@@ -1,85 +1,210 @@
+![Ferry](src-tauri/icons/128x128.png)
+
 # Ferry
 
-PHP projelerini yeni sürümlere güvenle taşıyan masaüstü uygulaması (macOS ve Windows; Linux yol haritasında). Arayüz Türkçe ve İngilizcedir.
+**Find what breaks when your PHP project moves to a new version, and fix it safely.**
 
-Ferry kodu tarar, PHP 7.0'dan 8.5'e kadar kaldırılan ve değişen kullanımları bulur, her bulguyu riskine göre
-sınıflandırır (**Otomatik**, **Gözden geçir**, **Elle düzelt**), Rector dönüşümlerini satır satır önizletir ve
-onaylanan değişiklikleri uygulamadan önce yedek alır. Böylece her değişiklik tek tıkla geri alınabilir.
+A desktop app for macOS and Windows that scans your PHP code, shows what will break on the version you are moving to, and applies Rector's fixes only after you approve them, with a backup before every change. No account, no cloud, no telemetry.
 
-## Mimari
+[![Download for macOS and Windows](https://img.shields.io/badge/Download-macOS%20%C2%B7%20Windows-2156d9?style=for-the-badge)](../../releases/latest)
 
-```
-src/                    React + TypeScript arayüzü (tasarım: docs/DESIGN.md)
-src-tauri/              Tauri 2 kabuğu: komutlar, pencere, platform ayarları
-crates/ferry-core/    Platformdan bağımsız motor
-  lexer, analyzer, rules   Yerleşik uyumluluk tarayıcısı
-  rector                   Rector yapılandırması, önizleme, güvenli uygulama
-  diff, snapshot           Diff üretimi/uygulaması, geri alma
-  deps, version            composer.lock uyumluluğu, Composer kısıtları
-  project, toolchain       Framework algılama, PHP/Composer/Rector bulma
-```
+![macOS 11+](https://img.shields.io/badge/macOS-11%2B-000000?style=flat-square&logo=apple&logoColor=white) ![Windows 10 | 11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?style=flat-square&logo=windows&logoColor=white) ![PHP 7.0 to 8.5](https://img.shields.io/badge/PHP-7.0%20%E2%86%92%208.5-777BB4?style=flat-square&logo=php&logoColor=white) [![License: MIT](https://img.shields.io/badge/license-MIT-64748b?style=flat-square)](LICENSE)
 
-Rector yalnızca deneme modunda çalışır. Ürettiği diff'ler motor tarafından dosyaya uygulanır, böylece diske yazılan
-içerik önizlemede görülenle birebir aynıdır. Önizlemeden sonra değişen bir dosyaya uygulama reddedilir.
+[Features](#features) · [Install](#install) · [Privacy](#privacy) · [How it works](#how-it-works) · [Build from source](#build-from-source) · [Türkçe](README.tr.md)
 
-## Geliştirme
+![The Ferry overview for a WordPress project moving from PHP 7.4 to 8.4: a readiness score of 47, the split into automatic, review and manual fixes, and counts of breaking, deprecated and risky findings](assets/readme/hero-en.webp)
 
-Gereksinimler: Rust (stable), Node 22, pnpm, PHP 7.4+ ve Composer (otomatik düzeltmeler için).
+- **See the problems before your users do.** Every use of code that was removed or changed between PHP 7.0 and 8.5 is listed with its file, line, and the reason it matters.
+- **Nothing changes without your approval.** Rector runs in dry-run mode only. You review each change line by line and apply only the files you pick.
+- **Undo any change in one click.** A backup is taken before every apply, so you can go back without Git.
+
+## What sets it apart
+
+- **Know how much work is ahead.** A score from 0 to 100 and the split into automatic, review, and manual fixes tell you at a glance how big the migration is.
+- **Know which fixes you can trust.** Every finding and every change is labeled **Automatic** (a rule-based change that keeps behavior identical), **Review** (usually right, but worth a look), or **Manual** (it needs your decision).
+- **Fix only what is needed, or modernize too.** **Compatibility** mode makes only the changes the code needs to run on the new version. **Modernize** also adopts newer syntax such as `match`, constructor promotion, and `str_contains`.
+- **Find the packages that hold you back.** Ferry reads `composer.lock` and shows which packages do not support the target version, before you start changing code.
+- **Disk content matches the preview exactly.** Ferry applies the changes itself, exactly as you saw them, and refuses to touch a file that changed after the preview.
+- **No setup to start scanning.** The scan is built into Ferry and needs no PHP. PHP and Composer are needed only for automatic fixes, and Ferry installs Rector for you.
+
+## Features
+
+### A readiness score for your target version
+
+Pick the version you are moving to (PHP 8.1 to 8.5) and Ferry scans every PHP file in seconds. The **Overview** shows:
+
+- the project's platform (WordPress, Laravel, Symfony, Drupal, or plain PHP), its number of PHP files, and its current PHP version from `composer.json`
+- a readiness score from 0 to 100, and how many issues fall into each fix type
+- how many findings are **Breaking** (the code won't run), **Deprecated** (it warns now and will be removed later), or **Risky** (it may behave differently at runtime)
+- the most common issues and the next steps to take
+
+Framework code you don't maintain is skipped automatically: `wp-admin` and `wp-includes` in WordPress, `storage` and `bootstrap/cache` in Laravel, `var` in Symfony, Drupal core, and `vendor` and `node_modules` everywhere. The overview names the skipped folders.
+
+**Export report** saves the results as a Markdown file you can attach to a ticket or share with your team.
+
+### Every finding, explained
+
+The **Findings** page lists every issue grouped by file, with the line, the code, and its fix type. Filter by fix type or severity, or search files and issues.
+
+![Findings page with issues grouped by file, filters for fix type and severity, and the details of a mysql_connect() finding: why it matters, what to use instead, and its fix type](assets/readme/findings-en.webp)
+
+Select a finding to see:
+
+- the code that triggers it
+- why it matters and since which PHP version
+- what to use instead
+- whether it can be fixed automatically
+
+**Show in folder** opens the file's location. Use the arrow keys to move through the list.
+
+Ferry has its own PHP lexer and rule set, so it reads code the way PHP does: method calls such as `$db->each()`, functions in your own namespace, and text inside strings and comments are not mistaken for removed functions. Its rules cover:
+
+- removed extensions and functions, such as `mysql_*`, `ereg*`, `each()`, `create_function()`, and `money_format()`
+- syntax that no longer parses, such as `$str{0}`, `(real)` and `(unset)` casts, and PHP 7 `#[` comments, which PHP 8 reads as attributes
+- deprecations, such as `"${var}"` interpolation, implicit nullable parameters, `utf8_encode()`, `FILTER_SANITIZE_STRING`, and `E_STRICT`
+- code worth a manual check, such as `eval()`, `extract()`, and variable variables
+
+### Review every change before it is applied
+
+The **Fixes** page runs Rector on your project in dry-run mode. No files change. Each changed file shows its diff line by line, the rules that produced it, and how far you can trust it.
+
+![Fixes page with four changed files, each marked Review or Automatic, and a side-by-side diff replacing while (each()) with foreach and create_function() with a closure](assets/readme/fixes-en.webp)
+
+- **Compatibility** makes only the changes needed to run on the new version. It is the best place to start.
+- **Modernize** also adopts newer syntax for the target version.
+- Pick the files you want and press **Apply**. Files marked **Review** carry a note to check them first.
+
+Ferry handles cases Rector cannot on its own. For example, a file that uses `$str{0}` makes Rector skip the whole file. Ferry rewrites those offsets to `$str[0]` first, so the rest of the file is still fixed.
+
+### Dependencies that block the upgrade
+
+The **Dependencies** page checks every locked package against the target version, using the PHP requirement each package declares in `composer.lock`. The project's own PHP constraint in `composer.json` is checked too.
+
+![Dependencies page with two incompatible packages for PHP 8.4, the project's PHP constraint, and each package's version, PHP requirement and status](assets/readme/dependencies-en.webp)
+
+Each package is marked **Compatible**, **Incompatible**, or **Unknown** (when the package declares no PHP requirement). Development packages are labeled, and **Production only** hides them.
+
+### Undo anything from History
+
+Before every apply, Ferry backs up the files it is about to change. The **History** page lists every apply with its time and number of files.
+
+![A History entry opened for review: the changed files on the left, the diff and rules of the selected file on the right, and the Restore button](assets/readme/history-en.webp)
+
+- **Review** shows exactly what each apply changed, file by file, with the rules behind each change.
+- **Restore** puts every file back as it was before that apply.
+- If an apply fails partway, Ferry rolls the files back on its own. If even that fails, the backup stays in History so you can restore it yourself.
+
+### Made for your desktop
+
+- **Turkish and English** interface. The language also applies to exported reports.
+- **Light and dark** themes, or follow the system.
+- **Drag and drop** a project folder onto the window, or reopen a recent project from the start screen.
+- **Keyboard shortcuts:** **⌘O** opens a project, **⌘1** to **⌘5** switch between pages, and **⌘,** opens **Settings**. On Windows, use **Ctrl** instead of **⌘**.
+
+## Supported projects
+
+| Project type | Detected by | Skipped automatically |
+|---|---|---|
+| **WordPress** | `wp-config.php`, `wp-config-sample.php`, or a `wp-includes` folder | `wp-admin`, `wp-includes` (core); your themes and plugins are scanned |
+| **Laravel** | the `artisan` file, or `laravel/framework` in `composer.json` | `storage`, `bootstrap/cache` |
+| **Symfony** | `symfony/framework-bundle` in `composer.json`, or `bin/console` | `var` |
+| **Drupal** | `drupal/core` in `composer.json`, or `core/lib/Drupal.php` (also under `web/`, `docroot/`, `html/`, or `public/`) | Drupal core, `sites/default/files` |
+| **Plain PHP** | any folder with PHP files | — |
+
+`vendor` and `node_modules` are always skipped. Files larger than 2 MB are skipped and listed in the scan results, so nothing is left out silently.
+
+Target versions: **PHP 8.1, 8.2, 8.3, 8.4, and 8.5**. The scan covers changes from PHP 7.0 onward, so projects on PHP 5.6 and 7.x are covered too.
+
+## Install
+
+Download the file for your system from the [latest release](../../releases/latest). Open a project folder and press **Start scan**. Ferry reads nothing until you choose a folder.
+
+### macOS
+
+macOS 11 or newer, on Apple silicon and Intel Macs.
+
+1. Open `Ferry_x.y.z_universal.dmg` and drag **Ferry** to **Applications**.
+2. Open Ferry from **Applications**.
+
+> **Gatekeeper.** Ferry is not signed with an Apple Developer ID yet, so macOS may refuse to open it the first time. Open **System Settings → Privacy & Security** and choose **Open Anyway** next to the message about Ferry.
+
+**Uninstall.** Drag the app to the Trash. Backups and settings stay in `~/Library/Application Support/dev.ferry.app` until you delete that folder.
+
+### Windows
+
+Windows 10 and 11.
+
+1. Run `Ferry_x.y.z_x64-setup.exe`. The installer is **per-user** and needs no administrator rights.
+2. Windows 11 already includes WebView2. On Windows 10, the installer adds it if it is missing.
+
+> **SmartScreen.** The installer is not code-signed, so Windows may show "Unknown publisher". Choose **More info → Run anyway**.
+
+**Uninstall.** Use Windows Settings → Apps. Backups and settings stay in `%APPDATA%\dev.ferry.app` until you delete that folder.
+
+### Automatic fixes
+
+The scan and the dependency check work right away. Automatic fixes also need:
+
+- **PHP 7.4 or newer** on the computer (it doesn't have to be the version your project uses). Ferry finds the PHP on your `PATH`, and also looks in the usual places for Homebrew, Herd, and MAMP on macOS, and XAMPP, Laragon, and Scoop on Windows. You can also choose the executable under **Settings**.
+- **Composer.** Ferry uses it once to install Rector into its own folder; your project's `composer.json` is never touched.
+
+When something is missing, the **Fixes** page says what and offers **Install Rector**.
+
+## Privacy
+
+> **Your code never leaves your computer.** Ferry reads and changes files only in the folder you open, and has no telemetry.
+
+- **Read:** the PHP files, `composer.json`, and `composer.lock` in the project folder you choose.
+- **Written:** only the files you apply changes to. Every other file stays untouched.
+- **Stored:** backups of the files before each apply, a record of what was applied, Rector's cache, and your settings, in the app's data folder: `~/Library/Application Support/dev.ferry.app` on macOS and `%APPDATA%\dev.ferry.app` on Windows.
+- **Network:** Ferry itself makes no network requests. When you choose **Install Rector**, Composer downloads Rector from Packagist.
+
+## How it works
+
+Everything runs on your computer:
+
+1. Ferry detects the project type and the current PHP version, and skips folders you don't maintain.
+2. Its built-in scanner tokenizes every PHP file and checks it against the rules for each version between your current one and the target.
+3. For fixes, Rector runs in dry-run mode on your project. Ferry turns its proposed diffs into a preview and keeps a fingerprint of each file.
+4. When you apply, Ferry first backs up the selected files, then checks that none of them changed since the preview, and writes each one in a single step. A file that changed in the meantime is refused.
+5. Restoring copies the backup over the files, and **Review** in History shows the changes that were applied.
+
+## Known limitations
+
+- **Static analysis:** the scan reads code without running it, so behavior that depends on runtime values (for example, functions called by name from a string) can't always be found. Such cases are marked **Risky** where possible.
+- **Encodings:** automatic fixes skip files that are not UTF-8 (for example, Windows-1254 or Latin-1), so they are never corrupted. Convert them to UTF-8 to have them fixed.
+- **Manual fixes:** findings such as `mysql_*` need code to be rewritten, and Ferry shows what to use instead but doesn't rewrite them for you.
+- **Restore:** it puts back the files as they were before the apply. Edits you made to the same files after the apply are replaced too.
+- **Linux:** not supported yet.
+
+## Build from source
+
+Requirements: Rust (stable), Node 22, and pnpm, plus PHP 7.4+ and Composer for the Rector tests. On Windows you also need Visual Studio Build Tools (C++), and on macOS the Xcode Command Line Tools.
 
 ```bash
 pnpm install
-pnpm tauri dev        # masaüstü uygulaması
-pnpm dev              # yalnızca arayüz, tarayıcıda örnek verilerle
+pnpm tauri dev            # desktop app
+pnpm dev                  # interface only, in a browser with sample data
+pnpm typecheck && pnpm test
+cargo test --workspace
+pnpm tauri build          # installers → target/release/bundle/
 ```
 
-## Demo projeleri
+To run the tests against real Rector, point `FERRY_TEST_TOOLS` to a folder where Rector is installed: `FERRY_TEST_TOOLS=/path/to/tools cargo test --workspace`.
 
-`demo/` klasöründe üç örnek proje var: her kuralı tetikleyen düz PHP bir mağaza, WordPress bir blog ve
-neredeyse hazır bir Laravel API'si. Değişiklik uygulamadan önce temiz bir kopya oluşturun:
+**Demo projects.** The `demo/` folder holds three sample projects: a plain PHP shop that triggers every rule, a WordPress blog, and a Laravel API that is nearly ready. `pnpm demo` copies them fresh into `.demo/`, so you can apply changes without touching the originals. See [demo/README.md](demo/README.md).
 
-```bash
-pnpm demo             # projeleri .demo/ klasörüne sıfırdan kopyalar
-```
+| Path | Contents |
+|---|---|
+| `crates/ferry-core` | the engine: lexer, rules and analyzer, Rector integration, diffs, backups, and Composer checks |
+| `src-tauri` | desktop shell: commands, window, and platform settings |
+| `src` | React and TypeScript interface (design system in [docs/DESIGN.md](docs/DESIGN.md)) |
+| `demo` | sample projects for trying the app and for the tests |
 
-Ayrıntılar için [demo/README.md](demo/README.md).
+CI runs the interface and engine tests (including real Rector) on Linux for every push, adds Windows for pushes to `main`, and builds the macOS and Windows installers for `v*` tags.
 
-## Testler
+Bug reports and pull requests are welcome.
 
-```bash
-pnpm typecheck && pnpm test     # arayüz birim ve akış testleri
-cargo test --workspace          # motor, entegrasyon ve IPC sözleşme testleri
-```
-
-Gerçek Rector ile uçtan uca testler için Rector'ın kurulu olduğu bir klasör gösterin:
-
-```bash
-FERRY_TEST_TOOLS=/yol/tools cargo test --workspace
-```
-
-Gerçek pencerede, gerçek backend'le uçtan uca duman testi (yalnızca debug derlemelerde etkin). Betik proje açar,
-tarar, gerekirse Rector'ı kurar, önizler, uygular ve geri yükler; ilerlemeyi `[e2e]` satırlarıyla yazar:
-
-```bash
-FERRY_E2E=e2e/native-smoke.js FERRY_E2E_ROOT=/yol/php-projesi pnpm tauri dev
-```
-
-## CI
-
-GitHub Actions dakikalarını boşa harcamamak için iş yükü kademelidir:
-
-- **Her push ve PR:** Linux'ta arayüz testleri, production build, motor testleri ve gerçek Rector testleri.
-- **`main` dalına push:** Ek olarak Windows'ta tüm testler.
-- **`v*` etiketi ya da elle çalıştırma:** macOS testleri ve macOS/Windows kurulum paketleri.
-
-Yalnızca Markdown ve `docs/` değişiklikleri CI'ı tetiklemez.
-
-## Yol haritası
-
-- Docker ile iki PHP sürümünde karşılaştırmalı çalışma testi
-- "Elle düzelt" bulguları için AI destekli öneriler
-- WordPress ve Laravel'e özel kural paketleri
-- Linux desteği
-
-## Lisans
+## License
 
 [MIT](LICENSE)
