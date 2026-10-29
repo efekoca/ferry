@@ -3,7 +3,7 @@ use crate::lexer::{tokenize, Token, TokenKind};
 use crate::rules::{patterns, FixKind, PatternRule, Severity, SymbolRule, CONSTANTS, FUNCTIONS};
 use crate::version::PhpVersion;
 use serde::Serialize;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::Instant;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -42,9 +42,13 @@ pub struct FileError {
 }
 
 pub fn relative_path(root: &Path, path: &Path) -> String {
-    let rel = match path.strip_prefix(root) {
-        Ok(rel) => rel.to_path_buf(),
-        Err(_) => match (root.canonicalize(), path.canonicalize()) {
+    let lexical = path
+        .strip_prefix(root)
+        .ok()
+        .filter(|rel| rel.components().all(|c| matches!(c, Component::Normal(_) | Component::CurDir)));
+    let rel = match lexical {
+        Some(rel) => rel.to_path_buf(),
+        None => match (root.canonicalize(), path.canonicalize()) {
             (Ok(root), Ok(full)) => full.strip_prefix(&root).map(Path::to_path_buf).unwrap_or_else(|_| path.to_path_buf()),
             _ => path.to_path_buf(),
         },
@@ -450,6 +454,9 @@ mod tests {
         assert_eq!(relative_path(dir.path(), &canonical.join("src/a.php")), "src/a.php");
         assert_eq!(relative_path(&canonical, &dir.path().join("src").join("a.php")), "src/a.php");
         assert_eq!(relative_path(Path::new("/elsewhere"), Path::new("/x/y.php")), "/x/y.php");
+        let name = dir.path().file_name().unwrap();
+        let detour = dir.path().join("..").join(name).join("src/a.php");
+        assert_eq!(relative_path(dir.path(), &detour), "src/a.php");
     }
 
     fn rules(src: &str, target: &str) -> Vec<String> {
