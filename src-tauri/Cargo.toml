@@ -1,0 +1,26 @@
+[package]
+name = "ferry"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "PHP projelerini yeni sürümlere güvenle taşıyan masaüstü uygulaması"
+
+[lib]
+name = "ferry_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["macos-private-api"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+serde.workspace = true
+serde_json.workspace = true
+ferry-core = { path = "../crates/ferry-core" }
+
+[dev-dependencies]
+tauri = { version = "2", features = ["test"] }
+tempfile.workspace = true
+walkdir.workspace = true
