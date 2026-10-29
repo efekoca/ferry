@@ -86,7 +86,7 @@ jobs:
           composer require rector/rector --working-dir "$RUNNER_TEMP/tools" --no-interaction --no-progress
           echo "FERRY_TEST_TOOLS=$RUNNER_TEMP/tools" >> "$GITHUB_ENV"
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo test --workspace
+      - run: cargo test --workspace --no-fail-fast
 
   macos:
     if: startsWith(github.ref, 'refs/tags/v') || inputs.macos || inputs.bundle
@@ -107,7 +107,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo test --workspace
+      - run: cargo test --workspace --no-fail-fast
 
   bundle:
     if: startsWith(github.ref, 'refs/tags/v') || inputs.bundle

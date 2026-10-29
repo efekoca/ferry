@@ -42,10 +42,14 @@ pub struct FileError {
 }
 
 pub fn relative_path(root: &Path, path: &Path) -> String {
-    path.strip_prefix(root)
-        .unwrap_or(path)
-        .to_string_lossy()
-        .replace('\\', "/")
+    let rel = match path.strip_prefix(root) {
+        Ok(rel) => rel.to_path_buf(),
+        Err(_) => match (root.canonicalize(), path.canonicalize()) {
+            (Ok(root), Ok(full)) => full.strip_prefix(&root).map(Path::to_path_buf).unwrap_or_else(|_| path.to_path_buf()),
+            _ => path.to_path_buf(),
+        },
+    };
+    rel.to_string_lossy().replace('\\', "/")
 }
 
 pub fn analyze_files(
@@ -436,6 +440,17 @@ fn inside_call(tokens: &[Token], i: usize, func: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn relative_path_survives_different_spellings_of_the_root() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::write(dir.path().join("src/a.php"), "<?php").unwrap();
+        let canonical = dir.path().canonicalize().unwrap();
+        assert_eq!(relative_path(dir.path(), &canonical.join("src/a.php")), "src/a.php");
+        assert_eq!(relative_path(&canonical, &dir.path().join("src").join("a.php")), "src/a.php");
+        assert_eq!(relative_path(Path::new("/elsewhere"), Path::new("/x/y.php")), "/x/y.php");
+    }
 
     fn rules(src: &str, target: &str) -> Vec<String> {
         analyze_source("t.php", src, target.parse().unwrap())
