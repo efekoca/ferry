@@ -127,10 +127,12 @@ export function Segmented<T extends string>({
   size?: "md" | "lg";
   disabled?: boolean;
 }) {
-  const move = (dir: 1 | -1) => {
+  const move = (group: HTMLElement, dir: 1 | -1) => {
+    if (disabled) return;
     const i = options.findIndex((o) => o.value === value);
-    const next = options[(i + dir + options.length) % options.length];
-    onChange(next.value);
+    const j = (i + dir + options.length) % options.length;
+    onChange(options[j].value);
+    group.querySelectorAll<HTMLButtonElement>('[role="radio"]')[j]?.focus();
   };
   return (
     <div
@@ -138,8 +140,8 @@ export function Segmented<T extends string>({
       aria-label={label}
       className={`segmented ${size === "lg" ? "segmented--lg" : ""}`}
       onKeyDown={(e) => {
-        if (e.key === "ArrowRight") move(1);
-        if (e.key === "ArrowLeft") move(-1);
+        if (e.key === "ArrowRight") move(e.currentTarget, 1);
+        if (e.key === "ArrowLeft") move(e.currentTarget, -1);
       }}
     >
       {options.map((o) => (

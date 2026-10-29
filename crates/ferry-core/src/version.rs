@@ -53,13 +53,14 @@ impl FromStr for PhpVersion {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut parts = s.trim().split('.');
+        let s = s.trim();
+        let mut parts = s.strip_suffix("-dev").unwrap_or(s).split('.');
         let major = parts
             .next()
             .and_then(|p| p.parse().ok())
-            .ok_or_else(|| format!("geçersiz PHP sürümü: {s}"))?;
+            .ok_or_else(|| crate::t!("geçersiz PHP sürümü: {s}", "invalid PHP version: {s}"))?;
         let minor = parts.next().map(|p| p.parse().ok()).unwrap_or(Some(0));
-        let minor = minor.ok_or_else(|| format!("geçersiz PHP sürümü: {s}"))?;
+        let minor = minor.ok_or_else(|| crate::t!("geçersiz PHP sürümü: {s}", "invalid PHP version: {s}"))?;
         Ok(Self { major, minor })
     }
 }
@@ -184,6 +185,7 @@ fn parse_and_group(input: &str) -> Option<Vec<Bound>> {
 
 fn parse_atom(token: &str) -> Option<Vec<Bound>> {
     let token = token.split('@').next().unwrap_or(token);
+    let token = token.strip_suffix("-dev").unwrap_or(token);
     if token == "*" {
         return Some(vec![]);
     }
@@ -195,6 +197,9 @@ fn parse_atom(token: &str) -> Option<Vec<Bound>> {
     let rest = rest.trim();
 
     if rest.contains('*') || rest.contains('x') || rest.contains('X') {
+        if op == "!=" {
+            return Some(vec![]);
+        }
         let prefix: Vec<&str> = rest
             .split('.')
             .take_while(|p| !matches!(*p, "*" | "x" | "X"))
@@ -212,19 +217,18 @@ fn parse_atom(token: &str) -> Option<Vec<Bound>> {
         "!=" => vec![Bound::Ne(v)],
         "^" => {
             let upper = if v.0 > 0 {
-                (v.0 + 1, 0, 0)
+                (v.0.saturating_add(1), 0, 0)
             } else if v.1 > 0 {
-                (0, v.1 + 1, 0)
+                (0, v.1.saturating_add(1), 0)
             } else {
-                (0, 0, v.2 + 1)
+                (0, 0, v.2.saturating_add(1))
             };
             vec![Bound::Ge(v), Bound::Lt(upper)]
         }
         "~" => {
             let upper = match parts {
-                1 => (v.0 + 1, 0, 0),
-                2 => (v.0 + 1, 0, 0),
-                _ => (v.0, v.1 + 1, 0),
+                1 | 2 => (v.0.saturating_add(1), 0, 0),
+                _ => (v.0, v.1.saturating_add(1), 0),
             };
             vec![Bound::Ge(v), Bound::Lt(upper)]
         }
@@ -259,9 +263,9 @@ fn parse_version(s: &str) -> Option<(Triple, usize)> {
 fn bump(v: Triple, parts: usize) -> Triple {
     match parts {
         0 => (u32::MAX, 0, 0),
-        1 => (v.0 + 1, 0, 0),
-        2 => (v.0, v.1 + 1, 0),
-        _ => (v.0, v.1, v.2 + 1),
+        1 => (v.0.saturating_add(1), 0, 0),
+        2 => (v.0, v.1.saturating_add(1), 0),
+        _ => (v.0, v.1, v.2.saturating_add(1)),
     }
 }
 

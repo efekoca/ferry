@@ -12,6 +12,7 @@ import type {
   Target,
   ToolchainStatus,
 } from "./types";
+import { TARGETS } from "./types";
 import { useToast } from "../components/Toast";
 import { useI18n } from "../i18n";
 
@@ -29,13 +30,33 @@ const RECENT_KEY = "ferry.recent";
 const THEME_KEY = "ferry.theme";
 const TARGET_KEY = "ferry.target";
 
-function readStorage<T>(key: string, fallback: T): T {
+const THEMES: readonly Theme[] = ["system", "light", "dark"];
+const FRAMEWORKS: readonly Framework[] = ["wordpress", "laravel", "symfony", "drupal", "generic"];
+
+function readStorage<T>(key: string, fallback: T, valid: (v: unknown) => boolean): T {
   try {
     const raw = localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as T) : fallback;
+    if (!raw) return fallback;
+    const value: unknown = JSON.parse(raw);
+    return valid(value) ? (value as T) : fallback;
   } catch {
     return fallback;
   }
+}
+
+function isRecent(v: unknown): v is RecentProject {
+  if (!v || typeof v !== "object") return false;
+  const r = v as Record<string, unknown>;
+  return (
+    typeof r.path === "string" &&
+    typeof r.name === "string" &&
+    typeof r.openedAt === "number" &&
+    FRAMEWORKS.includes(r.framework as Framework)
+  );
+}
+
+function readRecent(): RecentProject[] {
+  return readStorage<unknown[]>(RECENT_KEY, [], Array.isArray).filter(isRecent).slice(0, 6);
 }
 
 function writeStorage(key: string, value: unknown) {
@@ -76,7 +97,7 @@ interface AppStore {
   preview: RectorPreview | null;
   previewMode: RectorMode;
   previewing: boolean;
-  loadPreview(mode: RectorMode): Promise<void>;
+  loadPreview(mode: RectorMode): Promise<boolean>;
   applying: boolean;
   applyChanges(files: string[]): Promise<boolean>;
 
@@ -95,11 +116,11 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
   const { t, lang } = useI18n();
   const [api, setApi] = useState<Api | null>(injected ?? null);
   const [view, setView] = useState<View>("overview");
-  const [theme, setThemeState] = useState<Theme>(() => readStorage<Theme>(THEME_KEY, "system"));
-  const [recent, setRecent] = useState<RecentProject[]>(() => readStorage<RecentProject[]>(RECENT_KEY, []));
+  const [theme, setThemeState] = useState<Theme>(() => readStorage<Theme>(THEME_KEY, "system", (v) => THEMES.includes(v as Theme)));
+  const [recent, setRecent] = useState<RecentProject[]>(readRecent);
   const [project, setProject] = useState<ProjectInfo | null>(null);
   const [opening, setOpening] = useState(false);
-  const [target, setTargetState] = useState<Target>(() => readStorage<Target>(TARGET_KEY, "8.4"));
+  const [target, setTargetState] = useState<Target>(() => readStorage<Target>(TARGET_KEY, "8.4", (v) => TARGETS.includes(v as Target)));
   const [scan, setScan] = useState<ScanResult | null>(null);
   const [scanning, setScanning] = useState(false);
   const [progress, setProgress] = useState<ScanProgress | null>(null);
@@ -112,6 +133,8 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
   const [applying, setApplying] = useState(false);
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const generation = useRef(0);
+  const previewSeq = useRef(0);
+  const rootRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!injected) getApi().then(setApi);
@@ -157,18 +180,23 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
 
   const resetResults = useCallback(() => {
     generation.current++;
+    previewSeq.current++;
     setScan(null);
     setDeps(null);
     setPreview(null);
+    setScanning(false);
+    setPreviewing(false);
     setProgress(null);
   }, []);
 
   const refreshSnapshots = useCallback(async () => {
     if (!api || !project) return;
+    const root = project.root;
     try {
-      setSnapshots(await api.listSnapshots(project.root));
+      const list = await api.listSnapshots(root);
+      if (rootRef.current === root) setSnapshots(list);
     } catch (e) {
-      fail(t.toast.historyFailed, e);
+      if (rootRef.current === root) fail(t.toast.historyFailed, e);
     }
   }, [api, project, fail, t]);
 
@@ -180,11 +208,18 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
   const openProject = useCallback(
     async (path?: string) => {
       if (!api) return;
-      const chosen = path ?? (await api.pickProjectFolder(t.dialogs.pickProject));
+      let chosen: string | null | undefined = path;
+      try {
+        chosen ??= await api.pickProjectFolder(t.dialogs.pickProject);
+      } catch (e) {
+        fail(t.toast.openFailed, e);
+        return;
+      }
       if (!chosen) return;
       setOpening(true);
       try {
         const info = await api.inspectProject(chosen);
+        rootRef.current = info.root;
         resetResults();
         setProject(info);
         setView("overview");
@@ -214,6 +249,7 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
   }, []);
 
   const closeProject = useCallback(() => {
+    rootRef.current = null;
     resetResults();
     setProject(null);
     setView("overview");
@@ -233,8 +269,11 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
     const gen = ++generation.current;
     setScanning(true);
     setProgress({ done: 0, total: project.phpFiles, file: "" });
-    const unlisten = await api.onScanProgress((p) => gen === generation.current && setProgress(p));
+    let unlisten: (() => void) | undefined;
     try {
+      unlisten = await api.onScanProgress((p) => {
+        if (gen === generation.current) setProgress(p);
+      });
       const [result, depReport] = await Promise.all([
         api.scanProject(project.root, target),
         api.checkDependencies(project.root, target).catch(() => null),
@@ -245,7 +284,7 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
     } catch (e) {
       if (gen === generation.current) fail(t.toast.scanFailed, e);
     } finally {
-      unlisten();
+      unlisten?.();
       if (gen === generation.current) {
         setScanning(false);
         setProgress(null);
@@ -268,20 +307,27 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
 
   const loadPreview = useCallback(
     async (mode: RectorMode) => {
-      if (!api || !project) return;
+      if (!api || !project) return false;
+      const root = project.root;
       const gen = generation.current;
+      const seq = ++previewSeq.current;
+      const previous = previewMode;
       setPreviewMode(mode);
       setPreviewing(true);
       try {
-        const result = await api.rectorPreview(project.root, target, mode);
+        const result = await api.rectorPreview(root, target, mode);
         if (gen === generation.current) setPreview(result);
+        return true;
       } catch (e) {
+        if (seq !== previewSeq.current || rootRef.current !== root) return true;
+        setPreviewMode(previous);
         fail(t.toast.previewFailed, e);
+        return false;
       } finally {
-        setPreviewing(false);
+        if (seq === previewSeq.current) setPreviewing(false);
       }
     },
-    [api, project, target, fail, t],
+    [api, project, target, previewMode, fail, t],
   );
 
   const applyChanges = useCallback(
@@ -290,11 +336,13 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
       setApplying(true);
       try {
         const label = t.changes.snapshotLabel(previewMode === "compat", target);
-        const result = await api.applyChanges(project.root, files, label);
+        const root = project.root;
+        const result = await api.applyChanges(root, files, label);
+        if (rootRef.current !== root) return true;
         setPreview((p) => (p ? { ...p, changes: p.changes.filter((c) => !result.written.includes(c.file)) } : p));
         toast.push({ tone: "success", title: t.toast.applied(result.written.length), description: t.toast.appliedText });
         await refreshSnapshots();
-        if (scan) await runScan();
+        if (scan && rootRef.current === root) await runScan();
         return true;
       } catch (e) {
         fail(t.toast.applyFailed, e);
@@ -310,7 +358,9 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
     async (id: string) => {
       if (!api || !project) return;
       try {
-        const files = await api.restoreSnapshot(project.root, id);
+        const root = project.root;
+        const files = await api.restoreSnapshot(root, id);
+        if (rootRef.current !== root) return;
         setPreview(null);
         toast.push({ tone: "success", title: t.toast.restored, description: t.toast.restoredText(files.length) });
         if (scan) await runScan();
@@ -336,9 +386,9 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
 
   const exportReport = useCallback(async () => {
     if (!api || !project || !scan) return;
-    const dest = await api.pickSaveFile(t.dialogs.reportName(project.name, target));
-    if (!dest) return;
     try {
+      const dest = await api.pickSaveFile(t.dialogs.reportName(project.name, target));
+      if (!dest) return;
       await api.exportReport(project.root, dest);
       toast.push({ tone: "success", title: t.toast.reportSaved, description: dest });
     } catch (e) {

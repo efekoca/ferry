@@ -109,82 +109,137 @@ impl std::error::Error for PatchError {}
 struct ParsedHunk {
     old_start_hint: Option<usize>,
     old: Vec<String>,
-    new: Vec<String>,
+    ops: Vec<(char, String)>,
+}
+
+fn hunk_range(part: Option<&str>) -> Option<(usize, usize)> {
+    let mut it = part?.splitn(2, ',');
+    let start = it.next()?.parse().ok()?;
+    let len = match it.next() {
+        Some(n) => n.parse().ok()?,
+        None => 1,
+    };
+    Some((start, len))
 }
 
 fn parse_unified(diff: &str) -> Result<Vec<ParsedHunk>, PatchError> {
     let mut hunks: Vec<ParsedHunk> = Vec::new();
+    let mut left: Option<(usize, usize)> = Some((0, 0));
     for line in diff.lines() {
-        if line.starts_with("@@") {
-            let hint = line
-                .split_whitespace()
-                .find_map(|p| p.strip_prefix('-'))
-                .and_then(|p| p.split(',').next())
-                .and_then(|n| n.parse::<usize>().ok());
-            hunks.push(ParsedHunk {
-                old_start_hint: hint,
-                old: Vec::new(),
-                new: Vec::new(),
-            });
+        let between = left == Some((0, 0));
+        if line.starts_with("@@") && (between || left.is_none()) {
+            let mut parts = line.split_whitespace();
+            let old = hunk_range(parts.find_map(|p| p.strip_prefix('-')));
+            let new = hunk_range(parts.find_map(|p| p.strip_prefix('+')));
+            let old_start_hint = old.map(|(s, len)| if len == 0 { s } else { s.saturating_sub(1) });
+            hunks.push(ParsedHunk { old_start_hint, old: Vec::new(), ops: Vec::new() });
+            left = old.zip(new).map(|((_, o), (_, n))| (o, n));
             continue;
         }
-        if hunks.is_empty() || line.starts_with("--- ") || line.starts_with("+++ ") {
+        if between || line.starts_with('\\') {
             continue;
         }
         let hunk = hunks.last_mut().unwrap();
-        if line.starts_with('\\') {
-            continue;
-        }
-        match line.split_at_checked(1) {
-            Some((" ", rest)) => {
-                hunk.old.push(rest.to_string());
-                hunk.new.push(rest.to_string());
-            }
-            Some(("-", rest)) => hunk.old.push(rest.to_string()),
-            Some(("+", rest)) => hunk.new.push(rest.to_string()),
-            None if line.is_empty() => {
-                hunk.old.push(String::new());
-                hunk.new.push(String::new());
-            }
+        let (op, rest) = match line.split_at_checked(1) {
+            Some((op @ (" " | "-" | "+"), rest)) => (op.chars().next().unwrap(), rest),
+            None if line.is_empty() => (' ', ""),
             _ => return Err(PatchError::Malformed),
+        };
+        if let Some((o, n)) = left.as_mut() {
+            if op != '+' {
+                *o = o.checked_sub(1).ok_or(PatchError::Malformed)?;
+            }
+            if op != '-' {
+                *n = n.checked_sub(1).ok_or(PatchError::Malformed)?;
+            }
         }
+        if op != '+' {
+            hunk.old.push(rest.to_string());
+        }
+        hunk.ops.push((op, rest.to_string()));
     }
-    if hunks.is_empty() {
+    if hunks.is_empty() || left.is_some_and(|l| l != (0, 0)) {
         return Err(PatchError::Malformed);
     }
     Ok(hunks)
 }
 
+fn split_eol(s: &str) -> (&str, &str) {
+    let text = strip_eol(s);
+    (text, &s[text.len()..])
+}
+
 pub fn apply_unified(original: &str, diff: &str) -> Result<String, PatchError> {
     let hunks = parse_unified(diff)?;
-    let eol = if original.contains("\r\n") { "\r\n" } else { "\n" };
-    let had_final_newline = original.is_empty() || original.ends_with('\n');
-    let lines: Vec<&str> = original.split_inclusive('\n').map(strip_eol).collect();
+    let default_eol = if original.contains("\r\n") && !original.replace("\r\n", "").contains('\n') { "\r\n" } else { "\n" };
+    let lines: Vec<(&str, &str)> = original.split_inclusive('\n').map(split_eol).collect();
 
-    let mut out: Vec<String> = Vec::with_capacity(lines.len());
+    let mut out: Vec<(String, String)> = Vec::with_capacity(lines.len());
+    let push = |out: &mut Vec<(String, String)>, text: String, eol: String, fallback: &str| {
+        if let Some(last) = out.last_mut().filter(|l| l.1.is_empty()) {
+            last.1 = fallback.to_string();
+        }
+        out.push((text, eol));
+    };
     let mut cursor = 0;
+    let mut last_added = false;
     for (n, hunk) in hunks.iter().enumerate() {
         let matches_at = |start: usize| {
             start + hunk.old.len() <= lines.len()
-                && hunk.old.iter().zip(&lines[start..]).all(|(a, b)| a == b)
+                && hunk.old.iter().zip(&lines[start..]).all(|(a, b)| a == b.0)
         };
-        let hinted = hunk.old_start_hint.map(|h| h.saturating_sub(1)).filter(|&h| h >= cursor);
+        let hinted = hunk.old_start_hint.filter(|&h| h >= cursor);
         let start = match hinted {
             Some(h) if matches_at(h) => Some(h),
             _ => (cursor..=lines.len().saturating_sub(hunk.old.len())).find(|&s| matches_at(s)),
         };
         let start = start.ok_or(PatchError::Mismatch(n + 1))?;
-        out.extend(lines[cursor..start].iter().map(|s| s.to_string()));
-        out.extend(hunk.new.iter().cloned());
-        cursor = start + hunk.old.len();
+        for (text, eol) in &lines[cursor..start] {
+            push(&mut out, text.to_string(), eol.to_string(), default_eol);
+        }
+        let mut pos = start;
+        let mut deleted_eol: Option<&str> = None;
+        for (op, text) in &hunk.ops {
+            let near = lines
+                .get(pos)
+                .or_else(|| pos.checked_sub(1).and_then(|p| lines.get(p)))
+                .map(|l| l.1)
+                .filter(|e| !e.is_empty())
+                .unwrap_or(default_eol);
+            match op {
+                '+' => {
+                    let eol = deleted_eol.filter(|e| !e.is_empty()).unwrap_or(near);
+                    push(&mut out, text.clone(), eol.to_string(), eol);
+                    last_added = true;
+                    continue;
+                }
+                '-' => {
+                    deleted_eol = Some(lines[pos].1);
+                    pos += 1;
+                }
+                _ => {
+                    deleted_eol = None;
+                    push(&mut out, lines[pos].0.to_string(), lines[pos].1.to_string(), near);
+                    pos += 1;
+                }
+            }
+            last_added = false;
+        }
+        cursor = pos;
     }
-    out.extend(lines[cursor..].iter().map(|s| s.to_string()));
-
-    let mut result = out.join(eol);
-    if had_final_newline && !out.is_empty() {
-        result.push_str(eol);
+    for (text, eol) in &lines[cursor..] {
+        push(&mut out, text.to_string(), eol.to_string(), default_eol);
+        last_added = false;
     }
-    Ok(result)
+    let had_final_newline = original.is_empty() || original.ends_with('\n');
+    if let Some(last) = out.last_mut() {
+        if !had_final_newline && last_added {
+            last.1.clear();
+        } else if had_final_newline && last.1.is_empty() {
+            last.1 = default_eol.to_string();
+        }
+    }
+    Ok(out.into_iter().flat_map(|(t, e)| [t, e]).collect())
 }
 
 #[cfg(test)]
@@ -238,5 +293,24 @@ mod tests {
         let original = "<?php\necho 1;";
         let diff = "@@ -2,1 +2,1 @@\n-echo 1;\n+echo 2;\n\\ No newline at end of file\n";
         assert_eq!(apply_unified(original, diff).unwrap(), "<?php\necho 2;");
+    }
+
+    #[test]
+    fn hunk_lines_that_look_like_headers() {
+        assert_eq!(apply_unified("a\n-- x\nb\n", "--- a\n+++ b\n@@ -1,2 +1,1 @@\n a\n--- x\n").unwrap(), "a\nb\n");
+        assert_eq!(apply_unified("a\nb\n", "@@ -1,2 +1,3 @@\n a\n+++ added\n b\n").unwrap(), "a\n++ added\nb\n");
+    }
+
+    #[test]
+    fn keeps_each_line_ending() {
+        assert_eq!(apply_unified("a\nb\r\nc\n", "@@ -1,1 +1,1 @@\n-a\n+A\n").unwrap(), "A\nb\r\nc\n");
+        let src = "<?php\n$s = \"x\r\ny\";\nf();\n";
+        assert_eq!(apply_unified(src, "@@ -3,1 +3,1 @@\n-f();\n+g();\n").unwrap(), src.replace("f()", "g()"));
+    }
+
+    #[test]
+    fn pure_insertions_go_after_the_line() {
+        assert_eq!(apply_unified("a\nb\nc\n", "@@ -2,0 +3 @@\n+X\n").unwrap(), "a\nb\nX\nc\n");
+        assert_eq!(apply_unified("a", "@@ -1,0 +2 @@\n+b\n").unwrap(), "a\nb");
     }
 }

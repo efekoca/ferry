@@ -310,6 +310,7 @@ export const tr = {
     reportFailed: "Rapor kaydedilemedi",
     phpSaved: "PHP yolu kaydedildi",
     saveFailed: "Kaydedilemedi",
+    revealFailed: "Dosya gösterilemedi",
   },
   dialogs: {
     pickProject: "PHP projesinin klasörünü seçin",

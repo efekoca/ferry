@@ -129,6 +129,19 @@ describe("Ferry app", () => {
     expect(within(detail).getByText(/must be declared nullable/)).toBeInTheDocument();
   });
 
+  it("does not leave scanning stuck when another project is opened mid-scan", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    api.scanProject = () => new Promise(() => {});
+    render(<App api={api} />);
+    await user.click(await screen.findByRole("button", { name: "Proje klasörü seçin" }));
+    await user.click(await screen.findByRole("button", { name: /Taramayı başlat/ }));
+    await waitFor(() => expect(screen.getByRole("radio", { name: "8.4" })).toBeDisabled());
+    await user.keyboard("{Meta>}o{/Meta}");
+    await waitFor(() => expect(screen.getByRole("radio", { name: "8.4" })).toBeEnabled());
+    expect(screen.getByRole("button", { name: /Taramayı başlat/ })).toBeEnabled();
+  });
+
   it("supports keyboard selection in the version picker", async () => {
     const user = setup();
     await user.click(await screen.findByRole("button", { name: "Proje klasörü seçin" }));

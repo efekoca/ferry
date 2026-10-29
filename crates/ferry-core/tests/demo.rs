@@ -100,6 +100,7 @@ fn rector_handles_every_demo_project() {
             work.path(),
         )
         .unwrap();
+        assert!(preview.errors.is_empty(), "{name}: {:?}", preview.errors);
         let curly_files: BTreeSet<String> = analyzer::analyze_files(
             &root,
             &project::collect_php_files(&root, &info.excluded_dirs),
@@ -111,12 +112,11 @@ fn rector_handles_every_demo_project() {
         .filter(|f| f.rule_id == patterns::CURLY_OFFSET.id)
         .map(|f| f.file)
         .collect();
-        let unexpected: Vec<&String> = preview
-            .errors
-            .iter()
-            .filter(|e| !curly_files.iter().any(|f| e.replace('\\', "/").contains(f.as_str())))
-            .collect();
-        assert!(unexpected.is_empty(), "{name}: {unexpected:?}");
+        for file in &curly_files {
+            let change = preview.changes.iter().find(|c| &c.file == file).unwrap_or_else(|| panic!("{name}: {file} not fixed"));
+            assert!(change.rules.iter().any(|r| r.name == "CurlyToSquareBracketArrayStringRector"), "{name}: {file}");
+            assert!(change.rules.len() > 1 || name != "kuzey-magaza", "{name}: Rector skipped {file}");
+        }
         assert!(!preview.changes.is_empty(), "{name}: Rector found nothing");
         assert!(preview.changes.iter().all(|c| !c.file.starts_with("vendor/")), "{name}");
     }

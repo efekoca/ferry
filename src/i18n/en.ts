@@ -310,6 +310,7 @@ export const en: Dict = {
     reportFailed: "Couldn't save the report",
     phpSaved: "PHP path saved",
     saveFailed: "Couldn't save",
+    revealFailed: "Couldn't show the file",
   },
   dialogs: {
     pickProject: "Choose your PHP project folder",

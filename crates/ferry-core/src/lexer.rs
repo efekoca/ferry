@@ -33,7 +33,16 @@ const MULTI_PUNCT: [&str; 22] = [
     "<>", "<=", ">=", "&&", "||", "??", "++", "--",
 ];
 
+pub struct Lexed {
+    pub tokens: Vec<Token>,
+    pub stray_hash_brackets: Vec<(usize, usize)>,
+}
+
 pub fn tokenize(src: &str) -> Vec<Token> {
+    lex(src).tokens
+}
+
+pub fn lex(src: &str) -> Lexed {
     Lexer::new(src).run()
 }
 
@@ -42,7 +51,9 @@ struct Lexer<'a> {
     b: &'a [u8],
     pos: usize,
     line_starts: Vec<usize>,
+    cursor: (usize, usize, usize),
     tokens: Vec<Token>,
+    stray_hash_brackets: Vec<(usize, usize)>,
 }
 
 fn is_ident_start(c: u8) -> bool {
@@ -66,17 +77,27 @@ impl<'a> Lexer<'a> {
             b: src.as_bytes(),
             pos: 0,
             line_starts,
+            cursor: (0, 0, 1),
             tokens: Vec::new(),
+            stray_hash_brackets: Vec::new(),
         }
     }
 
-    fn line_col(&self, offset: usize) -> (usize, usize) {
-        let line = match self.line_starts.binary_search(&offset) {
-            Ok(i) => i,
-            Err(i) => i - 1,
-        };
-        let col = self.src[self.line_starts[line]..offset].chars().count() + 1;
-        (line + 1, col)
+    fn line_col(&mut self, offset: usize) -> (usize, usize) {
+        let (mut line, mut from, mut col) = self.cursor;
+        let next_line = self.line_starts.get(line + 1).copied().unwrap_or(usize::MAX);
+        if offset < from || offset >= next_line {
+            line = match self.line_starts.binary_search(&offset) {
+                Ok(i) => i,
+                Err(i) => i - 1,
+            };
+            from = self.line_starts[line];
+            col = 1;
+        }
+        col += self.src[from..offset].chars().count();
+        self.cursor = (line, offset, col);
+        let bom = line == 0 && offset > 0 && self.src.starts_with('\u{FEFF}');
+        (line + 1, col - usize::from(bom))
     }
 
     fn push(&mut self, kind: TokenKind, start: usize, end: usize, text: String) {
@@ -104,12 +125,15 @@ impl<'a> Lexer<'a> {
         end <= self.b.len() && self.b[self.pos..end].eq_ignore_ascii_case(s.as_bytes())
     }
 
-    fn run(mut self) -> Vec<Token> {
+    fn run(mut self) -> Lexed {
         self.skip_inline_html();
         while self.pos < self.b.len() {
             self.lex_php();
         }
-        self.tokens
+        Lexed {
+            tokens: self.tokens,
+            stray_hash_brackets: self.stray_hash_brackets,
+        }
     }
 
     fn skip_inline_html(&mut self) {
@@ -147,9 +171,13 @@ impl<'a> Lexer<'a> {
             return;
         }
         if self.starts_with("#[") {
-            self.pos += 2;
-            self.push(TokenKind::Punct, start, self.pos, "#[".into());
-            return;
+            if is_attribute(self.b, self.pos) {
+                self.pos += 2;
+                self.push(TokenKind::Punct, start, self.pos, "#[".into());
+                return;
+            }
+            let at = self.line_col(start);
+            self.stray_hash_brackets.push(at);
         }
         if c == b'#' || self.starts_with("//") {
             self.skip_line_comment();
@@ -163,15 +191,15 @@ impl<'a> Lexer<'a> {
             return;
         }
         if c == b'\'' {
-            self.lex_quoted(b'\'', false, false);
+            self.lex_quoted(false, false);
             return;
         }
         if c == b'"' {
-            self.lex_quoted(b'"', true, false);
+            self.lex_quoted(true, false);
             return;
         }
         if c == b'`' {
-            self.lex_quoted(b'`', true, true);
+            self.lex_quoted(true, true);
             return;
         }
         if self.starts_with("<<<") && self.lex_heredoc() {
@@ -245,21 +273,9 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn lex_quoted(&mut self, quote: u8, interpolates: bool, backtick: bool) {
+    fn lex_quoted(&mut self, interpolates: bool, backtick: bool) {
         let start = self.pos;
-        self.pos += 1;
-        while self.pos < self.b.len() {
-            let ch = self.b[self.pos];
-            if ch == b'\\' {
-                self.pos += 2;
-                continue;
-            }
-            self.pos += 1;
-            if ch == quote {
-                break;
-            }
-        }
-        self.pos = self.pos.min(self.b.len());
+        self.pos = skip_quoted(self.b, self.pos);
         let text = self.src[start..self.pos].to_string();
         self.push(
             TokenKind::Str {
@@ -335,6 +351,143 @@ impl<'a> Lexer<'a> {
     }
 }
 
+fn skip_quoted(b: &[u8], mut p: usize) -> usize {
+    let quote = b[p];
+    p += 1;
+    while p < b.len() {
+        let ch = b[p];
+        if ch == b'\\' {
+            p += 2;
+            continue;
+        }
+        if quote != b'\'' && ch == b'{' && b.get(p + 1) == Some(&b'$') && b.get(p + 2).is_some_and(|&c| c == b'$' || is_ident_start(c)) {
+            p = skip_code(b, p + 1);
+            continue;
+        }
+        if quote != b'\'' && ch == b'$' && b.get(p + 1) == Some(&b'{') {
+            p = skip_code(b, p + 2);
+            continue;
+        }
+        p += 1;
+        if ch == quote {
+            break;
+        }
+    }
+    p.min(b.len())
+}
+
+fn skip_code(b: &[u8], mut p: usize) -> usize {
+    let mut depth = 1;
+    while p < b.len() {
+        match b[p] {
+            b'\'' | b'"' => {
+                p = skip_quoted(b, p);
+                continue;
+            }
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return p + 1;
+                }
+            }
+            _ => {}
+        }
+        p += 1;
+    }
+    b.len()
+}
+
+fn skip_space(b: &[u8], mut p: usize) -> usize {
+    while p < b.len() {
+        if b[p].is_ascii_whitespace() {
+            p += 1;
+        } else if b[p..].starts_with(b"/*") {
+            p = b[p + 2..].windows(2).position(|w| w == b"*/").map_or(b.len(), |i| p + 2 + i + 2);
+        } else if b[p..].starts_with(b"//") || (b[p] == b'#' && b.get(p + 1) != Some(&b'[')) {
+            p = b[p..].iter().position(|&c| c == b'\n').map_or(b.len(), |i| p + i);
+        } else {
+            break;
+        }
+    }
+    p
+}
+
+fn skip_name(b: &[u8], mut p: usize) -> Option<usize> {
+    let start = p;
+    while p < b.len() && (is_ident_char(b[p]) || (b[p] == b'\\' && b.get(p + 1).is_some_and(|&c| is_ident_start(c)))) {
+        p += 1;
+    }
+    let first = if b[start] == b'\\' { b.get(start + 1) } else { b.get(start) };
+    (p > start && first.is_some_and(|&c| is_ident_start(c))).then_some(p)
+}
+
+const ATTRIBUTE_TARGETS: [&str; 17] = [
+    "function", "fn", "class", "interface", "trait", "enum", "abstract", "final", "readonly",
+    "public", "protected", "private", "static", "var", "const", "case", "new",
+];
+
+fn is_attribute(b: &[u8], at: usize) -> bool {
+    let mut p = at + 2;
+    loop {
+        p = skip_space(b, p);
+        if p >= b.len() {
+            return false;
+        }
+        if b[p] == b']' {
+            break;
+        }
+        let Some(end) = skip_name(b, p) else { return false };
+        p = skip_space(b, end);
+        if b.get(p) == Some(&b'(') {
+            let mut depth = 0usize;
+            let mut braces = 0usize;
+            while p < b.len() {
+                match b[p] {
+                    b'\'' | b'"' => {
+                        p = skip_quoted(b, p);
+                        continue;
+                    }
+                    b'(' | b'[' => depth += 1,
+                    b')' | b']' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            p += 1;
+                            break;
+                        }
+                    }
+                    b'{' => braces += 1,
+                    b'}' => braces = braces.saturating_sub(1),
+                    b';' if braces == 0 => return false,
+                    _ => {}
+                }
+                p += 1;
+            }
+            p = skip_space(b, p);
+        }
+        match b.get(p) {
+            Some(b',') => p += 1,
+            Some(b']') => break,
+            _ => return false,
+        }
+    }
+    p = skip_space(b, p + 1);
+    match b.get(p) {
+        Some(b'$' | b'?' | b'&' | b'#') => true,
+        Some(b'.') => b[p..].starts_with(b"..."),
+        Some(_) => {
+            let Some(end) = skip_name(b, p) else { return false };
+            let word = std::str::from_utf8(&b[p..end]).unwrap_or("");
+            if ATTRIBUTE_TARGETS.iter().any(|k| word.eq_ignore_ascii_case(k)) {
+                return true;
+            }
+            let after = skip_space(b, end);
+            matches!(b.get(after), Some(b'$' | b'|' | b'&' | b'.'))
+        }
+        None => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -407,8 +560,52 @@ mod tests {
     }
 
     #[test]
+    fn columns_on_a_long_single_line_stay_linear() {
+        let src = format!("<?php {}each($a);", "$x = 1; ".repeat(50_000));
+        let started = std::time::Instant::now();
+        let toks = tokenize(&src);
+        assert!(started.elapsed().as_secs() < 2, "{:?}", started.elapsed());
+        let each = toks.iter().find(|t| t.text == "each").unwrap();
+        assert_eq!((each.line, each.column), (1, each.start + 1));
+        let toks = tokenize("<?php\n$a = 'ü'; $b;\n  $c;");
+        let cols: Vec<_> = toks.iter().filter(|t| t.kind == TokenKind::Variable).map(|t| (t.line, t.column)).collect();
+        assert_eq!(cols, vec![(2, 1), (2, 11), (3, 3)]);
+    }
+
+    #[test]
+    fn leading_bom_is_not_a_column() {
+        let toks = tokenize("\u{FEFF}<?php each($a);\n$b;");
+        assert_eq!((toks[0].line, toks[0].column), (1, 7));
+        let b = toks.iter().find(|t| t.text == "b").unwrap();
+        assert_eq!((b.line, b.column), (2, 1));
+    }
+
+    #[test]
+    fn quotes_inside_interpolation_do_not_end_the_string() {
+        let src = "<?php echo \"{$a[\"it's\"]}\";\nmysql_query($q); echo \"${b[\"x\"]} `{$c['\"']}`\"; split();";
+        let toks = tokenize(src);
+        let names: Vec<_> = toks.iter().filter(|t| t.kind == TokenKind::Ident).map(|t| t.text.as_str()).collect();
+        assert_eq!(names, vec!["echo", "mysql_query", "echo", "split"]);
+        let s = tokenize("<?php $s = \"a {$\"; foo();");
+        assert!(s.iter().any(|t| t.text == "foo"));
+    }
+
+    #[test]
+    fn hash_bracket_comments_in_php7_code() {
+        let lexed = lex("<?php\n#[note] don't use this\nmysql_query($q);\n$x = 'a';\n  #[ TODO\n");
+        assert!(lexed.tokens.iter().any(|t| t.text == "mysql_query"));
+        assert!(lexed.tokens.iter().all(|t| !t.is_punct("#[")));
+        assert_eq!(lexed.stray_hash_brackets, vec![(2, 1), (5, 3)]);
+
+        let attrs = "<?php\n#[Attribute]\nclass A {\n  #[ORM\\Column(type: 'string', options: ['x' => \"]\"])]\n  private string $s;\n  #[\\ReturnTypeWillChange]\n  public function f(#[A([1])] ?Foo $x, #[B] int|null $y, #[C] Bar ...$z) {}\n  #[A, B(1)] #[C]\n  final const X = 1;\n}\n$f = #[Pure] static fn() => 1;\nfunction g(#[S] $x) {}\n#[\n  Route('/x', methods: ['GET'])\n]\nfunction h() {}\n#[A(static function () { return 1; })] function i() {}";
+        let lexed = lex(attrs);
+        assert!(lexed.stray_hash_brackets.is_empty(), "{:?}", lexed.stray_hash_brackets);
+        assert_eq!(lexed.tokens.iter().filter(|t| t.is_punct("#[")).count(), 12);
+    }
+
+    #[test]
     fn never_panics_on_garbage() {
-        for src in ["<?php '", "<?php \"\\", "<?php <<<", "<?php /*", "<?php $", "<?php ü€ $ç = 1;"] {
+        for src in ["<?php '", "<?php \"\\", "<?php <<<", "<?php /*", "<?php $", "<?php ü€ $ç = 1;", "<?php #[", "<?php #[A(", "<?php #[A] ", "<?php \"{$a", "<?php \"${", "\u{FEFF}"] {
             let _ = tokenize(src);
         }
     }

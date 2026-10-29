@@ -34,7 +34,7 @@ const ALWAYS_SKIP: [&str; 8] = [
     "vendor", "node_modules", ".git", ".svn", ".hg", ".idea", ".vscode", ".ferry",
 ];
 
-const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
+pub(crate) const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
 
 pub fn detect_framework(root: &Path) -> Framework {
     if root.join("wp-config.php").exists()
@@ -50,7 +50,7 @@ pub fn detect_framework(root: &Path) -> Framework {
     if composer.contains("\"laravel/framework\"") {
         return Framework::Laravel;
     }
-    if composer.contains("\"drupal/core") || root.join("core/lib/Drupal.php").exists() {
+    if composer.contains("\"drupal/core") || drupal_core_dirs(root).next().is_some() {
         return Framework::Drupal;
     }
     if composer.contains("\"symfony/framework-bundle\"") || root.join("bin/console").is_file() {
@@ -68,6 +68,25 @@ pub fn framework_excludes(framework: Framework) -> Vec<String> {
         Framework::Generic => &[],
     };
     dirs.iter().map(|d| d.to_string()).collect()
+}
+
+const DRUPAL_DOCROOTS: [&str; 5] = ["", "web", "docroot", "html", "public"];
+
+fn drupal_core_dirs(root: &Path) -> impl Iterator<Item = &'static str> + '_ {
+    DRUPAL_DOCROOTS
+        .into_iter()
+        .filter(move |d| root.join(d).join("core/lib/Drupal.php").is_file())
+}
+
+fn project_excludes(root: &Path, framework: Framework) -> Vec<String> {
+    let mut dirs = framework_excludes(framework);
+    if framework == Framework::Drupal {
+        for docroot in drupal_core_dirs(root).filter(|d| !d.is_empty()) {
+            dirs.push(format!("{docroot}/core"));
+            dirs.push(format!("{docroot}/sites/default/files"));
+        }
+    }
+    dirs
 }
 
 fn is_php_file(path: &Path) -> bool {
@@ -95,10 +114,10 @@ pub fn collect_php_files(root: &Path, excluded: &[String]) -> Vec<PathBuf> {
         .follow_links(false)
         .into_iter()
         .filter_entry(keep)
-        .filter_map(Result::ok)
-        .filter(|e| e.file_type().is_file() && is_php_file(e.path()))
-        .filter(|e| e.metadata().is_ok_and(|m| m.len() <= MAX_FILE_BYTES))
-        .map(DirEntry::into_path)
+        .filter_map(|e| match e {
+            Ok(e) => (e.file_type().is_file() && is_php_file(e.path())).then(|| e.into_path()),
+            Err(e) => e.path().filter(|p| p.is_dir() || is_php_file(p)).map(Path::to_path_buf),
+        })
         .collect();
     files.sort();
     files
@@ -126,8 +145,11 @@ pub fn inspect(root: &Path) -> std::io::Result<ProjectInfo> {
         ));
     }
     let framework = detect_framework(root);
-    let excluded_dirs = framework_excludes(framework);
-    let php_files = collect_php_files(root, &excluded_dirs).len();
+    let excluded_dirs = project_excludes(root, framework);
+    let php_files = collect_php_files(root, &excluded_dirs)
+        .iter()
+        .filter(|p| !p.is_dir())
+        .count();
     let php_constraint = composer_php_constraint(root);
     let current_version = composer_platform_php(root).or_else(|| {
         php_constraint
@@ -203,6 +225,28 @@ mod tests {
         )
         .unwrap();
         assert_eq!(inspect(dir.path()).unwrap().current_version, Some(PhpVersion::new(8, 0)));
+    }
+
+    #[test]
+    fn drupal_docroot_core_is_excluded() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::write(root.join("composer.json"), r#"{"require": {"drupal/core-recommended": "^10"}}"#).unwrap();
+        fs::create_dir_all(root.join("web/core/lib")).unwrap();
+        fs::write(root.join("web/core/lib/Drupal.php"), "<?php").unwrap();
+        fs::create_dir_all(root.join("web/modules/custom/m")).unwrap();
+        fs::write(root.join("web/modules/custom/m/m.module"), "<?php").unwrap();
+        let info = inspect(root).unwrap();
+        assert_eq!(info.framework, Framework::Drupal);
+        assert!(info.excluded_dirs.contains(&"web/core".to_string()));
+        assert_eq!(info.php_files, 1);
+    }
+
+    #[test]
+    fn oversized_files_are_kept_for_reporting() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("big.php"), vec![b' '; MAX_FILE_BYTES as usize + 1]).unwrap();
+        assert_eq!(collect_php_files(dir.path(), &[]).len(), 1);
     }
 
     #[test]

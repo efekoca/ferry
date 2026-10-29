@@ -1,5 +1,5 @@
 use crate::i18n::{Localized, Text};
-use crate::lexer::{tokenize, Token, TokenKind};
+use crate::lexer::{lex, tokenize, Token, TokenKind};
 use crate::rules::{patterns, FixKind, PatternRule, Severity, SymbolRule, CONSTANTS, FUNCTIONS};
 use crate::version::PhpVersion;
 use serde::Serialize;
@@ -69,6 +69,24 @@ pub fn analyze_files(
     for (i, path) in files.iter().enumerate() {
         let rel = relative_path(root, path);
         progress(i, files.len(), &rel);
+        if path.is_dir() {
+            let message = match std::fs::read_dir(path) {
+                Err(e) => e.to_string(),
+                Ok(_) => crate::t!("Klasör okunamadı.", "Couldn't read the folder."),
+            };
+            errors.push(FileError { file: rel, message });
+            continue;
+        }
+        if std::fs::metadata(path).is_ok_and(|m| m.len() > crate::project::MAX_FILE_BYTES) {
+            errors.push(FileError {
+                file: rel,
+                message: crate::t!(
+                    "Atlandı: dosya çok büyük (2 MB üstü).",
+                    "Skipped: file is too large (over 2 MB)."
+                ),
+            });
+            continue;
+        }
         match std::fs::read(path) {
             Ok(bytes) => {
                 let src = String::from_utf8_lossy(&bytes);
@@ -95,16 +113,73 @@ pub fn analyze_files(
     }
 }
 
-pub fn analyze_source(file: &str, src: &str, target: PhpVersion) -> Vec<Finding> {
+pub fn fix_curly_offsets(src: &str) -> Option<String> {
     let tokens = tokenize(src);
+    let mut braces = Vec::new();
+    for i in 0..tokens.len() {
+        if tokens[i].kind != TokenKind::Variable {
+            continue;
+        }
+        let mut j = i + 1;
+        while tokens.get(j).is_some_and(|t| t.is_punct("{") && t.start == tokens[j - 1].end) {
+            let mut depth = 0;
+            let Some(close) = (j..tokens.len()).find(|&k| {
+                if tokens[k].is_punct("{") {
+                    depth += 1;
+                } else if tokens[k].is_punct("}") {
+                    depth -= 1;
+                }
+                depth == 0
+            }) else {
+                break;
+            };
+            braces.push((tokens[j].start, b'['));
+            braces.push((tokens[close].start, b']'));
+            j = close + 1;
+        }
+    }
+    if braces.is_empty() {
+        return None;
+    }
+    let mut bytes = src.as_bytes().to_vec();
+    for (pos, b) in braces {
+        bytes[pos] = b;
+    }
+    String::from_utf8(bytes).ok()
+}
+
+pub fn analyze_source(file: &str, src: &str, target: PhpVersion) -> Vec<Finding> {
+    let lexed = lex(src);
+    let tokens = lexed.tokens;
+    let mut line_starts = vec![0];
+    line_starts.extend(src.match_indices('\n').map(|(i, _)| i + 1));
     let mut ctx = Ctx {
         file,
         src,
+        line_starts,
         target,
         out: Vec::new(),
     };
-    for i in 0..tokens.len() {
+    for &(line, column) in &lexed.stray_hash_brackets {
+        ctx.pattern_at(&patterns::HASH_BRACKET_COMMENT, line, column);
+    }
+    let mut i = 0;
+    while i < tokens.len() {
         let tok = &tokens[i];
+        i += 1;
+        if tok.is_punct("#[") {
+            let mut depth = 1;
+            while i < tokens.len() && depth > 0 {
+                if tokens[i].is_punct("[") || tokens[i].is_punct("#[") {
+                    depth += 1;
+                } else if tokens[i].is_punct("]") {
+                    depth -= 1;
+                }
+                i += 1;
+            }
+            continue;
+        }
+        let i = i - 1;
         match &tok.kind {
             TokenKind::Ident => ctx.ident(&tokens, i),
             TokenKind::Variable => {
@@ -146,9 +221,15 @@ struct Hit<'r> {
 struct Ctx<'a> {
     file: &'a str,
     src: &'a str,
+    line_starts: Vec<usize>,
     target: PhpVersion,
     out: Vec<Finding>,
 }
+
+const EXPR_KEYWORDS: [&str; 17] = [
+    "return", "echo", "print", "yield", "from", "case", "else", "and", "or", "xor", "throw",
+    "include", "include_once", "require", "require_once", "clone", "default",
+];
 
 const DECL_KEYWORDS: [&str; 13] = [
     "function", "fn", "new", "const", "class", "interface", "trait", "enum", "use", "goto",
@@ -161,12 +242,14 @@ impl<'a> Ctx<'a> {
     }
 
     fn snippet(&self, line: usize) -> String {
-        let text = self.src.lines().nth(line - 1).unwrap_or("").trim();
-        if text.chars().count() > 200 {
-            let cut: String = text.chars().take(200).collect();
-            format!("{cut}…")
-        } else {
-            text.to_string()
+        let Some(&start) = self.line_starts.get(line - 1) else {
+            return String::new();
+        };
+        let end = self.line_starts.get(line).map_or(self.src.len(), |&e| e - 1);
+        let text = self.src[start..end].trim_start_matches('\u{FEFF}').trim();
+        match text.char_indices().nth(200) {
+            Some((cut, _)) => format!("{}…", &text[..cut]),
+            None => text.to_string(),
         }
     }
 
@@ -210,10 +293,14 @@ impl<'a> Ctx<'a> {
     }
 
     fn pattern(&mut self, rule: &PatternRule, tok: &Token, at: Option<(usize, usize)>) {
+        let (line, column) = at.unwrap_or((tok.line, tok.column));
+        self.pattern_at(rule, line, column);
+    }
+
+    fn pattern_at(&mut self, rule: &PatternRule, line: usize, column: usize) {
         if !self.applies(rule.since()) {
             return;
         }
-        let (line, column) = at.unwrap_or((tok.line, tok.column));
         let hit = Hit {
             rule_id: rule.id,
             title: rule.title.into(),
@@ -235,8 +322,13 @@ impl<'a> Ctx<'a> {
         let lower = bare.to_ascii_lowercase();
         let prev = i.checked_sub(1).map(|p| &tokens[p]);
         let next = tokens.get(i + 1);
+        let by_ref_fn = prev.is_some_and(|p| p.is_punct("&"))
+            && i >= 2
+            && (tokens[i - 2].is_ident_ci("function") || tokens[i - 2].is_ident_ci("fn"));
+        let decl_idx = if by_ref_fn { i - 2 } else { i.saturating_sub(1) };
+        let prev = if by_ref_fn { Some(&tokens[i - 2]) } else { prev };
 
-        let is_member = prev.is_some_and(|p| p.is_punct("->") || p.is_punct("?->") || p.is_punct("::"));
+        let is_member = !by_ref_fn && prev.is_some_and(|p| p.is_punct("->") || p.is_punct("?->") || p.is_punct("::"));
         let after_decl = prev.is_some_and(|p| {
             p.kind == TokenKind::Ident && DECL_KEYWORDS.iter().any(|k| p.text.eq_ignore_ascii_case(k))
         });
@@ -248,7 +340,8 @@ impl<'a> Ctx<'a> {
         if prev.is_some_and(|p| p.is_punct("(")) && next.is_some_and(|n| n.is_punct(")")) {
             let before_paren = i.checked_sub(2).map(|p| &tokens[p]);
             let paren_is_call = before_paren.is_some_and(|b| {
-                matches!(b.kind, TokenKind::Ident | TokenKind::Variable)
+                b.kind == TokenKind::Variable
+                    || (b.kind == TokenKind::Ident && !EXPR_KEYWORDS.iter().any(|k| b.is_ident_ci(k)))
                     || b.is_punct(")")
                     || b.is_punct("]")
             });
@@ -271,7 +364,7 @@ impl<'a> Ctx<'a> {
 
         if after_decl {
             let is_function_decl = prev.is_some_and(|p| p.is_ident_ci("function"));
-            if is_function_decl && lower == "__autoload" && !is_method(tokens, i - 1) {
+            if is_function_decl && lower == "__autoload" && !is_method(tokens, decl_idx) {
                 self.pattern(&patterns::AUTOLOAD, tok, None);
             }
             return;
@@ -346,7 +439,9 @@ impl<'a> Ctx<'a> {
                     continue;
                 }
                 if attr_depth > 0 {
-                    if t.is_punct("]") {
+                    if t.is_punct("[") {
+                        attr_depth += 1;
+                    } else if t.is_punct("]") {
                         attr_depth -= 1;
                     }
                     continue;
@@ -379,17 +474,24 @@ impl<'a> Ctx<'a> {
 
     fn dollar_brace(&mut self, tok: &Token) {
         let bytes = tok.text.as_bytes();
+        let (mut line, mut column) = (tok.line, tok.column);
+        let mut counted = 0;
         let mut k = 0;
         while k + 1 < bytes.len() {
             if bytes[k] == b'\\' {
                 k += 2;
                 continue;
             }
-            if bytes[k] == b'$' && bytes[k + 1] == b'{' {
-                let offset = tok.start + k;
-                let line = tok.line + tok.text[..k].matches('\n').count();
-                let line_start = self.src[..offset].rfind('\n').map_or(0, |p| p + 1);
-                let column = self.src[line_start..offset].chars().count() + 1;
+            if bytes[k] == b'$' && bytes[k + 1] == b'{' && (k == 0 || bytes[k - 1] != b'{') {
+                for c in tok.text[counted..k].chars() {
+                    if c == '\n' {
+                        line += 1;
+                        column = 1;
+                    } else {
+                        column += 1;
+                    }
+                }
+                counted = k;
                 self.pattern(&patterns::DOLLAR_BRACE_INTERPOLATION, tok, Some((line, column)));
             }
             k += 1;
@@ -412,8 +514,13 @@ fn is_method(tokens: &[Token], fn_idx: usize) -> bool {
             depth += 1;
         } else if t.is_punct("{") {
             if depth == 0 {
-                return tokens[..k].iter().rev().take(12).any(|b| {
-                    ["class", "trait", "interface", "enum"].iter().any(|c| b.is_ident_ci(c))
+                let header = tokens[..k]
+                    .iter()
+                    .rposition(|b| b.is_punct(";") || b.is_punct("{") || b.is_punct("}"))
+                    .map_or(0, |p| p + 1);
+                return (header..k).any(|h| {
+                    ["class", "trait", "interface", "enum"].iter().any(|c| tokens[h].is_ident_ci(c))
+                        && !(h > 0 && tokens[h - 1].is_punct("::"))
                 });
             }
             depth -= 1;
@@ -433,7 +540,9 @@ fn inside_call(tokens: &[Token], i: usize, func: &str) -> bool {
             depth += 1;
         } else if t.is_punct("(") {
             if depth == 0 {
-                return k > 0 && tokens[k - 1].is_ident_ci(func);
+                return k > 0
+                    && tokens[k - 1].kind == TokenKind::Ident
+                    && tokens[k - 1].text.trim_start_matches('\\').eq_ignore_ascii_case(func);
             }
             depth -= 1;
         }
@@ -517,6 +626,16 @@ mod tests {
     }
 
     #[test]
+    fn rewrites_curly_offsets() {
+        let src = "<?php\n$a = $s{0} . $m{$i}{f($x{1})};\nif ($b){ echo \"{$c}\"; }\n";
+        assert_eq!(
+            fix_curly_offsets(src).unwrap(),
+            "<?php\n$a = $s[0] . $m[$i][f($x[1])];\nif ($b){ echo \"{$c}\"; }\n"
+        );
+        assert_eq!(fix_curly_offsets("<?php $a[0]; ${'x'};"), None);
+    }
+
+    #[test]
     fn dollar_brace_interpolation() {
         let src = "<?php\n$a = \"Hi ${name}\";\n$b = \"ok {$name}\";\n$c = \"esc \\${x}\";\n$d = 'no ${x}';";
         let f = analyze_source("t.php", src, "8.2".parse().unwrap());
@@ -558,6 +677,92 @@ mod tests {
             rules(src, "8.4"),
             vec!["deprecated.filter_sanitize_string", "deprecated.e_strict", "deprecated.e_user_error"]
         );
+    }
+
+    #[test]
+    fn casts_after_keywords() {
+        let src = "<?php\nfunction f($x) { return (real) $x; }\necho (double) $y;\nprint (integer) $z;\n$g = yield (boolean) $w;\nif (REAL) {}\nfoo(REAL);";
+        assert_eq!(
+            rules(src, "8.5"),
+            vec!["removed.real_cast", "deprecated.non_canonical_cast", "deprecated.non_canonical_cast", "deprecated.non_canonical_cast"]
+        );
+    }
+
+    #[test]
+    fn by_reference_function_declarations() {
+        assert!(rules("<?php function &each($a) {} function &split() {} $f = fn &($x) => $x;", "8.0").is_empty());
+        assert_eq!(rules("<?php function &__autoload($c) {}", "8.0"), vec!["removed.__autoload"]);
+        assert_eq!(rules("<?php $a = &each($b);", "8.0"), vec!["removed.each"]);
+    }
+
+    #[test]
+    fn brace_dollar_brace_is_not_deprecated() {
+        let f = analyze_source("t.php", "<?php\n$a = \"{${expr}} ${x}\";\n$b = \"x\n  ${y}\";", "8.2".parse().unwrap());
+        let at: Vec<_> = f.iter().map(|f| (f.line, f.column)).collect();
+        assert_eq!(at, vec![(2, 17), (4, 3)]);
+    }
+
+    #[test]
+    fn nested_brackets_in_parameter_attributes() {
+        assert!(rules("<?php function f(#[A([1])] $x = null, #[B(['k' => [2]])] ?int $y = null) {}", "8.4").is_empty());
+        assert_eq!(rules("<?php function f(#[A([1])] Foo $x = null) {}", "8.4"), vec!["deprecated.implicit_nullable"]);
+    }
+
+    #[test]
+    fn root_qualified_trigger_error() {
+        assert_eq!(rules("<?php \\trigger_error('x', E_USER_ERROR);", "8.4"), vec!["deprecated.e_user_error"]);
+    }
+
+    #[test]
+    fn attribute_names_are_not_calls() {
+        assert!(rules("<?php #[Split()] class A {} #[Each, Ereg(E_STRICT)] function f(#[Split] $x) {}", "8.5").is_empty());
+        assert_eq!(rules("<?php #[A([1])] function f() { split(); }", "8.0"), vec!["removed.split"]);
+    }
+
+    #[test]
+    fn hash_bracket_comment_in_php7_code() {
+        let src = "<?php\n#[note] don't use this\nmysql_query($q);\n$x = 'a';";
+        assert_eq!(rules(src, "7.4"), vec!["removed.mysql"]);
+        let f = analyze_source("t.php", src, "8.0".parse().unwrap());
+        let ids: Vec<_> = f.iter().map(|f| (f.rule_id.as_str(), f.line, f.column)).collect();
+        assert_eq!(ids, vec![("removed.hash_bracket_comment", 2, 1), ("removed.mysql", 3, 1)]);
+        assert_eq!(f[0].snippet, "#[note] don't use this");
+    }
+
+    #[test]
+    fn bom_does_not_shift_columns() {
+        let f = &analyze_source("t.php", "\u{FEFF}<?php each($a);", "8.0".parse().unwrap())[0];
+        assert_eq!((f.line, f.column), (1, 7));
+        assert_eq!(f.snippet, "<?php each($a);");
+    }
+
+    #[test]
+    fn methods_in_classes_with_long_headers() {
+        let src = "<?php\nfinal class Store extends Base implements \\A\\One, \\B\\Two, \\C\\Three, \\D\\Four, \\E\\Five {\n  function __autoload($c) {}\n}";
+        assert!(rules(src, "8.0").is_empty(), "{:?}", rules(src, "8.0"));
+        assert_eq!(rules("<?php if ($x === Foo::class) { function __autoload($c) {} }", "8.0"), vec!["removed.__autoload"]);
+    }
+
+    #[test]
+    fn long_lines_stay_fast_and_snippets_are_cut() {
+        let src = format!("<?php {}", "each($a); ".repeat(40_000));
+        let started = Instant::now();
+        let f = analyze_source("t.php", &src, "8.0".parse().unwrap());
+        assert!(started.elapsed().as_secs() < 3, "{:?}", started.elapsed());
+        assert_eq!(f.len(), 40_000);
+        assert_eq!(f[0].snippet.chars().count(), 201);
+        assert_eq!(f[39_999].column, 6 + 39_999 * 10 + 1);
+    }
+
+    #[test]
+    fn oversized_files_are_reported() {
+        let dir = tempfile::tempdir().unwrap();
+        let big = dir.path().join("big.php");
+        std::fs::write(&big, vec![b' '; crate::project::MAX_FILE_BYTES as usize + 1]).unwrap();
+        let result = analyze_files(dir.path(), &[big], "8.0".parse().unwrap(), |_, _, _| {});
+        assert_eq!(result.errors.len(), 1);
+        assert_eq!(result.errors[0].file, "big.php");
+        assert!(result.errors[0].message.contains("2 MB"));
     }
 
     #[test]

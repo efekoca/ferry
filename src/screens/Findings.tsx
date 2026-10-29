@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ArrowRight, CircleCheck, ClipboardList, FileCode2, FolderSearch, Info, Lightbulb, Search, Sparkles } from "lucide-react";
 import { PageHeader } from "../components/Shell";
+import { useToast } from "../components/Toast";
 import { Badge, Button, Callout, EmptyState, RiskBadge, SeverityBadge, SeverityIcon } from "../components/ui";
 import { useI18n } from "../i18n";
+import { errorMessage } from "../lib/api";
 import { joinPath } from "../lib/labels";
 import { useStore } from "../lib/store";
 import type { Finding, FixKind, Severity } from "../lib/types";
@@ -35,6 +37,7 @@ export function Findings() {
   const [severity, setSeverity] = useState<SeverityFilter>("all");
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const toast = useToast();
 
   const findings = useMemo(() => scan?.findings ?? [], [scan]);
   const visible = useMemo(() => filterFindings(findings, fix, severity, query), [findings, fix, severity, query]);
@@ -53,7 +56,7 @@ export function Findings() {
       const i = selected ? visible.indexOf(selected) : -1;
       const next = visible[Math.max(0, Math.min(visible.length - 1, i + (e.key === "ArrowDown" ? 1 : -1)))];
       setSelectedId(next.id);
-      document.getElementById(`finding-${CSS.escape(next.id)}`)?.scrollIntoView({ block: "nearest" });
+      document.getElementById(`finding-${next.id}`)?.scrollIntoView({ block: "nearest" });
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -122,7 +125,7 @@ export function Findings() {
             ) : (
               <div role="listbox" aria-label={t.findings.list} style={{ paddingBottom: "var(--space-6)" }}>
                 {groups.map(([file, items]) => (
-                  <section key={file} className="file-group">
+                  <section key={file} className="file-group" role="group" aria-label={file}>
                     <header className="file-group__header">
                       <FileCode2 size={14} />
                       <span className="file-group__name" title={file}>
@@ -201,7 +204,14 @@ export function Findings() {
                     </Button>
                   )}
                   {project && api && (
-                    <Button variant="secondary" onClick={() => api.revealPath(joinPath(project.root, selected.file))}>
+                    <Button
+                      variant="secondary"
+                      onClick={() =>
+                        api
+                          .revealPath(joinPath(project.root, selected.file))
+                          .catch((e) => toast.push({ tone: "error", title: t.toast.revealFailed, description: errorMessage(e, t.common.genericError) }))
+                      }
+                    >
                       {t.findings.reveal}
                     </Button>
                   )}

@@ -1,7 +1,53 @@
-import { useEffect, useId, useRef, type ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, type ReactNode, type RefObject } from "react";
 import { X } from "lucide-react";
 import { Button } from "./ui";
 import { useI18n } from "../i18n";
+
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]';
+
+function useModal(open: boolean, dialogRef: RefObject<HTMLElement | null>, initialRef: RefObject<HTMLElement | null>, onEscape: () => void) {
+  const escapeRef = useRef(onEscape);
+  useLayoutEffect(() => {
+    escapeRef.current = onEscape;
+  });
+
+  useEffect(() => {
+    if (!open) return;
+    const previous = document.activeElement as HTMLElement | null;
+    initialRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      const dialog = dialogRef.current;
+      const top = [...document.querySelectorAll('[role="dialog"][aria-modal="true"]')].pop();
+      if (!dialog || top !== dialog) return;
+      if (e.key === "Escape") {
+        escapeRef.current();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const items = [...dialog.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((el) => el.tabIndex >= 0 && !el.matches(":disabled"));
+      if (!items.length) {
+        e.preventDefault();
+        return;
+      }
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement;
+      const outside = !dialog.contains(active);
+      if (e.shiftKey && (active === first || outside)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (active === last || outside)) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      previous?.focus?.();
+    };
+  }, [open, dialogRef, initialRef]);
+}
 
 export function ConfirmDialog({
   open,
@@ -29,26 +75,15 @@ export function ConfirmDialog({
   const { t } = useI18n();
   const titleId = useId();
   const confirmRef = useRef<HTMLButtonElement>(null);
-  const previousFocus = useRef<HTMLElement | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    previousFocus.current = document.activeElement as HTMLElement | null;
-    confirmRef.current?.focus();
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !loading) onCancel();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      previousFocus.current?.focus?.();
-    };
-  }, [open, loading, onCancel]);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModal(open, dialogRef, confirmRef, () => {
+    if (!loading) onCancel();
+  });
 
   if (!open) return null;
   return (
     <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && !loading && onCancel()}>
-      <div className="modal" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+      <div ref={dialogRef} className="modal" role="dialog" aria-modal="true" aria-labelledby={titleId}>
         <div className="modal__body">
           <div className={`modal__icon ${tone === "danger" ? "modal__icon--danger" : ""}`} aria-hidden>
             {icon}
@@ -92,23 +127,13 @@ export function Sheet({
   const { t } = useI18n();
   const titleId = useId();
   const closeRef = useRef<HTMLButtonElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const previous = document.activeElement as HTMLElement | null;
-    closeRef.current?.focus();
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      previous?.focus?.();
-    };
-  }, [open, onClose]);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModal(open, dialogRef, closeRef, onClose);
 
   if (!open) return null;
   return (
     <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal sheet" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+      <div ref={dialogRef} className="modal sheet" role="dialog" aria-modal="true" aria-labelledby={titleId}>
         <header className="sheet__header">
           <div className="sheet__title">
             <h2 id={titleId}>{title}</h2>

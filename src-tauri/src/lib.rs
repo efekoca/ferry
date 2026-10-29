@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 use ferry_core::analyzer::{self, ScanResult};
@@ -28,6 +28,7 @@ pub struct AppState {
     settings: Mutex<Settings>,
     scans: Mutex<HashMap<String, ScanResult>>,
     previews: Mutex<HashMap<String, RectorPreview>>,
+    writes: Arc<Mutex<()>>,
 }
 
 impl AppState {
@@ -42,6 +43,7 @@ impl AppState {
             settings: Mutex::new(settings),
             scans: Mutex::new(HashMap::new()),
             previews: Mutex::new(HashMap::new()),
+            writes: Arc::new(Mutex::new(())),
         }
     }
 
@@ -233,7 +235,9 @@ async fn apply_changes(
     }
     let store = state.snapshots();
     let applied_files: Vec<String> = selected.iter().map(|c| c.file.clone()).collect();
+    let writes = state.writes.clone();
     let result = blocking(move || {
+        let _guard = writes.lock().unwrap_or_else(|e| e.into_inner());
         let snapshot = store
             .create(&root, &applied_files, &label)
             .map_err(|e| e.to_string())?;
@@ -245,11 +249,16 @@ async fn apply_changes(
                 }
                 Ok(ApplyResult { snapshot, written })
             }
-            Err(e) => {
-                let _ = store.restore(&root, &snapshot.id);
-                let _ = store.delete(&root, &snapshot.id);
-                Err(e.to_string())
-            }
+            Err(e) => match store.restore(&root, &snapshot.id) {
+                Ok(_) => {
+                    let _ = store.delete(&root, &snapshot.id);
+                    Err(e.to_string())
+                }
+                Err(restore) => Err(t!(
+                    "{e}\nDosyalar geri alınamadı ({restore}). Yedek Geçmiş sayfasında duruyor; oradan geri yükleyebilirsiniz.",
+                    "{e}\nCouldn't roll the files back ({restore}). The backup is kept in History; you can restore it from there."
+                )),
+            },
         }
     })
     .await?;
@@ -269,7 +278,12 @@ async fn list_snapshots(state: State<'_, AppState>, path: String) -> CmdResult<V
 async fn restore_snapshot(state: State<'_, AppState>, path: String, id: String) -> CmdResult<Vec<String>> {
     let store = state.snapshots();
     state.previews.lock().unwrap().remove(&path);
-    blocking(move || store.restore(&project_root(&path)?, &id).map_err(|e| e.to_string())).await
+    let writes = state.writes.clone();
+    blocking(move || {
+        let _guard = writes.lock().unwrap_or_else(|e| e.into_inner());
+        store.restore(&project_root(&path)?, &id).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
@@ -340,9 +354,10 @@ fn get_settings(state: State<'_, AppState>) -> Settings {
 
 #[tauri::command]
 fn save_settings(state: State<'_, AppState>, settings: Settings) -> CmdResult<()> {
-    let json = serde_json::to_vec_pretty(&settings).map_err(|e| e.to_string())?;
-    std::fs::create_dir_all(&state.data_dir).map_err(|e| e.to_string())?;
-    std::fs::write(state.settings_path(), json).map_err(|e| e.to_string())?;
+    let failed = |e: &dyn std::fmt::Display| t!("Ayarlar kaydedilemedi: {e}", "Couldn't save the settings: {e}");
+    let json = serde_json::to_vec_pretty(&settings).map_err(|e| failed(&e))?;
+    std::fs::create_dir_all(&state.data_dir).map_err(|e| failed(&e))?;
+    std::fs::write(state.settings_path(), json).map_err(|e| failed(&e))?;
     *state.settings.lock().unwrap() = settings;
     Ok(())
 }

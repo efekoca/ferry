@@ -55,8 +55,11 @@ export function Changes() {
               options={modes}
               value={mode}
               onChange={(m) => {
+                const previous = mode;
                 setMode(m);
-                loadPreview(m);
+                loadPreview(m).then((ok) => {
+                  if (!ok) setMode(previous);
+                });
               }}
               disabled={previewing}
             />
@@ -223,7 +226,7 @@ export function Changes() {
               <span className="subtle" style={{ fontSize: "var(--text-sm)" }}>
                 <span className="stat-add">+{totals.add}</span> <span className="stat-del">−{totals.del}</span> {t.common.lines}
               </span>
-              <Button variant="primary" disabled={chosen.length === 0} loading={applying} onClick={() => setConfirming(true)}>
+              <Button variant="primary" disabled={chosen.length === 0 || previewing} loading={applying} onClick={() => setConfirming(true)}>
                 {chosen.length === changes.length ? t.changes.applyAll : t.changes.applySome(chosen.length)}
               </Button>
             </div>

@@ -103,13 +103,36 @@ impl SnapshotStore {
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0);
         let project_dir = self.project_dir(project_root);
+        std::fs::create_dir_all(&project_dir).map_err(io_err(&project_dir))?;
         let mut id = now.to_string();
         let mut n = 1;
-        while project_dir.join(&id).exists() {
-            id = format!("{now}-{n}");
-            n += 1;
+        loop {
+            match std::fs::create_dir(project_dir.join(&id)) {
+                Ok(()) => break,
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    id = format!("{now}-{n}");
+                    n += 1;
+                }
+                Err(e) => return Err(io_err(&project_dir)(e)),
+            }
         }
         let dir = project_dir.join(&id);
+        let result = self.fill(project_root, &dir, id, now, rel_paths, label);
+        if result.is_err() {
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+        result
+    }
+
+    fn fill(
+        &self,
+        project_root: &Path,
+        dir: &Path,
+        id: String,
+        now: u64,
+        rel_paths: &[String],
+        label: &str,
+    ) -> Result<Snapshot, SnapshotError> {
         let files_dir = dir.join("files");
         std::fs::create_dir_all(&files_dir).map_err(io_err(&files_dir))?;
 
@@ -171,21 +194,33 @@ impl SnapshotStore {
     pub fn restore(&self, project_root: &Path, id: &str) -> Result<Vec<String>, SnapshotError> {
         let (snapshot, dir) = self.load(project_root, id)?;
         let mut restored = Vec::new();
+        let mut first_error = None;
         for file in &snapshot.files {
-            let rel = safe_relative(&file.path)?;
-            let target = project_root.join(&rel);
-            if file.existed {
-                let saved = dir.join("files").join(&rel);
-                if let Some(parent) = target.parent() {
-                    std::fs::create_dir_all(parent).map_err(io_err(parent))?;
+            let result = (|| {
+                let rel = safe_relative(&file.path)?;
+                let target = project_root.join(&rel);
+                if file.existed {
+                    let saved = dir.join("files").join(&rel);
+                    if let Some(parent) = target.parent() {
+                        std::fs::create_dir_all(parent).map_err(io_err(parent))?;
+                    }
+                    std::fs::copy(&saved, &target).map_err(io_err(&saved))?;
+                } else if target.exists() {
+                    std::fs::remove_file(&target).map_err(io_err(&target))?;
                 }
-                std::fs::copy(&saved, &target).map_err(io_err(&saved))?;
-            } else if target.exists() {
-                std::fs::remove_file(&target).map_err(io_err(&target))?;
+                Ok::<_, SnapshotError>(())
+            })();
+            match result {
+                Ok(()) => restored.push(file.path.clone()),
+                Err(e) => {
+                    first_error.get_or_insert(e);
+                }
             }
-            restored.push(file.path.clone());
         }
-        Ok(restored)
+        match first_error {
+            Some(e) => Err(e),
+            None => Ok(restored),
+        }
     }
 
     pub fn write_attachment(&self, project_root: &Path, id: &str, name: &str, bytes: &[u8]) -> Result<(), SnapshotError> {

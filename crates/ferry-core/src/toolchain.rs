@@ -115,9 +115,11 @@ fn expand_glob(parent: &Path, prefix: &str, suffix: &str) -> Vec<PathBuf> {
 }
 
 pub fn augmented_path() -> std::ffi::OsString {
-    let mut dirs = extra_dirs();
-    if let Some(path) = std::env::var_os("PATH") {
-        dirs.extend(std::env::split_paths(&path));
+    let mut dirs: Vec<PathBuf> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
+    for d in extra_dirs() {
+        if !dirs.contains(&d) {
+            dirs.push(d);
+        }
     }
     std::env::join_paths(dirs).unwrap_or_default()
 }

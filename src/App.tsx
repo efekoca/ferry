@@ -47,7 +47,7 @@ function Shortcuts() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
-      if (!mod || e.altKey) return;
+      if (!mod || e.altKey || document.querySelector('[role="dialog"][aria-modal="true"]')) return;
       if (e.key.toLowerCase() === "o") {
         e.preventDefault();
         openProject();

@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactElement } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactElement } from "react";
 import {
   Bot,
   Check,
@@ -281,14 +281,20 @@ function SnapshotReview({
   const toast = useToast();
   const [changes, setChanges] = useState<FileChange[] | null>(null);
   const [active, setActive] = useState<string | null>(null);
+  const closeRef = useRef(onClose);
+  useLayoutEffect(() => {
+    closeRef.current = onClose;
+  });
+  const id = snapshot?.id;
+  const root = project?.root;
 
   useEffect(() => {
     setChanges(null);
     setActive(null);
-    if (!snapshot || !api || !project) return;
+    if (!id || !api || !root) return;
     let live = true;
     api
-      .snapshotChanges(project.root, snapshot.id)
+      .snapshotChanges(root, id)
       .then((list) => {
         if (!live) return;
         setChanges(list);
@@ -297,12 +303,12 @@ function SnapshotReview({
       .catch((e) => {
         if (!live) return;
         toast.push({ tone: "error", title: t.history.reviewFailed, description: errorMessage(e, t.common.genericError) });
-        onClose();
+        closeRef.current();
       });
     return () => {
       live = false;
     };
-  }, [snapshot, api, project, toast, t, onClose]);
+  }, [id, api, root, toast, t]);
 
   const current = changes?.find((c) => c.file === active) ?? null;
   const legacy = !!changes?.length && changes.every((c) => c.rules.length === 0);
@@ -405,9 +411,9 @@ export function SettingsScreen() {
 
   const choosePhp = async () => {
     if (!api) return;
-    const path = await api.pickPhpBinary(t.dialogs.pickPhp);
-    if (!path) return;
     try {
+      const path = await api.pickPhpBinary(t.dialogs.pickPhp);
+      if (!path) return;
       await api.saveSettings({ phpPath: path });
       await recheck();
       toast.push({ tone: "success", title: t.toast.phpSaved, description: path });
@@ -418,8 +424,12 @@ export function SettingsScreen() {
 
   const resetPhp = async () => {
     if (!api) return;
-    await api.saveSettings({ phpPath: null });
-    await recheck();
+    try {
+      await api.saveSettings({ phpPath: null });
+      await recheck();
+    } catch (e) {
+      toast.push({ tone: "error", title: t.toast.saveFailed, description: errorMessage(e, t.common.genericError) });
+    }
   };
 
   const tools = [

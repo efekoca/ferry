@@ -178,9 +178,9 @@ pub fn to_markdown(project: &ProjectInfo, scan: &ScanResult, deps: Option<&Depen
             for p in bad {
                 md.push_str(&format!(
                     "| `{}` | {} | `{}` |\n",
-                    p.name,
-                    p.version,
-                    p.php_constraint.as_deref().unwrap_or("—")
+                    p.name.replace('|', "\\|"),
+                    p.version.replace('|', "\\|"),
+                    p.php_constraint.as_deref().unwrap_or("—").replace('|', "\\|")
                 ));
             }
             md.push('\n');
