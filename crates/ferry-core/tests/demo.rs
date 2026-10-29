@@ -114,7 +114,7 @@ fn rector_handles_every_demo_project() {
         let unexpected: Vec<&String> = preview
             .errors
             .iter()
-            .filter(|e| !curly_files.iter().any(|f| e.contains(f.as_str())))
+            .filter(|e| !curly_files.iter().any(|f| e.replace('\\', "/").contains(f.as_str())))
             .collect();
         assert!(unexpected.is_empty(), "{name}: {unexpected:?}");
         assert!(!preview.changes.is_empty(), "{name}: Rector found nothing");

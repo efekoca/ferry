@@ -64,7 +64,12 @@ fn rector_preview_apply_and_restore() {
     )
     .unwrap();
     assert!(preview.errors.is_empty(), "{:?}", preview.errors);
-    let greeter = preview.changes.iter().find(|c| c.file == "src/Greeter.php").expect("Greeter changes");
+    let files: Vec<&str> = preview.changes.iter().map(|c| c.file.as_str()).collect();
+    let greeter = preview
+        .changes
+        .iter()
+        .find(|c| c.file == "src/Greeter.php")
+        .unwrap_or_else(|| panic!("Greeter changes missing; root {} changed {files:?}", root.display()));
     let names: Vec<_> = greeter.rules.iter().map(|r| r.name.as_str()).collect();
     assert!(names.contains(&"ExplicitNullableParamTypeRector"), "{names:?}");
     assert!(names.contains(&"WhileEachToForeachRector"), "{names:?}");
