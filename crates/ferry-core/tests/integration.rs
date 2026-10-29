@@ -61,6 +61,7 @@ fn rector_preview_apply_and_restore() {
         rector::RectorMode::Compat,
         &[],
         work.path(),
+        &std::sync::atomic::AtomicBool::new(false),
     )
     .unwrap();
     assert!(preview.errors.is_empty(), "{:?}", preview.errors);

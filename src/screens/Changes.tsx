@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { CircleAlert, CircleCheck, Download, GitCompareArrows, RotateCw, ShieldCheck, Sparkles, Wand2 } from "lucide-react";
+import { CircleAlert, CircleCheck, CircleStop, Download, GitCompareArrows, RotateCw, ShieldCheck, Sparkles, Wand2 } from "lucide-react";
 import { DiffViewer } from "../components/DiffViewer";
 import { ConfirmDialog } from "../components/Modal";
 import { PageHeader } from "../components/Shell";
@@ -10,7 +10,7 @@ import type { FileChange, RectorMode } from "../lib/types";
 
 export function Changes() {
   const { t } = useI18n();
-  const { toolchain, installRector, installingRector, preview, previewMode, previewing, loadPreview, applyChanges, applying, target, setView } =
+  const { toolchain, installRector, installingRector, preview, previewMode, previewing, loadPreview, cancelPreview, applyChanges, applying, target, setView } =
     useStore();
   const [mode, setMode] = useState<RectorMode>(previewMode);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -63,6 +63,11 @@ export function Changes() {
               }}
               disabled={previewing}
             />
+            {previewing && (
+              <Button variant="ghost" size="sm" icon={<CircleStop size={14} />} onClick={cancelPreview}>
+                {t.changes.stop}
+              </Button>
+            )}
             <Button variant="secondary" size="sm" icon={<RotateCw size={14} />} onClick={() => loadPreview(mode)} loading={previewing}>
               {t.changes.recalculate}
             </Button>
@@ -142,9 +147,14 @@ export function Changes() {
               {previewing ? (
                 <div className="stack" style={{ gap: 8 }}>
                   <Progress value={null} label={t.changes.calculating} />
-                  <span className="subtle" style={{ fontSize: "var(--text-sm)" }}>
-                    {t.changes.calculatingHint}
-                  </span>
+                  <div className="row" style={{ justifyContent: "space-between" }}>
+                    <span className="subtle" style={{ fontSize: "var(--text-sm)" }}>
+                      {t.changes.calculatingHint}
+                    </span>
+                    <Button variant="secondary" size="sm" icon={<CircleStop size={14} />} onClick={cancelPreview}>
+                      {t.changes.stop}
+                    </Button>
+                  </div>
                 </div>
               ) : (
                 <div>
@@ -208,7 +218,7 @@ export function Changes() {
             />
             <span>{t.changes.selected(chosen.length, changes.length)}</span>
           </label>
-          <div className="change-list" role="listbox" aria-label={t.changes.files}>
+          <ul className="change-list" aria-label={t.changes.files}>
             {changes.map((c) => (
               <ChangeItem
                 key={c.file}
@@ -219,7 +229,7 @@ export function Changes() {
                 onSelect={() => setActive(c.file)}
               />
             ))}
-          </div>
+          </ul>
           <div className="apply-bar">
             {preview.errors.length > 0 && <ErrorList errors={preview.errors} compact />}
             <div className="row" style={{ justifyContent: "space-between" }}>
@@ -299,20 +309,7 @@ function ChangeItem({
 }) {
   const { t } = useI18n();
   return (
-    <div
-      className="change-item"
-      role="option"
-      aria-selected={active}
-      tabIndex={0}
-      onClick={onSelect}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") onSelect();
-        if (e.key === " ") {
-          e.preventDefault();
-          onToggle();
-        }
-      }}
-    >
+    <li className="change-item" data-active={active} onClick={onSelect}>
       <input
         type="checkbox"
         className="checkbox"
@@ -321,7 +318,7 @@ function ChangeItem({
         onClick={(e) => e.stopPropagation()}
         aria-label={t.changes.selectFile(change.file)}
       />
-      <div className="change-item__body">
+      <button type="button" className="change-item__body" aria-current={active || undefined} onClick={onSelect}>
         <div className="change-item__file" title={change.file}>
           <bdi>{change.file}</bdi>
         </div>
@@ -333,8 +330,8 @@ function ChangeItem({
             {t.common.rules(change.rules.length)}
           </span>
         </div>
-      </div>
-    </div>
+      </button>
+    </li>
   );
 }
 

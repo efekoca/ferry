@@ -6,7 +6,11 @@ use crate::toolchain::{command, ToolError};
 use crate::version::PhpVersion;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use std::time::Instant;
+use std::process::{Command, Output, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
+
+const RECTOR_TIMEOUT: Duration = Duration::from_secs(20 * 60);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -176,6 +180,8 @@ pub enum RectorError {
     Output(String),
     Io(String, std::io::Error),
     Stale(String),
+    Cancelled,
+    TimedOut(u64),
 }
 
 impl From<ToolError> for RectorError {
@@ -190,6 +196,11 @@ impl std::fmt::Display for RectorError {
             RectorError::Tool(e) => e.to_string(),
             RectorError::Output(out) => crate::t!("Rector çıktısı okunamadı: {out}", "Couldn't read Rector's output: {out}"),
             RectorError::Io(path, e) => crate::t!("Dosya işlemi başarısız ({path}): {e}", "File operation failed ({path}): {e}"),
+            RectorError::Cancelled => crate::t!("Rector durduruldu.", "Rector was stopped."),
+            RectorError::TimedOut(minutes) => crate::t!(
+                "Rector {minutes} dakikada bitmediği için durduruldu. Projenin bir bölümünü dışarıda bırakmayı ya da PHP'nin bellek ayarlarını kontrol etmeyi deneyin.",
+                "Rector was stopped because it didn't finish in {minutes} minutes. Try leaving part of the project out, or check PHP's memory settings."
+            ),
             RectorError::Stale(file) => crate::t!(
                 "{file} önizlemeden sonra değişmiş. Değişiklikleri yeniden hesaplayın.",
                 "{file} changed after the preview. Recalculate the changes."
@@ -438,6 +449,55 @@ pub fn parse_output(root: &Path, stdout: &str, staging: &Staging) -> Result<(Vec
     Ok((changes, errors))
 }
 
+fn run_cancellable(mut cmd: Command, program: &Path, cancel: &AtomicBool, timeout: Duration) -> Result<Output, RectorError> {
+    let mut child = cmd
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|source| ToolError::Spawn {
+            program: program.display().to_string(),
+            source,
+        })?;
+    let read = |pipe: Option<Box<dyn std::io::Read + Send>>| {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(mut pipe) = pipe {
+                let _ = pipe.read_to_end(&mut buf);
+            }
+            buf
+        })
+    };
+    let stdout = read(child.stdout.take().map(|p| Box::new(p) as _));
+    let stderr = read(child.stderr.take().map(|p| Box::new(p) as _));
+    let started = Instant::now();
+    let io = |e| RectorError::Io("rector".into(), e);
+    let status = loop {
+        if let Some(status) = child.try_wait().map_err(io)? {
+            break status;
+        }
+        let stop = if cancel.load(Ordering::Relaxed) {
+            Some(RectorError::Cancelled)
+        } else if started.elapsed() >= timeout {
+            Some(RectorError::TimedOut(timeout.as_secs().div_ceil(60).max(1)))
+        } else {
+            None
+        };
+        if let Some(err) = stop {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(err);
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    Ok(Output {
+        status,
+        stdout: stdout.join().unwrap_or_default(),
+        stderr: stderr.join().unwrap_or_default(),
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn preview(
     php: &Path,
     rector: &Path,
@@ -446,6 +506,7 @@ pub fn preview(
     mode: RectorMode,
     excluded_dirs: &[String],
     work_dir: &Path,
+    cancel: &AtomicBool,
 ) -> Result<RectorPreview, RectorError> {
     if !rector.is_file() {
         return Err(ToolError::RectorMissing.into());
@@ -463,18 +524,14 @@ pub fn preview(
     let config = build_config(root, target, mode, excluded_dirs, &staging, &dir.join("cache"));
     std::fs::write(&config_path, config).map_err(|e| RectorError::Io(config_path.display().to_string(), e))?;
 
-    let output = command(php)
-        .arg("-d")
+    let mut cmd = command(php);
+    cmd.arg("-d")
         .arg("memory_limit=-1")
         .arg(rector)
         .args(["process", "--dry-run", "--output-format=json", "--no-progress-bar", "--no-ansi", "--config"])
         .arg(&config_path)
-        .current_dir(root)
-        .output()
-        .map_err(|source| ToolError::Spawn {
-            program: php.display().to_string(),
-            source,
-        })?;
+        .current_dir(root);
+    let output = run_cancellable(cmd, php, cancel, RECTOR_TIMEOUT)?;
     let stdout = String::from_utf8_lossy(&output.stdout);
     let (changes, errors) = parse_output(root, &stdout, &staging).map_err(|e| {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -594,5 +651,32 @@ mod tests {
         assert_eq!(errors.len(), 1);
         assert!(errors[0].contains("UTF-8"), "{errors:?}");
         assert!(parse_output(root, "Fatal error in {closure}", &Staging::default()).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn long_runs_can_be_cancelled_or_time_out() {
+        let sleep = Path::new("/bin/sleep");
+        let mut cmd = Command::new(sleep);
+        cmd.arg("30");
+        let started = Instant::now();
+        let err = run_cancellable(cmd, sleep, &AtomicBool::new(false), Duration::from_millis(300)).unwrap_err();
+        assert!(matches!(err, RectorError::TimedOut(1)), "{err}");
+        assert!(started.elapsed() < Duration::from_secs(5));
+
+        let cancel = std::sync::Arc::new(AtomicBool::new(false));
+        let flag = cancel.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(200));
+            flag.store(true, Ordering::Relaxed);
+        });
+        let mut cmd = Command::new(sleep);
+        cmd.arg("30");
+        assert!(matches!(run_cancellable(cmd, sleep, &cancel, RECTOR_TIMEOUT), Err(RectorError::Cancelled)));
+
+        let mut cmd = Command::new("/bin/sh");
+        cmd.args(["-c", "echo out; echo err >&2"]);
+        let out = run_cancellable(cmd, sleep, &AtomicBool::new(false), RECTOR_TIMEOUT).unwrap();
+        assert_eq!((out.stdout.as_slice(), out.stderr.as_slice()), (&b"out\n"[..], &b"err\n"[..]));
     }
 }

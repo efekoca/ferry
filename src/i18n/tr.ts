@@ -178,6 +178,7 @@ export const tr = {
       "Rector projenizi deneme modunda çalıştırır, hiçbir dosya değişmez. Önerilen değişiklikleri dosya dosya inceler, yalnızca seçtiklerinizi uygularsınız. Her uygulamadan önce yedek alınır.",
     calculating: "Değişiklikler hesaplanıyor",
     calculatingHint: "Rector çalışıyor. Büyük projelerde birkaç dakika sürebilir.",
+    stop: "Durdur",
     calculate: "Değişiklikleri hesapla",
     allApplied: "Hepsi uygulandı",
     allAppliedText: "Proje yeniden tarandı. Elle düzeltilecekler Bulgular'da; isterseniz Geçmiş'ten geri alabilirsiniz.",
@@ -248,6 +249,8 @@ export const tr = {
     restoreTitle: "Dosyalar geri yüklensin mi?",
     restoreText: (n: number, label: string) =>
       `${n} dosya, “${label}” öncesindeki hâline döner. Sonradan bu dosyalarda yaptığınız değişiklikler kaybolur.`,
+    conflictTitle: (n: number) => (n === 1 ? "Bu dosya uygulamadan sonra değiştirilmiş:" : `Bu ${n} dosya uygulamadan sonra değiştirilmiş:`),
+    conflictText: "Geri yüklerseniz bu dosyalarda sonradan yaptığınız değişiklikler kaybolur.",
   },
   settings: {
     title: "Ayarlar",

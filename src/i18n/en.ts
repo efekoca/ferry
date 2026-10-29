@@ -179,6 +179,7 @@ export const en: Dict = {
       "Rector runs on your project in dry-run mode; no files change. You review the proposed changes file by file and apply only the ones you pick. A backup is taken before every apply.",
     calculating: "Calculating changes",
     calculatingHint: "Rector is running. Large projects can take a few minutes.",
+    stop: "Stop",
     calculate: "Calculate changes",
     allApplied: "All changes applied",
     allAppliedText: "The project was rescanned. Manual items are in Findings, and you can undo from History.",
@@ -248,6 +249,8 @@ export const en: Dict = {
     deleteConfirm: "Delete",
     restoreTitle: "Restore these files?",
     restoreText: (n, label) => `${n} files go back to how they were before “${label}”. Any later edits to them will be lost.`,
+    conflictTitle: (n) => (n === 1 ? "This file was changed after the apply:" : `These ${n} files were changed after the apply:`),
+    conflictText: "Restoring replaces the changes you made to them since then.",
   },
   settings: {
     title: "Settings",

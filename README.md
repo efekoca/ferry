@@ -91,7 +91,7 @@ Before every apply, Ferry backs up the files it is about to change. The **Histor
 ![A History entry opened for review: the changed files on the left, the diff and rules of the selected file on the right, and the Restore button](assets/readme/history-en.webp)
 
 - **Review** shows exactly what each apply changed, file by file, with the rules behind each change.
-- **Restore** puts every file back as it was before that apply.
+- **Restore** puts every file back as it was before that apply. If you edited any of them since, Ferry lists them first.
 - If an apply fails partway, Ferry rolls the files back on its own. If even that fails, the backup stays in History so you can restore it yourself.
 
 ### Made for your desktop
@@ -165,7 +165,7 @@ Everything runs on your computer:
 
 1. Ferry detects the project type and the current PHP version, and skips folders you don't maintain.
 2. Its built-in scanner tokenizes every PHP file and checks it against the rules for each version between your current one and the target.
-3. For fixes, Rector runs in dry-run mode on your project. Ferry turns its proposed diffs into a preview and keeps a fingerprint of each file.
+3. For fixes, Rector runs in dry-run mode on your project, and you can stop it at any time. Ferry turns its proposed diffs into a preview and keeps a fingerprint of each file.
 4. When you apply, Ferry first backs up the selected files, then checks that none of them changed since the preview, and writes each one in a single step. A file that changed in the meantime is refused.
 5. Restoring copies the backup over the files, and **Review** in History shows the changes that were applied.
 
@@ -174,7 +174,7 @@ Everything runs on your computer:
 - **Static analysis:** the scan reads code without running it, so behavior that depends on runtime values (for example, functions called by name from a string) can't always be found. Such cases are marked **Risky** where possible.
 - **Encodings:** automatic fixes skip files that are not UTF-8 (for example, Windows-1254 or Latin-1), so they are never corrupted. Convert them to UTF-8 to have them fixed.
 - **Manual fixes:** findings such as `mysql_*` need code to be rewritten, and Ferry shows what to use instead but doesn't rewrite them for you.
-- **Restore:** it puts back the files as they were before the apply. Edits you made to the same files after the apply are replaced too.
+- **Restore:** it puts back the files as they were before the apply, so edits you made to them afterwards are replaced. Ferry lists those files and asks before restoring.
 - **Linux:** not supported yet.
 
 ## Build from source

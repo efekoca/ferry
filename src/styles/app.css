@@ -1644,6 +1644,9 @@ html[data-platform="macos"] .sidebar {
 .change-list {
   flex: 1;
   overflow: auto;
+  list-style: none;
+  margin: 0;
+  padding: 0;
 }
 
 .change-list__header {
@@ -1670,7 +1673,7 @@ html[data-platform="macos"] .sidebar {
   background: var(--surface-2);
 }
 
-.change-item[aria-selected="true"] {
+.change-item[data-active="true"] {
   background: var(--accent-soft);
   box-shadow: inset 2px 0 0 var(--accent);
 }
@@ -1682,6 +1685,19 @@ html[data-platform="macos"] .sidebar {
 .change-item__body {
   flex: 1;
   min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.change-item__body:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .change-item__file {
@@ -2278,4 +2294,11 @@ html[data-platform="macos"] .sidebar {
     border-right: 0;
     border-bottom: 1px solid var(--border);
   }
+}
+
+.conflict-list {
+  margin: var(--space-1) 0 var(--space-2);
+  padding-left: var(--space-4);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
 }

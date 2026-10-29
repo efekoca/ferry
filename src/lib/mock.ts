@@ -151,6 +151,7 @@ export function mockApi(opts: { delay?: number } = {}): Api {
   const listeners = new Set<(p: ScanProgress) => void>();
   let settings: Settings = { phpPath: null };
   let pending = [...CHANGES];
+  let cancelled = false;
   const fixed = new Set<string>();
   let snapshots: Snapshot[] = [
     { id: "1761400000000", createdAt: Date.now() - 1000 * 60 * 60 * 26, projectRoot: MOCK_ROOT, label: "Uyumluluk düzeltmeleri · PHP 8.1", files: [{ path: "includes/helpers.php", existed: true }] },
@@ -216,9 +217,14 @@ export function mockApi(opts: { delay?: number } = {}): Api {
       return toolchain();
     },
     rectorPreview: async (_path, target, mode) => {
+      cancelled = false;
       await sleep(delay * 2);
+      if (cancelled) throw new Error("Rector was stopped.");
       const changes = pending.filter((c) => c.rules.some((r) => !r.since || versionLte(r.since, target)));
       return { target, mode, changes, errors: [], durationMs: 2140 };
+    },
+    cancelPreview: async () => {
+      cancelled = true;
     },
     applyChanges: async (path, files, label) => {
       await sleep(delay);
@@ -243,6 +249,7 @@ export function mockApi(opts: { delay?: number } = {}): Api {
       if (!snap) throw new Error("snapshot not found");
       return CHANGES.filter((c) => snap.files.some((f) => f.path === c.file));
     },
+    snapshotConflicts: async () => [],
     deleteSnapshot: async (_path, id) => {
       snapshots = snapshots.filter((s) => s.id !== id);
     },

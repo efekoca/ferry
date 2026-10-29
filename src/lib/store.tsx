@@ -98,6 +98,7 @@ interface AppStore {
   previewMode: RectorMode;
   previewing: boolean;
   loadPreview(mode: RectorMode): Promise<boolean>;
+  cancelPreview(): void;
   applying: boolean;
   applyChanges(files: string[]): Promise<boolean>;
 
@@ -134,6 +135,7 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const generation = useRef(0);
   const previewSeq = useRef(0);
+  const cancelledSeq = useRef(0);
   const rootRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -321,7 +323,7 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
       } catch (e) {
         if (seq !== previewSeq.current || rootRef.current !== root) return true;
         setPreviewMode(previous);
-        fail(t.toast.previewFailed, e);
+        if (cancelledSeq.current !== seq) fail(t.toast.previewFailed, e);
         return false;
       } finally {
         if (seq === previewSeq.current) setPreviewing(false);
@@ -329,6 +331,11 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
     },
     [api, project, target, previewMode, fail, t],
   );
+
+  const cancelPreview = useCallback(() => {
+    cancelledSeq.current = previewSeq.current;
+    api?.cancelPreview().catch(() => {});
+  }, [api]);
 
   const applyChanges = useCallback(
     async (files: string[]) => {
@@ -400,13 +407,13 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
     () => ({
       api, view, setView, theme, setTheme, recent, forgetRecent, project, opening, openProject, closeProject,
       target, setTarget, scan, scanning, progress, runScan, deps, toolchain, refreshToolchain, installingRector,
-      installRector, preview, previewMode, previewing, loadPreview, applying, applyChanges, snapshots,
+      installRector, preview, previewMode, previewing, loadPreview, cancelPreview, applying, applyChanges, snapshots,
       refreshSnapshots, restoreSnapshot, deleteSnapshot, exportReport,
     }),
     [
       api, view, theme, setTheme, recent, forgetRecent, project, opening, openProject, closeProject, target,
       setTarget, scan, scanning, progress, runScan, deps, toolchain, refreshToolchain, installingRector,
-      installRector, preview, previewMode, previewing, loadPreview, applying, applyChanges, snapshots,
+      installRector, preview, previewMode, previewing, loadPreview, cancelPreview, applying, applyChanges, snapshots,
       refreshSnapshots, restoreSnapshot, deleteSnapshot, exportReport,
     ],
   );

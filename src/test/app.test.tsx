@@ -71,8 +71,8 @@ describe("Ferry app", () => {
     await openAndScan(user);
     await user.click(nav(/Düzeltmeler/));
     await user.click(await screen.findByRole("button", { name: /Değişiklikleri hesapla/ }));
-    const files = await screen.findByRole("listbox", { name: "Dosyalar" });
-    expect(within(files).getAllByRole("option")).toHaveLength(4);
+    const files = await screen.findByRole("list", { name: "Dosyalar" });
+    expect(within(files).getAllByRole("listitem")).toHaveLength(4);
     expect(screen.getByText("4 / 4 dosya seçili")).toBeInTheDocument();
 
     await user.click(screen.getByRole("checkbox", { name: "includes/helpers.php dosyasını seçin" }));
@@ -84,7 +84,7 @@ describe("Ferry app", () => {
 
     expect(await screen.findByText("3 dosya güncellendi")).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    expect(within(screen.getByRole("listbox", { name: "Dosyalar" })).getAllByRole("option")).toHaveLength(1);
+    expect(within(screen.getByRole("list", { name: "Dosyalar" })).getAllByRole("listitem")).toHaveLength(1);
 
     await user.click(nav(/Geçmiş/));
     const row = (await screen.findByText(/Uyumluluk düzeltmeleri · PHP 8.4/)).closest("tr")!;
@@ -140,6 +140,35 @@ describe("Ferry app", () => {
     await user.keyboard("{Meta>}o{/Meta}");
     await waitFor(() => expect(screen.getByRole("radio", { name: "8.4" })).toBeEnabled());
     expect(screen.getByRole("button", { name: /Taramayı başlat/ })).toBeEnabled();
+  });
+
+  it("stops a running preview without an error toast", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    let reject: (e: Error) => void = () => {};
+    api.rectorPreview = () => new Promise((_, r) => (reject = r));
+    api.cancelPreview = async () => reject(new Error("Rector durduruldu."));
+    render(<App api={api} />);
+    await openAndScan(user);
+    await user.click(nav(/Düzeltmeler/));
+    await user.click(await screen.findByRole("button", { name: /Değişiklikleri hesapla/ }));
+    await user.click(await screen.findByRole("button", { name: /Durdur/ }));
+    expect(await screen.findByRole("button", { name: /Değişiklikleri hesapla/ })).toBeEnabled();
+    expect(screen.queryByText("Değişiklikler hesaplanamadı")).not.toBeInTheDocument();
+  });
+
+  it("warns before restoring files edited after the apply", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    api.snapshotConflicts = async () => ["includes/helpers.php"];
+    render(<App api={api} />);
+    await openAndScan(user);
+    await user.click(nav(/Geçmiş/));
+    const row = (await screen.findAllByRole("row"))[1];
+    await user.click(within(row).getByRole("button", { name: /Geri yükle/ }));
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByText("Bu dosya uygulamadan sonra değiştirilmiş:")).toBeInTheDocument();
+    expect(within(dialog).getByText("includes/helpers.php")).toBeInTheDocument();
   });
 
   it("supports keyboard selection in the version picker", async () => {

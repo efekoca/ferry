@@ -98,6 +98,7 @@ fn rector_handles_every_demo_project() {
             ferry_core::rector::RectorMode::Compat,
             &info.excluded_dirs,
             work.path(),
+            &std::sync::atomic::AtomicBool::new(false),
         )
         .unwrap();
         assert!(preview.errors.is_empty(), "{name}: {:?}", preview.errors);

@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
@@ -8,13 +9,14 @@ use ferry_core::analyzer::{self, ScanResult};
 use ferry_core::deps::{self, DependencyReport};
 use ferry_core::project::{self, ProjectInfo};
 use ferry_core::rector::{self, FileChange, RectorMode, RectorPreview};
-use ferry_core::snapshot::{Snapshot, SnapshotStore};
+use ferry_core::snapshot::{fnv1a, Snapshot, SnapshotStore};
 use ferry_core::toolchain::{self, ToolchainStatus};
 use ferry_core::i18n::{self, Lang};
 use ferry_core::rules::FixKind;
 use ferry_core::{diff, report, t, PhpVersion};
 
 const CHANGES_FILE: &str = "changes.json";
+const WRITTEN_FILE: &str = "written.json";
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -29,6 +31,7 @@ pub struct AppState {
     scans: Mutex<HashMap<String, ScanResult>>,
     previews: Mutex<HashMap<String, RectorPreview>>,
     writes: Arc<Mutex<()>>,
+    rector_cancel: Arc<AtomicBool>,
 }
 
 impl AppState {
@@ -44,6 +47,7 @@ impl AppState {
             scans: Mutex::new(HashMap::new()),
             previews: Mutex::new(HashMap::new()),
             writes: Arc::new(Mutex::new(())),
+            rector_cancel: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -183,6 +187,8 @@ async fn rector_preview(
     let work = state.data_dir.join("rector");
     let php_override = state.php_override();
     let key = path.clone();
+    let cancel = state.rector_cancel.clone();
+    cancel.store(false, Ordering::Relaxed);
     let preview = blocking(move || {
         let root = project_root(&path)?;
         let php = toolchain::find_php(php_override.as_deref()).ok_or_else(|| toolchain::ToolError::PhpMissing.to_string())?;
@@ -195,12 +201,18 @@ async fn rector_preview(
             mode,
             &info.excluded_dirs,
             &work,
+            &cancel,
         )
         .map_err(|e| e.to_string())
     })
     .await?;
     state.previews.lock().unwrap().insert(key, preview.clone());
     Ok(preview)
+}
+
+#[tauri::command]
+fn cancel_rector_preview(state: State<'_, AppState>) {
+    state.rector_cancel.store(true, Ordering::Relaxed);
 }
 
 #[derive(Serialize)]
@@ -247,6 +259,13 @@ async fn apply_changes(
                 if let Ok(json) = serde_json::to_vec(&selected) {
                     let _ = store.write_attachment(&root, &snapshot.id, CHANGES_FILE, &json);
                 }
+                let written_hashes: HashMap<&str, u64> = selected
+                    .iter()
+                    .map(|c| (c.file.as_str(), fnv1a(c.new_content.as_bytes())))
+                    .collect();
+                if let Ok(json) = serde_json::to_vec(&written_hashes) {
+                    let _ = store.write_attachment(&root, &snapshot.id, WRITTEN_FILE, &json);
+                }
                 Ok(ApplyResult { snapshot, written })
             }
             Err(e) => match store.restore(&root, &snapshot.id) {
@@ -282,6 +301,26 @@ async fn restore_snapshot(state: State<'_, AppState>, path: String, id: String) 
     blocking(move || {
         let _guard = writes.lock().unwrap_or_else(|e| e.into_inner());
         store.restore(&project_root(&path)?, &id).map_err(|e| e.to_string())
+    })
+    .await
+}
+
+#[tauri::command]
+async fn snapshot_conflicts(state: State<'_, AppState>, path: String, id: String) -> CmdResult<Vec<String>> {
+    let store = state.snapshots();
+    blocking(move || {
+        let root = project_root(&path)?;
+        let Some(bytes) = store.read_attachment(&root, &id, WRITTEN_FILE).map_err(|e| e.to_string())? else {
+            return Ok(Vec::new());
+        };
+        let written: HashMap<String, u64> = serde_json::from_slice(&bytes).unwrap_or_default();
+        let mut changed: Vec<String> = written
+            .into_iter()
+            .filter(|(file, hash)| std::fs::read(root.join(file)).map(|b| fnv1a(&b)).ok() != Some(*hash))
+            .map(|(file, _)| file)
+            .collect();
+        changed.sort();
+        Ok(changed)
     })
     .await
 }
@@ -375,6 +414,8 @@ pub fn with_commands<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R
         restore_snapshot,
         delete_snapshot,
         snapshot_changes,
+        snapshot_conflicts,
+        cancel_rector_preview,
         export_report,
         get_settings,
         save_settings,

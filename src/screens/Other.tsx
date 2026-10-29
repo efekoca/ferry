@@ -166,11 +166,26 @@ export function Dependencies() {
 
 export function History() {
   const { t } = useI18n();
-  const { snapshots, restoreSnapshot, deleteSnapshot } = useStore();
+  const { api, project, snapshots, restoreSnapshot, deleteSnapshot } = useStore();
   const [pending, setPending] = useState<{ snapshot: Snapshot; action: "restore" | "delete" } | null>(null);
   const [reviewing, setReviewing] = useState<Snapshot | null>(null);
   const [busy, setBusy] = useState(false);
+  const [conflicts, setConflicts] = useState<string[]>([]);
   const deleting = pending?.action === "delete";
+  const restoringId = pending?.action === "restore" ? pending.snapshot.id : null;
+
+  useEffect(() => {
+    setConflicts([]);
+    if (!api || !project || !restoringId) return;
+    let live = true;
+    api
+      .snapshotConflicts(project.root, restoringId)
+      .then((files) => live && setConflicts(files))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [api, project, restoringId]);
 
   return (
     <>
@@ -262,6 +277,21 @@ export function History() {
         }}
       >
         {deleting ? t.history.deleteText : t.history.restoreText(pending?.snapshot.files.length ?? 0, pending?.snapshot.label ?? "")}
+        {!deleting && conflicts.length > 0 && (
+          <div style={{ marginTop: "var(--space-3)" }}>
+            <Callout tone="warn" icon={<CircleAlert size={15} />}>
+              <strong>{t.history.conflictTitle(conflicts.length)}</strong>
+              <ul className="conflict-list">
+                {conflicts.map((f) => (
+                  <li key={f}>
+                    <bdi>{f}</bdi>
+                  </li>
+                ))}
+              </ul>
+              {t.history.conflictText}
+            </Callout>
+          </div>
+        )}
       </ConfirmDialog>
     </>
   );

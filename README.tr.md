@@ -91,7 +91,7 @@ Ferry her uygulamadan önce değiştireceği dosyaları yedekler. **Geçmiş** s
 ![İncelemek için açılmış bir Geçmiş kaydı: solda değişen dosyalar, sağda seçili dosyanın farkı ve kuralları, altta Geri yükle düğmesi](assets/readme/history-tr.webp)
 
 - **İncele**, her uygulamanın neyi değiştirdiğini dosya dosya ve her değişikliğin ardındaki kurallarla birlikte gösterir.
-- **Geri yükle**, o uygulamadan önceki halleriyle bütün dosyaları geri getirir.
+- **Geri yükle**, o uygulamadan önceki halleriyle bütün dosyaları geri getirir. Bunlardan birini sonradan düzenlediyseniz Ferry önce o dosyaları listeler.
 - Bir uygulama yarıda kalırsa Ferry dosyaları kendiliğinden geri alır. Bu da başarısız olursa yedek Geçmiş'te kalır; oradan kendiniz geri yükleyebilirsiniz.
 
 ### Masaüstünüz için tasarlandı
@@ -165,7 +165,7 @@ Her şey kendi bilgisayarınızda çalışır:
 
 1. Ferry proje türünü ve şu anki PHP sürümünü bulur, bakımını sizin yapmadığınız klasörleri atlar.
 2. Yerleşik tarayıcı her PHP dosyasını ayrıştırır ve şu anki sürümünüzle hedef sürüm arasındaki her sürümün kurallarına göre kontrol eder.
-3. Düzeltmeler için Rector projenizde deneme modunda çalışır. Ferry önerilen farkları bir önizlemeye dönüştürür ve her dosyanın parmak izini saklar.
+3. Düzeltmeler için Rector projenizde deneme modunda çalışır; dilediğiniz an durdurabilirsiniz. Ferry önerilen farkları bir önizlemeye dönüştürür ve her dosyanın parmak izini saklar.
 4. Uyguladığınızda Ferry önce seçilen dosyaları yedekler, sonra hiçbirinin önizlemeden bu yana değişmediğini kontrol eder ve her dosyayı tek adımda yazar. Arada değişen bir dosya reddedilir.
 5. Geri yükleme yedeği dosyaların üzerine kopyalar. Geçmiş'teki **İncele** ise uygulanan değişiklikleri gösterir.
 
@@ -174,7 +174,7 @@ Her şey kendi bilgisayarınızda çalışır:
 - **Statik analiz:** Tarama kodu çalıştırmadan okur. Bu yüzden çalışma anındaki değerlere bağlı davranışlar (örneğin adı bir metinden gelen fonksiyon çağrıları) her zaman bulunamaz. Bu tür durumlar mümkün olduğunda **Riskli** olarak işaretlenir.
 - **Karakter kodlaması:** Otomatik düzeltmeler UTF-8 olmayan dosyaları (örneğin Windows-1254 ya da Latin-1) bozulmasın diye atlar. Düzeltilmeleri için önce UTF-8'e dönüştürün.
 - **Elle yapılan düzeltmeler:** `mysql_*` gibi bulgular kodun yeniden yazılmasını gerektirir. Ferry yerine ne kullanmanız gerektiğini gösterir ama bu kodu sizin yerinize yazmaz.
-- **Geri yükleme:** Dosyaları uygulamadan önceki hallerine getirir. Uygulamadan sonra aynı dosyalarda yaptığınız düzenlemelerin de üzerine yazılır.
+- **Geri yükleme:** Dosyaları uygulamadan önceki hallerine getirdiği için sonradan yaptığınız düzenlemelerin üzerine yazılır. Ferry bu dosyaları listeler ve geri yüklemeden önce size sorar.
 - **Linux:** Henüz desteklenmiyor.
 
 ## Kaynaktan derleme

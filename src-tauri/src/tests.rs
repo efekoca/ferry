@@ -159,6 +159,7 @@ fn snapshot_changes_fall_back_to_a_fresh_diff() {
     assert_eq!(changes[0]["rules"], json!([]));
     assert_eq!(changes[0]["diff"]["additions"], 1);
     assert!(h.invoke("snapshot_changes", json!({ "path": h.root, "id": "nope" })).is_err());
+    assert_eq!(h.ok("snapshot_conflicts", json!({ "path": h.root, "id": snap.id })), json!([]));
 }
 
 #[test]
@@ -191,6 +192,11 @@ fn rector_preview_apply_restore_over_ipc() {
     assert_eq!(history[0]["file"], "src/Greeter.php");
     assert_eq!(history[0]["diff"], greeter["diff"]);
     assert!(!history[0]["rules"].as_array().unwrap().is_empty());
+    assert_eq!(h.ok("snapshot_conflicts", json!({ "path": root, "id": id })), json!([]));
+    let greeter_path = Path::new(&root).join("src/Greeter.php");
+    std::fs::write(&greeter_path, format!("{changed}// edited after apply\n")).unwrap();
+    assert_eq!(h.ok("snapshot_conflicts", json!({ "path": root, "id": id })), json!(["src/Greeter.php"]));
+    std::fs::write(&greeter_path, &changed).unwrap();
 
     assert!(h
         .invoke("apply_changes", json!({ "path": root, "files": ["src/Greeter.php"], "label": "x" }))
