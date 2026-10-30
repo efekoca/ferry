@@ -292,7 +292,7 @@ export function History() {
         onConfirm={async () => {
           if (!pending) return;
           setBusy(true);
-          if (pending.action === "restore") await restoreSnapshot(pending.snapshot.id);
+          if (pending.action === "restore") await restoreSnapshot(pending.snapshot.id, conflicts);
           else await deleteSnapshot(pending.snapshot.id);
           setBusy(false);
           setPending(null);
