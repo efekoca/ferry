@@ -19,9 +19,10 @@ const CHANGES_FILE: &str = "changes.json";
 const WRITTEN_FILE: &str = "written.json";
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", default)]
 pub struct Settings {
     pub php_path: Option<String>,
+    pub snapshot_limit: Option<u32>,
 }
 
 pub struct AppState {
@@ -302,6 +303,7 @@ fn cancel_rector_preview(state: State<'_, AppState>, path: Option<String>) {
 struct ApplyResult {
     snapshot: Snapshot,
     written: Vec<String>,
+    lint_errors: Vec<String>,
 }
 
 #[tauri::command]
@@ -314,7 +316,7 @@ async fn apply_changes(
 ) -> CmdResult<ApplyResult> {
     let path = normalize_path(path);
     let root = project_root(&path)?;
-    let selected: Vec<FileChange> = {
+    let (selected, target): (Vec<FileChange>, PhpVersion) = {
         let previews = state.previews.lock().unwrap();
         let (id, preview) = previews
             .get(&path)
@@ -325,12 +327,8 @@ async fn apply_changes(
                 "The preview is out of date. Calculate the changes again."
             ));
         }
-        preview
-            .changes
-            .iter()
-            .filter(|c| files.contains(&c.file))
-            .cloned()
-            .collect()
+        let selected = preview.changes.iter().filter(|c| files.contains(&c.file)).cloned().collect();
+        (selected, preview.target)
     };
     if selected.is_empty() {
         return Err(t!("Uygulanacak dosya seçilmedi.", "No files selected to apply."));
@@ -338,6 +336,8 @@ async fn apply_changes(
     let store = state.snapshots();
     let applied_files: Vec<String> = selected.iter().map(|c| c.file.clone()).collect();
     let writes = state.writes.clone();
+    let php_override = state.php_override();
+    let snapshot_limit = state.settings.lock().unwrap().snapshot_limit;
     let result = blocking(move || {
         let _guard = writes.lock().unwrap_or_else(|e| e.into_inner());
         let refs: Vec<&FileChange> = selected.iter().collect();
@@ -362,7 +362,14 @@ async fn apply_changes(
                 if let Ok(json) = serde_json::to_vec(&written_hashes) {
                     let _ = store.write_attachment(&root, &snapshot.id, WRITTEN_FILE, &json);
                 }
-                Ok(ApplyResult { snapshot, written })
+                if let Some(limit) = snapshot_limit {
+                    let _ = store.prune(&root, limit.max(1) as usize);
+                }
+                let lint_errors = toolchain::find_php(php_override.as_deref())
+                    .filter(|php| toolchain::php_version(php).and_then(|v| v.parse::<PhpVersion>().ok()).is_some_and(|v| v >= target))
+                    .map(|php| toolchain::lint(&php, &root, &written))
+                    .unwrap_or_default();
+                Ok(ApplyResult { snapshot, written, lint_errors })
             }
             Err(e) => match store.restore_files(&root, &snapshot.id, Some(&written)) {
                 Ok(_) => {
