@@ -1206,13 +1206,14 @@ fn php4_constructors(tokens: &[Token]) -> Vec<usize> {
     out
 }
 
-const TENTATIVE: [(&str, &[&str]); 5] = [
-    ("arrayaccess", &["offsetexists", "offsetget", "offsetset", "offsetunset"]),
-    ("iterator", &["current", "key", "next", "rewind", "valid"]),
-    ("iteratoraggregate", &["getiterator"]),
-    ("countable", &["count"]),
-    ("jsonserializable", &["jsonserialize"]),
-];
+fn tentative_methods(class: &str, out: &mut Vec<&'static str>) {
+    let Ok(i) = crate::tentative::TENTATIVE.binary_search_by(|(name, _, _)| (*name).cmp(class)) else { return };
+    let (_, parents, own) = crate::tentative::TENTATIVE[i];
+    out.extend_from_slice(own);
+    for parent in parents {
+        tentative_methods(parent, out);
+    }
+}
 
 fn refers_to_global(tokens: &[Token], name: &Token) -> bool {
     if name.text.starts_with('\\') {
@@ -1220,7 +1221,9 @@ fn refers_to_global(tokens: &[Token], name: &Token) -> bool {
     }
     let short = name.text.to_ascii_lowercase();
     let namespaced = tokens.windows(2).any(|w| w[0].is_ident_ci("namespace") && w[1].kind == TokenKind::Ident);
-    let declared_here = tokens.windows(2).any(|w| w[0].is_ident_ci("interface") && w[1].text.eq_ignore_ascii_case(&short));
+    let declared_here = tokens
+        .windows(2)
+        .any(|w| ["interface", "class", "trait", "enum"].iter().any(|k| w[0].is_ident_ci(k)) && w[1].text.eq_ignore_ascii_case(&short));
     let imported = tokens.windows(2).any(|w| w[0].is_ident_ci("use") && w[1].text.trim_start_matches('\\').eq_ignore_ascii_case(&short));
     !declared_here && (!namespaced || imported)
 }
@@ -1235,17 +1238,15 @@ fn untyped_interface_methods(tokens: &[Token]) -> Vec<usize> {
         if !tokens[open].is_punct("{") {
             continue;
         }
-        let Some(imp) = (i + 1..open).find(|&k| tokens[k].is_ident_ci("implements")) else { continue };
-        let methods: Vec<&str> = tokens[imp + 1..open]
-            .iter()
-            .filter(|t| t.kind == TokenKind::Ident && refers_to_global(tokens, t))
-            .filter_map(|t| {
-                let name = t.text.rsplit('\\').next().unwrap_or_default().to_ascii_lowercase();
-                TENTATIVE.iter().find(|(n, _)| *n == name).map(|(_, m)| *m)
-            })
-            .flatten()
-            .copied()
-            .collect();
+        let Some(clause) = (i + 1..open).find(|&k| tokens[k].is_ident_ci("implements") || tokens[k].is_ident_ci("extends")) else {
+            continue;
+        };
+        let mut methods: Vec<&str> = Vec::new();
+        for t in &tokens[clause + 1..open] {
+            if t.kind == TokenKind::Ident && !t.is_ident_ci("implements") && refers_to_global(tokens, t) {
+                tentative_methods(&t.text.trim_start_matches('\\').to_ascii_lowercase(), &mut methods);
+            }
+        }
         if methods.is_empty() {
             continue;
         }
@@ -1681,6 +1682,33 @@ mod tests {
 
     fn count85(src: &str, id: &str) -> usize {
         at(src, (8, 5)).iter().filter(|(r, _)| r == id).count()
+    }
+
+    #[test]
+    fn tentative_return_types_of_extended_built_in_classes() {
+        let id = "deprecated.tentative_return_type";
+        let src = "<?php
+class Db extends PDO {
+    public function query($sql, $mode = null, ...$args) {}
+    public function commit() {}
+    #[\\ReturnTypeWillChange] public function rollBack() {}
+    public function beginTransaction(): bool { return true; }
+    public function helper() {}
+}
+class Files extends RecursiveDirectoryIterator { function next() {} function getChildren() {} }
+class Handler implements SessionHandlerInterface { function read($id) {} }";
+        assert_eq!(lines_of(src, "8.1", id), vec![3, 4, 9, 9, 10]);
+        assert!(lines_of(src, "8.0", id).is_empty());
+        assert_eq!(count85("<?php namespace App; class PDO {} class Db extends PDO { function commit() {} }", id), 0);
+        assert_eq!(count85("<?php namespace App; use PDO; class Db extends PDO { function commit() {} }", id), 1);
+    }
+
+    #[test]
+    fn deprecated_resource_frees_and_intl_calendar_functions() {
+        let src = "<?php\nopenssl_x509_free($c);\nopenssl_pkey_free($k);\nopenssl_free_key($k);\nshmop_close($s);\nintlcal_set($cal, 2024, 1, 1);\nintlgregcal_create_instance();";
+        let ids: Vec<String> = at(src, (8, 4)).into_iter().map(|(id, _)| id).collect();
+        assert_eq!(ids.len(), 6, "{ids:?}");
+        assert_eq!(at(src, (8, 3)).len(), 4);
     }
 
     #[test]

@@ -59,6 +59,9 @@ fn kuzey_magaza_triggers_every_rule() {
         patterns::SERIALIZABLE.id,
         patterns::REMOVED_VARIABLE.id,
         patterns::DYNAMIC_PROPERTY.id,
+        patterns::OPTIONAL_BEFORE_REQUIRED.id,
+        patterns::NULL_TO_INTERNAL.id,
+        patterns::PARTIAL_CALLABLE.id,
     ];
     let missing: Vec<&str> = FUNCTIONS
         .iter()
