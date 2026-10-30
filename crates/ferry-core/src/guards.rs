@@ -79,7 +79,8 @@ pub fn dead_expressions(tokens: &[Token], target: PhpVersion) -> Vec<Span> {
     out
 }
 
-const EXPR_STOPS: [&str; 16] = [";", ",", "=", "=>", "?", ":", "??=", "return", "echo", "print", "yield", "throw", "case", "and", "or", "xor"];
+const EXPR_STOPS: [&str; 16] =
+    [";", ",", "=", "=>", "?", ":", "??=", "return", "echo", "print", "yield", "throw", "case", "and", "or", "xor"];
 
 fn stops(t: &Token, extra: &[&str]) -> bool {
     t.kind == TokenKind::CloseTag

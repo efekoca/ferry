@@ -22,10 +22,8 @@ impl std::fmt::Display for SnapshotError {
             SnapshotError::InvalidPath(p) => crate::t!("Geçersiz dosya yolu: {p}", "Invalid file path: {p}"),
             SnapshotError::NotFound(id) => crate::t!("Yedek bulunamadı: {id}", "Snapshot not found: {id}"),
             SnapshotError::Io { path, source } => {
-                {
                 let reason = crate::i18n::io_error(source);
                 crate::t!("Dosya işlemi başarısız ({path}): {reason}", "File operation failed ({path}): {reason}")
-            }
             }
             SnapshotError::Manifest(e) => crate::t!("Yedek bilgisi okunamadı: {e}", "Couldn't read snapshot info: {e}"),
         };
@@ -36,10 +34,7 @@ impl std::fmt::Display for SnapshotError {
 impl std::error::Error for SnapshotError {}
 
 fn io_err(path: &Path) -> impl FnOnce(std::io::Error) -> SnapshotError + '_ {
-    move |source| SnapshotError::Io {
-        path: path.display().to_string(),
-        source,
-    }
+    move |source| SnapshotError::Io { path: path.display().to_string(), source }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -74,10 +69,7 @@ pub fn fnv1a(bytes: &[u8]) -> u64 {
 
 fn safe_relative(rel: &str) -> Result<PathBuf, SnapshotError> {
     let path = PathBuf::from(rel);
-    let ok = !rel.is_empty()
-        && path
-            .components()
-            .all(|c| matches!(c, Component::Normal(_) | Component::CurDir));
+    let ok = !rel.is_empty() && path.components().all(|c| matches!(c, Component::Normal(_) | Component::CurDir));
     if ok {
         Ok(path)
     } else {
@@ -95,16 +87,8 @@ impl SnapshotStore {
         self.base.join(format!("{key:016x}"))
     }
 
-    pub fn create(
-        &self,
-        project_root: &Path,
-        rel_paths: &[String],
-        label: &str,
-    ) -> Result<Snapshot, SnapshotError> {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0);
+    pub fn create(&self, project_root: &Path, rel_paths: &[String], label: &str) -> Result<Snapshot, SnapshotError> {
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
         let project_dir = self.project_dir(project_root);
         std::fs::create_dir_all(&project_dir).map_err(io_err(&project_dir))?;
         let mut id = now.to_string();
@@ -151,18 +135,10 @@ impl SnapshotStore {
                 }
                 std::fs::copy(&src, &dest).map_err(io_err(&src))?;
             }
-            files.push(SnapshotFile {
-                path: rel.clone(),
-                existed,
-            });
+            files.push(SnapshotFile { path: rel.clone(), existed });
         }
-        let snapshot = Snapshot {
-            id,
-            created_at: now,
-            project_root: project_root.to_string_lossy().to_string(),
-            label: label.to_string(),
-            files,
-        };
+        let snapshot =
+            Snapshot { id, created_at: now, project_root: project_root.to_string_lossy().to_string(), label: label.to_string(), files };
         let manifest = dir.join("manifest.json");
         std::fs::write(&manifest, serde_json::to_vec_pretty(&snapshot)?).map_err(io_err(&manifest))?;
         Ok(snapshot)
@@ -202,8 +178,7 @@ impl SnapshotStore {
     fn load(&self, project_root: &Path, id: &str) -> Result<(Snapshot, PathBuf), SnapshotError> {
         safe_relative(id)?;
         let dir = self.project_dir(project_root).join(id);
-        let bytes = std::fs::read(dir.join("manifest.json"))
-            .map_err(|_| SnapshotError::NotFound(id.to_string()))?;
+        let bytes = std::fs::read(dir.join("manifest.json")).map_err(|_| SnapshotError::NotFound(id.to_string()))?;
         Ok((serde_json::from_slice(&bytes)?, dir))
     }
 
@@ -324,9 +299,7 @@ mod tests {
         fs::create_dir_all(root.join("src")).unwrap();
         fs::write(root.join("src/a.php"), "original").unwrap();
 
-        let snap = store
-            .create(root, &["src/a.php".into(), "src/new.php".into()], "Rector")
-            .unwrap();
+        let snap = store.create(root, &["src/a.php".into(), "src/new.php".into()], "Rector").unwrap();
         assert_eq!(snap.files.iter().map(|f| f.existed).collect::<Vec<_>>(), vec![true, false]);
 
         fs::write(root.join("src/a.php"), "changed").unwrap();
@@ -381,10 +354,7 @@ mod tests {
         let store_dir = tempfile::tempdir().unwrap();
         let store = SnapshotStore::new(store_dir.path());
         for bad in ["../x.php", "/etc/passwd", ""] {
-            assert!(matches!(
-                store.create(project.path(), &[bad.to_string()], "x"),
-                Err(SnapshotError::InvalidPath(_))
-            ));
+            assert!(matches!(store.create(project.path(), &[bad.to_string()], "x"), Err(SnapshotError::InvalidPath(_))));
         }
         assert!(store.restore(project.path(), "../../x").is_err());
     }

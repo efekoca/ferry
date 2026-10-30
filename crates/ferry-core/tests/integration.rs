@@ -1,5 +1,5 @@
-use std::path::{Path, PathBuf};
 use ferry_core::{analyzer, project, rector, report, snapshot, toolchain, PhpVersion};
+use std::path::{Path, PathBuf};
 
 fn copy_fixture() -> (tempfile::TempDir, PathBuf) {
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/legacy");
@@ -107,10 +107,7 @@ fn rector_sees_the_same_files_as_the_scanner() {
         std::fs::write(path, nullable).unwrap();
     }
     let excluded = ["var".to_string()];
-    let mut scanned: Vec<String> = project::collect_php_files(&root, &excluded)
-        .iter()
-        .map(|f| analyzer::relative_path(&root, f))
-        .collect();
+    let mut scanned: Vec<String> = project::collect_php_files(&root, &excluded).iter().map(|f| analyzer::relative_path(&root, f)).collect();
     scanned.sort();
     assert!(scanned.contains(&"variables.php".to_string()) && !scanned.iter().any(|f| f.starts_with("var/")), "{scanned:?}");
     let work = tempfile::tempdir().unwrap();
@@ -143,14 +140,29 @@ fn project_index_sees_polyfills_and_class_hierarchies() {
     write("lib/polyfill.php", "<?php\nif (!function_exists('each')) {\n    function each(&$a) { return []; }\n}\n");
     write("src/uses.php", "<?php\nnamespace App;\n$x = each($arr);\n$y = \\each($arr);\nmysql_query('x');\nereg('a', 'b');\n");
     write("vendor/shim/mysql.php", "<?php\nfunction mysql_query($q) {}\n");
-    write("vendor/composer/autoload_files.php", "<?php\n$vendorDir = dirname(__DIR__);\nreturn array('abc' => $vendorDir . '/shim/mysql.php');\n");
+    write(
+        "vendor/composer/autoload_files.php",
+        "<?php\n$vendorDir = dirname(__DIR__);\nreturn array('abc' => $vendorDir . '/shim/mysql.php');\n",
+    );
     write("src/Base.php", "<?php\nnamespace App;\nclass Base { protected $name; }\n");
-    write("src/Child.php", "<?php\nnamespace App;\nclass Child extends Base {\n    function f() { $this->name = 1; $this->extra = 2; }\n}\n");
+    write(
+        "src/Child.php",
+        "<?php\nnamespace App;\nclass Child extends Base {\n    function f() { $this->name = 1; $this->extra = 2; }\n}\n",
+    );
     write("src/Open.php", "<?php\nclass Open extends \\stdClass { function f() { $this->any = 1; } }\n");
-    write("src/Magic.php", "<?php\nclass MagicBase { function __set($n, $v) {} }\nclass Kid extends MagicBase { function f() { $this->x = 1; } }\n");
+    write(
+        "src/Magic.php",
+        "<?php\nclass MagicBase { function __set($n, $v) {} }\nclass Kid extends MagicBase { function f() { $this->x = 1; } }\n",
+    );
     write("src/Post.php", "<?php\ntrait HasTitle { public $title; }\nclass Post { use HasTitle;\n    function f() { $this->title = 1; $this->body = 2; }\n}\n");
-    write("src/Vendor.php", "<?php\nclass UsesFramework extends \\Illuminate\\Database\\Eloquent\\Model { function f() { $this->x = 1; } }\n");
-    write("src/Allowed.php", "<?php\n#[\\AllowDynamicProperties]\nclass Loose {}\nclass Looser extends Loose { function f() { $this->z = 1; } }\n");
+    write(
+        "src/Vendor.php",
+        "<?php\nclass UsesFramework extends \\Illuminate\\Database\\Eloquent\\Model { function f() { $this->x = 1; } }\n",
+    );
+    write(
+        "src/Allowed.php",
+        "<?php\n#[\\AllowDynamicProperties]\nclass Loose {}\nclass Looser extends Loose { function f() { $this->z = 1; } }\n",
+    );
 
     let info = project::inspect(root).unwrap();
     let files = project::collect_php_files(root, &info.excluded_dirs);
@@ -159,13 +171,10 @@ fn project_index_sees_polyfills_and_class_hierarchies() {
     found.sort();
     assert_eq!(
         found,
-        [
-            "src/Child.php:4:deprecated.dynamic_property",
-            "src/Post.php:4:deprecated.dynamic_property",
-            "src/uses.php:6:removed.ereg",
-        ]
+        ["src/Child.php:4:deprecated.dynamic_property", "src/Post.php:4:deprecated.dynamic_property", "src/uses.php:6:removed.ereg",]
     );
-    let titles: Vec<&str> = scan.findings.iter().filter(|f| f.rule_id == "deprecated.dynamic_property").map(|f| f.snippet.as_str()).collect();
+    let titles: Vec<&str> =
+        scan.findings.iter().filter(|f| f.rule_id == "deprecated.dynamic_property").map(|f| f.snippet.as_str()).collect();
     assert!(titles.iter().all(|s| s.contains("extra") || s.contains("body")), "{titles:?}");
 }
 
@@ -205,6 +214,9 @@ fn laravel_projects_get_framework_findings() {
     );
 
     write("vendor/laravel/helpers/src/helpers.php", "<?php\nif (!function_exists('str_slug')) { function str_slug($s) {} }\nif (!function_exists('array_get')) { function array_get($a, $k) {} }\n");
-    write("vendor/composer/autoload_files.php", "<?php\n$vendorDir = dirname(__DIR__);\nreturn array('h' => $vendorDir . '/laravel/helpers/src/helpers.php');\n");
+    write(
+        "vendor/composer/autoload_files.php",
+        "<?php\n$vendorDir = dirname(__DIR__);\nreturn array('h' => $vendorDir . '/laravel/helpers/src/helpers.php');\n",
+    );
     assert_eq!(scan(root), ["app/Http/Controllers/PostController.php:6:Input::get()", "composer.json:3:Laravel 5"]);
 }

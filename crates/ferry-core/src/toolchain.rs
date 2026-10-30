@@ -180,18 +180,12 @@ pub fn require_supported_php(php: &Path) -> Result<(), ToolError> {
 }
 
 pub fn php_version(php: &Path) -> Option<String> {
-    let out = command(php)
-        .args(["-d", "display_startup_errors=0", "-d", "display_errors=stderr", "-r", "echo PHP_VERSION;"])
-        .output()
-        .ok()?;
+    let out =
+        command(php).args(["-d", "display_startup_errors=0", "-d", "display_errors=stderr", "-r", "echo PHP_VERSION;"]).output().ok()?;
     if !out.status.success() {
         return None;
     }
-    String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .map(str::trim)
-        .rfind(|l| !l.is_empty())
-        .map(str::to_string)
+    String::from_utf8_lossy(&out.stdout).lines().map(str::trim).rfind(|l| !l.is_empty()).map(str::to_string)
 }
 
 pub fn lint(php: &Path, root: &Path, files: &[String]) -> Vec<String> {
@@ -220,10 +214,8 @@ pub fn lint(php: &Path, root: &Path, files: &[String]) -> Vec<String> {
 
 pub fn find_composer() -> Option<PathBuf> {
     let found = find_executable("composer.phar").or_else(|| find_executable("composer"))?;
-    let is_script_wrapper = found
-        .extension()
-        .and_then(|e| e.to_str())
-        .is_some_and(|e| e.eq_ignore_ascii_case("bat") || e.eq_ignore_ascii_case("cmd"));
+    let is_script_wrapper =
+        found.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("bat") || e.eq_ignore_ascii_case("cmd"));
     if is_script_wrapper {
         let phar = found.with_file_name("composer.phar");
         return phar.is_file().then_some(phar).or(Some(found));
@@ -261,20 +253,13 @@ fn first_line(bytes: &[u8]) -> Option<String> {
 
 pub fn detect(tools_dir: &Path, php_override: Option<&Path>) -> ToolchainStatus {
     let php_path = find_php(php_override);
-    let php = php_path.as_ref().map(|p| ToolInfo {
-        path: p.display().to_string(),
-        version: php_version(p),
-    });
+    let php = php_path.as_ref().map(|p| ToolInfo { path: p.display().to_string(), version: php_version(p) });
     let composer = find_composer().map(|c| {
         let version = php_path.as_ref().and_then(|php| {
             let out = php_tool_command(php, &c).args(["--version", "--no-ansi"]).output().ok()?;
-            first_line(&out.stdout)
-                .and_then(|l| l.split_whitespace().nth(2).map(str::to_string))
+            first_line(&out.stdout).and_then(|l| l.split_whitespace().nth(2).map(str::to_string))
         });
-        ToolInfo {
-            path: c.display().to_string(),
-            version,
-        }
+        ToolInfo { path: c.display().to_string(), version }
     });
     let entry = rector_entry(tools_dir);
     let rector = entry.is_file().then(|| {
@@ -282,30 +267,13 @@ pub fn detect(tools_dir: &Path, php_override: Option<&Path>) -> ToolchainStatus 
             let out = command(php).arg(&entry).arg("--version").output().ok()?;
             first_line(&out.stdout).and_then(|l| l.split_whitespace().nth(1).map(str::to_string))
         });
-        ToolInfo {
-            path: entry.display().to_string(),
-            version,
-        }
+        ToolInfo { path: entry.display().to_string(), version }
     });
     let docker = find_executable("docker").map(|d| {
-        let version = command(&d)
-            .args(["--version"])
-            .output()
-            .ok()
-            .and_then(|o| first_line(&o.stdout));
-        ToolInfo {
-            path: d.display().to_string(),
-            version,
-        }
+        let version = command(&d).args(["--version"]).output().ok().and_then(|o| first_line(&o.stdout));
+        ToolInfo { path: d.display().to_string(), version }
     });
-    ToolchainStatus {
-        php,
-        composer,
-        rector,
-        docker,
-        tools_dir: tools_dir.display().to_string(),
-        platform: platform(),
-    }
+    ToolchainStatus { php, composer, rector, docker, tools_dir: tools_dir.display().to_string(), platform: platform() }
 }
 
 const INSTALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10 * 60);
@@ -326,17 +294,16 @@ pub fn install_rector(tools_dir: &Path, php_override: Option<&Path>, cancel: &st
     std::fs::write(&manifest, json).map_err(|e| ToolError::Failed(e.to_string()))?;
     let mut cmd = php_tool_command(&php, &composer);
     cmd.args(["update", "--no-interaction", "--no-progress", "--no-ansi", "--working-dir"]).arg(tools_dir);
-    let out = crate::rector::run_cancellable(cmd, Path::new("composer"), cancel, INSTALL_TIMEOUT)
-        .map_err(|e| match e {
-            crate::rector::RectorError::Tool(t) => t,
-            crate::rector::RectorError::TimedOut(minutes) => ToolError::Failed(crate::t!(
-                "Composer {minutes} dakikada bitmediği için durduruldu. İnternet bağlantınızı kontrol edip yeniden deneyin.",
-                "Composer was stopped because it didn't finish in {minutes} minutes. Check your internet connection and try again."
-            )),
-            crate::rector::RectorError::Cancelled => ToolError::Failed(crate::t!("Kurulum durduruldu.", "The installation was stopped.")),
-            crate::rector::RectorError::Io(_, e) => ToolError::Failed(crate::i18n::io_error(&e)),
-            other => ToolError::Failed(other.to_string()),
-        })?;
+    let out = crate::rector::run_cancellable(cmd, Path::new("composer"), cancel, INSTALL_TIMEOUT).map_err(|e| match e {
+        crate::rector::RectorError::Tool(t) => t,
+        crate::rector::RectorError::TimedOut(minutes) => ToolError::Failed(crate::t!(
+            "Composer {minutes} dakikada bitmediği için durduruldu. İnternet bağlantınızı kontrol edip yeniden deneyin.",
+            "Composer was stopped because it didn't finish in {minutes} minutes. Check your internet connection and try again."
+        )),
+        crate::rector::RectorError::Cancelled => ToolError::Failed(crate::t!("Kurulum durduruldu.", "The installation was stopped.")),
+        crate::rector::RectorError::Io(_, e) => ToolError::Failed(crate::i18n::io_error(&e)),
+        other => ToolError::Failed(other.to_string()),
+    })?;
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr);
         let tail: Vec<&str> = stderr.lines().rev().take(12).collect();

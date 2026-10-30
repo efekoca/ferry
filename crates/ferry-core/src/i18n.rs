@@ -76,10 +76,7 @@ impl Localized {
 
 impl From<Text> for Localized {
     fn from(t: Text) -> Self {
-        Self {
-            tr: t.tr.to_string(),
-            en: t.en.to_string(),
-        }
+        Self { tr: t.tr.to_string(), en: t.en.to_string() }
     }
 }
 
@@ -96,7 +93,9 @@ macro_rules! t {
 pub fn io_error(e: &std::io::Error) -> String {
     use std::io::ErrorKind::*;
     if cfg!(windows) && matches!(e.raw_os_error(), Some(32 | 33)) {
-        return Text::new("dosya başka bir program tarafından kullanılıyor", "the file is in use by another program").get(lang()).to_string();
+        return Text::new("dosya başka bir program tarafından kullanılıyor", "the file is in use by another program")
+            .get(lang())
+            .to_string();
     }
     let text = match e.kind() {
         NotFound => Text::new("dosya ya da klasör bulunamadı", "file or folder not found"),
@@ -128,4 +127,3 @@ mod tests {
         assert_eq!(Localized::from(Text::same("x")).get(Lang::Tr), "x");
     }
 }
-

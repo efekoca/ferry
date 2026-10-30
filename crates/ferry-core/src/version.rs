@@ -13,13 +13,8 @@ impl PhpVersion {
         Self { major, minor }
     }
 
-    pub const TARGETS: [PhpVersion; 5] = [
-        PhpVersion::new(8, 1),
-        PhpVersion::new(8, 2),
-        PhpVersion::new(8, 3),
-        PhpVersion::new(8, 4),
-        PhpVersion::new(8, 5),
-    ];
+    pub const TARGETS: [PhpVersion; 5] =
+        [PhpVersion::new(8, 1), PhpVersion::new(8, 2), PhpVersion::new(8, 3), PhpVersion::new(8, 4), PhpVersion::new(8, 5)];
 
     pub const KNOWN: [PhpVersion; 14] = [
         PhpVersion::new(5, 6),
@@ -55,10 +50,8 @@ impl FromStr for PhpVersion {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let s = s.trim();
         let mut parts = s.strip_suffix("-dev").unwrap_or(s).split('.');
-        let major = parts
-            .next()
-            .and_then(|p| p.parse().ok())
-            .ok_or_else(|| crate::t!("geçersiz PHP sürümü: {s}", "invalid PHP version: {s}"))?;
+        let major =
+            parts.next().and_then(|p| p.parse().ok()).ok_or_else(|| crate::t!("geçersiz PHP sürümü: {s}", "invalid PHP version: {s}"))?;
         let minor = parts.next().map(|p| p.parse().ok()).unwrap_or(Some(0));
         let minor = minor.ok_or_else(|| crate::t!("geçersiz PHP sürümü: {s}", "invalid PHP version: {s}"))?;
         Ok(Self { major, minor })
@@ -129,15 +122,11 @@ impl Constraint {
     }
 
     pub fn allows(&self, v: Triple) -> bool {
-        self.alternatives
-            .iter()
-            .any(|group| group.iter().all(|b| b.allows(v)))
+        self.alternatives.iter().any(|group| group.iter().all(|b| b.allows(v)))
     }
 
     pub fn allows_line(&self, line: PhpVersion) -> bool {
-        (0..=40)
-            .chain(std::iter::once(999))
-            .any(|patch| self.allows((line.major, line.minor, patch)))
+        (0..=40).chain(std::iter::once(999)).any(|patch| self.allows((line.major, line.minor, patch)))
     }
 
     pub fn lowest_known_line(&self) -> Option<PhpVersion> {
@@ -153,18 +142,11 @@ fn parse_and_group(input: &str) -> Option<Vec<Bound>> {
     if let Some((lo, hi)) = input.split_once(" - ") {
         let (lo, _) = parse_version(lo.trim())?;
         let (hi, hi_parts) = parse_version(hi.trim())?;
-        let upper = if hi_parts < 3 {
-            Bound::Lt(bump(hi, hi_parts))
-        } else {
-            Bound::Le(hi)
-        };
+        let upper = if hi_parts < 3 { Bound::Lt(bump(hi, hi_parts)) } else { Bound::Le(hi) };
         return Some(vec![Bound::Ge(lo), upper]);
     }
 
-    let raw: Vec<&str> = input
-        .split(|c: char| c == ',' || c.is_whitespace())
-        .filter(|t| !t.is_empty())
-        .collect();
+    let raw: Vec<&str> = input.split(|c: char| c == ',' || c.is_whitespace()).filter(|t| !t.is_empty()).collect();
     let mut tokens: Vec<String> = Vec::new();
     let mut pending_op: Option<&str> = None;
     for t in raw {
@@ -192,17 +174,11 @@ fn parse_atom(token: &str) -> Option<Vec<Bound>> {
         return Some(vec![]);
     }
     let ops = [">=", "<=", "!=", "==", ">", "<", "=", "^", "~"];
-    let (op, rest) = ops
-        .iter()
-        .find_map(|op| token.strip_prefix(op).map(|r| (*op, r)))
-        .unwrap_or(("", token));
+    let (op, rest) = ops.iter().find_map(|op| token.strip_prefix(op).map(|r| (*op, r))).unwrap_or(("", token));
     let rest = rest.trim();
 
     if rest.contains('*') || rest.contains('x') || rest.contains('X') {
-        let prefix: Vec<&str> = rest
-            .split('.')
-            .take_while(|p| !matches!(*p, "*" | "x" | "X"))
-            .collect();
+        let prefix: Vec<&str> = rest.split('.').take_while(|p| !matches!(*p, "*" | "x" | "X")).collect();
         let (base, parts) = parse_version(&prefix.join("."))?;
         if op == "!=" {
             return Some(vec![Bound::Outside(base, bump(base, parts))]);
