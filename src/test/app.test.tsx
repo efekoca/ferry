@@ -271,6 +271,23 @@ describe("Ferry app", () => {
     expect(restored).toEqual([["includes/helpers.php"]]);
   });
 
+  it("closes the restore dialog without waiting for the rescan", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    const real = api.scanProject;
+    let scans = 0;
+    api.scanProject = (...args) => (++scans === 1 ? real(...args) : new Promise(() => {}));
+    render(<App api={api} />);
+    await openAndScan(user);
+    await user.click(nav(/Geçmiş/));
+    const row = (await screen.findAllByRole("row"))[1];
+    await user.click(within(row).getByRole("button", { name: /Geri yükle/ }));
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Geri yükle" }));
+    expect(await screen.findByText("Geri yüklendi")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(scans).toBe(2);
+  });
+
   it("deletes every snapshot of the project after confirming", async () => {
     const user = setup();
     await openAndScan(user);
