@@ -152,6 +152,7 @@ export function mockApi(opts: { delay?: number } = {}): Api {
   let settings: Settings = { phpPath: null };
   let pending = [...CHANGES];
   let cancelled = false;
+  let previewId = 0;
   const fixed = new Set<string>();
   let snapshots: Snapshot[] = [
     { id: "1761400000000", createdAt: Date.now() - 1000 * 60 * 60 * 26, projectRoot: MOCK_ROOT, label: "Uyumluluk düzeltmeleri · PHP 8.1", files: [{ path: "includes/helpers.php", existed: true }] },
@@ -160,9 +161,9 @@ export function mockApi(opts: { delay?: number } = {}): Api {
   const toolchain = (): ToolchainStatus => ({
     php: { path: "/opt/homebrew/bin/php", version: "8.4.14" },
     composer: { path: "/opt/homebrew/bin/composer", version: "2.8.12" },
-    rector: { path: "~/Library/Application Support/dev.ferry.app/tools/vendor/rector/rector/bin/rector", version: "2.8.3" },
+    rector: { path: "~/Library/Application Support/io.github.efekoca.ferry/tools/vendor/rector/rector/bin/rector", version: "2.8.3" },
     docker: { path: "/usr/local/bin/docker", version: "Docker version 28.4.0" },
-    toolsDir: "~/Library/Application Support/dev.ferry.app/tools",
+    toolsDir: "~/Library/Application Support/io.github.efekoca.ferry/tools",
     platform: "macos",
   });
 
@@ -185,12 +186,12 @@ export function mockApi(opts: { delay?: number } = {}): Api {
         excludedDirs: ["wp-admin", "wp-includes"],
       };
     },
-    scanProject: async (_path, target): Promise<ScanResult> => {
+    scanProject: async (_path, target, run): Promise<ScanResult> => {
       const total = 148;
       const steps = 12;
       for (let i = 0; i <= steps; i++) {
         const done = Math.round((total * i) / steps);
-        listeners.forEach((l) => l({ done, total, file: i < steps ? `includes/file-${done}.php` : "" }));
+        listeners.forEach((l) => l({ run, done, total, file: i < steps ? `includes/file-${done}.php` : "" }));
         await sleep(delay / steps);
       }
       const findings: Finding[] = SEEDS.filter((s) => versionLte(s.since, target) && !(fixed.has(s.file) && s.fix !== "manual")).map((s) => ({
@@ -218,16 +219,18 @@ export function mockApi(opts: { delay?: number } = {}): Api {
     },
     rectorPreview: async (_path, target, mode) => {
       cancelled = false;
+      const id = ++previewId;
       await sleep(delay * 2);
       if (cancelled) throw new Error("Rector was stopped.");
       const changes = pending.filter((c) => c.rules.some((r) => !r.since || versionLte(r.since, target)));
-      return { target, mode, changes, errors: [], durationMs: 2140 };
+      return { id, target, mode, changes, errors: [], durationMs: 2140 };
     },
     cancelPreview: async () => {
       cancelled = true;
     },
-    applyChanges: async (path, files, label) => {
+    applyChanges: async (path, id, files, label) => {
       await sleep(delay);
+      if (id !== previewId) throw new Error("The preview is out of date. Calculate the changes again.");
       const snapshot: Snapshot = { id: String(Date.now()), createdAt: Date.now(), projectRoot: path, label, files: files.map((p) => ({ path: p, existed: true })) };
       snapshots = [snapshot, ...snapshots];
       pending = pending.filter((c) => !files.includes(c.file));

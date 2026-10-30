@@ -192,10 +192,14 @@ impl SnapshotStore {
     }
 
     pub fn restore(&self, project_root: &Path, id: &str) -> Result<Vec<String>, SnapshotError> {
+        self.restore_files(project_root, id, None)
+    }
+
+    pub fn restore_files(&self, project_root: &Path, id: &str, only: Option<&[String]>) -> Result<Vec<String>, SnapshotError> {
         let (snapshot, dir) = self.load(project_root, id)?;
         let mut restored = Vec::new();
         let mut first_error = None;
-        for file in &snapshot.files {
+        for file in snapshot.files.iter().filter(|f| only.is_none_or(|o| o.contains(&f.path))) {
             let result = (|| {
                 let rel = safe_relative(&file.path)?;
                 let target = project_root.join(&rel);
@@ -204,7 +208,15 @@ impl SnapshotStore {
                     if let Some(parent) = target.parent() {
                         std::fs::create_dir_all(parent).map_err(io_err(parent))?;
                     }
-                    std::fs::copy(&saved, &target).map_err(io_err(&saved))?;
+                    if let Ok(meta) = std::fs::metadata(&target) {
+                        let mut perms = meta.permissions();
+                        if perms.readonly() {
+                            #[allow(clippy::permissions_set_readonly_false)]
+                            perms.set_readonly(false);
+                            let _ = std::fs::set_permissions(&target, perms);
+                        }
+                    }
+                    std::fs::copy(&saved, &target).map_err(io_err(&target))?;
                 } else if target.exists() {
                     std::fs::remove_file(&target).map_err(io_err(&target))?;
                 }
@@ -300,6 +312,26 @@ mod tests {
         store.delete(root, &snap.id).unwrap();
         assert_eq!(store.list(root).unwrap().len(), 1);
         assert!(matches!(store.restore(root, &snap.id), Err(SnapshotError::NotFound(_))));
+    }
+
+    #[test]
+    fn restores_read_only_files_and_subsets() {
+        let project = tempfile::tempdir().unwrap();
+        let store_dir = tempfile::tempdir().unwrap();
+        let store = SnapshotStore::new(store_dir.path());
+        let root = project.path();
+        fs::write(root.join("a.php"), "a").unwrap();
+        fs::write(root.join("b.php"), "b").unwrap();
+        let snap = store.create(root, &["a.php".into(), "b.php".into()], "x").unwrap();
+        fs::write(root.join("a.php"), "A").unwrap();
+        fs::write(root.join("b.php"), "B").unwrap();
+        let mut perms = fs::metadata(root.join("a.php")).unwrap().permissions();
+        perms.set_readonly(true);
+        fs::set_permissions(root.join("a.php"), perms).unwrap();
+
+        assert_eq!(store.restore_files(root, &snap.id, Some(&["a.php".to_string()])).unwrap(), vec!["a.php"]);
+        assert_eq!(fs::read_to_string(root.join("a.php")).unwrap(), "a");
+        assert_eq!(fs::read_to_string(root.join("b.php")).unwrap(), "B");
     }
 
     #[test]

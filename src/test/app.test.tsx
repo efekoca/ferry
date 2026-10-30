@@ -157,6 +157,25 @@ describe("Ferry app", () => {
     expect(screen.queryByText("Değişiklikler hesaplanamadı")).not.toBeInTheDocument();
   });
 
+  it("cancels a running preview when the target changes", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    let cancels = 0;
+    api.rectorPreview = () => new Promise(() => {});
+    api.cancelPreview = async () => {
+      cancels++;
+    };
+    render(<App api={api} />);
+    await openAndScan(user);
+    await user.click(nav(/Düzeltmeler/));
+    await user.click(await screen.findByRole("button", { name: /Değişiklikleri hesapla/ }));
+    await screen.findByRole("button", { name: /Durdur/ });
+    const before = cancels;
+    await user.click(nav(/Genel bakış/));
+    await user.click(screen.getByRole("radio", { name: "8.1" }));
+    expect(cancels).toBeGreaterThan(before);
+  });
+
   it("warns before restoring files edited after the apply", async () => {
     const user = userEvent.setup();
     const api = mockApi({ delay: 0 });

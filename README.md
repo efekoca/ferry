@@ -128,7 +128,7 @@ macOS 11 or newer, on Apple silicon and Intel Macs.
 
 > **Gatekeeper.** Ferry is not signed with an Apple Developer ID yet, so macOS may refuse to open it the first time. Open **System Settings → Privacy & Security** and choose **Open Anyway** next to the message about Ferry.
 
-**Uninstall.** Drag the app to the Trash. Backups and settings stay in `~/Library/Application Support/dev.ferry.app` until you delete that folder.
+**Uninstall.** Drag the app to the Trash. Backups and settings stay in `~/Library/Application Support/io.github.efekoca.ferry` until you delete that folder.
 
 ### Windows
 
@@ -139,7 +139,7 @@ Windows 10 and 11.
 
 > **SmartScreen.** The installer is not code-signed, so Windows may show "Unknown publisher". Choose **More info → Run anyway**.
 
-**Uninstall.** Use Windows Settings → Apps. Backups and settings stay in `%APPDATA%\dev.ferry.app` until you delete that folder.
+**Uninstall.** Use Windows Settings → Apps. Backups and settings stay in `%APPDATA%\io.github.efekoca.ferry` until you delete that folder.
 
 ### Automatic fixes
 
@@ -156,7 +156,7 @@ When something is missing, the **Fixes** page says what and offers **Install Rec
 
 - **Read:** the PHP files, `composer.json`, and `composer.lock` in the project folder you choose.
 - **Written:** only the files you apply changes to. Every other file stays untouched.
-- **Stored:** backups of the files before each apply, a record of what was applied, Rector's cache, and your settings, in the app's data folder: `~/Library/Application Support/dev.ferry.app` on macOS and `%APPDATA%\dev.ferry.app` on Windows.
+- **Stored:** backups of the files before each apply, a record of what was applied, Rector's cache, and your settings, in the app's data folder: `~/Library/Application Support/io.github.efekoca.ferry` on macOS and `%APPDATA%\io.github.efekoca.ferry` on Windows.
 - **Network:** Ferry itself makes no network requests. When you choose **Install Rector**, Composer downloads Rector from Packagist.
 
 ## How it works

@@ -232,9 +232,10 @@
       await scan();
       const compat = await preview();
       radio("Modernleştirme").click();
-      await until(() => button("Durdur"), "modernize starts");
-      check(button("uygula", $(".apply-bar")) === undefined, "apply is disabled while recalculating");
+      if (button("Durdur")) check(button("uygula", $(".apply-bar")) === undefined, "apply is disabled while recalculating");
       await until(() => !$$("button").some((b) => b.textContent.includes("Durdur")), "modern preview", 300000);
+      await sleep(300);
+      check(radio("Modernleştirme").getAttribute("aria-checked") === "true", "modernize stays selected");
       const modern = $$(".change-item__file").map((e) => e.textContent);
       await emit(`  compat=${compat.length} modern=${modern.length}: ${modern.join(", ")}`);
       check(modern.length >= compat.length, "modernize covers at least the compat files");

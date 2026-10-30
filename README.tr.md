@@ -128,7 +128,7 @@ Apple silicon ve Intel işlemcili Mac'lerde macOS 11 ve üstü.
 
 > **Gatekeeper.** Ferry henüz bir Apple Developer ID ile imzalanmadığı için macOS ilk açılışta uygulamayı engelleyebilir. **Sistem Ayarları → Gizlilik ve Güvenlik** bölümünü açın ve Ferry ile ilgili mesajın yanındaki **Yine de Aç**'ı seçin.
 
-**Kaldırma.** Uygulamayı Çöp Sepeti'ne sürükleyin. Yedekler ve ayarlar, siz silene kadar `~/Library/Application Support/dev.ferry.app` klasöründe kalır.
+**Kaldırma.** Uygulamayı Çöp Sepeti'ne sürükleyin. Yedekler ve ayarlar, siz silene kadar `~/Library/Application Support/io.github.efekoca.ferry` klasöründe kalır.
 
 ### Windows
 
@@ -139,7 +139,7 @@ Windows 10 ve 11.
 
 > **SmartScreen.** Kurulum dosyası kod imzalı olmadığı için Windows "Bilinmeyen yayımcı" uyarısı gösterebilir. **Ek bilgi → Yine de çalıştır**'ı seçin.
 
-**Kaldırma.** Windows Ayarları → Uygulamalar bölümünü kullanın. Yedekler ve ayarlar, siz silene kadar `%APPDATA%\dev.ferry.app` klasöründe kalır.
+**Kaldırma.** Windows Ayarları → Uygulamalar bölümünü kullanın. Yedekler ve ayarlar, siz silene kadar `%APPDATA%\io.github.efekoca.ferry` klasöründe kalır.
 
 ### Otomatik düzeltmeler
 
@@ -156,7 +156,7 @@ Eksik bir şey olduğunda **Düzeltmeler** sayfası neyin eksik olduğunu söyle
 
 - **Okunanlar:** seçtiğiniz proje klasöründeki PHP dosyaları, `composer.json` ve `composer.lock`.
 - **Yazılanlar:** yalnızca değişiklik uyguladığınız dosyalar. Diğer dosyalara dokunulmaz.
-- **Saklananlar:** her uygulamadan önceki dosya yedekleri, neyin uygulandığının kaydı, Rector'ın önbelleği ve ayarlarınız. Hepsi uygulamanın veri klasöründe durur: macOS'ta `~/Library/Application Support/dev.ferry.app`, Windows'ta `%APPDATA%\dev.ferry.app`.
+- **Saklananlar:** her uygulamadan önceki dosya yedekleri, neyin uygulandığının kaydı, Rector'ın önbelleği ve ayarlarınız. Hepsi uygulamanın veri klasöründe durur: macOS'ta `~/Library/Application Support/io.github.efekoca.ferry`, Windows'ta `%APPDATA%\io.github.efekoca.ferry`.
 - **Ağ:** Ferry'nin kendisi hiçbir ağ isteği yapmaz. **Rector'ı kur**'u seçtiğinizde Composer, Rector'ı Packagist'ten indirir.
 
 ## Nasıl çalışır

@@ -3,7 +3,7 @@ name = "ferry"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "PHP projelerini yeni sürümlere güvenle taşıyan masaüstü uygulaması"
+description = "Desktop app that upgrades PHP projects to newer versions safely"
 
 [lib]
 name = "ferry_lib"

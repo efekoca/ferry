@@ -181,6 +181,7 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
   }, [refreshToolchain]);
 
   const resetResults = useCallback(() => {
+    api?.cancelPreview().catch(() => {});
     generation.current++;
     previewSeq.current++;
     setScan(null);
@@ -189,7 +190,7 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
     setScanning(false);
     setPreviewing(false);
     setProgress(null);
-  }, []);
+  }, [api]);
 
   const refreshSnapshots = useCallback(async () => {
     if (!api || !project) return;
@@ -270,14 +271,14 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
     if (!api || !project) return;
     const gen = ++generation.current;
     setScanning(true);
-    setProgress({ done: 0, total: project.phpFiles, file: "" });
+    setProgress({ run: gen, done: 0, total: project.phpFiles, file: "" });
     let unlisten: (() => void) | undefined;
     try {
       unlisten = await api.onScanProgress((p) => {
-        if (gen === generation.current) setProgress(p);
+        if (gen === generation.current && p.run === gen) setProgress(p);
       });
       const [result, depReport] = await Promise.all([
-        api.scanProject(project.root, target),
+        api.scanProject(project.root, target, gen),
         api.checkDependencies(project.root, target).catch(() => null),
       ]);
       if (gen !== generation.current) return;
@@ -318,7 +319,7 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
       setPreviewing(true);
       try {
         const result = await api.rectorPreview(root, target, mode);
-        if (gen === generation.current) setPreview(result);
+        if (gen === generation.current && seq === previewSeq.current) setPreview(result);
         return true;
       } catch (e) {
         if (seq !== previewSeq.current || rootRef.current !== root) return true;
@@ -344,7 +345,8 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
       try {
         const label = t.changes.snapshotLabel(previewMode === "compat", target);
         const root = project.root;
-        const result = await api.applyChanges(root, files, label);
+        if (!preview) return false;
+        const result = await api.applyChanges(root, preview.id, files, label);
         if (rootRef.current !== root) return true;
         setPreview((p) => (p ? { ...p, changes: p.changes.filter((c) => !result.written.includes(c.file)) } : p));
         toast.push({ tone: "success", title: t.toast.applied(result.written.length), description: t.toast.appliedText });
@@ -358,7 +360,7 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
         setApplying(false);
       }
     },
-    [api, project, previewMode, target, toast, refreshSnapshots, scan, runScan, fail, t],
+    [api, project, preview, previewMode, target, toast, refreshSnapshots, scan, runScan, fail, t],
   );
 
   const restoreSnapshot = useCallback(

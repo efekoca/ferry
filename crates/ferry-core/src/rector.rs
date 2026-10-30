@@ -265,7 +265,13 @@ fn php_str(s: &str) -> String {
 #[derive(Default)]
 pub struct Staging {
     dir: PathBuf,
-    files: Vec<(String, String)>,
+    files: Vec<StagedFile>,
+}
+
+struct StagedFile {
+    rel: String,
+    fixed: String,
+    original: String,
 }
 
 impl Staging {
@@ -284,13 +290,17 @@ impl Staging {
                 std::fs::create_dir_all(parent).map_err(|e| RectorError::Io(parent.display().to_string(), e))?;
             }
             std::fs::write(&dest, &fixed).map_err(|e| RectorError::Io(dest.display().to_string(), e))?;
-            files.push((rel, fixed));
+            files.push(StagedFile {
+                rel,
+                fixed,
+                original: text.to_string(),
+            });
         }
         Ok(Staging { dir, files })
     }
 
-    fn content(&self, rel: &str) -> Option<&str> {
-        self.files.iter().find(|(r, _)| r == rel).map(|(_, c)| c.as_str())
+    fn get(&self, rel: &str) -> Option<&StagedFile> {
+        self.files.iter().find(|f| f.rel == rel)
     }
 }
 
@@ -318,7 +328,7 @@ pub fn build_config(
     skip.extend(excluded_dirs.iter().map(|d| php_str(&root.join(d).to_string_lossy())));
     if !staging.files.is_empty() {
         paths.push(php_str(&staging.dir.to_string_lossy()));
-        skip.extend(staging.files.iter().map(|(rel, _)| php_str(&root.join(rel).to_string_lossy())));
+        skip.extend(staging.files.iter().map(|f| php_str(&root.join(&f.rel).to_string_lossy())));
     }
     if mode == RectorMode::Compat {
         skip.extend(
@@ -394,23 +404,35 @@ pub fn parse_output(root: &Path, stdout: &str, staging: &Staging) -> Result<(Vec
             root.join(&fd.file)
         };
         let staged_rel = crate::analyzer::relative_path(&staging.dir, &abs);
-        let staged = staging.content(&staged_rel);
-        let (rel, abs) = match staged {
-            Some(_) => (staged_rel.clone(), root.join(&staged_rel)),
-            None => (crate::analyzer::relative_path(root, &abs), abs),
+        let staged = staging.get(&staged_rel);
+        let rel = match staged {
+            Some(_) => staged_rel.clone(),
+            None => crate::analyzer::relative_path(root, &abs),
         };
-        let original = match std::fs::read(&abs) {
-            Ok(b) => b,
-            Err(e) => {
-                errors.push(crate::t!("{rel} — okunamadı: {e}", "{rel} — couldn't read: {e}"));
-                continue;
-            }
-        };
-        let Ok(original_text) = String::from_utf8(original.clone()) else {
-            errors.push(not_utf8(&rel));
+        if Path::new(&rel).is_absolute() || Path::new(&rel).components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+            errors.push(crate::t!(
+                "{rel} — proje klasörünün dışında; atlandı.",
+                "{rel} — outside the project folder; skipped."
+            ));
             continue;
+        }
+        let original_text = match staged {
+            Some(f) => f.original.clone(),
+            None => match std::fs::read(&abs) {
+                Ok(bytes) => match String::from_utf8(bytes) {
+                    Ok(text) => text,
+                    Err(_) => {
+                        errors.push(not_utf8(&rel));
+                        continue;
+                    }
+                },
+                Err(e) => {
+                    errors.push(crate::t!("{rel} — okunamadı: {e}", "{rel} — couldn't read: {e}"));
+                    continue;
+                }
+            },
         };
-        let new_content = match diff::apply_unified(staged.unwrap_or(&original_text), &fd.diff) {
+        let new_content = match diff::apply_unified(staged.map_or(original_text.as_str(), |f| f.fixed.as_str()), &fd.diff) {
             Ok(c) => c,
             Err(e) => {
                 errors.push(format!("{rel} — {e}"));
@@ -426,23 +448,21 @@ pub fn parse_output(root: &Path, stdout: &str, staging: &Staging) -> Result<(Vec
             file: rel,
             rules,
             fix,
-            original_hash: fnv1a(&original),
+            original_hash: fnv1a(original_text.as_bytes()),
             new_content,
         });
     }
-    for (rel, fixed) in &staging.files {
-        if changes.iter().any(|c| &c.file == rel) {
+    for f in &staging.files {
+        if changes.iter().any(|c| c.file == f.rel) {
             continue;
         }
-        let Ok(original) = std::fs::read(root.join(rel)) else { continue };
-        let Ok(original_text) = std::str::from_utf8(&original) else { continue };
         changes.push(FileChange {
-            diff: diff::compute(original_text, fixed, 3),
-            file: rel.clone(),
+            diff: diff::compute(&f.original, &f.fixed, 3),
+            file: f.rel.clone(),
             rules: vec![curly_rule()],
             fix: FixKind::Auto,
-            original_hash: fnv1a(&original),
-            new_content: fixed.clone(),
+            original_hash: fnv1a(f.original.as_bytes()),
+            new_content: f.fixed.clone(),
         });
     }
     changes.sort_by(|a, b| (b.fix, &a.file).cmp(&(a.fix, &b.file)));
@@ -563,7 +583,7 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     Ok(())
 }
 
-pub fn apply(root: &Path, changes: &[&FileChange]) -> Result<Vec<String>, RectorError> {
+pub fn check_fresh(root: &Path, changes: &[&FileChange]) -> Result<(), RectorError> {
     for change in changes {
         let path = root.join(&change.file);
         let current = std::fs::read(&path).map_err(|e| RectorError::Io(change.file.clone(), e))?;
@@ -571,18 +591,46 @@ pub fn apply(root: &Path, changes: &[&FileChange]) -> Result<Vec<String>, Rector
             return Err(RectorError::Stale(change.file.clone()));
         }
     }
-    let mut written = Vec::new();
+    Ok(())
+}
+
+pub fn write_changes(root: &Path, changes: &[&FileChange], written: &mut Vec<String>) -> Result<(), RectorError> {
     for change in changes {
         let path = root.join(&change.file);
         write_atomic(&path, change.new_content.as_bytes()).map_err(|e| RectorError::Io(change.file.clone(), e))?;
         written.push(change.file.clone());
     }
+    Ok(())
+}
+
+pub fn apply(root: &Path, changes: &[&FileChange]) -> Result<Vec<String>, RectorError> {
+    check_fresh(root, changes)?;
+    let mut written = Vec::new();
+    write_changes(root, changes, &mut written)?;
     Ok(written)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn edits_made_while_rector_runs_make_the_change_stale() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.php"), "<?php\necho $s{0};\n// edited meanwhile\n").unwrap();
+        let staging = Staging {
+            dir: root.join("staged"),
+            files: vec![StagedFile {
+                rel: "a.php".into(),
+                fixed: "<?php\necho $s[0];\n".into(),
+                original: "<?php\necho $s{0};\n".into(),
+            }],
+        };
+        let (changes, errors) = parse_output(root, r#"{"totals":{"changed_files":0},"file_diffs":[]}"#, &staging).unwrap();
+        assert!(errors.is_empty());
+        assert!(matches!(check_fresh(root, &[&changes[0]]), Err(RectorError::Stale(_))));
+    }
 
     #[test]
     fn describes_rules() {

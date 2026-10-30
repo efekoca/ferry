@@ -87,7 +87,7 @@ fn scan_flow_matches_ui_contract() {
     assert_eq!(info["framework"], "generic");
     assert_eq!(info["currentVersion"], "7.1");
 
-    let scan = h.ok("scan_project", json!({ "path": root, "target": "8.4" }));
+    let scan = h.ok("scan_project", json!({ "path": root, "target": "8.4", "run": 1 }));
     assert_eq!(scan["target"], "8.4");
     assert_eq!(scan["filesScanned"], 2);
     let findings = scan["findings"].as_array().unwrap();
@@ -114,14 +114,14 @@ fn scan_flow_matches_ui_contract() {
 fn rejects_bad_input_with_messages() {
     let _lang = LANG_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let h = harness();
-    let err = h.invoke("scan_project", json!({ "path": h.root, "target": "7.4" })).unwrap_err();
+    let err = h.invoke("scan_project", json!({ "path": h.root, "target": "7.4", "run": 1 })).unwrap_err();
     assert!(err.as_str().unwrap().contains("Desteklenmeyen hedef sürüm"));
     let err = h.invoke("inspect_project", json!({ "path": "/yok/boyle/bir/klasor" })).unwrap_err();
     assert!(err.as_str().unwrap().contains("Klasör bulunamadı"));
     let err = h.invoke("export_report", json!({ "path": h.root, "destination": "/tmp/x.md" })).unwrap_err();
     assert!(err.as_str().unwrap().contains("Önce projeyi tarayın"));
     let err = h
-        .invoke("apply_changes", json!({ "path": h.root, "files": ["a.php"], "label": "x" }))
+        .invoke("apply_changes", json!({ "path": h.root, "previewId": 1, "files": ["a.php"], "label": "x" }))
         .unwrap_err();
     assert!(err.as_str().unwrap().contains("Önce değişiklikleri hesaplayın"));
 }
@@ -131,7 +131,7 @@ fn messages_follow_the_ui_language() {
     let _lang = LANG_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let h = harness();
     h.ok("set_language", json!({ "language": "en" }));
-    let err = h.invoke("scan_project", json!({ "path": h.root, "target": "7.4" })).unwrap_err();
+    let err = h.invoke("scan_project", json!({ "path": h.root, "target": "7.4", "run": 1 })).unwrap_err();
     h.ok("set_language", json!({ "language": "tr" }));
     assert!(err.as_str().unwrap().contains("Unsupported target version"));
 }
@@ -177,33 +177,51 @@ fn rector_preview_apply_restore_over_ipc() {
     assert!(greeter.get("newContent").is_none(), "file contents must not be sent to the UI");
 
     let original = std::fs::read_to_string(Path::new(&root).join("src/Greeter.php")).unwrap();
+    let greeter_path = Path::new(&root).join("src/Greeter.php");
+
+    let older = preview["id"].as_u64().unwrap();
+    let preview = h.ok("rector_preview", json!({ "path": root, "target": "8.4", "mode": "compat" }));
+    let id = preview["id"].as_u64().unwrap();
+    assert_ne!(id, older);
+    let err = h
+        .invoke("apply_changes", json!({ "path": root, "previewId": older, "files": ["src/Greeter.php"], "label": "x" }))
+        .unwrap_err();
+    assert!(err.as_str().unwrap().contains("güncel değil"), "{err}");
+
+    std::fs::write(&greeter_path, format!("{original}// edited after preview\n")).unwrap();
+    assert!(h
+        .invoke("apply_changes", json!({ "path": root, "previewId": id, "files": ["src/Greeter.php"], "label": "x" }))
+        .is_err());
+    assert_eq!(h.ok("list_snapshots", json!({ "path": root })), json!([]), "no backup for a refused apply");
+    assert!(std::fs::read_to_string(&greeter_path).unwrap().ends_with("// edited after preview\n"));
+    std::fs::write(&greeter_path, &original).unwrap();
+
     let applied = h.ok(
         "apply_changes",
-        json!({ "path": root, "files": ["src/Greeter.php"], "label": "Uyumluluk düzeltmeleri · PHP 8.4" }),
+        json!({ "path": root, "previewId": id, "files": ["src/Greeter.php"], "label": "Uyumluluk düzeltmeleri · PHP 8.4" }),
     );
     assert_eq!(applied["written"], json!(["src/Greeter.php"]));
     let changed = std::fs::read_to_string(Path::new(&root).join("src/Greeter.php")).unwrap();
     assert_ne!(changed, original);
 
     let snapshots = h.ok("list_snapshots", json!({ "path": root }));
-    let id = snapshots[0]["id"].as_str().unwrap().to_string();
+    let snap_id = snapshots[0]["id"].as_str().unwrap().to_string();
     assert_eq!(snapshots[0]["label"], "Uyumluluk düzeltmeleri · PHP 8.4");
-    let history = h.ok("snapshot_changes", json!({ "path": root, "id": id }));
+    let history = h.ok("snapshot_changes", json!({ "path": root, "id": snap_id }));
     assert_eq!(history[0]["file"], "src/Greeter.php");
     assert_eq!(history[0]["diff"], greeter["diff"]);
     assert!(!history[0]["rules"].as_array().unwrap().is_empty());
-    assert_eq!(h.ok("snapshot_conflicts", json!({ "path": root, "id": id })), json!([]));
-    let greeter_path = Path::new(&root).join("src/Greeter.php");
+    assert_eq!(h.ok("snapshot_conflicts", json!({ "path": root, "id": snap_id })), json!([]));
     std::fs::write(&greeter_path, format!("{changed}// edited after apply\n")).unwrap();
-    assert_eq!(h.ok("snapshot_conflicts", json!({ "path": root, "id": id })), json!(["src/Greeter.php"]));
+    assert_eq!(h.ok("snapshot_conflicts", json!({ "path": root, "id": snap_id })), json!(["src/Greeter.php"]));
     std::fs::write(&greeter_path, &changed).unwrap();
 
     assert!(h
-        .invoke("apply_changes", json!({ "path": root, "files": ["src/Greeter.php"], "label": "x" }))
+        .invoke("apply_changes", json!({ "path": root, "previewId": id, "files": ["src/Greeter.php"], "label": "x" }))
         .is_err());
 
-    h.ok("restore_snapshot", json!({ "path": root, "id": id }));
+    h.ok("restore_snapshot", json!({ "path": root, "id": snap_id }));
     assert_eq!(std::fs::read_to_string(Path::new(&root).join("src/Greeter.php")).unwrap(), original);
-    h.ok("delete_snapshot", json!({ "path": root, "id": id }));
+    h.ok("delete_snapshot", json!({ "path": root, "id": snap_id }));
     assert_eq!(h.ok("list_snapshots", json!({ "path": root })), json!([]));
 }

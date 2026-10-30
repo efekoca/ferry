@@ -1,14 +1,14 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 use ferry_core::analyzer::{self, ScanResult};
 use ferry_core::deps::{self, DependencyReport};
 use ferry_core::project::{self, ProjectInfo};
-use ferry_core::rector::{self, FileChange, RectorMode, RectorPreview};
+use ferry_core::rector::{self, FileChange, RectorError, RectorMode, RectorPreview};
 use ferry_core::snapshot::{fnv1a, Snapshot, SnapshotStore};
 use ferry_core::toolchain::{self, ToolchainStatus};
 use ferry_core::i18n::{self, Lang};
@@ -29,9 +29,12 @@ pub struct AppState {
     tools_dir: PathBuf,
     settings: Mutex<Settings>,
     scans: Mutex<HashMap<String, ScanResult>>,
-    previews: Mutex<HashMap<String, RectorPreview>>,
+    latest_scan: Mutex<HashMap<String, u64>>,
+    previews: Mutex<HashMap<String, (u64, RectorPreview)>>,
     writes: Arc<Mutex<()>>,
-    rector_cancel: Arc<AtomicBool>,
+    rector_cancel: Mutex<Arc<AtomicBool>>,
+    rector_running: Arc<AtomicUsize>,
+    next_preview: AtomicU64,
 }
 
 impl AppState {
@@ -45,9 +48,12 @@ impl AppState {
             data_dir,
             settings: Mutex::new(settings),
             scans: Mutex::new(HashMap::new()),
+            latest_scan: Mutex::new(HashMap::new()),
             previews: Mutex::new(HashMap::new()),
             writes: Arc::new(Mutex::new(())),
-            rector_cancel: Arc::new(AtomicBool::new(false)),
+            rector_cancel: Mutex::new(Arc::new(AtomicBool::new(false))),
+            rector_running: Arc::new(AtomicUsize::new(0)),
+            next_preview: AtomicU64::new(1),
         }
     }
 
@@ -101,6 +107,7 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> CmdResult<T> + Send + '
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ScanProgress {
+    run: u64,
     done: usize,
     total: usize,
     file: String,
@@ -120,8 +127,9 @@ struct ScanResponse {
 }
 
 #[tauri::command]
-async fn scan_project<R: Runtime>(app: AppHandle<R>, path: String, target: String) -> CmdResult<ScanResponse> {
+async fn scan_project<R: Runtime>(app: AppHandle<R>, path: String, target: String, run: u64) -> CmdResult<ScanResponse> {
     let target = parse_target(&target)?;
+    app.state::<AppState>().latest_scan.lock().unwrap().insert(path.clone(), run);
     let handle = app.clone();
     let result = blocking(move || {
         let root = project_root(&path)?;
@@ -134,6 +142,7 @@ async fn scan_project<R: Runtime>(app: AppHandle<R>, path: String, target: Strin
                 let _ = handle.emit(
                     "scan://progress",
                     ScanProgress {
+                        run,
                         done,
                         total,
                         file: file.to_string(),
@@ -147,7 +156,9 @@ async fn scan_project<R: Runtime>(app: AppHandle<R>, path: String, target: Strin
     let (path, scan) = result;
     let state = app.state::<AppState>();
     let summary = report::summarize(&scan.findings);
-    state.scans.lock().unwrap().insert(path, scan.clone());
+    if state.latest_scan.lock().unwrap().get(&path) == Some(&run) {
+        state.scans.lock().unwrap().insert(path, scan.clone());
+    }
     Ok(ScanResponse { scan, summary })
 }
 
@@ -181,15 +192,19 @@ async fn rector_preview(
     path: String,
     target: String,
     mode: RectorMode,
-) -> CmdResult<RectorPreview> {
+) -> CmdResult<PreviewResponse> {
     let target = parse_target(&target)?;
     let tools = state.tools_dir();
     let work = state.data_dir.join("rector");
     let php_override = state.php_override();
     let key = path.clone();
-    let cancel = state.rector_cancel.clone();
-    cancel.store(false, Ordering::Relaxed);
+    let cancel = Arc::new(AtomicBool::new(false));
+    std::mem::replace(&mut *state.rector_cancel.lock().unwrap(), cancel.clone()).store(true, Ordering::Relaxed);
+    let mine = cancel.clone();
+    let running = state.rector_running.clone();
+    running.fetch_add(1, Ordering::SeqCst);
     let preview = blocking(move || {
+        let _running = RunningGuard(running);
         let root = project_root(&path)?;
         let php = toolchain::find_php(php_override.as_deref()).ok_or_else(|| toolchain::ToolError::PhpMissing.to_string())?;
         let info = project::inspect(&root).map_err(|e| e.to_string())?;
@@ -206,13 +221,33 @@ async fn rector_preview(
         .map_err(|e| e.to_string())
     })
     .await?;
-    state.previews.lock().unwrap().insert(key, preview.clone());
-    Ok(preview)
+    if !Arc::ptr_eq(&state.rector_cancel.lock().unwrap(), &mine) {
+        return Err(RectorError::Cancelled.to_string());
+    }
+    let id = state.next_preview.fetch_add(1, Ordering::Relaxed);
+    state.previews.lock().unwrap().insert(key, (id, preview.clone()));
+    Ok(PreviewResponse { id, preview })
+}
+
+struct RunningGuard(Arc<AtomicUsize>);
+
+impl Drop for RunningGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PreviewResponse {
+    id: u64,
+    #[serde(flatten)]
+    preview: RectorPreview,
 }
 
 #[tauri::command]
 fn cancel_rector_preview(state: State<'_, AppState>) {
-    state.rector_cancel.store(true, Ordering::Relaxed);
+    state.rector_cancel.lock().unwrap().store(true, Ordering::Relaxed);
 }
 
 #[derive(Serialize)]
@@ -226,15 +261,22 @@ struct ApplyResult {
 async fn apply_changes(
     state: State<'_, AppState>,
     path: String,
+    preview_id: u64,
     files: Vec<String>,
     label: String,
 ) -> CmdResult<ApplyResult> {
     let root = project_root(&path)?;
     let selected: Vec<FileChange> = {
         let previews = state.previews.lock().unwrap();
-        let preview = previews
+        let (id, preview) = previews
             .get(&path)
             .ok_or_else(|| t!("Önce değişiklikleri hesaplayın.", "Calculate the changes first."))?;
+        if *id != preview_id {
+            return Err(t!(
+                "Önizleme güncel değil. Değişiklikleri yeniden hesaplayın.",
+                "The preview is out of date. Calculate the changes again."
+            ));
+        }
         preview
             .changes
             .iter()
@@ -250,12 +292,18 @@ async fn apply_changes(
     let writes = state.writes.clone();
     let result = blocking(move || {
         let _guard = writes.lock().unwrap_or_else(|e| e.into_inner());
+        let refs: Vec<&FileChange> = selected.iter().collect();
+        rector::check_fresh(&root, &refs).map_err(|e| e.to_string())?;
         let snapshot = store
             .create(&root, &applied_files, &label)
             .map_err(|e| e.to_string())?;
-        let refs: Vec<&FileChange> = selected.iter().collect();
-        match rector::apply(&root, &refs) {
-            Ok(written) => {
+        if let Err(e) = rector::check_fresh(&root, &refs) {
+            let _ = store.delete(&root, &snapshot.id);
+            return Err(e.to_string());
+        }
+        let mut written = Vec::new();
+        match rector::write_changes(&root, &refs, &mut written) {
+            Ok(()) => {
                 if let Ok(json) = serde_json::to_vec(&selected) {
                     let _ = store.write_attachment(&root, &snapshot.id, CHANGES_FILE, &json);
                 }
@@ -268,7 +316,7 @@ async fn apply_changes(
                 }
                 Ok(ApplyResult { snapshot, written })
             }
-            Err(e) => match store.restore(&root, &snapshot.id) {
+            Err(e) => match store.restore_files(&root, &snapshot.id, Some(&written)) {
                 Ok(_) => {
                     let _ = store.delete(&root, &snapshot.id);
                     Err(e.to_string())
@@ -281,7 +329,7 @@ async fn apply_changes(
         }
     })
     .await?;
-    if let Some(preview) = state.previews.lock().unwrap().get_mut(&path) {
+    if let Some((_, preview)) = state.previews.lock().unwrap().get_mut(&path) {
         preview.changes.retain(|c| !result.written.contains(&c.file));
     }
     Ok(result)
@@ -431,6 +479,7 @@ pub fn run() {
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
+            remove_stale_runs(&data_dir.join("rector"));
             app.manage(AppState::new(data_dir));
             #[cfg(debug_assertions)]
             if std::env::var_os("FERRY_E2E").is_some() {
@@ -454,8 +503,30 @@ pub fn run() {
             let _ = (webview, payload);
         });
     with_commands(builder)
-        .run(tauri::generate_context!())
-        .expect("failed to start Ferry");
+        .build(tauri::generate_context!())
+        .expect("failed to start Ferry")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                let state = app.state::<AppState>();
+                state.rector_cancel.lock().unwrap().store(true, Ordering::Relaxed);
+                let started = Instant::now();
+                while state.rector_running.load(Ordering::SeqCst) > 0 && started.elapsed() < Duration::from_secs(3) {
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+            }
+        });
+}
+
+fn remove_stale_runs(work: &Path) {
+    let Ok(projects) = std::fs::read_dir(work) else { return };
+    for project in projects.flatten() {
+        let Ok(entries) = std::fs::read_dir(project.path()) else { continue };
+        for entry in entries.flatten() {
+            if entry.file_name().to_string_lossy().starts_with("run-") {
+                let _ = std::fs::remove_dir_all(entry.path());
+            }
+        }
+    }
 }
 
 #[cfg(test)]

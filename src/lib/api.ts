@@ -19,14 +19,14 @@ export interface Api {
   pickSaveFile(defaultName: string): Promise<string | null>;
   pickPhpBinary(title: string): Promise<string | null>;
   inspectProject(path: string): Promise<ProjectInfo>;
-  scanProject(path: string, target: string): Promise<ScanResult>;
+  scanProject(path: string, target: string, run: number): Promise<ScanResult>;
   onScanProgress(handler: (p: ScanProgress) => void): Promise<() => void>;
   checkDependencies(path: string, target: string): Promise<DependencyReport>;
   toolchainStatus(): Promise<ToolchainStatus>;
   installRector(): Promise<ToolchainStatus>;
   rectorPreview(path: string, target: string, mode: RectorMode): Promise<RectorPreview>;
   cancelPreview(): Promise<void>;
-  applyChanges(path: string, files: string[], label: string): Promise<ApplyResult>;
+  applyChanges(path: string, previewId: number, files: string[], label: string): Promise<ApplyResult>;
   listSnapshots(path: string): Promise<Snapshot[]>;
   restoreSnapshot(path: string, id: string): Promise<string[]>;
   deleteSnapshot(path: string, id: string): Promise<void>;
@@ -56,14 +56,14 @@ async function tauriApi(): Promise<Api> {
       dialog.save({ defaultPath: defaultName, filters: [{ name: "Markdown", extensions: ["md"] }] }),
     pickPhpBinary: async (title) => single(await dialog.open({ multiple: false, title })),
     inspectProject: (path) => invoke("inspect_project", { path }),
-    scanProject: (path, target) => invoke("scan_project", { path, target }),
+    scanProject: (path, target, run) => invoke("scan_project", { path, target, run }),
     onScanProgress: (handler) => listen<ScanProgress>("scan://progress", (e) => handler(e.payload)),
     checkDependencies: (path, target) => invoke("check_dependencies", { path, target }),
     toolchainStatus: () => invoke("toolchain_status"),
     installRector: () => invoke("install_rector"),
     rectorPreview: (path, target, mode) => invoke("rector_preview", { path, target, mode }),
     cancelPreview: () => invoke("cancel_rector_preview"),
-    applyChanges: (path, files, label) => invoke("apply_changes", { path, files, label }),
+    applyChanges: (path, previewId, files, label) => invoke("apply_changes", { path, previewId, files, label }),
     listSnapshots: (path) => invoke("list_snapshots", { path }),
     restoreSnapshot: (path, id) => invoke("restore_snapshot", { path, id }),
     deleteSnapshot: (path, id) => invoke("delete_snapshot", { path, id }),

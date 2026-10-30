@@ -60,6 +60,7 @@ export interface ScanResult {
 }
 
 export interface ScanProgress {
+  run: number;
   done: number;
   total: number;
   file: string;
@@ -130,6 +131,7 @@ export interface FileChange {
 }
 
 export interface RectorPreview {
+  id: number;
   target: string;
   mode: RectorMode;
   changes: FileChange[];
