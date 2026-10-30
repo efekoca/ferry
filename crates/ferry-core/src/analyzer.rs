@@ -279,6 +279,7 @@ pub fn analyze_source(file: &str, src: &str, target: PhpVersion) -> Vec<Finding>
             .windows(2)
             .any(|w| w[0].is_ident_ci("namespace") && (w[1].kind == TokenKind::Ident || w[1].is_punct("{"))),
         classes: class_references(&tokens),
+        dead: [crate::guards::dead_spans(&tokens, target), crate::guards::dead_expressions(&tokens, target)].concat(),
         out: Vec::new(),
     };
     for &(line, column) in &lexed.stray_hash_brackets {
@@ -394,6 +395,7 @@ struct Ctx<'a> {
     methods: std::collections::HashSet<usize>,
     classes: std::collections::HashSet<String>,
     namespaced: bool,
+    dead: Vec<crate::guards::Span>,
     out: Vec<Finding>,
 }
 
@@ -425,6 +427,9 @@ impl<'a> Ctx<'a> {
     }
 
     fn push(&mut self, hit: Hit<'_>, line: usize, column: usize) {
+        if self.dead.iter().any(|&(start, end)| (line, column) >= start && (line, column) <= end) {
+            return;
+        }
         self.out.push(Finding {
             id: format!("{}:{}:{}:{}", self.file, line, column, hit.rule_id),
             file: self.file.to_string(),
