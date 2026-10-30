@@ -605,13 +605,28 @@ impl<'a> Ctx<'a> {
             }
             let args = call_args(tokens, i + 1);
             let single = |n: usize| args.get(n).filter(|a| a.len() == 1).map(|a| &a[0]);
-            if let Some((_, slot)) = CALLABLE_ARGS.iter().find(|(f, _)| *f == lower) {
-                if let Some(arg) = single(*slot) {
-                    self.callable_string(arg, i);
-                }
-            }
             let named = args.iter().any(|a| a.len() > 1 && a[1].is_punct(":") && a[0].kind == TokenKind::Ident);
             let spread = args.iter().any(|a| a.first().is_some_and(|t| t.is_punct("...")));
+            let callable_slot = CALLABLE_ARGS.iter().chain(&[("is_callable", 0)]).find(|(f, _)| *f == lower).map(|&(_, n)| n);
+            if let Some(slot) = callable_slot {
+                if let Some(arg) = single(slot).filter(|_| lower != "is_callable") {
+                    self.callable_string(arg, i);
+                }
+                if let Some(arg) = args.get(slot).filter(|_| !named && !spread) {
+                    if let Some(at) = partial_callable(arg) {
+                        self.pattern(&patterns::PARTIAL_CALLABLE, at, None);
+                    }
+                }
+            }
+            if !named && !spread {
+                if let Some((_, slots)) = crate::rules::NULL_STRING_ARGS.iter().find(|(f, _)| *f == lower) {
+                    for &slot in *slots {
+                        if let Some(arg) = single(slot).filter(|t| t.is_ident_ci("null")) {
+                            self.pattern(&patterns::NULL_TO_INTERNAL, arg, None);
+                        }
+                    }
+                }
+            }
             match lower.as_str() {
                 "define" if single(2).is_some_and(|t| t.is_ident_ci("true")) => {
                     return self.pattern(&patterns::CASE_INSENSITIVE_CONSTANT, tok, None)
@@ -806,6 +821,30 @@ impl<'a> Ctx<'a> {
             j += 1;
         }
 
+        let mut optional: Option<&Token> = None;
+        let mut reported = false;
+        for param in &params {
+            let Some(var_pos) = param.iter().position(|t| t.kind == TokenKind::Variable) else {
+                continue;
+            };
+            let has_default = param[var_pos + 1..].first().is_some_and(|t| t.is_punct("="));
+            let variadic = param[..var_pos].iter().any(|t| t.is_punct("..."));
+            let typed_null = has_default
+                && param[var_pos + 1..].len() == 2
+                && param[var_pos + 2].is_ident_ci("null")
+                && param[..var_pos].iter().any(|t| t.kind == TokenKind::Ident && !["public", "protected", "private", "readonly"].iter().any(|m| t.is_ident_ci(m)));
+            if has_default {
+                if !typed_null && optional.is_none() {
+                    optional = Some(param[var_pos]);
+                }
+            } else if !variadic {
+                if let Some(opt) = optional.filter(|_| !reported) {
+                    self.pattern(&patterns::OPTIONAL_BEFORE_REQUIRED, opt, None);
+                    reported = true;
+                }
+            }
+        }
+
         for param in params {
             let Some(var_pos) = param.iter().position(|t| t.kind == TokenKind::Variable) else {
                 continue;
@@ -953,6 +992,28 @@ const MB_ENCODING_ARGS: [(&str, &[usize]); 34] = [
     ("mb_scrub", &[1]), ("mb_convert_variables", &[0, 1]), ("mb_encode_mimeheader", &[1]), ("mb_str_pad", &[4]),
     ("mb_trim", &[2]),
 ];
+
+fn partial_callable(arg: &[Token]) -> Option<&Token> {
+    fn literal(t: &Token) -> Option<&str> {
+        match t.kind {
+            TokenKind::Str { interpolates, .. } if !(interpolates && t.text.contains('$')) => t.text.get(1..t.text.len().saturating_sub(1)),
+            _ => None,
+        }
+    }
+    let relative = |s: &str| ["self", "parent", "static"].iter().any(|k| s.eq_ignore_ascii_case(k));
+    let is_name = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_');
+    if let [t] = arg {
+        let (class, method) = literal(t)?.split_once("::")?;
+        return (relative(class) && is_name(method)).then_some(t);
+    }
+    let inner = match arg {
+        [open, inner @ .., close] if open.is_punct("[") && close.is_punct("]") => inner,
+        [kw, open, inner @ .., close] if kw.is_ident_ci("array") && open.is_punct("(") && close.is_punct(")") => inner,
+        _ => return None,
+    };
+    let [class, comma, method] = inner else { return None };
+    (comma.is_punct(",") && literal(class).is_some_and(relative) && literal(method).is_some_and(is_name)).then_some(class)
+}
 
 fn argument_position(tokens: &[Token], i: usize) -> Option<(&str, usize)> {
     let mut depth: isize = 0;
@@ -1711,6 +1772,64 @@ mod tests {
             .into_iter()
             .map(|f| f.rule_id)
             .collect()
+    }
+
+    fn lines_of(src: &str, target: &str, rule: &str) -> Vec<usize> {
+        analyze_source("t.php", src, target.parse().unwrap())
+            .into_iter()
+            .filter(|f| f.rule_id == rule)
+            .map(|f| f.line)
+            .collect()
+    }
+
+    #[test]
+    fn optional_parameters_before_required_ones() {
+        let src = "<?php
+function a($x = 1, $y) {}
+function b(Foo $x = null, $y) {}
+function c($x, $y = 1) {}
+function d($x = 1, ...$rest) {}
+class K { public function m(array $x = [], $y, $z = 2, $w) {} }
+class P { public function __construct(public int $x = 1, $y) {} }
+$f = function ($x = null, $y) {};
+function e(public $x = null, $y) {}";
+        let rule = "deprecated.optional_before_required";
+        assert_eq!(lines_of(src, "8.0", rule), vec![2, 6, 7, 8, 9]);
+        assert!(lines_of(src, "7.4", rule).is_empty());
+        let fixes: Vec<FixKind> = analyze_source("t.php", src, PhpVersion::new(8, 3)).into_iter().filter(|f| f.rule_id == rule).map(|f| f.fix).collect();
+        assert!(fixes.iter().all(|f| *f == FixKind::Likely));
+    }
+
+    #[test]
+    fn null_passed_to_built_in_string_parameters() {
+        let src = "<?php
+strlen(null);
+str_replace('a', 'b', null);
+str_replace(null, 'b', $s);
+trim($s ?? null);
+htmlspecialchars(string: null);
+\\strpos('abc', NULL);
+$obj->strlen(null);";
+        let rule = "deprecated.null_to_internal";
+        assert_eq!(lines_of(src, "8.1", rule), vec![2, 3, 7]);
+        assert!(lines_of(src, "8.0", rule).is_empty());
+        assert!(lines_of("<?php namespace App; function strlen($s) {} strlen(null);", "8.1", rule).is_empty());
+    }
+
+    #[test]
+    fn partially_supported_callables() {
+        let src = "<?php
+call_user_func('self::create');
+call_user_func(['parent', 'boot']);
+array_map(\"static::wrap\", $items);
+is_callable(array('SELF', 'check'));
+call_user_func([self::class, 'create']);
+call_user_func('Foo::create');
+call_user_func(['self', $name]);
+$x = 'self::create';";
+        let rule = "deprecated.partial_callable";
+        assert_eq!(lines_of(src, "8.2", rule), vec![2, 3, 4, 5]);
+        assert!(lines_of(src, "8.1", rule).is_empty());
     }
 
     #[test]
