@@ -1,13 +1,13 @@
 import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const args = new Set(process.argv.slice(2));
 const script = join(root, "e2e", args.has("--smoke") ? "native-smoke.js" : "native-full.js");
-const timeoutMs = 30 * 60 * 1000;
+const timeoutMs = 20 * 60 * 1000;
 
 const work = mkdtempSync(join(tmpdir(), "ferry-e2e-"));
 const demo = join(work, "demo");
@@ -39,7 +39,7 @@ write(
 write(join(odd, "src/a.php"), "<?php\nclass Order {\n    public function total(Money $discount = null) {}\n}\n");
 write(join(odd, "big.php"), `<?php\n${" ".repeat(2 * 1024 * 1024 + 16)}\n`);
 write(join(odd, "vendor/acme/x/legacy.php"), "<?php\nmysql_query('SELECT 1');\n");
-symlinkSync(".", join(odd, "loop"), "dir");
+symlinkSync(process.platform === "win32" ? odd : ".", join(odd, "loop"), process.platform === "win32" ? "junction" : "dir");
 
 mkdirSync(join(fixtures, "empty"), { recursive: true });
 write(join(fixtures, "empty/README.md"), "No PHP here.\n");
@@ -54,7 +54,7 @@ async function devServerUp() {
 
 let dev = null;
 if (!(await devServerUp())) {
-  dev = spawn("pnpm", ["dev"], { cwd: root, stdio: "ignore" });
+  dev = spawn("pnpm", ["dev"], { cwd: root, stdio: "ignore", shell: process.platform === "win32" });
   for (let i = 0; i < 60 && !(await devServerUp()); i++) await new Promise((r) => setTimeout(r, 500));
 }
 
@@ -63,10 +63,22 @@ if (!args.has("--no-build")) {
   if (build.status !== 0) process.exit(build.status ?? 1);
 }
 
+const defaultTools = {
+  darwin: join(homedir(), "Library", "Application Support", "io.github.efekoca.ferry", "tools"),
+  win32: join(process.env.APPDATA ?? "", "io.github.efekoca.ferry", "tools"),
+}[process.platform] ?? join(homedir(), ".local", "share", "io.github.efekoca.ferry", "tools");
+const tools = process.env.FERRY_TEST_TOOLS ?? defaultTools;
+
 const exe = join(root, "target", "debug", process.platform === "win32" ? "ferry.exe" : "ferry");
 const app = spawn(exe, [], {
   cwd: root,
-  env: { ...process.env, FERRY_E2E: script, FERRY_E2E_ROOT: JSON.stringify({ demo, fixtures }) },
+  env: {
+    ...process.env,
+    FERRY_E2E: script,
+    FERRY_E2E_ROOT: JSON.stringify({ demo, fixtures }),
+    FERRY_DATA_DIR: join(work, "data"),
+    FERRY_TOOLS_DIR: tools,
+  },
   stdio: ["ignore", "pipe", "inherit"],
 });
 

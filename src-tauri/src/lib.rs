@@ -517,9 +517,17 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
+            #[cfg(debug_assertions)]
+            let data_dir = std::env::var_os("FERRY_DATA_DIR").map(PathBuf::from).unwrap_or(data_dir);
             std::fs::create_dir_all(&data_dir)?;
             remove_stale_runs(&data_dir.join("rector"));
-            app.manage(AppState::new(data_dir));
+            #[allow(unused_mut)]
+            let mut state = AppState::new(data_dir);
+            #[cfg(debug_assertions)]
+            if let Some(tools) = std::env::var_os("FERRY_TOOLS_DIR") {
+                state.tools_dir = PathBuf::from(tools);
+            }
+            app.manage(state);
             #[cfg(debug_assertions)]
             if std::env::var_os("FERRY_E2E").is_some() {
                 use tauri::Listener;
