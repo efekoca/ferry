@@ -1653,13 +1653,18 @@ mod tests {
 
     #[test]
     fn many_functions_stay_linear() {
-        let mut src = String::from("<?php\n");
-        for n in 0..20_000 {
-            src.push_str(&format!("function f{n}($a) {{ return $a; }}\n"));
-        }
-        let started = std::time::Instant::now();
-        analyze_source("big.php", &src, PhpVersion::new(8, 5));
-        assert!(started.elapsed() < std::time::Duration::from_secs(1), "{:?}", started.elapsed());
+        let time = |n: usize| {
+            let mut src = String::from("<?php\n");
+            for k in 0..n {
+                src.push_str(&format!("function f{k}($a) {{ return $a; }}\n"));
+            }
+            let started = std::time::Instant::now();
+            analyze_source("big.php", &src, PhpVersion::new(8, 5));
+            started.elapsed().as_secs_f64()
+        };
+        time(1_000);
+        let (small, large) = (time(4_000), time(16_000));
+        assert!(large < small * 10.0, "4k: {small:.3}s, 16k: {large:.3}s");
     }
 
     #[test]
