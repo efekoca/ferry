@@ -9,6 +9,12 @@ const APP_ORIGIN: &str = if cfg!(windows) { "http://tauri.localhost" } else { "t
 
 static LANG_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+fn turkish() -> std::sync::MutexGuard<'static, ()> {
+    let guard = LANG_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    i18n::set_lang(Lang::Tr);
+    guard
+}
+
 struct Harness {
     _app: tauri::App<MockRuntime>,
     webview: WebviewWindow<MockRuntime>,
@@ -79,6 +85,7 @@ impl Harness {
 
 #[test]
 fn scan_flow_matches_ui_contract() {
+    let _lang = turkish();
     let h = harness();
     let root = h.root.clone();
 
@@ -117,7 +124,7 @@ fn scan_flow_matches_ui_contract() {
 
 #[test]
 fn rejects_bad_input_with_messages() {
-    let _lang = LANG_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _lang = turkish();
     let h = harness();
     let err = h.invoke("scan_project", json!({ "path": h.root, "target": "7.4", "run": 1 })).unwrap_err();
     assert!(err.as_str().unwrap().contains("Desteklenmeyen hedef sürüm"));
@@ -176,6 +183,7 @@ fn rector_preview_apply_restore_over_ipc() {
         eprintln!("FERRY_TEST_TOOLS ayarlı değil; Rector IPC testi atlandı");
         return;
     }
+    let _lang = turkish();
     let h = harness();
     let root = h.root.clone();
     let preview = h.ok("rector_preview", json!({ "path": root, "target": "8.4", "mode": "compat" }));

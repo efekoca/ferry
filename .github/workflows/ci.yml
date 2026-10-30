@@ -58,7 +58,6 @@ jobs:
           cargo test -p ferry-core
 
   windows:
-    if: github.event_name != 'pull_request'
     needs: checks
     runs-on: windows-latest
     timeout-minutes: 40

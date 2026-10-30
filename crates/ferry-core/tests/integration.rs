@@ -106,6 +106,13 @@ fn rector_sees_the_same_files_as_the_scanner() {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, nullable).unwrap();
     }
+    let excluded = ["var".to_string()];
+    let mut scanned: Vec<String> = project::collect_php_files(&root, &excluded)
+        .iter()
+        .map(|f| analyzer::relative_path(&root, f))
+        .collect();
+    scanned.sort();
+    assert!(scanned.contains(&"variables.php".to_string()) && !scanned.iter().any(|f| f.starts_with("var/")), "{scanned:?}");
     let work = tempfile::tempdir().unwrap();
     let preview = rector::preview(
         &php,
@@ -113,15 +120,15 @@ fn rector_sees_the_same_files_as_the_scanner() {
         &root,
         PhpVersion::new(8, 4),
         rector::RectorMode::Compat,
-        &["var".to_string()],
+        &excluded,
         work.path(),
         &std::sync::atomic::AtomicBool::new(false),
     )
     .unwrap();
     assert!(preview.errors.is_empty(), "{:?}", preview.errors);
-    let mut changed: Vec<&str> = preview.changes.iter().map(|c| c.file.as_str()).collect();
+    let mut changed: Vec<String> = preview.changes.iter().map(|c| c.file.clone()).collect();
     changed.sort();
-    assert_eq!(changed, ["src/m.module", "src/t.phtml", "src/x.inc", "variables.php", "web/core.install"]);
+    assert_eq!(changed, scanned);
 }
 
 #[test]

@@ -1653,18 +1653,26 @@ mod tests {
 
     #[test]
     fn many_functions_stay_linear() {
-        let time = |n: usize| {
+        let src = |n: usize| {
             let mut src = String::from("<?php\n");
             for k in 0..n {
                 src.push_str(&format!("function f{k}($a) {{ return $a; }}\n"));
             }
-            let started = std::time::Instant::now();
-            analyze_source("big.php", &src, PhpVersion::new(8, 5));
-            started.elapsed().as_secs_f64()
+            src
         };
-        time(1_000);
-        let (small, large) = (time(4_000), time(16_000));
+        let (small, large) = (fastest_run(&src(4_000), "8.5"), fastest_run(&src(16_000), "8.5"));
         assert!(large < small * 10.0, "4k: {small:.3}s, 16k: {large:.3}s");
+    }
+
+    fn fastest_run(src: &str, target: &str) -> f64 {
+        analyze_source("big.php", src, target.parse().unwrap());
+        (0..5)
+            .map(|_| {
+                let started = Instant::now();
+                analyze_source("big.php", src, target.parse().unwrap());
+                started.elapsed().as_secs_f64()
+            })
+            .fold(f64::INFINITY, f64::min)
     }
 
     #[test]
@@ -1875,10 +1883,11 @@ mod tests {
 
     #[test]
     fn long_lines_stay_fast_and_snippets_are_cut() {
-        let src = format!("<?php {}", "each($a); ".repeat(40_000));
-        let started = Instant::now();
+        let line = |n: usize| format!("<?php {}", "each($a); ".repeat(n));
+        let src = line(40_000);
+        let (small, large) = (fastest_run(&line(10_000), "8.0"), fastest_run(&src, "8.0"));
+        assert!(large < small * 10.0, "10k: {small:.3}s, 40k: {large:.3}s");
         let f = analyze_source("t.php", &src, "8.0".parse().unwrap());
-        assert!(started.elapsed().as_secs() < 3, "{:?}", started.elapsed());
         assert_eq!(f.len(), 40_000);
         assert_eq!(f[0].snippet.chars().count(), 201);
         assert_eq!(f[39_999].column, 6 + 39_999 * 10 + 1);
