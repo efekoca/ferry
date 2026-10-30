@@ -599,6 +599,11 @@ impl<'a> Ctx<'a> {
             }
             let args = call_args(tokens, i + 1);
             let single = |n: usize| args.get(n).filter(|a| a.len() == 1).map(|a| &a[0]);
+            if let Some((_, slot)) = CALLABLE_ARGS.iter().find(|(f, _)| *f == lower) {
+                if let Some(arg) = single(*slot) {
+                    self.callable_string(arg, i);
+                }
+            }
             let named = args.iter().any(|a| a.len() > 1 && a[1].is_punct(":") && a[0].kind == TokenKind::Ident);
             let spread = args.iter().any(|a| a.first().is_some_and(|t| t.is_punct("...")));
             match lower.as_str() {
@@ -669,6 +674,12 @@ impl<'a> Ctx<'a> {
         let (kind, class) = if tokens[i - 1].is_punct("::") {
             let Some(class) = i.checked_sub(2).map(|k| &tokens[k]).filter(|t| t.kind == TokenKind::Ident) else { return };
             let name = class.text.rsplit('\\').next().unwrap_or_default();
+            if is_call && name.eq_ignore_ascii_case("Closure") && lower == "fromcallable" {
+                if let Some(arg) = call_args(tokens, i + 1).first().filter(|a| a.len() == 1) {
+                    self.callable_string(&arg[0], i);
+                }
+                return;
+            }
             (if is_call { MemberKind::StaticCall } else { MemberKind::Constant }, Some(name))
         } else if is_call {
             (MemberKind::Method, None)
@@ -703,6 +714,35 @@ impl<'a> Ctx<'a> {
             replacement: m.rule.replacement,
         };
         self.push(hit, tok.line, tok.column);
+    }
+
+    fn callable_string(&mut self, arg: &Token, call: usize) {
+        let TokenKind::Str { interpolates, .. } = arg.kind else { return };
+        let inner = arg.text.get(1..arg.text.len().saturating_sub(1)).unwrap_or_default();
+        if interpolates && inner.contains('$') {
+            return;
+        }
+        let name = inner.trim_start_matches('\\').to_ascii_lowercase();
+        if name.is_empty() || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
+            return;
+        }
+        if self.local_functions.contains(&name) || self.index.declares_function(crate::index::namespace_at(&self.namespaces, call), &name, true) {
+            return;
+        }
+        let Some(rule) = FUNCTIONS.iter().find(|r| r.matches(&name)) else { return };
+        if !self.applies(rule.since()) {
+            return;
+        }
+        let hit = Hit {
+            rule_id: rule.id,
+            title: Localized::same(format!("'{}'", inner.trim_start_matches('\\'))),
+            message: rule.note,
+            since: rule.since(),
+            severity: rule.severity(),
+            fix: FixKind::Manual,
+            replacement: rule.replacement,
+        };
+        self.push(hit, arg.line, arg.column);
     }
 
     fn mb_encoding(&mut self, tokens: &[Token], i: usize) {
@@ -871,6 +911,15 @@ fn enclosing_call(tokens: &[Token], i: usize) -> Option<&str> {
     }
     None
 }
+
+const CALLABLE_ARGS: [(&str, usize); 23] = [
+    ("array_map", 0), ("array_filter", 1), ("array_walk", 1), ("array_walk_recursive", 1), ("array_reduce", 1),
+    ("usort", 1), ("uasort", 1), ("uksort", 1), ("call_user_func", 0), ("call_user_func_array", 0),
+    ("forward_static_call", 0), ("forward_static_call_array", 0), ("register_shutdown_function", 0),
+    ("spl_autoload_register", 0), ("set_error_handler", 0), ("set_exception_handler", 0),
+    ("preg_replace_callback", 1), ("iterator_apply", 1), ("ob_start", 0), ("header_register_callback", 0),
+    ("register_tick_function", 0), ("array_udiff", 2), ("array_uintersect", 2),
+];
 
 const MB_ENCODING_ARGS: [(&str, &[usize]); 34] = [
     ("mb_convert_encoding", &[1, 2]), ("mb_check_encoding", &[1]), ("mb_strlen", &[1]), ("mb_substr", &[3]),
@@ -1590,6 +1639,17 @@ mod tests {
         let started = std::time::Instant::now();
         analyze_source("big.php", &src, PhpVersion::new(8, 5));
         assert!(started.elapsed() < std::time::Duration::from_secs(1), "{:?}", started.elapsed());
+    }
+
+    #[test]
+    fn removed_functions_passed_as_strings() {
+        let src = "<?php\n$a = array_map('utf8_encode', $rows);\nusort($list, 'strcmp');\ncall_user_func(\"each\", $arr);\n$f = Closure::fromCallable('create_function');\narray_filter($x, 'is_real');\nfunction legacy_helper() {}\narray_map('legacy_helper', $x);\narray_map(\"pre_$name\", $x);\n$s = 'each';";
+        let found = at(src, (8, 5));
+        let titles: Vec<&str> = found.iter().map(|(_, t)| t.as_str()).collect();
+        assert_eq!(titles, ["'utf8_encode'", "'each'", "'create_function'", "'is_real'"]);
+        let fixes: Vec<_> = analyze_source("a.php", src, PhpVersion::new(8, 5)).into_iter().map(|f| f.fix).collect();
+        assert!(fixes.iter().all(|f| *f == FixKind::Manual), "Rector doesn't rewrite strings");
+        assert!(at("<?php function each($a) {} array_map('each', $x);", (8, 5)).is_empty());
     }
 
     #[test]
