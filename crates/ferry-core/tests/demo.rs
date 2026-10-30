@@ -1,9 +1,9 @@
-use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
 use ferry_core::deps::{self, DependencyStatus};
 use ferry_core::project::{self, Framework};
 use ferry_core::rules::{patterns, CONSTANTS, FUNCTIONS, MEMBERS};
 use ferry_core::{analyzer, report, PhpVersion};
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
 
 fn demo(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../demo").join(name)
@@ -127,17 +127,13 @@ fn rector_handles_every_demo_project() {
         )
         .unwrap();
         assert!(preview.errors.is_empty(), "{name}: {:?}", preview.errors);
-        let curly_files: BTreeSet<String> = analyzer::analyze_files(
-            &root,
-            &project::collect_php_files(&root, &info.excluded_dirs),
-            PhpVersion::new(8, 5),
-            |_, _, _| {},
-        )
-        .findings
-        .into_iter()
-        .filter(|f| f.rule_id == patterns::CURLY_OFFSET.id)
-        .map(|f| f.file)
-        .collect();
+        let curly_files: BTreeSet<String> =
+            analyzer::analyze_files(&root, &project::collect_php_files(&root, &info.excluded_dirs), PhpVersion::new(8, 5), |_, _, _| {})
+                .findings
+                .into_iter()
+                .filter(|f| f.rule_id == patterns::CURLY_OFFSET.id)
+                .map(|f| f.file)
+                .collect();
         for file in &curly_files {
             let change = preview.changes.iter().find(|c| &c.file == file).unwrap_or_else(|| panic!("{name}: {file} not fixed"));
             assert!(change.rules.iter().any(|r| r.name == "CurlyToSquareBracketArrayStringRector"), "{name}: {file}");
@@ -177,7 +173,8 @@ fn auto_findings_are_fixed_by_rector() {
             &std::sync::atomic::AtomicBool::new(false),
         )
         .unwrap();
-        let findings = analyzer::analyze_files(&root, &project::collect_php_files(&root, &info.excluded_dirs), target, |_, _, _| {}).findings;
+        let findings =
+            analyzer::analyze_files(&root, &project::collect_php_files(&root, &info.excluded_dirs), target, |_, _, _| {}).findings;
         for f in findings.iter().filter(|f| f.fix != ferry_core::rules::FixKind::Manual) {
             let Some(change) = preview.changes.iter().find(|c| c.file == f.file) else {
                 unfixed.insert(format!("{} ({:?}) {}:{}", f.rule_id, f.fix, f.file, f.line));
@@ -190,16 +187,24 @@ fn auto_findings_are_fixed_by_rector() {
                 let count = |s: &str| {
                     let lower = s.to_lowercase();
                     let w = word.to_lowercase();
-                    lower.match_indices(&w).filter(|(i, _)| {
-                        let before = lower[..*i].chars().last();
-                        let after = lower[i + w.len()..].chars().next();
-                        !before.is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '$')
-                            && !after.is_some_and(|c| c.is_alphanumeric() || c == '_')
-                    }).count()
+                    lower
+                        .match_indices(&w)
+                        .filter(|(i, _)| {
+                            let before = lower[..*i].chars().last();
+                            let after = lower[i + w.len()..].chars().next();
+                            !before.is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '$')
+                                && !after.is_some_and(|c| c.is_alphanumeric() || c == '_')
+                        })
+                        .count()
                 };
                 !word.is_empty() && count(&change.new_content) < count(&source)
             } else {
-                change.diff.hunks.iter().flat_map(|h| &h.lines).any(|l| l.kind == ferry_core::diff::LineKind::Del && l.old_no == Some(f.line))
+                change
+                    .diff
+                    .hunks
+                    .iter()
+                    .flat_map(|h| &h.lines)
+                    .any(|l| l.kind == ferry_core::diff::LineKind::Del && l.old_no == Some(f.line))
             };
             if !touched {
                 unfixed.insert(format!("{} ({:?}) {}:{}", f.rule_id, f.fix, f.file, f.line));
@@ -224,5 +229,8 @@ fn framework_versions_are_checked_for_demo_projects() {
     assert!(rule_files("laravel-api", PhpVersion::new(8, 3)).is_empty());
     assert_eq!(rule_files("laravel-api", PhpVersion::new(8, 4)), [("framework.laravel_version".to_string(), "composer.json".to_string())]);
     assert!(rule_files("wp-blog", PhpVersion::new(8, 2)).is_empty());
-    assert_eq!(rule_files("wp-blog", PhpVersion::new(8, 4)), [("framework.wordpress_version".to_string(), "wp-includes/version.php".to_string())]);
+    assert_eq!(
+        rule_files("wp-blog", PhpVersion::new(8, 4)),
+        [("framework.wordpress_version".to_string(), "wp-includes/version.php".to_string())]
+    );
 }

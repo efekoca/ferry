@@ -46,11 +46,8 @@ fn read_json(path: &Path) -> Option<serde_json::Value> {
 }
 
 pub fn check(root: &Path, target: PhpVersion) -> DependencyReport {
-    let root_constraint = read_json(&root.join("composer.json")).and_then(|j| {
-        j.pointer("/require/php")
-            .and_then(|v| v.as_str())
-            .map(str::to_string)
-    });
+    let root_constraint =
+        read_json(&root.join("composer.json")).and_then(|j| j.pointer("/require/php").and_then(|v| v.as_str()).map(str::to_string));
     let lock = read_json(&root.join("composer.lock"));
     let mut packages = Vec::new();
     if let Some(lock) = &lock {
@@ -60,15 +57,8 @@ pub fn check(root: &Path, target: PhpVersion) -> DependencyReport {
             };
             for pkg in list {
                 let name = pkg.get("name").and_then(|v| v.as_str()).unwrap_or("?").to_string();
-                let version = pkg
-                    .get("version")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("?")
-                    .to_string();
-                let php_constraint = pkg
-                    .pointer("/require/php")
-                    .and_then(|v| v.as_str())
-                    .map(str::to_string);
+                let version = pkg.get("version").and_then(|v| v.as_str()).unwrap_or("?").to_string();
+                let php_constraint = pkg.pointer("/require/php").and_then(|v| v.as_str()).map(str::to_string);
                 let mut status = status_for(php_constraint.as_deref(), target);
                 let mut note = None;
                 if let Some(limit) = crate::framework::package_limit(&name, &version).filter(|l| target > l.max) {
@@ -89,14 +79,7 @@ pub fn check(root: &Path, target: PhpVersion) -> DependencyReport {
                         });
                     }
                 }
-                packages.push(Dependency {
-                    name,
-                    version,
-                    php_constraint,
-                    status,
-                    dev,
-                    note,
-                });
+                packages.push(Dependency { name, version, php_constraint, status, dev, note });
             }
         }
     }

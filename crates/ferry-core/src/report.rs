@@ -40,11 +40,7 @@ pub fn score(findings: &[Finding]) -> u8 {
 }
 
 pub fn summarize(findings: &[Finding]) -> Summary {
-    let mut s = Summary {
-        total: findings.len(),
-        score: score(findings),
-        ..Summary::default()
-    };
+    let mut s = Summary { total: findings.len(), score: score(findings), ..Summary::default() };
     let mut files = BTreeSet::new();
     for f in findings {
         match f.severity {
@@ -86,9 +82,7 @@ fn md_escape(s: &str) -> String {
 pub fn to_markdown(project: &ProjectInfo, scan: &ScanResult, deps: Option<&DependencyReport>, lang: Lang) -> String {
     let l = |t: Text| t.get(lang);
     let s = summarize(&scan.findings);
-    let current = project
-        .current_version
-        .map_or_else(|| l(Text::new("bilinmiyor", "unknown")).to_string(), |v| format!("PHP {v}"));
+    let current = project.current_version.map_or_else(|| l(Text::new("bilinmiyor", "unknown")).to_string(), |v| format!("PHP {v}"));
     let mut md = String::new();
     md.push_str(&format!("# {}: {}\n\n", l(Text::new("Ferry raporu", "Ferry report")), project.name));
     md.push_str(&format!(
@@ -104,11 +98,7 @@ pub fn to_markdown(project: &ProjectInfo, scan: &ScanResult, deps: Option<&Depen
         l(Text::new("Hazırlık skoru", "Readiness score")),
         s.score
     ));
-    md.push_str(&format!(
-        "## {}\n\n| | {} |\n|---|---:|\n",
-        l(Text::new("Özet", "Summary")),
-        l(Text::new("Adet", "Count"))
-    ));
+    md.push_str(&format!("## {}\n\n| | {} |\n|---|---:|\n", l(Text::new("Özet", "Summary")), l(Text::new("Adet", "Count"))));
     for (label, n) in [
         (severity_label(Severity::Breaking), s.breaking),
         (severity_label(Severity::Deprecated), s.deprecated),
@@ -149,11 +139,7 @@ pub fn to_markdown(project: &ProjectInfo, scan: &ScanResult, deps: Option<&Depen
     }
 
     if let Some(deps) = deps {
-        let bad: Vec<_> = deps
-            .packages
-            .iter()
-            .filter(|p| p.status == DependencyStatus::Incompatible)
-            .collect();
+        let bad: Vec<_> = deps.packages.iter().filter(|p| p.status == DependencyStatus::Incompatible).collect();
         md.push_str(&format!("## {}\n\n", l(Text::new("Bağımlılıklar", "Dependencies"))));
         if deps.root_status == DependencyStatus::Incompatible {
             let constraint = deps.root_constraint.as_deref().unwrap_or("");
@@ -170,10 +156,7 @@ pub fn to_markdown(project: &ProjectInfo, scan: &ScanResult, deps: Option<&Depen
                 Lang::En => format!("All {} packages look compatible with PHP {}.\n\n", deps.packages.len(), deps.target),
             });
         } else {
-            md.push_str(l(Text::new(
-                "| Paket | Sürüm | PHP gereksinimi |\n",
-                "| Package | Version | PHP requirement |\n",
-            )));
+            md.push_str(l(Text::new("| Paket | Sürüm | PHP gereksinimi |\n", "| Package | Version | PHP requirement |\n")));
             md.push_str("|---|---|---|\n");
             for p in bad {
                 md.push_str(&format!(
