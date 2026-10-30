@@ -151,7 +151,7 @@ const DEPS: Omit<DependencyReport, "target" | "rootStatus"> = {
 export function mockApi(opts: { delay?: number } = {}): Api {
   const delay = opts.delay ?? 450;
   const listeners = new Set<(p: ScanProgress) => void>();
-  let settings: Settings = { phpPath: null };
+  let settings: Settings = { phpPath: null, snapshotLimit: null };
   let pending = [...CHANGES];
   let cancelled = false;
   let previewId = 0;
@@ -237,7 +237,7 @@ export function mockApi(opts: { delay?: number } = {}): Api {
       snapshots = [snapshot, ...snapshots];
       pending = pending.filter((c) => !files.includes(c.file));
       files.forEach((f) => fixed.add(f));
-      return { snapshot, written: files };
+      return { snapshot, written: files, lintErrors: [] };
     },
     listSnapshots: async () => snapshots,
     restoreSnapshot: async (_path, id) => {

@@ -153,6 +153,33 @@ describe("Ferry app", () => {
     expect(JSON.parse(localStorage.getItem("ferry.theme")!)).toBe("light");
   });
 
+  it("keeps the PHP path when the backup limit changes", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    await api.saveSettings({ phpPath: "/opt/php", snapshotLimit: null });
+    render(<App api={api} />);
+    await user.click(await screen.findByRole("button", { name: /Ayarlar/ }));
+    const group = await screen.findByRole("radiogroup", { name: "Saklanacak yedek" });
+    await user.click(within(group).getByRole("radio", { name: "30" }));
+    await waitFor(async () => expect(await api.getSettings()).toEqual({ phpPath: "/opt/php", snapshotLimit: 30 }));
+    expect(within(group).getByRole("radio", { name: "30" })).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("warns when the applied files fail php -l", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    const real = api.applyChanges;
+    api.applyChanges = async (...args) => ({ ...(await real(...args)), lintErrors: ["includes/helpers.php — Parse error on line 3"] });
+    render(<App api={api} />);
+    await openAndScan(user);
+    await user.click(nav(/Düzeltmeler/));
+    await user.click(await screen.findByRole("button", { name: /Değişiklikleri hesapla/ }));
+    await user.click(await screen.findByRole("button", { name: "Tümünü uygula" }));
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Uygula" }));
+    const alert = await screen.findByText("1 dosyada sözdizimi hatası var");
+    expect(alert.closest("[role=alert]")).toHaveTextContent("includes/helpers.php — Parse error on line 3");
+  });
+
   it("switches the whole interface to English and remembers it", async () => {
     const user = setup();
     await user.click(await screen.findByRole("button", { name: /Ayarlar/ }));
