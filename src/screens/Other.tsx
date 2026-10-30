@@ -28,7 +28,7 @@ import { LANGS, useI18n, type Lang } from "../i18n";
 import { errorMessage } from "../lib/api";
 import { formatRelative } from "../lib/labels";
 import { useStore, type Theme } from "../lib/store";
-import type { DependencyStatus, FileChange, Snapshot } from "../lib/types";
+import type { DependencyStatus, FileChange, Settings, Snapshot } from "../lib/types";
 
 const DEP_TONE: Record<DependencyStatus, "danger" | "auto" | "neutral"> = {
   incompatible: "danger",
@@ -466,6 +466,23 @@ export function SettingsScreen() {
   const { theme, setTheme, toolchain, refreshToolchain, installRector, installingRector, api } = useStore();
   const toast = useToast();
   const [checking, setChecking] = useState(false);
+  const [settings, setSettings] = useState<Settings>({ phpPath: null, snapshotLimit: null });
+
+  useEffect(() => {
+    api?.getSettings().then(setSettings).catch(() => {});
+  }, [api]);
+
+  const save = async (next: Settings) => {
+    if (!api) return false;
+    try {
+      await api.saveSettings(next);
+      setSettings(next);
+      return true;
+    } catch (e) {
+      toast.push({ tone: "error", title: t.toast.saveFailed, description: errorMessage(e, t.common.genericError) });
+      return false;
+    }
+  };
 
   const themes = [
     { value: "system" as Theme, label: withIcon(<Monitor size={13} />, t.settings.system) },
@@ -481,26 +498,30 @@ export function SettingsScreen() {
 
   const choosePhp = async () => {
     if (!api) return;
+    let path: string | null;
     try {
-      const path = await api.pickPhpBinary(t.dialogs.pickPhp);
-      if (!path) return;
-      await api.saveSettings({ phpPath: path });
-      await recheck();
-      toast.push({ tone: "success", title: t.toast.phpSaved, description: path });
+      path = await api.pickPhpBinary(t.dialogs.pickPhp);
     } catch (e) {
       toast.push({ tone: "error", title: t.toast.saveFailed, description: errorMessage(e, t.common.genericError) });
+      return;
     }
+    if (!path || !(await save({ ...settings, phpPath: path }))) return;
+    await recheck();
+    toast.push({ tone: "success", title: t.toast.phpSaved, description: path });
   };
 
   const resetPhp = async () => {
-    if (!api) return;
-    try {
-      await api.saveSettings({ phpPath: null });
-      await recheck();
-    } catch (e) {
-      toast.push({ tone: "error", title: t.toast.saveFailed, description: errorMessage(e, t.common.genericError) });
-    }
+    if (await save({ ...settings, phpPath: null })) await recheck();
   };
+
+  const limits = [
+    { value: "none", label: t.settings.unlimited },
+    { value: "10", label: "10" },
+    { value: "30", label: "30" },
+    { value: "100", label: "100" },
+  ] as const;
+  type LimitValue = (typeof limits)[number]["value"];
+  const limitValue = (settings.snapshotLimit === null ? "none" : String(settings.snapshotLimit)) as LimitValue;
 
   const tools = [
     { name: "PHP", info: toolchain?.php, required: true },
@@ -568,6 +589,23 @@ export function SettingsScreen() {
                   )}
                 </div>
               ))}
+            </div>
+          </Card>
+
+          <Card title={t.settings.backups} bodyClassName="">
+            <div className="card__list">
+              <div className="setting">
+                <div className="setting__text">
+                  <div className="setting__title">{t.settings.keep}</div>
+                  <div className="setting__desc">{t.settings.keepText}</div>
+                </div>
+                <Segmented<LimitValue>
+                  label={t.settings.keep}
+                  options={limits}
+                  value={limits.some((l) => l.value === limitValue) ? limitValue : "none"}
+                  onChange={(v) => save({ ...settings, snapshotLimit: v === "none" ? null : Number(v) })}
+                />
+              </div>
             </div>
           </Card>
 

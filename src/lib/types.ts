@@ -151,8 +151,10 @@ export interface Snapshot {
 export interface ApplyResult {
   snapshot: Snapshot;
   written: string[];
+  lintErrors: string[];
 }
 
 export interface Settings {
   phpPath: string | null;
+  snapshotLimit: number | null;
 }

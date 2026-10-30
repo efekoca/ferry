@@ -194,6 +194,30 @@ pub fn php_version(php: &Path) -> Option<String> {
         .map(str::to_string)
 }
 
+pub fn lint(php: &Path, root: &Path, files: &[String]) -> Vec<String> {
+    let mut errors = Vec::new();
+    for rel in files {
+        let path = root.join(rel);
+        let Ok(out) = command(php).args(["-n", "-d", "display_errors=1", "-l"]).arg(&path).output() else {
+            continue;
+        };
+        if out.status.success() {
+            continue;
+        }
+        let text = format!("{}\n{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        let full = path.to_string_lossy();
+        let line = text
+            .lines()
+            .map(str::trim)
+            .find(|l| l.to_ascii_lowercase().contains("error") && !l.starts_with("Errors parsing"))
+            .or_else(|| text.lines().map(str::trim).find(|l| !l.is_empty()))
+            .unwrap_or_default();
+        let line = line.trim_start_matches("PHP ").replace(full.as_ref(), rel);
+        errors.push(format!("{rel} — {line}"));
+    }
+    errors
+}
+
 pub fn find_composer() -> Option<PathBuf> {
     let found = find_executable("composer.phar").or_else(|| find_executable("composer"))?;
     let is_script_wrapper = found
@@ -331,6 +355,23 @@ pub fn install_rector(tools_dir: &Path, php_override: Option<&Path>, cancel: &st
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lint_reports_only_broken_files() {
+        let Some(php) = find_php(None) else {
+            eprintln!("php not found; lint test skipped");
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::write(dir.path().join("src/ok.php"), "<?php\necho 1;\n").unwrap();
+        std::fs::write(dir.path().join("src/bad.php"), "<?php\nfunction f( {\n").unwrap();
+        let errors = lint(&php, dir.path(), &["src/ok.php".into(), "src/bad.php".into()]);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].starts_with("src/bad.php — "), "{errors:?}");
+        assert!(errors[0].contains("line 2"), "{errors:?}");
+        assert!(!errors[0].contains(&*dir.path().to_string_lossy()), "{errors:?}");
+    }
 
     #[cfg(unix)]
     #[test]

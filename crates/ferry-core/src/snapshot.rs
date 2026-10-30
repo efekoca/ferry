@@ -190,6 +190,15 @@ impl SnapshotStore {
         Ok(out)
     }
 
+    pub fn prune(&self, project_root: &Path, keep: usize) -> Result<Vec<String>, SnapshotError> {
+        let mut removed = Vec::new();
+        for old in self.list(project_root)?.into_iter().skip(keep) {
+            self.delete(project_root, &old.id)?;
+            removed.push(old.id);
+        }
+        Ok(removed)
+    }
+
     fn load(&self, project_root: &Path, id: &str) -> Result<(Snapshot, PathBuf), SnapshotError> {
         safe_relative(id)?;
         let dir = self.project_dir(project_root).join(id);
@@ -283,6 +292,28 @@ impl SnapshotStore {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn prune_keeps_the_newest_snapshots() {
+        let project = tempfile::tempdir().unwrap();
+        let store_dir = tempfile::tempdir().unwrap();
+        let store = SnapshotStore::new(store_dir.path());
+        let root = project.path();
+        fs::write(root.join("a.php"), "x").unwrap();
+        let ids: Vec<String> = (0..4).map(|n| store.create(root, &["a.php".into()], &format!("s{n}")).unwrap().id).collect();
+        let newest: Vec<String> = store.list(root).unwrap().into_iter().map(|s| s.id).collect();
+        assert_eq!(newest.len(), 4);
+
+        let mut removed = store.prune(root, 2).unwrap();
+        removed.sort();
+        let mut expected = newest[2..].to_vec();
+        expected.sort();
+        assert_eq!(removed, expected);
+        let left: Vec<String> = store.list(root).unwrap().into_iter().map(|s| s.id).collect();
+        assert_eq!(left, newest[..2]);
+        assert!(store.prune(root, 2).unwrap().is_empty());
+        assert!(ids.iter().all(|id| left.contains(id) || removed.contains(id)));
+    }
 
     #[test]
     fn create_list_restore_delete() {
