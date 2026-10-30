@@ -128,6 +128,7 @@ export const tr = {
       `composer.json'daki PHP kısıtı (${c}) PHP ${t} ile uyumlu değil${n ? `; ayrıca ${n} paket uyumsuz` : ""}.`,
     packagesBlocked: (n: number, t: string) => `${n} paket PHP ${t} ile çalışmıyor.`,
     noBlockers: "Bilinen bir engel yok.",
+    upgradeFramework: (name: string) => `${name} sürümünü yükseltin`,
     inspect: "İncele",
     resolveManual: "Elle düzeltilecekleri çöz",
     manualLeft: (n: number) => `${n} bulgu sizin kararınızı bekliyor.`,

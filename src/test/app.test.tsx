@@ -34,6 +34,17 @@ describe("Ferry app", () => {
     expect(screen.getByText("Ciddi bir geçiş gerekiyor")).toBeInTheDocument();
     expect(JSON.parse(localStorage.getItem("ferry.recent")!)[0].name).toBe("kuzey-magaza");
     expect(screen.getByText("mysql_*()")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("WordPress 6.2, PHP 8.4 ile çalışmaz.");
+    expect(screen.getByText("WordPress sürümünü yükseltin")).toBeInTheDocument();
+  });
+
+  it("drops the framework warning for targets the framework supports", async () => {
+    const user = setup();
+    await openAndScan(user);
+    await user.click(screen.getByRole("radio", { name: "8.2" }));
+    await user.click(screen.getByRole("button", { name: /Taramayı başlat/ }));
+    await screen.findByRole("img", { name: /Hazırlık skoru/ });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("changing the target version clears stale results", async () => {

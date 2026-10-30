@@ -45,6 +45,7 @@ const NULLABLE_REPL = L("?Tip $param = null", "?Type $param = null");
 type Seed = Omit<Finding, "id" | "column">;
 
 const SEEDS: Seed[] = [
+  { file: "wp-includes/version.php", line: 16, ruleId: "framework.wordpress_version", title: same("WordPress 6.2"), message: L("WordPress 6.2, PHP 8.4 ile çalışmaz. PHP 8.4 için en az WordPress 6.7 gerekiyor; önce WordPress'i güncelleyin.", "WordPress 6.2 doesn't run on PHP 8.4. PHP 8.4 needs at least WordPress 6.7; update WordPress first."), since: "8.3", severity: "breaking", fix: "manual", replacement: same("WordPress 6.7+"), snippet: "$wp_version = '6.2.2';" },
   { file: "includes/class-db.php", line: 42, ruleId: "removed.mysql", title: same("mysql_connect()"), message: MYSQL, since: "7.0", severity: "breaking", fix: "manual", replacement: MYSQL_REPL, snippet: "$this->link = mysql_connect($host, $user, $pass);" },
   { file: "includes/class-db.php", line: 58, ruleId: "removed.mysql", title: same("mysql_query()"), message: MYSQL, since: "7.0", severity: "breaking", fix: "manual", replacement: MYSQL_REPL, snippet: "$res = mysql_query($sql, $this->link);" },
   { file: "includes/class-db.php", line: 61, ruleId: "removed.mysql", title: same("mysql_fetch_assoc()"), message: MYSQL, since: "7.0", severity: "breaking", fix: "manual", replacement: MYSQL_REPL, snippet: "while ($row = mysql_fetch_assoc($res)) {" },

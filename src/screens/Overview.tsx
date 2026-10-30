@@ -56,6 +56,7 @@ export function Overview() {
   const pct = progress && progress.total > 0 ? (progress.done / progress.total) * 100 : null;
   const s = scan?.summary;
   const blockers = dependencyBlockers(deps);
+  const frameworkBlockers = scan?.findings.filter((f) => f.ruleId.startsWith("framework.") && f.ruleId.endsWith("_version")) ?? [];
   const blockerText = blockers.root
     ? t.overview.rootBlocked(deps?.rootConstraint ?? "", target, blockers.packages)
     : t.overview.packagesBlocked(blockers.packages, target);
@@ -166,6 +167,15 @@ export function Overview() {
                 )}
               </Card>
 
+              {frameworkBlockers.map((f) => {
+                const [lead, ...rest] = loc(f.message).split(/(?<=\.) /);
+                return (
+                  <Callout key={f.id} tone={f.severity === "breaking" ? "danger" : "warn"} icon={<CircleAlert size={16} />}>
+                    <strong>{lead}</strong> {rest.join(" ")}
+                  </Callout>
+                );
+              })}
+
               <div className="grid-4">
                 <Metric label={t.severity.breaking} value={s.breaking} hint={t.overview.metrics.breakingHint} tone="var(--danger-fg)" onClick={() => setView("findings")} />
                 <Metric label={t.severity.deprecated} value={s.deprecated} hint={t.overview.metrics.deprecatedHint} tone="var(--risk-manual-fg)" onClick={() => setView("findings")} />
@@ -214,6 +224,20 @@ export function Overview() {
                 <Card title={t.overview.nextSteps} bodyClassName="">
                   <div className="steps" style={{ paddingTop: "var(--space-2)" }}>
                     <Step state="done" icon={<Check size={14} />} title={t.overview.scanDone} desc={t.overview.classified(s.total)} />
+                    {frameworkBlockers.map((f) => (
+                      <Step
+                        key={f.id}
+                        state="active"
+                        icon={<CircleAlert size={14} />}
+                        title={t.overview.upgradeFramework(loc(f.title).replace(/\s+[\d.]+$/, ""))}
+                        desc={f.replacement ? loc(f.replacement) : loc(f.message)}
+                        action={
+                          <Button size="sm" variant="ghost" onClick={() => setView("findings")}>
+                            {t.overview.inspect}
+                          </Button>
+                        }
+                      />
+                    ))}
                     <Step
                       state={preview ? "done" : "active"}
                       icon={preview ? <Check size={14} /> : <Sparkles size={14} />}

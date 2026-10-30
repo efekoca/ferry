@@ -128,6 +128,7 @@ export const en: Dict = {
     rootBlocked: (c, t, n) =>
       `The PHP constraint in composer.json (${c}) doesn't allow PHP ${t}${n ? `; ${n} packages are incompatible too` : ""}.`,
     packagesBlocked: (n, t) => `${n} packages don't support PHP ${t}.`,
+    upgradeFramework: (name: string) => `Upgrade ${name}`,
     noBlockers: "No known blockers.",
     inspect: "Review",
     resolveManual: "Resolve the manual ones",
