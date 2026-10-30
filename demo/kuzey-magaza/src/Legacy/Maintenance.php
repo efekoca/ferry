@@ -33,6 +33,23 @@ class Maintenance implements Serializable
         }
     }
 
+    public function cleanup($cert, $key, $segment, $calendar, $limit = 10, $label)
+    {
+        openssl_x509_free($cert);
+        openssl_pkey_free($key);
+        openssl_free_key($key);
+        shmop_close($segment);
+        intlcal_set($calendar, 2024, 0, 1);
+        $start = intlgregcal_create_instance();
+        call_user_func('self::report', strlen(null), $label);
+        return array($start, $limit);
+    }
+
+    public static function report($size, $label)
+    {
+        return $label . $size;
+    }
+
     public function database($conn, $result, $stmt)
     {
         $rows = pg_numrows($result);
