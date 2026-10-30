@@ -35,9 +35,7 @@ pub struct FileDiff {
 }
 
 fn strip_eol(s: &str) -> &str {
-    s.strip_suffix('\n')
-        .map(|s| s.strip_suffix('\r').unwrap_or(s))
-        .unwrap_or(s)
+    s.strip_suffix('\n').map(|s| s.strip_suffix('\r').unwrap_or(s)).unwrap_or(s)
 }
 
 pub fn compute(old: &str, new: &str, context: usize) -> FileDiff {
@@ -64,25 +62,12 @@ pub fn compute(old: &str, new: &str, context: usize) -> FileDiff {
                 let new_no = change.new_index().map(|i| i + 1);
                 old_start = old_start.or(old_no);
                 new_start = new_start.or(new_no);
-                lines.push(DiffLine {
-                    kind,
-                    old_no,
-                    new_no,
-                    text: strip_eol(change.value()).to_string(),
-                });
+                lines.push(DiffLine { kind, old_no, new_no, text: strip_eol(change.value()).to_string() });
             }
         }
-        hunks.push(Hunk {
-            old_start: old_start.unwrap_or(0),
-            new_start: new_start.unwrap_or(0),
-            lines,
-        });
+        hunks.push(Hunk { old_start: old_start.unwrap_or(0), new_start: new_start.unwrap_or(0), lines });
     }
-    FileDiff {
-        hunks,
-        additions,
-        deletions,
-    }
+    FileDiff { hunks, additions, deletions }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -184,10 +169,8 @@ pub fn apply_unified(original: &str, diff: &str) -> Result<String, PatchError> {
     let mut cursor = 0;
     let mut last_added = false;
     for (n, hunk) in hunks.iter().enumerate() {
-        let matches_at = |start: usize| {
-            start + hunk.old.len() <= lines.len()
-                && hunk.old.iter().zip(&lines[start..]).all(|(a, b)| a == b.0)
-        };
+        let matches_at =
+            |start: usize| start + hunk.old.len() <= lines.len() && hunk.old.iter().zip(&lines[start..]).all(|(a, b)| a == b.0);
         let hinted = hunk.old_start_hint.filter(|&h| h >= cursor);
         let start = match hinted {
             Some(h) if matches_at(h) => Some(h),

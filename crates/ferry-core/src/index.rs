@@ -26,10 +26,7 @@ pub struct ProjectIndex {
 
 impl ProjectIndex {
     pub fn build(root: &Path, files: &[PathBuf]) -> Self {
-        let mut index = Self {
-            framework: Some(crate::project::detect_framework(root)),
-            ..Self::default()
-        };
+        let mut index = Self { framework: Some(crate::project::detect_framework(root)), ..Self::default() };
         let mut seen = HashSet::new();
         for path in files.iter().cloned().chain(composer_files(root)) {
             if !seen.insert(std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone())) {
@@ -145,7 +142,9 @@ fn type_decls(tokens: &[Token]) -> Vec<NamedDecl> {
     let mut out = Vec::new();
     for i in 0..tokens.len() {
         let t = &tokens[i];
-        if !(t.is_ident_ci("class") || t.is_ident_ci("trait")) || i > 0 && (tokens[i - 1].is_punct("::") || tokens[i - 1].is_ident_ci("new")) {
+        if !(t.is_ident_ci("class") || t.is_ident_ci("trait"))
+            || i > 0 && (tokens[i - 1].is_punct("::") || tokens[i - 1].is_ident_ci("new"))
+        {
             continue;
         }
         let Some(name) = tokens.get(i + 1).filter(|n| n.kind == TokenKind::Ident) else { continue };
@@ -181,15 +180,10 @@ fn type_decl(tokens: &[Token], kw: usize) -> Option<TypeDecl> {
         .filter(|t| t.kind == TokenKind::Ident)
         .map(|t| short(&t.text));
     let attr_start = (0..kw).rev().find(|&k| tokens[k].is_punct(";") || tokens[k].is_punct("}") || tokens[k].is_punct("{")).unwrap_or(0);
-    let mut open_class = tokens[attr_start..kw]
-        .iter()
-        .any(|t| t.text.trim_start_matches('\\').eq_ignore_ascii_case("AllowDynamicProperties"));
+    let mut open_class =
+        tokens[attr_start..kw].iter().any(|t| t.text.trim_start_matches('\\').eq_ignore_ascii_case("AllowDynamicProperties"));
     let modifiers = ["public", "protected", "private", "readonly", "var"];
-    let mut info = TypeInfo {
-        is_trait: tokens[kw].is_ident_ci("trait"),
-        parent,
-        ..TypeInfo::default()
-    };
+    let mut info = TypeInfo { is_trait: tokens[kw].is_ident_ci("trait"), parent, ..TypeInfo::default() };
     let mut depth = 0usize;
     let mut k = open;
     while k < close {
