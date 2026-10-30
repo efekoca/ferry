@@ -161,3 +161,43 @@ fn project_index_sees_polyfills_and_class_hierarchies() {
     let titles: Vec<&str> = scan.findings.iter().filter(|f| f.rule_id == "deprecated.dynamic_property").map(|f| f.snippet.as_str()).collect();
     assert!(titles.iter().all(|s| s.contains("extra") || s.contains("body")), "{titles:?}");
 }
+
+#[test]
+fn laravel_projects_get_framework_findings() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let write = |rel: &str, body: &str| {
+        let path = root.join(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, body).unwrap();
+    };
+    write("artisan", "#!/usr/bin/env php\n<?php\n");
+    write("composer.json", "{\n  \"require\": {\n    \"laravel/framework\": \"^5.8\"\n  }\n}\n");
+    write("composer.lock", r#"{"packages":[{"name":"laravel/framework","version":"v5.8.38"}]}"#);
+    write("app/Http/Controllers/PostController.php", "<?php\nnamespace App\\Http\\Controllers;\nuse Input;\nclass PostController {\n    public function store() {\n        $slug = str_slug(Input::get('title'));\n        return array_get($this->data, 'x') . str_contains($slug, 'a');\n    }\n}\n");
+
+    let scan = |root: &Path| {
+        let info = project::inspect(root).unwrap();
+        let files = project::collect_php_files(root, &info.excluded_dirs);
+        let mut ids: Vec<String> = analyzer::analyze_files(root, &files, PhpVersion::new(8, 1), |_, _, _| {})
+            .findings
+            .into_iter()
+            .map(|f| format!("{}:{}:{}", f.file, f.line, f.title.en))
+            .collect();
+        ids.sort();
+        ids
+    };
+    assert_eq!(
+        scan(root),
+        [
+            "app/Http/Controllers/PostController.php:6:Input::get()",
+            "app/Http/Controllers/PostController.php:6:str_slug()",
+            "app/Http/Controllers/PostController.php:7:array_get()",
+            "composer.json:3:Laravel 5",
+        ]
+    );
+
+    write("vendor/laravel/helpers/src/helpers.php", "<?php\nif (!function_exists('str_slug')) { function str_slug($s) {} }\nif (!function_exists('array_get')) { function array_get($a, $k) {} }\n");
+    write("vendor/composer/autoload_files.php", "<?php\n$vendorDir = dirname(__DIR__);\nreturn array('h' => $vendorDir . '/laravel/helpers/src/helpers.php');\n");
+    assert_eq!(scan(root), ["app/Http/Controllers/PostController.php:6:Input::get()", "composer.json:3:Laravel 5"]);
+}

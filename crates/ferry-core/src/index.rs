@@ -19,13 +19,17 @@ pub(crate) struct TypeDecl {
 
 #[derive(Debug, Default)]
 pub struct ProjectIndex {
+    pub framework: Option<crate::project::Framework>,
     functions: HashSet<String>,
     types: HashMap<String, Vec<TypeInfo>>,
 }
 
 impl ProjectIndex {
     pub fn build(root: &Path, files: &[PathBuf]) -> Self {
-        let mut index = Self::default();
+        let mut index = Self {
+            framework: Some(crate::project::detect_framework(root)),
+            ..Self::default()
+        };
         let mut seen = HashSet::new();
         for path in files.iter().cloned().chain(composer_files(root)) {
             if !seen.insert(std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone())) {

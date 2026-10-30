@@ -393,6 +393,25 @@ pub const MEMBERS: &[MemberRule] = &[
 
 const NO_EFFECT: Text = Text::new("Hiçbir etkisi yok; silinebilir.", "Has no effect and can be removed.");
 
+pub const LARAVEL_HELPERS: [&str; 41] = [
+    "array_add", "array_collapse", "array_divide", "array_dot", "array_except", "array_first", "array_flatten",
+    "array_forget", "array_get", "array_has", "array_last", "array_only", "array_pluck", "array_prepend", "array_pull",
+    "array_random", "array_set", "array_sort", "array_sort_recursive", "array_where", "array_wrap", "camel_case",
+    "ends_with", "kebab_case", "snake_case", "starts_with", "str_after", "str_before", "str_finish", "str_is",
+    "str_limit", "str_plural", "str_random", "str_replace_array", "str_replace_first", "str_replace_last",
+    "str_singular", "str_slug", "str_start", "studly_case", "title_case",
+];
+
+pub const LARAVEL_HELPER: SymbolRule = rule!("framework.laravel_helper", "laravel_helper", R, (8, 0), tx(
+    "Illuminate\\Support\\Str ve Arr sınıfları ya da laravel/helpers paketi",
+    "the Illuminate\\Support\\Str and Arr classes, or the laravel/helpers package"), M, Text::new(
+    "Laravel 6 str_ ve array_ yardımcılarını çıkardı. PHP 8 en az Laravel 6.20 gerektirdiği için bu çağrı çalışmaz. Str ya da Arr sınıfını kullanın veya composer require laravel/helpers ile paketi ekleyin.",
+    "Laravel 6 removed the str_ and array_ helpers. PHP 8 needs at least Laravel 6.20, so this call breaks. Use the Str or Arr class, or add the package with composer require laravel/helpers."));
+
+pub const LARAVEL_INPUT: SymbolRule = rule!("framework.laravel_input", "input", R, (8, 0), code("Request::input()"), M, Text::new(
+    "Input facade'ı Laravel 6'da kaldırıldı. PHP 8 en az Laravel 6.20 gerektirdiği için Request facade'ını kullanın.",
+    "The Input facade was removed in Laravel 6. PHP 8 needs at least Laravel 6.20, so use the Request facade instead."));
+
 const PDO_DRIVER: Text = Text::new(
     "PDO'nun sürücüye özel sabitleri 8.5'te kullanımdan kalktı; sürücünün kendi sınıfındaki sabiti kullanın.",
     "PDO's driver-specific constants are deprecated in 8.5; use the constant on the driver's own class.",

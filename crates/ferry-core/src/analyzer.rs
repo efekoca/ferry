@@ -101,6 +101,9 @@ pub fn analyze_files(
         }
     }
     progress(files.len(), files.len(), "");
+    if let Some(framework) = index.framework {
+        findings.extend(crate::framework::check(root, framework, target));
+    }
     findings.sort_by(|a, b| {
         (a.severity, &a.file, a.line, a.column).cmp(&(b.severity, &b.file, b.line, b.column))
     });
@@ -597,6 +600,9 @@ impl<'a> Ctx<'a> {
             if self.index.declares_function(crate::index::namespace_at(&self.namespaces, i), &lower, rooted) {
                 return;
             }
+            if self.index.framework == Some(crate::project::Framework::Laravel) && crate::rules::LARAVEL_HELPERS.contains(&lower.as_str()) {
+                return self.symbol(&crate::rules::LARAVEL_HELPER, tok, true);
+            }
             let args = call_args(tokens, i + 1);
             let single = |n: usize| args.get(n).filter(|a| a.len() == 1).map(|a| &a[0]);
             if let Some((_, slot)) = CALLABLE_ARGS.iter().find(|(f, _)| *f == lower) {
@@ -674,6 +680,21 @@ impl<'a> Ctx<'a> {
         let (kind, class) = if tokens[i - 1].is_punct("::") {
             let Some(class) = i.checked_sub(2).map(|k| &tokens[k]).filter(|t| t.kind == TokenKind::Ident) else { return };
             let name = class.text.rsplit('\\').next().unwrap_or_default();
+            if is_call && name.eq_ignore_ascii_case("Input") && self.index.framework == Some(crate::project::Framework::Laravel) {
+                if self.applies(crate::rules::LARAVEL_INPUT.since()) {
+                    let hit = Hit {
+                        rule_id: crate::rules::LARAVEL_INPUT.id,
+                        title: Localized::same(format!("Input::{}()", tok.text)),
+                        message: crate::rules::LARAVEL_INPUT.note,
+                        since: crate::rules::LARAVEL_INPUT.since(),
+                        severity: crate::rules::LARAVEL_INPUT.severity(),
+                        fix: FixKind::Manual,
+                        replacement: crate::rules::LARAVEL_INPUT.replacement,
+                    };
+                    self.push(hit, tok.line, tok.column);
+                }
+                return;
+            }
             if is_call && name.eq_ignore_ascii_case("Closure") && lower == "fromcallable" {
                 if let Some(arg) = call_args(tokens, i + 1).first().filter(|a| a.len() == 1) {
                     self.callable_string(&arg[0], i);

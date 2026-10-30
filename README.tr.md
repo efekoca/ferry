@@ -111,6 +111,11 @@ Ferry her uygulamadan önce değiştireceği dosyaları yedekler. **Geçmiş** s
 | **Drupal** | `composer.json`'da `drupal/core` ya da `core/lib/Drupal.php` (`web/`, `docroot/`, `html/` veya `public/` altında da) | Drupal çekirdeği, `sites/default/files` |
 | **Düz PHP** | PHP dosyası içeren her klasör | — |
 
+WordPress ve Laravel projelerinde Ferry framework'ün kendisini de kontrol eder:
+
+- **WordPress:** `wp-includes/version.php`'deki çekirdek sürümü, hedef PHP sürümünü destekleyen en eski WordPress sürümüyle karşılaştırılır (örneğin PHP 8.4 için en az WordPress 6.7 gerekir).
+- **Laravel:** `composer.lock`'taki `laravel/framework` sürümü Laravel'in desteklediği PHP aralığıyla karşılaştırılır. Ayrıca Laravel 6'nın kaldırdığı `str_*` ve `array_*` yardımcıları ile `Input` facade'ı işaretlenir; PHP 8 en az Laravel 6.20 gerektirdiği için `laravel/helpers` kurulu değilse bunlar da bozulur.
+
 `vendor` ve `node_modules` her zaman atlanır. 2 MB'tan büyük dosyalar atlanır ve tarama sonuçlarında listelenir; hiçbir dosya sessizce dışarıda kalmaz.
 
 Hedef sürümler: **PHP 8.1, 8.2, 8.3, 8.4 ve 8.5**. Tarama PHP 7.0'dan bu yana yapılan değişiklikleri kapsadığı için PHP 5.6 ve 7.x projeleri de desteklenir.

@@ -84,7 +84,7 @@ fn kuzey_magaza_triggers_every_rule() {
 fn wp_blog_skips_core_and_finds_theme_issues() {
     let (info, result) = scan("wp-blog", PhpVersion::new(8, 4));
     assert_eq!(info.framework, Framework::WordPress);
-    assert!(result.findings.iter().all(|f| f.file.starts_with("wp-content/")));
+    assert!(result.findings.iter().all(|f| f.file.starts_with("wp-content/") || f.rule_id == "framework.wordpress_version"));
     let summary = report::summarize(&result.findings);
     assert!((50..90).contains(&summary.score), "score {}", summary.score);
 }
@@ -204,4 +204,22 @@ fn auto_findings_are_fixed_by_rector() {
         }
     }
     assert!(unfixed.is_empty(), "classified as fixable but Rector left them:\n{}", unfixed.into_iter().collect::<Vec<_>>().join("\n"));
+}
+
+#[test]
+fn framework_versions_are_checked_for_demo_projects() {
+    let rule_files = |name: &str, target: PhpVersion| -> Vec<(String, String)> {
+        let root = demo(name);
+        let info = project::inspect(&root).unwrap();
+        analyzer::analyze_files(&root, &project::collect_php_files(&root, &info.excluded_dirs), target, |_, _, _| {})
+            .findings
+            .into_iter()
+            .filter(|f| f.rule_id.starts_with("framework."))
+            .map(|f| (f.rule_id, f.file))
+            .collect()
+    };
+    assert!(rule_files("laravel-api", PhpVersion::new(8, 3)).is_empty());
+    assert_eq!(rule_files("laravel-api", PhpVersion::new(8, 4)), [("framework.laravel_version".to_string(), "composer.json".to_string())]);
+    assert!(rule_files("wp-blog", PhpVersion::new(8, 2)).is_empty());
+    assert_eq!(rule_files("wp-blog", PhpVersion::new(8, 4)), [("framework.wordpress_version".to_string(), "wp-includes/version.php".to_string())]);
 }
