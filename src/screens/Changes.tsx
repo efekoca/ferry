@@ -6,14 +6,14 @@ import { PageHeader } from "../components/Shell";
 import { Button, Callout, Card, EmptyState, Progress, RiskBadge, RuleChips, Segmented } from "../components/ui";
 import { useI18n } from "../i18n";
 import { useStore } from "../lib/store";
-import type { FileChange, RectorMode } from "../lib/types";
+import type { FileChange, RectorMode, RectorPreview } from "../lib/types";
 
 export function Changes() {
   const { t } = useI18n();
   const { toolchain, installRector, installingRector, preview, previewMode, previewing, loadPreview, cancelPreview, applyChanges, applying, target, setView } =
     useStore();
   const [mode, setMode] = useState<RectorMode>(previewMode);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [excluded, setExcluded] = useState<{ preview: RectorPreview | null; files: Set<string> }>({ preview: null, files: new Set() });
   const [active, setActive] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [appliedAll, setAppliedAll] = useState(false);
@@ -24,24 +24,26 @@ export function Changes() {
   ];
 
   useEffect(() => {
-    setSelected(new Set(preview?.changes.map((c) => c.file) ?? []));
     if (preview?.changes.length) setAppliedAll(false);
-    setActive((cur) => (preview?.changes.some((c) => c.file === cur) ? cur : (preview?.changes[0]?.file ?? null)));
   }, [preview]);
 
   const changes = useMemo(() => preview?.changes ?? [], [preview]);
-  const current = changes.find((c) => c.file === active) ?? null;
+  const off = excluded.preview === preview ? excluded.files : null;
+  const selected = useMemo(() => new Set(changes.filter((c) => !off?.has(c.file)).map((c) => c.file)), [changes, off]);
+  const current = changes.find((c) => c.file === active) ?? changes[0] ?? null;
   const chosen = useMemo(() => changes.filter((c) => selected.has(c.file)), [changes, selected]);
   const totals = chosen.reduce((sum, c) => ({ add: sum.add + c.diff.additions, del: sum.del + c.diff.deletions }), { add: 0, del: 0 });
   const allSelected = changes.length > 0 && chosen.length === changes.length;
 
-  const toggle = (file: string) =>
-    setSelected((s) => {
-      const next = new Set(s);
-      if (next.has(file)) next.delete(file);
-      else next.add(file);
-      return next;
-    });
+  const setSelected = (next: Set<string>) =>
+    setExcluded({ preview, files: new Set(changes.filter((c) => !next.has(c.file)).map((c) => c.file)) });
+
+  const toggle = (file: string) => {
+    const next = new Set(selected);
+    if (next.has(file)) next.delete(file);
+    else next.add(file);
+    setSelected(next);
+  };
 
   const header = (
     <PageHeader
@@ -237,7 +239,7 @@ export function Changes() {
                 key={c.file}
                 change={c}
                 checked={selected.has(c.file)}
-                active={c.file === active}
+                active={c.file === current?.file}
                 onToggle={() => toggle(c.file)}
                 onSelect={() => setActive(c.file)}
               />
