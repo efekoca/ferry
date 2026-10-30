@@ -15,6 +15,14 @@ pub fn set_lang(lang: Lang) {
     CURRENT.store(lang as u8, Ordering::Relaxed);
 }
 
+#[cfg(test)]
+pub(crate) fn lock_lang(lang: Lang) -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    set_lang(lang);
+    guard
+}
+
 pub fn lang() -> Lang {
     if CURRENT.load(Ordering::Relaxed) == Lang::En as u8 {
         Lang::En
@@ -109,6 +117,7 @@ mod tests {
 
     #[test]
     fn switches_language() {
+        let _lang = lock_lang(Lang::Tr);
         let n = 3;
         assert_eq!(lang(), Lang::Tr);
         assert_eq!(t!("{n} dosya", "{n} files"), "3 dosya");
