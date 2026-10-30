@@ -25,10 +25,10 @@ export interface Api {
   toolchainStatus(): Promise<ToolchainStatus>;
   installRector(): Promise<ToolchainStatus>;
   rectorPreview(path: string, target: string, mode: RectorMode): Promise<RectorPreview>;
-  cancelPreview(): Promise<void>;
+  cancelPreview(path?: string): Promise<void>;
   applyChanges(path: string, previewId: number, files: string[], label: string): Promise<ApplyResult>;
   listSnapshots(path: string): Promise<Snapshot[]>;
-  restoreSnapshot(path: string, id: string): Promise<string[]>;
+  restoreSnapshot(path: string, id: string, acknowledged: string[]): Promise<string[]>;
   deleteSnapshot(path: string, id: string): Promise<void>;
   snapshotChanges(path: string, id: string): Promise<FileChange[]>;
   snapshotConflicts(path: string, id: string): Promise<string[]>;
@@ -62,10 +62,10 @@ async function tauriApi(): Promise<Api> {
     toolchainStatus: () => invoke("toolchain_status"),
     installRector: () => invoke("install_rector"),
     rectorPreview: (path, target, mode) => invoke("rector_preview", { path, target, mode }),
-    cancelPreview: () => invoke("cancel_rector_preview"),
+    cancelPreview: (path) => invoke("cancel_rector_preview", { path }),
     applyChanges: (path, previewId, files, label) => invoke("apply_changes", { path, previewId, files, label }),
     listSnapshots: (path) => invoke("list_snapshots", { path }),
-    restoreSnapshot: (path, id) => invoke("restore_snapshot", { path, id }),
+    restoreSnapshot: (path, id, acknowledged) => invoke("restore_snapshot", { path, id, acknowledged }),
     deleteSnapshot: (path, id) => invoke("delete_snapshot", { path, id }),
     snapshotChanges: (path, id) => invoke("snapshot_changes", { path, id }),
     snapshotConflicts: (path, id) => invoke("snapshot_conflicts", { path, id }),
