@@ -1046,14 +1046,26 @@ pub mod patterns {
     };
     pub const RETURN_TYPE_WILL_CHANGE: PatternRule = PatternRule {
         id: "deprecated.tentative_return_type",
-        title: Text::new("Dönüş tipi eksik arayüz metodu", "Interface method without a return type"),
+        title: Text::new("Dönüş tipi eksik yerleşik metot", "Built-in method without a return type"),
         severity: Severity::Deprecated,
         since: (8, 1),
         replacement: code("#[\\ReturnTypeWillChange]"),
         fix: FixKind::Manual,
         note: Text::new(
-            "ArrayAccess, Iterator, Countable gibi yerleşik arayüzlerin metotları PHP 8.1'den itibaren dönüş tipi bekliyor. Dönüş tipini yazın ya da #[\\ReturnTypeWillChange] ekleyin.",
-            "Since PHP 8.1, methods of built-in interfaces such as ArrayAccess, Iterator and Countable expect a return type. Add the return type or #[\\ReturnTypeWillChange].",
+            "ArrayAccess, Iterator, Countable ya da PDO gibi yerleşik sınıf ve arayüzlerin metotları PHP 8.1'den itibaren dönüş tipi bekliyor. Dönüş tipini yazın ya da #[\\ReturnTypeWillChange] ekleyin.",
+            "Since PHP 8.1, methods of built-in classes and interfaces such as ArrayAccess, Iterator, Countable or PDO expect a return type. Add the return type or #[\\ReturnTypeWillChange].",
+        ),
+    };
+    pub const INCOMPATIBLE_OVERRIDE: PatternRule = PatternRule {
+        id: "removed.incompatible_override",
+        title: Text::new("Yerleşik metotla uyumsuz imza", "Signature incompatible with a built-in method"),
+        severity: Severity::Breaking,
+        since: (8, 0),
+        replacement: None,
+        fix: FixKind::Manual,
+        note: Text::new(
+            "Bu metot yerleşik bir sınıfın ya da arayüzün metodunu eziyor ama imzası PHP 8'deki hâliyle uyumlu değil: parametre sayısı, tipleri, referansla geçiş, static olması ya da dönüş tipi farklı. PHP sınıfı yüklerken ölümcül hata verir. İmzayı aşağıdakine uyacak şekilde düzenleyin.",
+            "This method overrides a built-in class or interface method, but its signature doesn't match the PHP 8 one: the parameter count, types, by-reference passing, static modifier or return type differ. PHP throws a fatal error when it loads the class. Make the signature compatible with the one below.",
         ),
     };
     pub const HTTP_RESPONSE_HEADER: PatternRule = PatternRule {

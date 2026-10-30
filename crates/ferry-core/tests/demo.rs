@@ -62,6 +62,7 @@ fn kuzey_magaza_triggers_every_rule() {
         patterns::OPTIONAL_BEFORE_REQUIRED.id,
         patterns::NULL_TO_INTERNAL.id,
         patterns::PARTIAL_CALLABLE.id,
+        patterns::INCOMPATIBLE_OVERRIDE.id,
     ];
     let missing: Vec<&str> = FUNCTIONS
         .iter()

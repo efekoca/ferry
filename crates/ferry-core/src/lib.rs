@@ -1,4 +1,6 @@
 pub mod analyzer;
+#[rustfmt::skip]
+mod builtin;
 pub mod deps;
 pub mod diff;
 pub mod framework;
@@ -11,8 +13,6 @@ pub mod rector;
 pub mod report;
 pub mod rules;
 pub mod snapshot;
-#[rustfmt::skip]
-mod tentative;
 pub mod toolchain;
 pub mod version;
 
