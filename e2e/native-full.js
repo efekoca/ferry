@@ -188,6 +188,7 @@
       const before = seen.length;
       await click("Geri yükle", confirm);
       await until(() => seen.slice(before).includes("Geri yüklendi"), "restored toast", 30000);
+      await until(() => !$('[role="dialog"]'), "restore dialog closed");
 
       emit("  deleting snapshot");
       (await until(() => $('tbody tr button[aria-label="Yedeği sil"]'), "delete button")).click();
@@ -211,6 +212,7 @@
       const before = seen.length;
       await click("Geri yükle", await dialog());
       await until(() => seen.slice(before).includes("Geri yüklendi"), "restored", 30000);
+      await until(() => !$('[role="dialog"]'), "restore dialog closed");
     },
 
     async function stopPreview() {
@@ -253,6 +255,7 @@
       const before = seen.length;
       await click("Geri yükle", await dialog());
       await until(() => seen.slice(before).includes("Geri yüklendi"), "restored", 30000);
+      await until(() => !$('[role="dialog"]'), "restore dialog closed");
     },
 
     async function unicodePath() {
@@ -273,6 +276,7 @@
       const before = seen.length;
       await click("Geri yükle", confirm);
       await until(() => seen.slice(before).includes("Geri yüklendi"), "restored", 30000);
+      await until(() => !$('[role="dialog"]'), "restore dialog closed");
     },
 
     async function oddProject() {
@@ -305,6 +309,7 @@
         const before = seen.length;
         await click("Geri yükle", await dialog());
         await until(() => seen.slice(before).includes("Geri yüklendi"), "restored", 30000);
+      await until(() => !$('[role="dialog"]'), "restore dialog closed");
       }
     },
 
