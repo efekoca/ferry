@@ -138,7 +138,7 @@ jobs:
         shell: bash
         run: test "${GITHUB_REF_NAME#v}" = "$(node -p "require('./src-tauri/tauri.conf.json').version")"
       - run: pnpm tauri build ${{ matrix.args }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ferry-${{ matrix.os }}
           path: |
