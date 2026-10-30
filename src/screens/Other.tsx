@@ -22,7 +22,7 @@ import {
 import { DiffViewer } from "../components/DiffViewer";
 import { ConfirmDialog, Sheet } from "../components/Modal";
 import { PageHeader } from "../components/Shell";
-import { Badge, Button, Callout, Card, EmptyState, RiskBadge, RuleChips, Segmented } from "../components/ui";
+import { Badge, Button, Callout, Card, CommandLine, EmptyState, RiskBadge, RuleChips, Segmented } from "../components/ui";
 import { useToast } from "../components/Toast";
 import { LANGS, useI18n, type Lang } from "../i18n";
 import { errorMessage } from "../lib/api";
@@ -35,6 +35,8 @@ const DEP_TONE: Record<DependencyStatus, "danger" | "auto" | "neutral"> = {
   compatible: "auto",
   unknown: "neutral",
 };
+
+const DEP_ORDER: Record<DependencyStatus, number> = { incompatible: 0, unknown: 1, compatible: 2 };
 
 const DEP_ICON: Record<DependencyStatus, ReactElement> = {
   incompatible: <CircleAlert size={11} />,
@@ -66,7 +68,7 @@ export function Dependencies() {
           title={t.deps.notChecked}
           action={
             !scan && (
-              <Button variant="primary" onClick={runScan} loading={scanning}>
+              <Button variant="primary" onClick={() => runScan()} loading={scanning}>
                 {t.overview.startScan}
               </Button>
             )
@@ -78,8 +80,12 @@ export function Dependencies() {
     );
   }
 
-  const packages = deps.packages.filter((p) => showDev || !p.dev);
-  const bad = deps.packages.filter((p) => p.status === "incompatible").length;
+  const packages = deps.packages
+    .filter((p) => showDev || !p.dev)
+    .sort((a, b) => DEP_ORDER[a.status] - DEP_ORDER[b.status] || Number(a.dev) - Number(b.dev) || a.name.localeCompare(b.name));
+  const incompatible = deps.packages.filter((p) => p.status === "incompatible");
+  const bad = incompatible.length;
+  const command = `composer update ${incompatible.map((p) => p.name).join(" ")} --with-all-dependencies`;
 
   return (
     <>
@@ -111,8 +117,8 @@ export function Dependencies() {
             </Callout>
           ) : bad > 0 ? (
             <Callout tone="danger" icon={<CircleAlert size={16} />}>
-              <strong>{t.deps.badTitle(bad, deps.target)}</strong> {t.deps.badText}{" "}
-              <code className="selectable">composer update vendor/package --with-all-dependencies</code>
+              <strong>{t.deps.badTitle(bad, deps.target)}</strong> {t.deps.badText}
+              <CommandLine command={command} />
             </Callout>
           ) : (
             <Callout tone="info" icon={<CircleCheck size={16} />}>
@@ -124,7 +130,7 @@ export function Dependencies() {
             <Card bodyClassName="card__body row">
               <span className="muted">{t.deps.rootConstraint}</span>
               <code>{deps.rootConstraint}</code>
-              <span style={{ marginLeft: "auto" }}>
+              <span className="push-end">
                 <DepBadge status={deps.rootStatus} />
               </span>
             </Card>
@@ -138,12 +144,12 @@ export function Dependencies() {
                     <th>{t.deps.package}</th>
                     <th>{t.deps.version}</th>
                     <th>{t.deps.requirement}</th>
-                    <th style={{ width: 140 }}>{t.deps.status}</th>
+                    <th className="table__status">{t.deps.status}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {packages.map((p) => (
-                    <tr key={p.name}>
+                    <tr key={p.name} data-status={p.status}>
                       <td>
                         <span className="mono selectable">{p.name}</span> {p.dev && <Badge>dev</Badge>}
                       </td>
@@ -218,7 +224,9 @@ export function History() {
                     <th>{t.history.change}</th>
                     <th>{t.history.when}</th>
                     <th>{t.history.files}</th>
-                    <th style={{ width: 260 }} />
+                    <th className="table__actions">
+                      <span className="sr-only">{t.history.actions}</span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -227,7 +235,7 @@ export function History() {
                       <td>
                         <div className="row">
                           <FileClock size={15} className="subtle" />
-                          <span style={{ fontWeight: 500 }}>{s.label}</span>
+                          <span className="strong">{s.label}</span>
                         </div>
                       </td>
                       <td className="muted" title={new Date(s.createdAt).toLocaleString(t.locale)}>
@@ -237,7 +245,7 @@ export function History() {
                         {s.files.length}
                       </td>
                       <td>
-                        <div className="row" style={{ justifyContent: "flex-end" }}>
+                        <div className="row row--end">
                           <Button size="sm" variant="ghost" icon={<Eye size={13} />} onClick={() => setReviewing(s)}>
                             {t.history.review}
                           </Button>
@@ -292,7 +300,7 @@ export function History() {
       >
         {deleting ? t.history.deleteText : t.history.restoreText(pending?.snapshot.files.length ?? 0, pending?.snapshot.label ?? "")}
         {!deleting && conflicts.length > 0 && (
-          <div style={{ marginTop: "var(--space-3)" }}>
+          <div className="dialog-callout">
             <Callout tone="warn" icon={<CircleAlert size={15} />}>
               <strong>{t.history.conflictTitle(conflicts.length)}</strong>
               <ul className="conflict-list">
@@ -447,7 +455,7 @@ function SnapshotReview({
 }
 
 const withIcon = (icon: ReactElement, label: string) => (
-  <span className="row" style={{ gap: 6 }}>
+  <span className="row row--tight">
     {icon}
     {label}
   </span>
@@ -505,9 +513,9 @@ export function SettingsScreen() {
     <>
       <PageHeader title={t.settings.title} />
       <div className="page-scroll">
-        <div className="page-body stack" style={{ maxWidth: 820 }}>
+        <div className="page-body page-body--narrow stack">
           <Card title={t.settings.appearance} bodyClassName="">
-            <div style={{ paddingTop: "var(--space-2)" }}>
+            <div className="card__list">
               <div className="setting">
                 <div className="setting__text">
                   <div className="setting__title">{t.settings.language}</div>
@@ -534,7 +542,7 @@ export function SettingsScreen() {
             }
             bodyClassName=""
           >
-            <div style={{ paddingTop: "var(--space-2)" }}>
+            <div className="card__list">
               {tools.map((tool) => (
                 <div key={tool.name} className="tool">
                   <span className={`dot ${tool.info ? "dot--ok" : tool.required ? "dot--error" : "dot--warn"}`} aria-hidden />
@@ -564,7 +572,7 @@ export function SettingsScreen() {
           </Card>
 
           {toolchain && (
-            <p className="subtle selectable" style={{ fontSize: "var(--text-sm)" }}>
+            <p className="hint selectable">
               {t.settings.footnote(toolchain.toolsDir)}
             </p>
           )}

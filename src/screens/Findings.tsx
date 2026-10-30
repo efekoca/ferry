@@ -1,16 +1,13 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { ArrowRight, CircleCheck, ClipboardList, FileCode2, FolderSearch, Info, Lightbulb, Search, Sparkles } from "lucide-react";
+import { ArrowRight, CircleCheck, ClipboardList, FileCode2, FolderSearch, Info, Lightbulb, Search, Sparkles, X } from "lucide-react";
 import { PageHeader } from "../components/Shell";
 import { useToast } from "../components/Toast";
 import { Badge, Button, Callout, EmptyState, RiskBadge, SeverityBadge, SeverityIcon } from "../components/ui";
 import { useI18n } from "../i18n";
 import { errorMessage } from "../lib/api";
-import { joinPath } from "../lib/labels";
-import { useStore } from "../lib/store";
+import { commonTitle, joinPath } from "../lib/labels";
+import { NO_FILTER, useStore, type FindingsFilter } from "../lib/store";
 import type { Finding, FixKind, Severity } from "../lib/types";
-
-type FixFilter = FixKind | "all";
-type SeverityFilter = Severity | "all";
 
 const FIX_TONE = { auto: "success", likely: "info", manual: "warn" } as const;
 const FIX_ICON: Record<FixKind, ReactNode> = {
@@ -19,28 +16,32 @@ const FIX_ICON: Record<FixKind, ReactNode> = {
   manual: <Info size={15} />,
 };
 
-export function filterFindings(findings: Finding[], fix: FixFilter, severity: SeverityFilter, query: string): Finding[] {
+export function filterFindings(findings: Finding[], { fix, severity, rule, query }: FindingsFilter): Finding[] {
   const q = query.trim().toLowerCase();
   const hit = (s: string) => s.toLowerCase().includes(q);
   return findings.filter(
     (f) =>
-      (fix === "all" || f.fix === fix) &&
-      (severity === "all" || f.severity === severity) &&
+      (!fix || f.fix === fix) &&
+      (!severity || f.severity === severity) &&
+      (!rule || f.ruleId === rule) &&
       (!q || hit(f.file) || hit(f.title.tr) || hit(f.title.en) || hit(f.snippet)),
   );
 }
 
 export function Findings() {
   const { t, loc } = useI18n();
-  const { scan, setView, project, api, runScan, scanning } = useStore();
-  const [fix, setFix] = useState<FixFilter>("all");
-  const [severity, setSeverity] = useState<SeverityFilter>("all");
-  const [query, setQuery] = useState("");
+  const { scan, setView, project, api, runScan, scanning, findingsFilter: filter, setFindingsFilter } = useStore();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const toast = useToast();
 
   const findings = useMemo(() => scan?.findings ?? [], [scan]);
-  const visible = useMemo(() => filterFindings(findings, fix, severity, query), [findings, fix, severity, query]);
+  const visible = useMemo(() => filterFindings(findings, filter), [findings, filter]);
+  const update = (patch: Partial<FindingsFilter>) => setFindingsFilter({ ...filter, ...patch });
+  const filtered = filter.fix || filter.severity || filter.rule || filter.query;
+  const ruleTitle = useMemo(() => {
+    const titles = [...new Set(findings.filter((f) => f.ruleId === filter.rule).map((f) => loc(f.title)))];
+    return titles.length ? commonTitle(titles) : null;
+  }, [findings, filter.rule, loc]);
   const groups = useMemo(() => {
     const map = new Map<string, Finding[]>();
     for (const f of visible) map.set(f.file, [...(map.get(f.file) ?? []), f]);
@@ -71,7 +72,7 @@ export function Findings() {
           icon={<ClipboardList size={24} />}
           title={t.findings.noScan}
           action={
-            <Button variant="primary" onClick={runScan} loading={scanning}>
+            <Button variant="primary" onClick={() => runScan()} loading={scanning}>
               {t.overview.startScan}
             </Button>
           }
@@ -96,35 +97,59 @@ export function Findings() {
         <div className="split">
           <div className="pane">
             <div className="toolbar">
-              <div className="chip-group" role="group" aria-label={t.findings.fixType}>
-                <Chip pressed={fix === "all"} onClick={() => setFix("all")} label={t.common.all} count={findings.length} />
-                {(["auto", "likely", "manual"] as const).map((k) => (
-                  <Chip key={k} pressed={fix === k} onClick={() => setFix(fix === k ? "all" : k)} label={t.fix[k]} count={countFix(k)} />
-                ))}
-              </div>
-              <div className="chip-group" role="group" aria-label={t.findings.severity} style={{ marginLeft: 8 }}>
-                {(["breaking", "deprecated", "behavior"] as const).map((k) => (
-                  <Chip key={k} pressed={severity === k} onClick={() => setSeverity(severity === k ? "all" : k)} label={t.severity[k]} count={countSev(k)} />
-                ))}
-              </div>
-              <div className="search" style={{ marginLeft: "auto" }}>
-                <Search size={14} />
+              <div className="search">
+                <Search size={14} aria-hidden />
                 <input
                   className="input"
+                  type="search"
                   placeholder={t.findings.search}
                   aria-label={t.findings.searchLabel}
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
+                  value={filter.query}
+                  onChange={(e) => update({ query: e.target.value })}
                 />
+              </div>
+              <div className="toolbar__filters">
+                <div className="chip-group" role="group" aria-label={t.findings.fixType}>
+                  {(["auto", "likely", "manual"] as const).map((k) => (
+                    <Chip key={k} pressed={filter.fix === k} onClick={() => update({ fix: filter.fix === k ? null : k })} label={t.fix[k]} count={countFix(k)} />
+                  ))}
+                </div>
+                <div className="chip-group" role="group" aria-label={t.findings.severity}>
+                  {(["breaking", "deprecated", "behavior"] as const).map((k) => (
+                    <Chip key={k} pressed={filter.severity === k} onClick={() => update({ severity: filter.severity === k ? null : k })} label={t.severity[k]} count={countSev(k)} />
+                  ))}
+                </div>
+                {ruleTitle && (
+                  <button type="button" className="chip chip--removable" onClick={() => update({ rule: null })} aria-label={t.findings.removeRule(ruleTitle)}>
+                    {ruleTitle}
+                    <X size={12} aria-hidden />
+                  </button>
+                )}
+              </div>
+              <div className="toolbar__summary">
+                <span aria-live="polite">{t.findings.showing(visible.length, findings.length)}</span>
+                {filtered && (
+                  <Button variant="ghost" size="sm" onClick={() => setFindingsFilter(NO_FILTER)}>
+                    {t.findings.clearFilters}
+                  </Button>
+                )}
               </div>
             </div>
 
             {visible.length === 0 ? (
-              <EmptyState icon={<FolderSearch size={24} />} title={t.findings.noMatch}>
+              <EmptyState
+                icon={<FolderSearch size={24} />}
+                title={t.findings.noMatch}
+                action={
+                  <Button variant="secondary" onClick={() => setFindingsFilter(NO_FILTER)}>
+                    {t.findings.clearFilters}
+                  </Button>
+                }
+              >
                 {t.findings.noMatchText}
               </EmptyState>
             ) : (
-              <div role="listbox" aria-label={t.findings.list} style={{ paddingBottom: "var(--space-6)" }}>
+              <div role="listbox" aria-label={t.findings.list} className="finding-list">
                 {groups.map(([file, items]) => (
                   <section key={file} className="file-group" role="group" aria-label={file}>
                     <header className="file-group__header">
@@ -166,7 +191,7 @@ export function Findings() {
             {selected && (
               <div className="detail" key={selected.id}>
                 <div>
-                  <div className="row" style={{ marginBottom: 8 }}>
+                  <div className="row detail__badges">
                     <SeverityBadge severity={selected.severity} />
                     <RiskBadge fix={selected.fix} />
                     <Badge mono>PHP {selected.since}</Badge>
@@ -198,7 +223,7 @@ export function Findings() {
                   <strong>{t.fix[selected.fix]}:</strong> {t.fixDesc[selected.fix]}
                 </Callout>
 
-                <div className="row" style={{ flexWrap: "wrap" }}>
+                <div className="row row--wrap">
                   {selected.fix !== "manual" && (
                     <Button variant="primary" onClick={() => setView("changes")}>
                       {t.findings.previewFix} <ArrowRight size={14} />
@@ -217,7 +242,7 @@ export function Findings() {
                     </Button>
                   )}
                 </div>
-                <div className="subtle mono" style={{ fontSize: "var(--text-xs)" }}>
+                <div className="detail__rule">
                   {selected.ruleId}
                 </div>
               </div>

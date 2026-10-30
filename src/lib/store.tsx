@@ -8,6 +8,8 @@ import type {
   RectorPreview,
   ScanProgress,
   ScanResult,
+  FixKind,
+  Severity,
   Snapshot,
   Target,
   ToolchainStatus,
@@ -18,6 +20,15 @@ import { useI18n } from "../i18n";
 
 export type View = "overview" | "findings" | "changes" | "dependencies" | "history" | "runtime" | "ai" | "settings";
 export type Theme = "system" | "light" | "dark";
+
+export interface FindingsFilter {
+  fix: FixKind | null;
+  severity: Severity | null;
+  rule: string | null;
+  query: string;
+}
+
+export const NO_FILTER: FindingsFilter = { fix: null, severity: null, rule: null, query: "" };
 
 export interface RecentProject {
   path: string;
@@ -69,6 +80,9 @@ interface AppStore {
   api: Api | null;
   view: View;
   setView(v: View): void;
+  findingsFilter: FindingsFilter;
+  setFindingsFilter(f: FindingsFilter): void;
+  showFindings(f?: Partial<FindingsFilter>): void;
   theme: Theme;
   setTheme(t: Theme): void;
 
@@ -85,7 +99,7 @@ interface AppStore {
   scan: ScanResult | null;
   scanning: boolean;
   progress: ScanProgress | null;
-  runScan(): Promise<void>;
+  runScan(target?: Target): Promise<void>;
 
   deps: DependencyReport | null;
 
@@ -118,6 +132,7 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
   const { t, lang } = useI18n();
   const [api, setApi] = useState<Api | null>(injected ?? null);
   const [view, setView] = useState<View>("overview");
+  const [findingsFilter, setFindingsFilter] = useState<FindingsFilter>(NO_FILTER);
   const [theme, setThemeState] = useState<Theme>(() => readStorage<Theme>(THEME_KEY, "system", (v) => THEMES.includes(v as Theme)));
   const [recent, setRecent] = useState<RecentProject[]>(readRecent);
   const [project, setProject] = useState<ProjectInfo | null>(null);
@@ -225,6 +240,7 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
         const info = await api.inspectProject(chosen);
         rootRef.current = info.root;
         resetResults();
+        setFindingsFilter(NO_FILTER);
         setProject(info);
         setView("overview");
         setRecent((list) => {
@@ -259,16 +275,12 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
     setView("overview");
   }, [resetResults]);
 
-  const setTarget = useCallback(
-    (next: Target) => {
-      setTargetState(next);
-      writeStorage(TARGET_KEY, next);
-      resetResults();
-    },
-    [resetResults],
-  );
+  const showFindings = useCallback((f: Partial<FindingsFilter> = {}) => {
+    setFindingsFilter({ ...NO_FILTER, ...f });
+    setView("findings");
+  }, []);
 
-  const runScan = useCallback(async () => {
+  const runScan = useCallback(async (scanTarget: Target = target) => {
     if (!api || !project) return;
     const gen = ++generation.current;
     setScanning(true);
@@ -279,8 +291,8 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
         if (gen === generation.current && p.run === gen) setProgress(p);
       });
       const [result, depReport] = await Promise.all([
-        api.scanProject(project.root, target, gen),
-        api.checkDependencies(project.root, target).catch(() => null),
+        api.scanProject(project.root, scanTarget, gen),
+        api.checkDependencies(project.root, scanTarget).catch(() => null),
       ]);
       if (gen !== generation.current) return;
       setScan(result);
@@ -295,6 +307,17 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
       }
     }
   }, [api, project, target, fail, t]);
+
+  const setTarget = useCallback(
+    (next: Target) => {
+      const rescan = !!scan;
+      setTargetState(next);
+      writeStorage(TARGET_KEY, next);
+      resetResults();
+      if (rescan) runScan(next);
+    },
+    [scan, resetResults, runScan],
+  );
 
   const installRector = useCallback(async () => {
     if (!api) return;
@@ -421,13 +444,13 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
 
   const value = useMemo<AppStore>(
     () => ({
-      api, view, setView, theme, setTheme, recent, forgetRecent, project, opening, openProject, closeProject,
+      api, view, setView, findingsFilter, setFindingsFilter, showFindings, theme, setTheme, recent, forgetRecent, project, opening, openProject, closeProject,
       target, setTarget, scan, scanning, progress, runScan, deps, toolchain, refreshToolchain, installingRector,
       installRector, preview, previewMode, previewing, loadPreview, cancelPreview, applying, applyChanges, snapshots,
       refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport,
     }),
     [
-      api, view, theme, setTheme, recent, forgetRecent, project, opening, openProject, closeProject, target,
+      api, view, findingsFilter, showFindings, theme, setTheme, recent, forgetRecent, project, opening, openProject, closeProject, target,
       setTarget, scan, scanning, progress, runScan, deps, toolchain, refreshToolchain, installingRector,
       installRector, preview, previewMode, previewing, loadPreview, cancelPreview, applying, applyChanges, snapshots,
       refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport,

@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import {
   ArrowRight,
   Check,
@@ -14,20 +14,14 @@ import {
   Sparkles,
   Wrench,
 } from "lucide-react";
+import { ConfirmDialog } from "../components/Modal";
 import { PageHeader } from "../components/Shell";
 import { ScoreRing } from "../components/ScoreRing";
 import { Badge, Button, Callout, Card, Progress, RiskBadge, Segmented } from "../components/ui";
 import { useI18n } from "../i18n";
-import { dependencyBlockers, FRAMEWORK_LABEL, formatDuration, formatNumber, scoreHeadline, scoreTone } from "../lib/labels";
+import { commonTitle, dependencyBlockers, FRAMEWORK_LABEL, formatDuration, formatNumber, scoreHeadline, scoreTone } from "../lib/labels";
 import { useStore } from "../lib/store";
 import { TARGETS, type Finding, type FixKind, type Target } from "../lib/types";
-
-export function commonTitle(titles: string[]): string {
-  if (titles.every((t) => t === titles[0])) return titles[0];
-  let prefix = titles[0];
-  for (const t of titles) while (!t.startsWith(prefix)) prefix = prefix.slice(0, -1);
-  return prefix ? `${prefix}*()` : titles[0];
-}
 
 function topRules(findings: Finding[], loc: (f: Finding) => string) {
   const map = new Map<string, { titles: string[]; fix: Finding["fix"]; since: string; count: number }>();
@@ -49,9 +43,16 @@ function topRules(findings: Finding[], loc: (f: Finding) => string) {
 
 export function Overview() {
   const { t, loc } = useI18n();
-  const { project, target, setTarget, scan, scanning, progress, runScan, deps, setView, toolchain, exportReport, preview } =
+  const { project, target, setTarget, scan, scanning, progress, runScan, deps, setView, showFindings, toolchain, exportReport, preview } =
     useStore();
+  const [pendingTarget, setPendingTarget] = useState<Target | null>(null);
   if (!project) return null;
+
+  const chooseTarget = (next: Target) => {
+    if (next === target) return;
+    if (preview && preview.changes.length > 0) setPendingTarget(next);
+    else setTarget(next);
+  };
 
   const pct = progress && progress.total > 0 ? (progress.done / progress.total) * 100 : null;
   const s = scan?.summary;
@@ -75,7 +76,7 @@ export function Overview() {
               <Button variant="ghost" size="sm" icon={<Download size={14} />} onClick={exportReport}>
                 {t.overview.exportReport}
               </Button>
-              <Button variant="secondary" size="sm" icon={<RotateCw size={14} />} onClick={runScan} loading={scanning}>
+              <Button variant="secondary" size="sm" icon={<RotateCw size={14} />} onClick={() => runScan()} loading={scanning}>
                 {t.overview.rescan}
               </Button>
             </>
@@ -104,12 +105,12 @@ export function Overview() {
                 label={t.overview.targetLabel}
                 size="lg"
                 value={target}
-                onChange={setTarget}
+                onChange={chooseTarget}
                 disabled={scanning}
                 options={TARGETS.map((v) => ({ value: v, label: v }))}
               />
               {!scan && (
-                <Button variant="primary" size="lg" icon={<Play size={16} />} onClick={runScan} loading={scanning}>
+                <Button variant="primary" size="lg" icon={<Play size={16} />} onClick={() => runScan()} loading={scanning}>
                   {t.overview.startScan}
                 </Button>
               )}
@@ -161,7 +162,7 @@ export function Overview() {
                 {s.total > 0 && (
                   <div className="fix-tiles">
                     {(["auto", "likely", "manual"] as const).map((kind) => (
-                      <FixTile key={kind} kind={kind} n={s[kind]} total={s.total} onClick={() => setView("findings")} />
+                      <FixTile key={kind} kind={kind} n={s[kind]} total={s.total} onClick={() => showFindings({ fix: kind })} />
                     ))}
                   </div>
                 )}
@@ -177,9 +178,9 @@ export function Overview() {
               })}
 
               <div className="grid-4">
-                <Metric label={t.severity.breaking} value={s.breaking} hint={t.overview.metrics.breakingHint} tone="var(--danger-fg)" onClick={() => setView("findings")} />
-                <Metric label={t.severity.deprecated} value={s.deprecated} hint={t.overview.metrics.deprecatedHint} tone="var(--risk-manual-fg)" onClick={() => setView("findings")} />
-                <Metric label={t.severity.behavior} value={s.behavior} hint={t.overview.metrics.behaviorHint} tone="var(--text-2)" onClick={() => setView("findings")} />
+                <Metric label={t.severity.breaking} value={s.breaking} hint={t.overview.metrics.breakingHint} tone="danger" onClick={() => showFindings({ severity: "breaking" })} />
+                <Metric label={t.severity.deprecated} value={s.deprecated} hint={t.overview.metrics.deprecatedHint} tone="manual" onClick={() => showFindings({ severity: "deprecated" })} />
+                <Metric label={t.severity.behavior} value={s.behavior} hint={t.overview.metrics.behaviorHint} tone="neutral" onClick={() => showFindings({ severity: "behavior" })} />
                 <Metric
                   label={t.overview.metrics.blockers}
                   value={deps ? blockers.total : "—"}
@@ -190,7 +191,7 @@ export function Overview() {
                         ? t.overview.metrics.ofPackages(deps.packages.length)
                         : t.overview.metrics.noLock
                   }
-                  tone={blockers.total > 0 ? "var(--danger-fg)" : "var(--risk-auto-fg)"}
+                  tone={!deps ? "neutral" : blockers.total > 0 ? "danger" : "auto"}
                   onClick={() => setView("dependencies")}
                 />
               </div>
@@ -200,7 +201,7 @@ export function Overview() {
                   title={t.overview.commonIssues}
                   actions={
                     s.total > 0 && (
-                      <Button variant="ghost" size="sm" onClick={() => setView("findings")}>
+                      <Button variant="ghost" size="sm" onClick={() => showFindings()}>
                         {t.overview.viewAll} <ArrowRight size={13} />
                       </Button>
                     )
@@ -211,18 +212,18 @@ export function Overview() {
                     <div className="card__body muted">{t.overview.noIssues}</div>
                   ) : (
                     topRules(scan.findings, (f) => loc(f.title)).map(([id, r]) => (
-                      <div key={id} className="rule-row">
+                      <button key={id} type="button" className="rule-row" onClick={() => showFindings({ rule: id })}>
                         <span className="rule-row__title">{r.title}</span>
                         <Badge mono>PHP {r.since}</Badge>
                         <RiskBadge fix={r.fix} />
                         <span className="rule-row__count">{r.count}</span>
-                      </div>
+                      </button>
                     ))
                   )}
                 </Card>
 
                 <Card title={t.overview.nextSteps} bodyClassName="">
-                  <div className="steps" style={{ paddingTop: "var(--space-2)" }}>
+                  <div className="steps steps--card">
                     <Step state="done" icon={<Check size={14} />} title={t.overview.scanDone} desc={t.overview.classified(s.total)} />
                     {frameworkBlockers.map((f) => (
                       <Step
@@ -232,7 +233,7 @@ export function Overview() {
                         title={t.overview.upgradeFramework(loc(f.title).replace(/\s+[\d.]+$/, ""))}
                         desc={f.replacement ? loc(f.replacement) : loc(f.message)}
                         action={
-                          <Button size="sm" variant="ghost" onClick={() => setView("findings")}>
+                          <Button size="sm" variant="ghost" onClick={() => showFindings({ rule: f.ruleId })}>
                             {t.overview.inspect}
                           </Button>
                         }
@@ -260,7 +261,19 @@ export function Overview() {
                         </Button>
                       }
                     />
-                    <Step icon={<FileCode2 size={14} />} title={t.overview.resolveManual} desc={t.overview.manualLeft(s.manual)} />
+                    <Step
+                      state={s.manual > 0 ? undefined : "done"}
+                      icon={s.manual > 0 ? <FileCode2 size={14} /> : <Check size={14} />}
+                      title={t.overview.resolveManual}
+                      desc={t.overview.manualLeft(s.manual)}
+                      action={
+                        s.manual > 0 && (
+                          <Button size="sm" variant="ghost" onClick={() => showFindings({ fix: "manual" })}>
+                            {t.overview.inspect}
+                          </Button>
+                        )
+                      }
+                    />
                   </div>
                 </Card>
               </div>
@@ -277,6 +290,20 @@ export function Overview() {
           )}
         </div>
       </div>
+
+      <ConfirmDialog
+        open={pendingTarget !== null}
+        icon={<RotateCw size={20} />}
+        title={t.overview.switchTitle(pendingTarget ?? target)}
+        confirmLabel={t.overview.switchConfirm}
+        onCancel={() => setPendingTarget(null)}
+        onConfirm={() => {
+          if (pendingTarget) setTarget(pendingTarget);
+          setPendingTarget(null);
+        }}
+      >
+        {t.overview.switchText(preview?.changes.length ?? 0)}
+      </ConfirmDialog>
     </>
   );
 }
@@ -302,7 +329,7 @@ function FixTile({ kind, n, total, onClick }: { kind: FixKind; n: number; total:
   const { t } = useI18n();
   const share = total ? n / total : 0;
   return (
-    <button className="fix-tile" data-kind={kind} onClick={onClick} title={t.fixDesc[kind]}>
+    <button type="button" className="fix-tile" data-kind={kind} onClick={onClick} title={t.fixDesc[kind]}>
       <span className="fix-tile__icon" aria-hidden>
         {FIX_TILE_ICON[kind]}
       </span>
@@ -328,13 +355,13 @@ function Metric({
   label: string;
   value: number | string;
   hint: string;
-  tone: string;
+  tone: "danger" | "manual" | "neutral" | "auto";
   onClick: () => void;
 }) {
   return (
-    <button className="card card--interactive metric" onClick={onClick} style={{ textAlign: "left", font: "inherit", color: "inherit" }}>
+    <button type="button" className="card card--interactive metric" onClick={onClick}>
       <div className="metric__label">
-        <span className="dot" style={{ background: tone }} />
+        <span className={`dot dot--${tone}`} aria-hidden />
         {label}
       </div>
       <div className="metric__value">{value}</div>

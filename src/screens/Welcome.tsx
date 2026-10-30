@@ -65,15 +65,15 @@ export function Welcome() {
             <div className="section-title">{t.welcome.recent}</div>
             <div className="recent__list">
               {recent.map((r) => (
-                <div key={r.path} className="row" style={{ gap: 0 }}>
-                  <button className="recent__item" style={{ flex: 1, minWidth: 0 }} onClick={() => openProject(r.path)}>
+                <div key={r.path} className="recent__row">
+                  <button type="button" className="recent__item" onClick={() => openProject(r.path)} disabled={opening}>
                     <FolderOpen size={16} className="subtle" />
-                    <span style={{ minWidth: 0, flex: 1 }}>
-                      <span style={{ fontWeight: 500 }}>{r.name}</span>{" "}
+                    <span className="recent__text">
+                      <span className="strong">{r.name}</span>{" "}
                       <span className="subtle">· {FRAMEWORK_LABEL[r.framework]}</span>
                       <div className="recent__path">{r.path}</div>
                     </span>
-                    <span className="subtle" style={{ fontSize: "var(--text-sm)", whiteSpace: "nowrap" }}>
+                    <span className="recent__time">
                       {formatRelative(r.openedAt, t)}
                     </span>
                   </button>
@@ -83,7 +83,7 @@ export function Welcome() {
                     iconOnly
                     aria-label={t.welcome.forget(r.name)}
                     onClick={() => forgetRecent(r.path)}
-                    style={{ marginRight: 8 }}
+                    className="recent__forget"
                   >
                     <X size={14} />
                   </Button>

@@ -125,13 +125,14 @@
       await sleep(300);
       const score = await scan();
       await emit(`  score=${score} findings=${$(".nav__count")?.textContent}`);
-      radio("8.5").click();
-      await sleep(300);
-      check(!$(".score-ring"), "changing target should clear results");
-      const score85 = await scan();
+      const rescan = async (version) => {
+        radio(version).click();
+        await until(() => $(".badge")?.textContent === `PHP ${version}` && $(".score-ring"), `rescan for ${version}`, 120000);
+        return Number($(".score-ring__number")?.textContent);
+      };
+      const score85 = await rescan("8.5");
       await emit(`  8.5 score=${score85}`);
-      radio("8.4").click();
-      await scan();
+      await rescan("8.4");
 
       await nav("Bulgular");
       const all = await until(() => $$(".finding").length, "findings");
