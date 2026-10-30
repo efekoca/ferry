@@ -11,6 +11,8 @@ pub mod rector;
 pub mod report;
 pub mod rules;
 pub mod snapshot;
+#[rustfmt::skip]
+mod tentative;
 pub mod toolchain;
 pub mod version;
 
