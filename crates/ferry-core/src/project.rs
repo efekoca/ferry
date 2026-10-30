@@ -28,7 +28,9 @@ pub struct ProjectInfo {
     pub excluded_dirs: Vec<String>,
 }
 
-const PHP_EXTENSIONS: [&str; 7] = ["php", "phtml", "inc", "module", "php5", "php7", "phpt"];
+pub(crate) const PHP_EXTENSIONS: [&str; 14] = [
+    "php", "phtml", "inc", "module", "php3", "php4", "php5", "php7", "phpt", "install", "theme", "profile", "engine", "ctp",
+];
 
 const ALWAYS_SKIP: [&str; 8] = [
     "vendor", "node_modules", ".git", ".svn", ".hg", ".idea", ".vscode", ".ferry",
@@ -103,7 +105,7 @@ pub fn collect_php_files(root: &Path, excluded: &[String]) -> Vec<PathBuf> {
         }
         if e.file_type().is_dir() {
             let name = e.file_name().to_string_lossy();
-            if ALWAYS_SKIP.iter().any(|s| *s == name) {
+            if name.starts_with('.') || ALWAYS_SKIP.iter().any(|s| *s == name) {
                 return false;
             }
             return !excluded.iter().any(|x| x == e.path());

@@ -172,6 +172,17 @@ Everything runs on your computer:
 ## Known limitations
 
 - **Static analysis:** the scan reads code without running it, so behavior that depends on runtime values (for example, functions called by name from a string) can't always be found. Such cases are marked **Risky** where possible.
+- **Behavior changes:** some changes only show up when the code runs, so no static tool can find them. Test these by running your app on the new version:
+  - `0 == "foo"` is now `false`, which also affects `in_array()`, `array_search()` and `switch`.
+  - Arithmetic on non-numeric strings throws a `TypeError`.
+  - Many warnings became exceptions, for example `count()` on a non-countable value.
+  - Resources such as curl, GD and XML handles are now objects, so `is_resource()` checks fail.
+  - PDO MySQL and SQLite return real integers and floats, so `=== "1"` comparisons fail.
+  - Passing `null` through a variable to a built-in function is deprecated.
+  - Dynamic properties are deprecated.
+  - Missing `#[\ReturnTypeWillChange]` on `ArrayAccess`, `Iterator` and similar methods is deprecated.
+  - Required extensions such as imap or mcrypt may be missing on the new server.
+- **Method calls:** calls such as `$mysqli->ping()` and class constants like `PDO::MYSQL_ATTR_INIT_COMMAND` are not checked yet.
 - **Encodings:** automatic fixes skip files that are not UTF-8 (for example, Windows-1254 or Latin-1), so they are never corrupted. Convert them to UTF-8 to have them fixed.
 - **Manual fixes:** findings such as `mysql_*` need code to be rewritten, and Ferry shows what to use instead but doesn't rewrite them for you.
 - **Restore:** it puts back the files as they were before the apply, so edits you made to them afterwards are replaced. Ferry lists those files and asks before restoring.

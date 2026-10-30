@@ -38,6 +38,15 @@ fn kuzey_magaza_triggers_every_rule() {
         patterns::EVAL.id,
         patterns::VARIABLE_VARIABLE.id,
         patterns::EXTRACT.id,
+        patterns::PHP4_CONSTRUCTOR.id,
+        patterns::NESTED_TERNARY.id,
+        patterns::CASE_INSENSITIVE_CONSTANT.id,
+        patterns::PARSE_STR_ONE_ARG.id,
+        patterns::ASSERT_STRING.id,
+        patterns::BAREWORD_KEY.id,
+        patterns::CSV_ESCAPE.id,
+        patterns::MB_ENCODING.id,
+        patterns::RESERVED_NAME.id,
     ];
     let missing: Vec<&str> = FUNCTIONS
         .iter()
@@ -120,6 +129,12 @@ fn rector_handles_every_demo_project() {
         }
         assert!(!preview.changes.is_empty(), "{name}: Rector found nothing");
         assert!(preview.changes.iter().all(|c| !c.file.starts_with("vendor/")), "{name}");
+        if name == "kuzey-magaza" {
+            let report = preview.changes.iter().find(|c| c.file == "src/Legacy/OldReport.php").expect("OldReport fixed");
+            assert!(report.new_content.contains("$row['status']"), "bare keys are quoted");
+            assert!(!report.new_content.contains("STATUS"), "Rector must not turn bare keys into constants");
+            assert!(report.rules.iter().any(|r| r.name == "QuoteBarewordKeys"));
+        }
     }
 }
 

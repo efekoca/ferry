@@ -48,6 +48,9 @@ impl SymbolRule {
     }
 
     pub fn matches(&self, name: &str) -> bool {
+        if self.id == "removed.mysql" {
+            return MYSQL_FUNCTIONS.contains(&name);
+        }
         match self.name.strip_suffix('*') {
             Some(prefix) => name.starts_with(prefix),
             None => name == self.name,
@@ -56,6 +59,21 @@ impl SymbolRule {
 }
 
 use Change::{Deprecated as D, Removed as R};
+
+const MYSQL_FUNCTIONS: [&str; 65] = [
+    "mysql_affected_rows", "mysql_client_encoding", "mysql_close", "mysql_connect", "mysql_create_db", "mysql_createdb",
+    "mysql_data_seek", "mysql_db_name", "mysql_dbname", "mysql_db_query", "mysql_drop_db", "mysql_dropdb", "mysql_errno",
+    "mysql_error", "mysql_escape_string", "mysql_fetch_array", "mysql_fetch_assoc", "mysql_fetch_field",
+    "mysql_fetch_lengths", "mysql_fetch_object", "mysql_fetch_row", "mysql_field_flags", "mysql_fieldflags",
+    "mysql_field_len", "mysql_fieldlen", "mysql_field_name", "mysql_fieldname", "mysql_field_seek", "mysql_field_table",
+    "mysql_fieldtable", "mysql_field_type", "mysql_fieldtype", "mysql_free_result", "mysql_freeresult",
+    "mysql_get_client_info", "mysql_get_host_info", "mysql_get_proto_info", "mysql_get_server_info", "mysql_info",
+    "mysql_insert_id", "mysql_list_dbs", "mysql_listdbs", "mysql_list_fields", "mysql_listfields", "mysql_list_processes",
+    "mysql_list_tables", "mysql_listtables", "mysql_num_fields", "mysql_numfields", "mysql_num_rows", "mysql_numrows",
+    "mysql_pconnect", "mysql_ping", "mysql_query", "mysql_real_escape_string", "mysql_result", "mysql_select_db",
+    "mysql_selectdb", "mysql_set_charset", "mysql_stat", "mysql_tablename", "mysql_table_name", "mysql_thread_id",
+    "mysql_unbuffered_query", "mysql",
+];
 use FixKind::{Auto as A, Likely as L, Manual as M};
 
 const fn tx(tr: &'static str, en: &'static str) -> Option<Text> {
@@ -180,6 +198,24 @@ pub const FUNCTIONS: &[SymbolRule] = &[
         "Has done nothing since PHP 8.1 and is deprecated in 8.5.")),
     rule!("deprecated.imagedestroy", "imagedestroy", D, (8, 5), REMOVE_CALL, A, NOOP_SINCE_80),
     rule!("deprecated.xml_parser_free", "xml_parser_free", D, (8, 5), REMOVE_CALL, A, NOOP_SINCE_80),
+    rule!("removed.mssql", "mssql_*", R, (7, 0), tx("sqlsrv_* ya da PDO", "sqlsrv_* or PDO"), M, Text::new(
+        "mssql eklentisi PHP 7.0'da kaldırıldı.",
+        "The mssql extension was removed in PHP 7.0.")),
+    rule!("removed.sybase", "sybase_*", R, (7, 0), tx("PDO", "PDO"), M, Text::new(
+        "sybase eklentisi PHP 7.0'da kaldırıldı.",
+        "The sybase extension was removed in PHP 7.0.")),
+    rule!("deprecated.libxml_disable_entity_loader", "libxml_disable_entity_loader", D, (8, 0), REMOVE_CALL, M, Text::new(
+        "libxml 2.9'dan beri dış varlıklar zaten kapalı; bu çağrı hiçbir şey yapmıyor ve silinebilir.",
+        "External entities are already disabled since libxml 2.9; this call does nothing and can be removed.")),
+    rule!("removed.imap", "imap_*", R, (8, 4), tx("PECL imap ya da bir IMAP kütüphanesi", "PECL imap or an IMAP library"), M, Text::new(
+        "imap eklentisi PHP 8.4'te çekirdekten çıkarıldı; ancak PECL'den ayrıca kurulursa çalışır.",
+        "The imap extension was unbundled in PHP 8.4; it only works if you install it from PECL.")),
+    rule!("removed.pspell", "pspell_*", R, (8, 4), tx("PECL pspell", "PECL pspell"), M, Text::new(
+        "pspell eklentisi PHP 8.4'te çekirdekten çıkarıldı; ancak PECL'den ayrıca kurulursa çalışır.",
+        "The pspell extension was unbundled in PHP 8.4; it only works if you install it from PECL.")),
+    rule!("removed.oci8", "oci_*", R, (8, 4), tx("PECL oci8", "PECL oci8"), M, Text::new(
+        "oci8 eklentisi PHP 8.4'te çekirdekten çıkarıldı; ancak PECL'den ayrıca kurulursa çalışır.",
+        "The oci8 extension was unbundled in PHP 8.4; it only works if you install it from PECL.")),
 ];
 
 pub const CONSTANTS: &[SymbolRule] = &[
@@ -195,6 +231,15 @@ pub const CONSTANTS: &[SymbolRule] = &[
     rule!("deprecated.e_user_error", "e_user_error", D, (8, 4), tx("exception fırlatın ya da exit() kullanın", "throw an exception or call exit()"), M, Text::new(
         "trigger_error() ile E_USER_ERROR kullanmak 8.4'te kullanımdan kalktı.",
         "Passing E_USER_ERROR to trigger_error() is deprecated in 8.4.")),
+    rule!("removed.filter_flag_scheme_required", "filter_flag_scheme_required", R, (8, 0), tx("bayrağı silin", "remove the flag"), M, Text::new(
+        "Bu bayrak PHP 8.0'da kaldırıldı; FILTER_VALIDATE_URL şemayı zaten zorunlu tutuyor.",
+        "This flag was removed in PHP 8.0; FILTER_VALIDATE_URL already requires a scheme.")),
+    rule!("removed.filter_flag_host_required", "filter_flag_host_required", R, (8, 0), tx("bayrağı silin", "remove the flag"), M, Text::new(
+        "Bu bayrak PHP 8.0'da kaldırıldı; FILTER_VALIDATE_URL host'u zaten zorunlu tutuyor.",
+        "This flag was removed in PHP 8.0; FILTER_VALIDATE_URL already requires a host.")),
+    rule!("deprecated.curlopt_binarytransfer", "curlopt_binarytransfer", D, (8, 4), tx("seçeneği silin", "remove the option"), M, Text::new(
+        "CURLOPT_BINARYTRANSFER uzun zamandır hiçbir şey yapmıyor ve 8.4'te kullanımdan kalktı.",
+        "CURLOPT_BINARYTRANSFER has done nothing for years and is deprecated in 8.4.")),
 ];
 
 #[derive(Debug, Clone, Copy)]
@@ -365,6 +410,114 @@ pub mod patterns {
         note: Text::new(
             "extract() hangi değişkenleri oluşturduğunu gizler; tip ve null davranışını elle kontrol edin.",
             "extract() hides which variables it creates; check types and nulls by hand.",
+        ),
+    };
+    pub const PHP4_CONSTRUCTOR: PatternRule = PatternRule {
+        id: "removed.php4_constructor",
+        title: Text::new("PHP 4 tarzı kurucu", "PHP 4 style constructor"),
+        severity: Severity::Breaking,
+        since: (8, 0),
+        replacement: code("__construct()"),
+        fix: FixKind::Likely,
+        note: Text::new(
+            "Sınıfla aynı adı taşıyan metot PHP 8.0'dan itibaren kurucu sayılmıyor; nesne oluşturulurken artık çağrılmaz.",
+            "Since PHP 8.0 a method named after its class is no longer a constructor and isn't called when the object is created.",
+        ),
+    };
+    pub const NESTED_TERNARY: PatternRule = PatternRule {
+        id: "removed.nested_ternary",
+        title: Text::new("Parantezsiz iç içe ternary", "Unparenthesized nested ternary"),
+        severity: Severity::Breaking,
+        since: (8, 0),
+        replacement: code("$a ? $b : ($c ? $d : $e)"),
+        fix: FixKind::Likely,
+        note: Text::new(
+            "Parantezsiz iç içe ternary PHP 8.0'da derleme hatası verir. Rector eski PHP 7 davranışını koruyan parantezleri ekler; bu çoğu zaman kodun asıl niyeti değildir, uygulamadan önce kontrol edin.",
+            "Nested ternaries without parentheses are a compile error in PHP 8.0. Rector adds parentheses that keep the old PHP 7 behaviour, which is often not what the code meant, so check it before applying.",
+        ),
+    };
+    pub const CASE_INSENSITIVE_CONSTANT: PatternRule = PatternRule {
+        id: "removed.case_insensitive_constant",
+        title: Text::new("Büyük/küçük harfe duyarsız sabit", "Case-insensitive constant"),
+        severity: Severity::Breaking,
+        since: (8, 0),
+        replacement: code("define('NAME', $value)"),
+        fix: FixKind::Likely,
+        note: Text::new(
+            "define()'ın üçüncü parametresi PHP 8.0'da kaldırıldı. Sabite farklı harf büyüklüğüyle erişen yerler artık çalışmaz.",
+            "The third argument of define() was removed in PHP 8.0. Code that reads the constant with different casing stops working.",
+        ),
+    };
+    pub const PARSE_STR_ONE_ARG: PatternRule = PatternRule {
+        id: "removed.parse_str_one_arg",
+        title: Text::new("Tek parametreli parse_str()", "parse_str() with one argument"),
+        severity: Severity::Breaking,
+        since: (8, 0),
+        replacement: code("parse_str($s, $result)"),
+        fix: FixKind::Likely,
+        note: Text::new(
+            "parse_str() artık sonucu yerel değişkenlere yazmıyor; ikinci parametre zorunlu. Düzeltmeden sonra bu değişkenleri kullanan yerleri $result['...'] olarak değiştirin.",
+            "parse_str() no longer writes into local variables; the second argument is required. After the fix, change code that used those variables to $result['...'].",
+        ),
+    };
+    pub const ASSERT_STRING: PatternRule = PatternRule {
+        id: "removed.assert_string",
+        title: Text::new("Metin olarak assert()", "assert() with a string"),
+        severity: Severity::Breaking,
+        since: (8, 0),
+        replacement: code("assert($condition)"),
+        fix: FixKind::Likely,
+        note: Text::new(
+            "assert()'a verilen metin PHP 8.0'dan itibaren kod olarak çalıştırılmıyor; doğrudan koşulu yazın.",
+            "Since PHP 8.0 a string passed to assert() is no longer evaluated as code; pass the condition itself.",
+        ),
+    };
+    pub const BAREWORD_KEY: PatternRule = PatternRule {
+        id: "removed.bareword_key",
+        title: Text::new("Tırnaksız dizi anahtarı", "Unquoted array key"),
+        severity: Severity::Breaking,
+        since: (8, 0),
+        replacement: code("$row['id']"),
+        fix: FixKind::Likely,
+        note: Text::new(
+            "Tanımsız sabit artık metne çevrilmiyor; $row[id] PHP 8.0'da Error fırlatır. Anahtarı tırnak içine alın.",
+            "Undefined constants are no longer turned into strings; $row[id] throws an Error in PHP 8.0. Quote the key.",
+        ),
+    };
+    pub const CSV_ESCAPE: PatternRule = PatternRule {
+        id: "deprecated.csv_escape",
+        title: Text::new("escape parametresiz CSV fonksiyonu", "CSV function without an escape argument"),
+        severity: Severity::Deprecated,
+        since: (8, 4),
+        replacement: code("fputcsv($f, $row, escape: '')"),
+        fix: FixKind::Auto,
+        note: Text::new(
+            "fputcsv(), fgetcsv() ve str_getcsv() escape parametresi verilmeden çağrılınca 8.4'te uyarı veriyor.",
+            "fputcsv(), fgetcsv() and str_getcsv() raise a deprecation in 8.4 when the escape argument isn't given.",
+        ),
+    };
+    pub const MB_ENCODING: PatternRule = PatternRule {
+        id: "deprecated.mb_encoding",
+        title: Text::new("Kullanımdan kalkan mbstring kodlaması", "Deprecated mbstring encoding"),
+        severity: Severity::Deprecated,
+        since: (8, 2),
+        replacement: tx("htmlspecialchars(), base64_encode() ya da quoted_printable_encode()", "htmlspecialchars(), base64_encode() or quoted_printable_encode()"),
+        fix: FixKind::Manual,
+        note: Text::new(
+            "HTML-ENTITIES, BASE64, UUENCODE ve QPrint kodlamaları mbstring'de 8.2'de kullanımdan kalktı.",
+            "The HTML-ENTITIES, BASE64, UUENCODE and QPrint encodings are deprecated in mbstring as of 8.2.",
+        ),
+    };
+    pub const RESERVED_NAME: PatternRule = PatternRule {
+        id: "removed.reserved_name",
+        title: Text::new("Ayrılmış ad", "Reserved name"),
+        severity: Severity::Breaking,
+        since: (7, 0),
+        replacement: tx("sınıfı yeniden adlandırın", "rename the class"),
+        fix: FixKind::Manual,
+        note: Text::new(
+            "Bu ad yeni PHP sürümlerinde ayrılmış bir kelime; sınıf ya da fonksiyon adı olarak kullanılamaz.",
+            "This name is reserved in newer PHP versions and can't be used as a class or function name.",
         ),
     };
 }

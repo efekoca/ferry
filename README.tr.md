@@ -172,6 +172,17 @@ Her şey kendi bilgisayarınızda çalışır:
 ## Bilinen sınırlamalar
 
 - **Statik analiz:** Tarama kodu çalıştırmadan okur. Bu yüzden çalışma anındaki değerlere bağlı davranışlar (örneğin adı bir metinden gelen fonksiyon çağrıları) her zaman bulunamaz. Bu tür durumlar mümkün olduğunda **Riskli** olarak işaretlenir.
+- **Davranış değişiklikleri:** Bazı değişiklikler ancak kod çalışınca ortaya çıkar, bu yüzden hiçbir statik araç bunları bulamaz. Uygulamanızı yeni sürümde çalıştırarak test edin:
+  - `0 == "foo"` artık `false` döner; bu `in_array()`, `array_search()` ve `switch`'i de etkiler.
+  - Sayı olmayan metinlerle yapılan aritmetik işlemler `TypeError` fırlatır.
+  - Birçok uyarı exception'a dönüştü; örneğin sayılamayan bir değere `count()`.
+  - curl, GD ve XML gibi resource'lar artık nesne, bu yüzden `is_resource()` kontrolleri bozulur.
+  - PDO MySQL ve SQLite artık gerçek sayı döndürür, bu yüzden `=== "1"` karşılaştırmaları bozulur.
+  - Yerleşik fonksiyonlara değişken üzerinden `null` vermek kullanımdan kalktı.
+  - Dinamik property'ler kullanımdan kalktı.
+  - `ArrayAccess`, `Iterator` ve benzeri arayüzlerin metotlarında `#[\ReturnTypeWillChange]` eksikse uyarı verilir.
+  - imap ya da mcrypt gibi gerekli eklentiler yeni sunucuda kurulu olmayabilir.
+- **Metot çağrıları:** `$mysqli->ping()` gibi metot çağrıları ve `PDO::MYSQL_ATTR_INIT_COMMAND` gibi sınıf sabitleri henüz kontrol edilmiyor.
 - **Karakter kodlaması:** Otomatik düzeltmeler UTF-8 olmayan dosyaları (örneğin Windows-1254 ya da Latin-1) bozulmasın diye atlar. Düzeltilmeleri için önce UTF-8'e dönüştürün.
 - **Elle yapılan düzeltmeler:** `mysql_*` gibi bulgular kodun yeniden yazılmasını gerektirir. Ferry yerine ne kullanmanız gerektiğini gösterir ama bu kodu sizin yerinize yazmaz.
 - **Geri yükleme:** Dosyaları uygulamadan önceki hallerine getirdiği için sonradan yaptığınız düzenlemelerin üzerine yazılır. Ferry bu dosyaları listeler ve geri yüklemeden önce size sorar.

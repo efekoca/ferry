@@ -129,11 +129,24 @@ impl<'a> Lexer<'a> {
         self.skip_inline_html();
         while self.pos < self.b.len() {
             self.lex_php();
+            if self.halted() {
+                self.pos = self.b.len();
+            }
         }
         Lexed {
             tokens: self.tokens,
             stray_hash_brackets: self.stray_hash_brackets,
         }
+    }
+
+    fn halted(&self) -> bool {
+        let t = &self.tokens;
+        let n = t.len();
+        n >= 4
+            && t[n - 4].is_ident_ci("__halt_compiler")
+            && t[n - 3].is_punct("(")
+            && t[n - 2].is_punct(")")
+            && (t[n - 1].is_punct(";") || t[n - 1].kind == TokenKind::CloseTag)
     }
 
     fn skip_inline_html(&mut self) {

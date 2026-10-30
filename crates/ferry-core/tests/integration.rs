@@ -91,3 +91,35 @@ fn rector_preview_apply_and_restore() {
     store.restore(&root, &snap.id).unwrap();
     assert_eq!(std::fs::read_to_string(root.join("src/Greeter.php")).unwrap(), original);
 }
+
+#[test]
+fn rector_sees_the_same_files_as_the_scanner() {
+    let Some(tools) = std::env::var_os("FERRY_TEST_TOOLS").map(PathBuf::from) else {
+        return;
+    };
+    let php = toolchain::find_php(None).expect("php gerekli");
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("vendor/acme/app");
+    let nullable = "<?php\nfunction f(Foo $a = null) {}\n";
+    for file in ["variables.php", "src/x.inc", "src/m.module", "src/t.phtml", "web/core.install", "var/cache/c.php", "lib/vendor/v.php"] {
+        let path = root.join(file);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, nullable).unwrap();
+    }
+    let work = tempfile::tempdir().unwrap();
+    let preview = rector::preview(
+        &php,
+        &toolchain::rector_entry(&tools),
+        &root,
+        PhpVersion::new(8, 4),
+        rector::RectorMode::Compat,
+        &["var".to_string()],
+        work.path(),
+        &std::sync::atomic::AtomicBool::new(false),
+    )
+    .unwrap();
+    assert!(preview.errors.is_empty(), "{:?}", preview.errors);
+    let mut changed: Vec<&str> = preview.changes.iter().map(|c| c.file.as_str()).collect();
+    changed.sort();
+    assert_eq!(changed, ["src/m.module", "src/t.phtml", "src/x.inc", "variables.php", "web/core.install"]);
+}

@@ -87,6 +87,7 @@ enum Bound {
     Le(Triple),
     Lt(Triple),
     Ne(Triple),
+    Outside(Triple, Triple),
 }
 
 impl Bound {
@@ -97,6 +98,7 @@ impl Bound {
             Bound::Le(b) => v <= b,
             Bound::Lt(b) => v < b,
             Bound::Ne(b) => v != b,
+            Bound::Outside(lo, hi) => v < lo || v >= hi,
         }
     }
 }
@@ -197,14 +199,14 @@ fn parse_atom(token: &str) -> Option<Vec<Bound>> {
     let rest = rest.trim();
 
     if rest.contains('*') || rest.contains('x') || rest.contains('X') {
-        if op == "!=" {
-            return Some(vec![]);
-        }
         let prefix: Vec<&str> = rest
             .split('.')
             .take_while(|p| !matches!(*p, "*" | "x" | "X"))
             .collect();
         let (base, parts) = parse_version(&prefix.join("."))?;
+        if op == "!=" {
+            return Some(vec![Bound::Outside(base, bump(base, parts))]);
+        }
         return Some(vec![Bound::Ge(base), Bound::Lt(bump(base, parts))]);
     }
 
@@ -275,6 +277,13 @@ mod tests {
 
     fn v(s: &str) -> PhpVersion {
         s.parse().unwrap()
+    }
+
+    #[test]
+    fn not_equal_wildcards_exclude_the_whole_line() {
+        assert_eq!(constraint_allows("!=8.2.*", PhpVersion::new(8, 2)), Some(false));
+        assert_eq!(constraint_allows("!=8.2.*", PhpVersion::new(8, 3)), Some(true));
+        assert_eq!(constraint_allows(">=7.4 !=8.0.*", PhpVersion::new(8, 0)), Some(false));
     }
 
     #[test]
