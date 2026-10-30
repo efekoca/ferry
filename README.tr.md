@@ -12,7 +12,7 @@ Ferry, macOS ve Windows'ta çalışan bir masaüstü uygulamasıdır. PHP kodunu
 
 [Özellikler](#özellikler) · [Kurulum](#kurulum) · [Gizlilik](#gizlilik) · [Nasıl çalışır](#nasıl-çalışır) · [Kaynaktan derleme](#kaynaktan-derleme) · [English](README.md)
 
-![PHP 7.4'ten 8.4'e geçecek bir WordPress projesi için Ferry genel bakış ekranı: 47 puanlık hazırlık skoru, otomatik, gözden geçirilecek ve elle yapılacak düzeltmelerin dağılımı; kritik, eskimiş ve riskli bulguların sayıları](assets/readme/hero-tr.webp)
+![PHP 7.4'ten 8.4'e geçecek bir WordPress projesi için Ferry genel bakış ekranı: 39 puanlık hazırlık skoru, otomatik, gözden geçirilecek ve elle yapılacak düzeltmelerin dağılımı; kritik, eskimiş ve riskli bulguların sayıları](assets/readme/hero-tr.webp)
 
 - **Sorunları kullanıcılarınızdan önce görün.** PHP 7.0 ile 8.5 arasında kaldırılan ya da değişen her kullanım; dosyası, satırı ve neden önemli olduğuyla listelenir.
 - **Siz onaylamadan hiçbir şey değişmez.** Rector yalnızca deneme modunda çalışır. Her değişikliği satır satır inceler, yalnızca seçtiğiniz dosyaları uygularsınız.
@@ -38,13 +38,15 @@ Geçmek istediğiniz sürümü seçin (PHP 8.1 ile 8.5 arası); Ferry tüm PHP d
 - bulguların kaçının **Kritik** (kod çalışmaz), **Eskimiş** (şimdilik uyarı verir, ileride kaldırılır) ya da **Riskli** (çalışırken farklı davranabilir) olduğu
 - en sık görülen sorunlar ve atmanız gereken sonraki adımlar
 
+Her sayı bir kısayoldur: **Kritik**'e, **Elle düzelt**'e ya da en sık görülen sorunlardan birine tıklayın, **Bulgular** tam olarak onlara süzülmüş hâlde açılır. Hedef sürümü değiştirdiğinizde proje hemen yeniden taranır; düzeltmeleri hesapladıysanız Ferry onları silmeden önce sorar.
+
 Bakımını sizin yapmadığınız framework kodu kendiliğinden atlanır: WordPress'te `wp-admin` ve `wp-includes`, Laravel'de `storage` ve `bootstrap/cache`, Symfony'de `var`, Drupal çekirdeği; her projede de `vendor` ve `node_modules`. Atlanan klasörler genel bakışta yazılıdır.
 
 **Rapor al** ile sonuçları bir Markdown dosyasına kaydedebilir, bir iş kaydına ekleyebilir ya da ekibinizle paylaşabilirsiniz.
 
 ### Her bulgu, açıklamasıyla
 
-**Bulgular** sayfası her sorunu dosyasına göre gruplar; satırını, kodunu ve düzeltme türünü gösterir. Düzeltme türüne ya da önem derecesine göre süzebilir, dosyalarda ve sorunlarda arama yapabilirsiniz.
+**Bulgular** sayfası her sorunu dosyasına göre gruplar; satırını, kodunu ve düzeltme türünü gösterir. Dosyalarda ve sorunlarda arama yapabilir, düzeltme türüne ya da önem derecesine göre süzebilir ve kaç bulgunun eşleştiğini görebilirsiniz. Genel bakışta seçtiğiniz bir kural kaldırılabilir bir süzgeç olarak görünür; **Filtreleri temizle** hepsini sıfırlar. Sayfa değiştirdiğinizde süzgeçler korunur.
 
 ![Dosyalara göre gruplanmış bulgular, düzeltme türü ve önem derecesi süzgeçleri ve bir mysql_connect() bulgusunun ayrıntıları: neden önemli olduğu, yerine ne kullanılacağı ve düzeltme türü](assets/readme/findings-tr.webp)
 
@@ -62,6 +64,8 @@ Ferry'nin kendi PHP sözcük çözümleyicisi ve kural seti vardır; kodu PHP'ni
 - `mysql_*`, `ereg*`, `each()`, `create_function()` ve `money_format()` gibi kaldırılan eklenti ve fonksiyonlar
 - `$str{0}`, `(real)` ve `(unset)` dönüşümleri ve PHP 8'in attribute olarak okuduğu PHP 7 `#[` yorumları gibi artık ayrıştırılamayan yazımlar
 - `"${var}"` yerleştirmesi, örtük nullable parametreler, `utf8_encode()`, `FILTER_SANITIZE_STRING` ve `E_STRICT` gibi kullanımdan kalkanlar
+- zorunlu bir parametreden önce gelen isteğe bağlı parametre, yerleşik metin fonksiyonlarına doğrudan verilen `null` ve `"self::method"` biçimindeki callable'lar gibi parametre ve çağrı kalıpları
+- `PDO::query()` ya da `Iterator::current()` gibi yerleşik bir sınıfın ya da arayüzün metodunu dönüş tipi olmadan ezen ve PHP 8.1'den itibaren `#[\ReturnTypeWillChange]` isteyen metotlar
 - `eval()`, `extract()` ve değişken değişkenler gibi elle kontrol edilmesi gereken kodlar
 
 ### Her değişikliği uygulamadan önce inceleyin
@@ -73,6 +77,7 @@ Ferry'nin kendi PHP sözcük çözümleyicisi ve kural seti vardır; kodu PHP'ni
 - **Uyumluluk** yalnızca yeni sürümde çalışmak için gerekenleri değiştirir. Başlamak için en doğru yer burasıdır.
 - **Modernleştirme** hedef sürümün yeni yazımlarını da benimser.
 - İstediğiniz dosyaları seçip **Uygula**'ya basın. **Gözden geçir** olarak işaretlenen dosyalarda önce kontrol etmeniz için bir not bulunur.
+- Uyguladıktan sonra Ferry değişen dosyaları `php -l` ile kontrol eder; bir değişiklik dosyayı ayrıştırılamaz hâle getirdiyse sizi uyarır, böylece **Geçmiş**'ten hemen geri alabilirsiniz.
 
 Ferry, Rector'ın tek başına çözemediği durumları da ele alır. Örneğin `$str{0}` yazımı içeren bir dosyayı Rector tamamen atlar. Ferry bu yazımları önce `$str[0]` olarak düzeltir, böylece dosyanın geri kalanı da düzeltilir.
 
@@ -84,7 +89,7 @@ Ferry, Rector'ın tek başına çözemediği durumları da ele alır. Örneğin 
 
 ![PHP 8.4 ile uyumsuz üç paket, projenin PHP kısıtı ve her paketin sürümü, PHP gereksinimi ve durumunu gösteren Bağımlılıklar sayfası](assets/readme/dependencies-tr.webp)
 
-Her paket **Uyumlu**, **Uyumsuz** ya da **Belirsiz** (paket bir PHP gereksinimi bildirmiyorsa) olarak işaretlenir. Geliştirme paketleri etiketlidir; **Sadece üretim** seçeneği onları gizler.
+Her paket **Uyumlu**, **Uyumsuz** ya da **Belirsiz** (paket bir PHP gereksinimi bildirmiyorsa) olarak işaretlenir; uyumsuz paketler listenin başında yer alır. Geliştirme paketleri etiketlidir; **Sadece üretim** seçeneği onları gizler. Listenin üstündeki uyarı, geçişi engelleyen paketleri tek tek adıyla içeren, kopyalamaya hazır bir `composer update` komutu verir.
 
 ### Her şeyi Geçmiş'ten geri alın
 
@@ -93,7 +98,8 @@ Ferry her uygulamadan önce değiştireceği dosyaları yedekler. **Geçmiş** s
 ![İncelemek için açılmış bir Geçmiş kaydı: solda değişen dosyalar, sağda seçili dosyanın farkı ve kuralları, altta Geri yükle düğmesi](assets/readme/history-tr.webp)
 
 - **İncele**, her uygulamanın neyi değiştirdiğini dosya dosya ve her değişikliğin ardındaki kurallarla birlikte gösterir.
-- **Geri yükle**, o uygulamadan önceki halleriyle bütün dosyaları geri getirir. Bunlardan birini sonradan düzenlediyseniz Ferry önce o dosyaları listeler.
+- **Geri yükle**, o uygulamadan önceki halleriyle bütün dosyaları geri getirir. Bunlardan birini sonradan düzenlediyseniz Ferry önce o dosyaları listeler; onayladıktan sonra değişen bir dosyanın üzerine ise yazmaz.
+- **Ayarlar**'daki **Saklanacak yedek** seçeneği her projede tutulacak yedek sayısını sınırlar (10, 30 ya da 100). Varsayılanı sınırsızdır.
 - Bir uygulama yarıda kalırsa Ferry dosyaları kendiliğinden geri alır. Bu da başarısız olursa yedek Geçmiş'te kalır; oradan kendiniz geri yükleyebilirsiniz.
 
 ### Masaüstünüz için tasarlandı
@@ -165,7 +171,7 @@ Eksik bir şey olduğunda **Düzeltmeler** sayfası neyin eksik olduğunu söyle
 
 - **Okunanlar:** seçtiğiniz proje klasöründeki PHP dosyaları, `composer.json` ve `composer.lock`.
 - **Yazılanlar:** yalnızca değişiklik uyguladığınız dosyalar. Diğer dosyalara dokunulmaz.
-- **Saklananlar:** her uygulamadan önceki dosya yedekleri, neyin uygulandığının kaydı, Rector'ın önbelleği ve ayarlarınız. Hepsi uygulamanın veri klasöründe durur: macOS'ta `~/Library/Application Support/io.github.efekoca.ferry`, Windows'ta `%APPDATA%\io.github.efekoca.ferry`.
+- **Saklananlar:** her uygulamadan önceki dosya yedekleri (hepsi ya da bir sınır koyduysanız yalnızca en yenileri), neyin uygulandığının kaydı, Rector'ın önbelleği ve ayarlarınız. Hepsi uygulamanın veri klasöründe durur: macOS'ta `~/Library/Application Support/io.github.efekoca.ferry`, Windows'ta `%APPDATA%\io.github.efekoca.ferry`.
 - **Proje kodu:** Tarama kodunuzu hiçbir zaman çalıştırmaz. Düzeltmeleri hesaplarken Rector proje klasöründe çalışır ve projenin `vendor/autoload.php` dosyasını yükler; bu yüzden Composer'ın `autoload.files` listesindeki dosyalar çalıştırılır. Düzeltmeleri yalnızca güvendiğiniz projeler için hesaplayın.
 - **Ağ:** Ferry'nin kendisi hiçbir ağ isteği yapmaz. **Rector'ı kur**'u seçtiğinizde Composer, Rector'ı Packagist'ten indirir.
 
@@ -176,7 +182,7 @@ Her şey kendi bilgisayarınızda çalışır:
 1. Ferry proje türünü ve şu anki PHP sürümünü bulur, bakımını sizin yapmadığınız klasörleri atlar.
 2. Yerleşik tarayıcı her PHP dosyasını ayrıştırır ve şu anki sürümünüzle hedef sürüm arasındaki her sürümün kurallarına göre kontrol eder.
 3. Düzeltmeler için Rector projenizde deneme modunda çalışır; dilediğiniz an durdurabilirsiniz. Ferry önerilen farkları bir önizlemeye dönüştürür ve her dosyanın parmak izini saklar.
-4. Uyguladığınızda Ferry önce seçilen dosyaları yedekler, sonra hiçbirinin önizlemeden bu yana değişmediğini kontrol eder ve her dosyayı tek adımda yazar. Arada değişen bir dosya reddedilir.
+4. Uyguladığınızda Ferry önce seçilen dosyaları yedekler, sonra hiçbirinin önizlemeden bu yana değişmediğini kontrol eder ve her dosyayı tek adımda yazar. Arada değişen bir dosya reddedilir, sembolik bağlantılara dokunulmaz, salt okunur dosyalar salt okunur kalır. Düzeltmeler yalnızca taramanın kapsadığı dosyalara uygulanır; `.git` ya da `.ddev` gibi gizli klasörler hiçbir zaman değişmez.
 5. Geri yükleme yedeği dosyaların üzerine kopyalar. Geçmiş'teki **İncele** ise uygulanan değişiklikleri gösterir.
 
 ## Bilinen sınırlamalar
@@ -188,9 +194,8 @@ Her şey kendi bilgisayarınızda çalışır:
   - Birçok uyarı exception'a dönüştü; örneğin sayılamayan bir değere `count()`.
   - curl, GD ve XML gibi resource'lar artık nesne, bu yüzden `is_resource()` kontrolleri bozulur.
   - PDO MySQL ve SQLite artık gerçek sayı döndürür, bu yüzden `=== "1"` karşılaştırmaları bozulur.
-  - Yerleşik fonksiyonlara değişken üzerinden `null` vermek kullanımdan kalktı.
+  - Yerleşik fonksiyonlara değişken üzerinden `null` vermek kullanımdan kalktı. Ferry doğrudan yazılmış `null`'u bildirir ama bir değişkenin ne tuttuğunu göremez.
   - Dinamik property'ler kullanımdan kalktı. Ferry projenizdeki üst sınıfları ve trait'leri izler; ancak `vendor/` içindeki bir framework sınıfı gibi göremediği bir sınıftan türeyenleri atlar, çünkü property orada tanımlanmış olabilir.
-  - `ArrayAccess`, `Iterator` ve benzeri arayüzlerin metotlarında `#[\ReturnTypeWillChange]` eksikse uyarı verilir.
   - imap ya da mcrypt gibi gerekli eklentiler yeni sunucuda kurulu olmayabilir.
 - **Metot çağrıları:** Ferry kodu çalıştırmadan bir nesnenin sınıfını bilemez. Bu yüzden `$db->ping()` gibi bir metot çağrısı yalnızca aynı dosyada sınıfın adı geçiyorsa (`mysqli`, `Reflection…`, `SplObjectStorage`) işaretlenir. Statik çağrılar ve `PDO::MYSQL_ATTR_INIT_COMMAND` gibi sınıf sabitleri her zaman kontrol edilir.
 - **Karakter kodlaması:** Otomatik düzeltmeler UTF-8 olmayan dosyaları (örneğin Windows-1254 ya da Latin-1) bozulmasın diye atlar. Düzeltilmeleri için önce UTF-8'e dönüştürün.
@@ -213,6 +218,10 @@ pnpm tauri build          # kurulum dosyaları → target/release/bundle/
 
 Testleri gerçek Rector'la çalıştırmak için `FERRY_TEST_TOOLS` değişkenini Rector'ın kurulu olduğu klasöre yönlendirin: `FERRY_TEST_TOOLS=/yol/tools cargo test --workspace`.
 
+`scripts/fetch-corpus.sh` WordPress, Drupal, CodeIgniter ve phpBB'nin eski sürümlerini indirir; `CORPUS=<klasör> CORPUS_PHP=$(which php) cargo test -p ferry-core --test corpus -- --ignored --nocapture` tarayıcının bulduklarını o PHP'nin kendisinin bu projeler için bildirdikleriyle karşılaştırır.
+
+`pnpm e2e:native`, uygulamanın debug sürümünü demo projeler ve Unicode yol, symlink döngüsü ya da boş proje gibi uç durumlar üzerinde baştan sona çalıştırır ve her senaryonun sonucunu bildirir.
+
 **Demo projeleri.** `demo/` klasöründe üç örnek proje var: her kuralı tetikleyen düz PHP bir mağaza, WordPress bir blog ve neredeyse hazır bir Laravel API'si. `pnpm demo` bunları `.demo/` klasörüne sıfırdan kopyalar; böylece asıllarına dokunmadan değişiklik uygulayabilirsiniz. Ayrıntılar için [demo/README.md](demo/README.md).
 
 | Klasör | İçerik |
@@ -222,7 +231,7 @@ Testleri gerçek Rector'la çalıştırmak için `FERRY_TEST_TOOLS` değişkenin
 | `src` | React ve TypeScript arayüzü (tasarım sistemi: [docs/DESIGN.md](docs/DESIGN.md)) |
 | `demo` | Uygulamayı denemek ve testler için örnek projeler |
 
-CI, her push'ta Linux'ta arayüz ve motor testlerini (gerçek Rector dahil) çalıştırır; `main` dalına yapılan push'larda Windows'u da ekler, `v*` etiketlerinde macOS ve Windows kurulum dosyalarını oluşturur.
+CI, her pull request'te ve `main`'e yapılan her push'ta biçimi kontrol eder, arayüz ve motor testlerini (gerçek Rector dahil) Linux ve Windows'ta çalıştırır; `v*` etiketlerinde macOS ve Windows kurulum dosyalarını oluşturur.
 
 Hata bildirimlerinizi, pull request'lerinizi ve geri bildirimlerinizi almaktan mutluluk duyarım.
 
