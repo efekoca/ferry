@@ -90,8 +90,21 @@ fn parse_target(target: &str) -> CmdResult<PhpVersion> {
     Ok(v)
 }
 
+fn normalize_path(path: String) -> String {
+    let Ok(canonical) = std::fs::canonicalize(&path) else { return path };
+    let text = canonical.to_string_lossy();
+    match text.strip_prefix(r"\\?\") {
+        Some(rest) if !rest.starts_with("UNC\\") => rest.to_string(),
+        Some(rest) => format!(r"\\{}", &rest[4..]),
+        None => text.into_owned(),
+    }
+}
+
 fn project_root(path: &str) -> CmdResult<PathBuf> {
     let p = PathBuf::from(path);
+    if p.is_file() {
+        return Err(t!("Bu bir dosya, proje klasörü değil: {path}", "This is a file, not a project folder: {path}"));
+    }
     if !p.is_dir() {
         return Err(t!("Klasör bulunamadı: {path}", "Folder not found: {path}"));
     }
@@ -115,6 +128,7 @@ struct ScanProgress {
 
 #[tauri::command]
 async fn inspect_project(path: String) -> CmdResult<ProjectInfo> {
+    let path = normalize_path(path);
     blocking(move || project::inspect(&project_root(&path)?).map_err(|e| e.to_string())).await
 }
 
@@ -128,6 +142,7 @@ struct ScanResponse {
 
 #[tauri::command]
 async fn scan_project<R: Runtime>(app: AppHandle<R>, path: String, target: String, run: u64) -> CmdResult<ScanResponse> {
+    let path = normalize_path(path);
     let target = parse_target(&target)?;
     app.state::<AppState>().latest_scan.lock().unwrap().insert(path.clone(), run);
     let handle = app.clone();
@@ -164,6 +179,7 @@ async fn scan_project<R: Runtime>(app: AppHandle<R>, path: String, target: Strin
 
 #[tauri::command]
 async fn check_dependencies(path: String, target: String) -> CmdResult<DependencyReport> {
+    let path = normalize_path(path);
     let target = parse_target(&target)?;
     blocking(move || Ok(deps::check(&project_root(&path)?, target))).await
 }
@@ -193,6 +209,7 @@ async fn rector_preview(
     target: String,
     mode: RectorMode,
 ) -> CmdResult<PreviewResponse> {
+    let path = normalize_path(path);
     let target = parse_target(&target)?;
     let tools = state.tools_dir();
     let work = state.data_dir.join("rector");
@@ -207,6 +224,7 @@ async fn rector_preview(
         let _running = RunningGuard(running);
         let root = project_root(&path)?;
         let php = toolchain::find_php(php_override.as_deref()).ok_or_else(|| toolchain::ToolError::PhpMissing.to_string())?;
+        toolchain::require_supported_php(&php).map_err(|e| e.to_string())?;
         let info = project::inspect(&root).map_err(|e| e.to_string())?;
         rector::preview(
             &php,
@@ -265,6 +283,7 @@ async fn apply_changes(
     files: Vec<String>,
     label: String,
 ) -> CmdResult<ApplyResult> {
+    let path = normalize_path(path);
     let root = project_root(&path)?;
     let selected: Vec<FileChange> = {
         let previews = state.previews.lock().unwrap();
@@ -337,12 +356,14 @@ async fn apply_changes(
 
 #[tauri::command]
 async fn list_snapshots(state: State<'_, AppState>, path: String) -> CmdResult<Vec<Snapshot>> {
+    let path = normalize_path(path);
     let store = state.snapshots();
     blocking(move || store.list(Path::new(&path)).map_err(|e| e.to_string())).await
 }
 
 #[tauri::command]
 async fn restore_snapshot(state: State<'_, AppState>, path: String, id: String) -> CmdResult<Vec<String>> {
+    let path = normalize_path(path);
     let store = state.snapshots();
     state.previews.lock().unwrap().remove(&path);
     let writes = state.writes.clone();
@@ -355,6 +376,7 @@ async fn restore_snapshot(state: State<'_, AppState>, path: String, id: String) 
 
 #[tauri::command]
 async fn snapshot_conflicts(state: State<'_, AppState>, path: String, id: String) -> CmdResult<Vec<String>> {
+    let path = normalize_path(path);
     let store = state.snapshots();
     blocking(move || {
         let root = project_root(&path)?;
@@ -375,6 +397,7 @@ async fn snapshot_conflicts(state: State<'_, AppState>, path: String, id: String
 
 #[tauri::command]
 async fn snapshot_changes(state: State<'_, AppState>, path: String, id: String) -> CmdResult<Vec<FileChange>> {
+    let path = normalize_path(path);
     let store = state.snapshots();
     blocking(move || {
         let root = project_root(&path)?;
@@ -406,12 +429,14 @@ async fn snapshot_changes(state: State<'_, AppState>, path: String, id: String) 
 
 #[tauri::command]
 async fn delete_snapshot(state: State<'_, AppState>, path: String, id: String) -> CmdResult<()> {
+    let path = normalize_path(path);
     let store = state.snapshots();
     blocking(move || store.delete(Path::new(&path), &id).map_err(|e| e.to_string())).await
 }
 
 #[tauri::command]
 async fn export_report(state: State<'_, AppState>, path: String, destination: String) -> CmdResult<()> {
+    let path = normalize_path(path);
     let scan = state
         .scans
         .lock()
@@ -424,7 +449,10 @@ async fn export_report(state: State<'_, AppState>, path: String, destination: St
         let info = project::inspect(&root).map_err(|e| e.to_string())?;
         let deps = deps::check(&root, scan.target);
         let md = report::to_markdown(&info, &scan, Some(&deps), i18n::lang());
-        std::fs::write(&destination, md).map_err(|e| t!("Rapor kaydedilemedi: {e}", "Couldn't save the report: {e}"))
+        std::fs::write(&destination, md).map_err(|e| {
+            let e = ferry_core::i18n::io_error(&e);
+            t!("Rapor kaydedilemedi: {e}", "Couldn't save the report: {e}")
+        })
     })
     .await
 }

@@ -106,6 +106,11 @@ fn scan_flow_matches_ui_contract() {
     assert!(md.contains("# Ferry raporu: legacy"));
 
     assert_eq!(h.ok("list_snapshots", json!({ "path": root })), json!([]));
+    let store = h._app.state::<AppState>().snapshots();
+    let canonical = std::fs::canonicalize(&root).unwrap();
+    store.create(&canonical, &["composer.json".into()], "x").unwrap();
+    let spelled = format!("{root}/./");
+    assert_eq!(h.ok("list_snapshots", json!({ "path": spelled })).as_array().unwrap().len(), 1, "same history for any spelling of the path");
     let tools = h.ok("toolchain_status", json!({}));
     assert!(tools["platform"].is_string());
 }
@@ -118,6 +123,9 @@ fn rejects_bad_input_with_messages() {
     assert!(err.as_str().unwrap().contains("Desteklenmeyen hedef sürüm"));
     let err = h.invoke("inspect_project", json!({ "path": "/yok/boyle/bir/klasor" })).unwrap_err();
     assert!(err.as_str().unwrap().contains("Klasör bulunamadı"));
+    let file = Path::new(&h.root).join("composer.json");
+    let err = h.invoke("inspect_project", json!({ "path": file })).unwrap_err();
+    assert!(err.as_str().unwrap().contains("dosya, proje klasörü değil"), "{err}");
     let err = h.invoke("export_report", json!({ "path": h.root, "destination": "/tmp/x.md" })).unwrap_err();
     assert!(err.as_str().unwrap().contains("Önce projeyi tarayın"));
     let err = h
@@ -147,7 +155,7 @@ fn settings_round_trip() {
 #[test]
 fn snapshot_changes_fall_back_to_a_fresh_diff() {
     let h = harness();
-    let root = PathBuf::from(&h.root);
+    let root = std::fs::canonicalize(&h.root).unwrap();
     let store = h._app.state::<AppState>().snapshots();
     let snap = store.create(&root, &["src/Greeter.php".into()], "eski").unwrap();
     let file = root.join("src/Greeter.php");

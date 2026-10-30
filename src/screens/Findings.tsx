@@ -50,7 +50,8 @@ export function Findings() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.key === "ArrowDown" || e.key === "ArrowUp") || (e.target as HTMLElement)?.tagName === "INPUT") return;
+      if (!(e.key === "ArrowDown" || e.key === "ArrowUp")) return;
+      if ((e.target as HTMLElement)?.closest?.("input, textarea, select, .pane--side, [role=dialog]")) return;
       if (!visible.length) return;
       e.preventDefault();
       const i = selected ? visible.indexOf(selected) : -1;

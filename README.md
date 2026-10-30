@@ -157,6 +157,7 @@ When something is missing, the **Fixes** page says what and offers **Install Rec
 - **Read:** the PHP files, `composer.json`, and `composer.lock` in the project folder you choose.
 - **Written:** only the files you apply changes to. Every other file stays untouched.
 - **Stored:** backups of the files before each apply, a record of what was applied, Rector's cache, and your settings, in the app's data folder: `~/Library/Application Support/io.github.efekoca.ferry` on macOS and `%APPDATA%\io.github.efekoca.ferry` on Windows.
+- **Project code:** scanning never runs your code. Calculating fixes runs Rector in the project folder, and Rector loads the project's `vendor/autoload.php`, so files listed under Composer's `autoload.files` are executed. Only calculate fixes for projects you trust.
 - **Network:** Ferry itself makes no network requests. When you choose **Install Rector**, Composer downloads Rector from Packagist.
 
 ## How it works

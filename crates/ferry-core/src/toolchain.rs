@@ -1,11 +1,12 @@
 use serde::Serialize;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Command;
 
 #[derive(Debug)]
 pub enum ToolError {
     PhpMissing,
+    PhpTooOld(String),
     ComposerMissing,
     RectorMissing,
     Spawn { program: String, source: std::io::Error },
@@ -19,12 +20,17 @@ impl std::fmt::Display for ToolError {
                 "PHP bulunamadı. PHP 7.4 ya da üstünü kurun veya Ayarlar'dan yolunu gösterin.",
                 "PHP wasn't found. Install PHP 7.4 or newer, or point to it in Settings."
             ),
+            ToolError::PhpTooOld(v) => crate::t!(
+                "Bulunan PHP {v}; otomatik düzeltmeler için PHP 7.4 ya da üstü gerekiyor. Ayarlar'dan daha yeni bir PHP gösterin.",
+                "Found PHP {v}; automatic fixes need PHP 7.4 or newer. Point to a newer PHP in Settings."
+            ),
             ToolError::ComposerMissing => crate::t!(
                 "Composer bulunamadı. getcomposer.org adresinden kurabilirsiniz.",
                 "Composer wasn't found. You can install it from getcomposer.org."
             ),
             ToolError::RectorMissing => crate::t!("Rector kurulu değil.", "Rector isn't installed."),
             ToolError::Spawn { program, source } => {
+                let source = crate::i18n::io_error(source);
                 crate::t!("{program} çalıştırılamadı: {source}", "Couldn't run {program}: {source}")
             }
             ToolError::Failed(msg) => msg.clone(),
@@ -157,18 +163,20 @@ pub fn find_executable(name: &str) -> Option<PathBuf> {
     None
 }
 
-fn run(cmd: &mut Command, program: &str) -> Result<Output, ToolError> {
-    cmd.output().map_err(|source| ToolError::Spawn {
-        program: program.to_string(),
-        source,
-    })
-}
-
 pub fn find_php(override_path: Option<&Path>) -> Option<PathBuf> {
     if let Some(p) = override_path.filter(|p| p.is_file()) {
         return Some(p.to_path_buf());
     }
     find_executable("php")
+}
+
+pub fn require_supported_php(php: &Path) -> Result<(), ToolError> {
+    let Some(version) = php_version(php) else { return Ok(()) };
+    let mut parts = version.split(|c: char| !c.is_ascii_digit()).filter_map(|p| p.parse::<u32>().ok());
+    match (parts.next(), parts.next()) {
+        (Some(major), Some(minor)) if (major, minor) < (7, 4) => Err(ToolError::PhpTooOld(version)),
+        _ => Ok(()),
+    }
 }
 
 pub fn php_version(php: &Path) -> Option<String> {
@@ -269,8 +277,11 @@ pub fn detect(tools_dir: &Path, php_override: Option<&Path>) -> ToolchainStatus 
     }
 }
 
+const INSTALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+
 pub fn install_rector(tools_dir: &Path, php_override: Option<&Path>) -> Result<(), ToolError> {
     let php = find_php(php_override).ok_or(ToolError::PhpMissing)?;
+    require_supported_php(&php)?;
     let composer = find_composer().ok_or(ToolError::ComposerMissing)?;
     std::fs::create_dir_all(tools_dir).map_err(|e| ToolError::Failed(e.to_string()))?;
     let manifest = tools_dir.join("composer.json");
@@ -282,12 +293,13 @@ pub fn install_rector(tools_dir: &Path, php_override: Option<&Path>) -> Result<(
 }
 "#;
     std::fs::write(&manifest, json).map_err(|e| ToolError::Failed(e.to_string()))?;
-    let out = run(
-        php_tool_command(&php, &composer)
-            .args(["update", "--no-interaction", "--no-progress", "--no-ansi", "--working-dir"])
-            .arg(tools_dir),
-        "composer",
-    )?;
+    let mut cmd = php_tool_command(&php, &composer);
+    cmd.args(["update", "--no-interaction", "--no-progress", "--no-ansi", "--working-dir"]).arg(tools_dir);
+    let out = crate::rector::run_cancellable(cmd, Path::new("composer"), &std::sync::atomic::AtomicBool::new(false), INSTALL_TIMEOUT)
+        .map_err(|e| match e {
+            crate::rector::RectorError::Tool(t) => t,
+            other => ToolError::Failed(other.to_string()),
+        })?;
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr);
         let tail: Vec<&str> = stderr.lines().rev().take(12).collect();
@@ -306,6 +318,19 @@ pub fn install_rector(tools_dir: &Path, php_override: Option<&Path>) -> Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn old_php_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let php = dir.path().join("php");
+        std::fs::write(&php, "#!/bin/sh\necho 7.2.34\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&php, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(matches!(require_supported_php(&php), Err(ToolError::PhpTooOld(v)) if v == "7.2.34"));
+        std::fs::write(&php, "#!/bin/sh\necho 8.1.0\n").unwrap();
+        assert!(require_supported_php(&php).is_ok());
+    }
 
     #[test]
     fn rector_entry_layout() {

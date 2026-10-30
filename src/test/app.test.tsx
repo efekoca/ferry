@@ -190,6 +190,22 @@ describe("Ferry app", () => {
     expect(within(dialog).getByText("includes/helpers.php")).toBeInTheDocument();
   });
 
+  it("deletes every snapshot of the project after confirming", async () => {
+    const user = setup();
+    await openAndScan(user);
+    await user.click(nav(/Düzeltmeler/));
+    await user.click(await screen.findByRole("button", { name: /Değişiklikleri hesapla/ }));
+    await user.click(await screen.findByRole("button", { name: "Tümünü uygula" }));
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Uygula" }));
+    await screen.findByText("4 dosya güncellendi");
+    await user.click(nav(/Geçmiş/));
+    await user.click(await screen.findByRole("button", { name: /Tümünü sil/ }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByRole("heading", { name: /yedeği silinsin mi/ })).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Sil" }));
+    expect(await screen.findByText("Henüz bir değişiklik uygulanmadı")).toBeInTheDocument();
+  });
+
   it("supports keyboard selection in the version picker", async () => {
     const user = setup();
     await user.click(await screen.findByRole("button", { name: "Proje klasörü seçin" }));

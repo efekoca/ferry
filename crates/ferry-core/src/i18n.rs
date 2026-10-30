@@ -85,6 +85,21 @@ macro_rules! t {
     };
 }
 
+pub fn io_error(e: &std::io::Error) -> String {
+    use std::io::ErrorKind::*;
+    let text = match e.kind() {
+        NotFound => Text::new("dosya ya da klasör bulunamadı", "file or folder not found"),
+        PermissionDenied => Text::new("erişim izni yok", "permission denied"),
+        AlreadyExists => Text::new("zaten var", "already exists"),
+        ReadOnlyFilesystem => Text::new("disk salt okunur", "the disk is read-only"),
+        StorageFull => Text::new("diskte yer kalmadı", "the disk is full"),
+        ResourceBusy => Text::new("dosya başka bir program tarafından kullanılıyor", "the file is in use by another program"),
+        InvalidFilename => Text::new("geçersiz dosya adı", "invalid file name"),
+        _ => return e.to_string(),
+    };
+    text.get(lang()).to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -101,3 +116,4 @@ mod tests {
         assert_eq!(Localized::from(Text::same("x")).get(Lang::Tr), "x");
     }
 }
+

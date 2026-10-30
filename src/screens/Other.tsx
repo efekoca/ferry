@@ -166,7 +166,8 @@ export function Dependencies() {
 
 export function History() {
   const { t } = useI18n();
-  const { api, project, snapshots, restoreSnapshot, deleteSnapshot } = useStore();
+  const { api, project, snapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots } = useStore();
+  const [clearing, setClearing] = useState(false);
   const [pending, setPending] = useState<{ snapshot: Snapshot; action: "restore" | "delete" } | null>(null);
   const [reviewing, setReviewing] = useState<Snapshot | null>(null);
   const [busy, setBusy] = useState(false);
@@ -189,7 +190,17 @@ export function History() {
 
   return (
     <>
-      <PageHeader title={t.history.title} subtitle={snapshots.length ? t.history.subtitle(snapshots.length) : undefined} />
+      <PageHeader
+        title={t.history.title}
+        subtitle={snapshots.length ? t.history.subtitle(snapshots.length) : undefined}
+        actions={
+          snapshots.length > 1 && (
+            <Button variant="ghost" size="sm" icon={<Trash2 size={14} />} onClick={() => setClearing(true)}>
+              {t.history.deleteAll}
+            </Button>
+          )
+        }
+      />
       <div className="page-scroll">
         <div className="page-body stack">
           {snapshots.length === 0 ? (
@@ -292,6 +303,24 @@ export function History() {
             </Callout>
           </div>
         )}
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        open={clearing}
+        tone="danger"
+        icon={<Trash2 size={20} />}
+        title={t.history.deleteAllTitle(snapshots.length)}
+        confirmLabel={t.history.deleteConfirm}
+        loading={busy}
+        onCancel={() => setClearing(false)}
+        onConfirm={async () => {
+          setBusy(true);
+          await deleteAllSnapshots();
+          setBusy(false);
+          setClearing(false);
+        }}
+      >
+        {t.history.deleteAllText}
       </ConfirmDialog>
     </>
   );

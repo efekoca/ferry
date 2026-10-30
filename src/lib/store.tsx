@@ -106,6 +106,7 @@ interface AppStore {
   refreshSnapshots(): Promise<void>;
   restoreSnapshot(id: string): Promise<void>;
   deleteSnapshot(id: string): Promise<void>;
+  deleteAllSnapshots(): Promise<void>;
 
   exportReport(): Promise<void>;
 }
@@ -342,9 +343,9 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
     async (files: string[]) => {
       if (!api || !project || files.length === 0) return false;
       setApplying(true);
+      const root = project.root;
       try {
         const label = t.changes.snapshotLabel(previewMode === "compat", target);
-        const root = project.root;
         if (!preview) return false;
         const result = await api.applyChanges(root, preview.id, files, label);
         if (rootRef.current !== root) return true;
@@ -354,7 +355,7 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
         if (scan && rootRef.current === root) await runScan();
         return true;
       } catch (e) {
-        fail(t.toast.applyFailed, e);
+        if (rootRef.current === root) fail(t.toast.applyFailed, e);
         return false;
       } finally {
         setApplying(false);
@@ -393,6 +394,17 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
     [api, project, refreshSnapshots, fail, t],
   );
 
+  const deleteAllSnapshots = useCallback(async () => {
+    if (!api || !project) return;
+    try {
+      for (const s of snapshots) await api.deleteSnapshot(project.root, s.id);
+    } catch (e) {
+      fail(t.toast.deleteFailed, e);
+    } finally {
+      await refreshSnapshots();
+    }
+  }, [api, project, snapshots, refreshSnapshots, fail, t]);
+
   const exportReport = useCallback(async () => {
     if (!api || !project || !scan) return;
     try {
@@ -410,13 +422,13 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
       api, view, setView, theme, setTheme, recent, forgetRecent, project, opening, openProject, closeProject,
       target, setTarget, scan, scanning, progress, runScan, deps, toolchain, refreshToolchain, installingRector,
       installRector, preview, previewMode, previewing, loadPreview, cancelPreview, applying, applyChanges, snapshots,
-      refreshSnapshots, restoreSnapshot, deleteSnapshot, exportReport,
+      refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport,
     }),
     [
       api, view, theme, setTheme, recent, forgetRecent, project, opening, openProject, closeProject, target,
       setTarget, scan, scanning, progress, runScan, deps, toolchain, refreshToolchain, installingRector,
       installRector, preview, previewMode, previewing, loadPreview, cancelPreview, applying, applyChanges, snapshots,
-      refreshSnapshots, restoreSnapshot, deleteSnapshot, exportReport,
+      refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport,
     ],
   );
 

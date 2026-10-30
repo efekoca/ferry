@@ -205,7 +205,10 @@ impl std::fmt::Display for RectorError {
         let msg = match self {
             RectorError::Tool(e) => e.to_string(),
             RectorError::Output(out) => crate::t!("Rector çıktısı okunamadı: {out}", "Couldn't read Rector's output: {out}"),
-            RectorError::Io(path, e) => crate::t!("Dosya işlemi başarısız ({path}): {e}", "File operation failed ({path}): {e}"),
+            RectorError::Io(path, e) => {
+                let reason = crate::i18n::io_error(e);
+                crate::t!("Dosya işlemi başarısız ({path}): {reason}", "File operation failed ({path}): {reason}")
+            }
             RectorError::Cancelled => crate::t!("Rector durduruldu.", "Rector was stopped."),
             RectorError::TimedOut(minutes) => crate::t!(
                 "Rector {minutes} dakikada bitmediği için durduruldu. Projenin bir bölümünü dışarıda bırakmayı ya da PHP'nin bellek ayarlarını kontrol etmeyi deneyin.",
@@ -442,6 +445,7 @@ pub fn parse_output(root: &Path, stdout: &str, staging: &Staging) -> Result<(Vec
                     }
                 },
                 Err(e) => {
+                    let e = crate::i18n::io_error(&e);
                     errors.push(crate::t!("{rel} — okunamadı: {e}", "{rel} — couldn't read: {e}"));
                     continue;
                 }
@@ -484,7 +488,7 @@ pub fn parse_output(root: &Path, stdout: &str, staging: &Staging) -> Result<(Vec
     Ok((changes, errors))
 }
 
-fn run_cancellable(mut cmd: Command, program: &Path, cancel: &AtomicBool, timeout: Duration) -> Result<Output, RectorError> {
+pub(crate) fn run_cancellable(mut cmd: Command, program: &Path, cancel: &AtomicBool, timeout: Duration) -> Result<Output, RectorError> {
     let mut child = cmd
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

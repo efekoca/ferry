@@ -246,6 +246,9 @@ export const tr = {
     deleteTitle: "Yedek silinsin mi?",
     deleteText: "Bu yedek kalıcı olarak silinir ve bu noktaya artık dönemezsiniz. Proje dosyalarınız değişmez.",
     deleteConfirm: "Sil",
+    deleteAll: "Tümünü sil",
+    deleteAllTitle: (n: number) => (n === 1 ? "Bu projenin yedeği silinsin mi?" : `Bu projenin ${n} yedeği silinsin mi?`),
+    deleteAllText: "Yedekler kalıcı olarak silinir ve bu noktalara artık dönemezsiniz. Proje dosyalarınız değişmez.",
     restoreTitle: "Dosyalar geri yüklensin mi?",
     restoreText: (n: number, label: string) =>
       `${n} dosya, “${label}” öncesindeki hâline döner. Sonradan bu dosyalarda yaptığınız değişiklikler kaybolur.`,

@@ -22,7 +22,10 @@ impl std::fmt::Display for SnapshotError {
             SnapshotError::InvalidPath(p) => crate::t!("Geçersiz dosya yolu: {p}", "Invalid file path: {p}"),
             SnapshotError::NotFound(id) => crate::t!("Yedek bulunamadı: {id}", "Snapshot not found: {id}"),
             SnapshotError::Io { path, source } => {
-                crate::t!("Dosya işlemi başarısız ({path}): {source}", "File operation failed ({path}): {source}")
+                {
+                let reason = crate::i18n::io_error(source);
+                crate::t!("Dosya işlemi başarısız ({path}): {reason}", "File operation failed ({path}): {reason}")
+            }
             }
             SnapshotError::Manifest(e) => crate::t!("Yedek bilgisi okunamadı: {e}", "Couldn't read snapshot info: {e}"),
         };
