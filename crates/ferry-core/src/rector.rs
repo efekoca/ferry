@@ -293,7 +293,6 @@ fn glob_literal(s: &str) -> String {
     s.chars()
         .map(|c| match c {
             '[' => "[[]".to_string(),
-            ']' => "[]]".to_string(),
             '*' => "[*]".to_string(),
             '?' => "[?]".to_string(),
             c => c.to_string(),
