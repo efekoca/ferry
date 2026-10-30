@@ -375,7 +375,7 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
         if (result.lintErrors.length > 0) {
           toast.push({
             tone: "error",
-            title: t.toast.lintFailed(result.lintErrors.length),
+            title: t.toast.appliedWithErrors(result.written.length, result.lintErrors.length),
             description: `${result.lintErrors.slice(0, 3).join("\n")}\n${t.toast.lintFailedText}`,
           });
         } else {

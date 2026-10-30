@@ -312,6 +312,8 @@ async fn apply_changes(
             let _ = store.delete(&root, &snapshot.id);
             return Err(e.to_string());
         }
+        let originals: HashMap<String, String> =
+            refs.iter().filter_map(|c| Some((c.file.clone(), std::fs::read_to_string(root.join(&c.file)).ok()?))).collect();
         let mut written = Vec::new();
         match rector::write_changes(&root, &refs, &mut written) {
             Ok(()) => {
@@ -328,7 +330,11 @@ async fn apply_changes(
                 }
                 let lint_errors = toolchain::find_php(php_override.as_deref())
                     .filter(|php| toolchain::php_version(php).and_then(|v| v.parse::<PhpVersion>().ok()).is_some_and(|v| v >= target))
-                    .map(|php| toolchain::lint(&php, &root, &written))
+                    .map(|php| {
+                        let files =
+                            selected.iter().map(|c| (c.file.as_str(), originals.get(&c.file).map(String::as_str), c.new_content.as_str()));
+                        toolchain::new_syntax_errors(&php, files)
+                    })
                     .unwrap_or_default();
                 Ok(ApplyResult { snapshot, written, lint_errors })
             }
