@@ -111,10 +111,12 @@ Before every apply, Ferry backs up the files it is about to change. The **Histor
 | **Drupal** | `drupal/core` in `composer.json`, or `core/lib/Drupal.php` (also under `web/`, `docroot/`, `html/`, or `public/`) | Drupal core, `sites/default/files` |
 | **Plain PHP** | any folder with PHP files | — |
 
-For WordPress and Laravel, Ferry also checks the framework itself:
+For WordPress, Laravel, Drupal, and Symfony, Ferry also checks the framework itself:
 
 - **WordPress:** the core version in `wp-includes/version.php` against the oldest WordPress release that supports your target PHP version (for example, PHP 8.4 needs WordPress 6.7).
 - **Laravel:** the `laravel/framework` version in `composer.lock` against Laravel's supported PHP range, plus the `str_*` and `array_*` helpers and the `Input` facade that Laravel 6 removed. PHP 8 needs Laravel 6.20 or newer, so these break too unless `laravel/helpers` is installed.
+- **Drupal:** the core version against Drupal's PHP requirements (for example, PHP 8.5 needs Drupal 11.3).
+- **Symfony:** Symfony doesn't publish a maximum PHP version, so a release whose maintenance ended before your target PHP version came out is marked **Risky**.
 
 `vendor` and `node_modules` are always skipped. Files larger than 2 MB are skipped and listed in the scan results, so nothing is left out silently.
 
