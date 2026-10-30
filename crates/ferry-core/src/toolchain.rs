@@ -188,26 +188,40 @@ pub fn php_version(php: &Path) -> Option<String> {
     String::from_utf8_lossy(&out.stdout).lines().map(str::trim).rfind(|l| !l.is_empty()).map(str::to_string)
 }
 
-pub fn lint(php: &Path, root: &Path, files: &[String]) -> Vec<String> {
+pub fn lint_source(php: &Path, src: &str) -> Option<String> {
+    use std::io::Write;
+    let mut child = command(php)
+        .args(["-n", "-d", "display_errors=1", "-l"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .ok()?;
+    let mut stdin = child.stdin.take()?;
+    let input = src.to_string();
+    let writer = std::thread::spawn(move || stdin.write_all(input.as_bytes()));
+    let out = child.wait_with_output().ok()?;
+    let _ = writer.join();
+    if out.status.success() {
+        return None;
+    }
+    let text = format!("{}\n{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    let line = text
+        .lines()
+        .map(str::trim)
+        .find(|l| l.to_ascii_lowercase().contains("error") && !l.starts_with("Errors parsing"))
+        .or_else(|| text.lines().map(str::trim).find(|l| !l.is_empty()))?;
+    Some(line.trim_start_matches("PHP ").to_string())
+}
+
+pub fn new_syntax_errors<'a>(php: &Path, files: impl IntoIterator<Item = (&'a str, Option<&'a str>, &'a str)>) -> Vec<String> {
     let mut errors = Vec::new();
-    for rel in files {
-        let path = root.join(rel);
-        let Ok(out) = command(php).args(["-n", "-d", "display_errors=1", "-l"]).arg(&path).output() else {
-            continue;
-        };
-        if out.status.success() {
+    for (rel, before, after) in files {
+        let Some(error) = lint_source(php, after) else { continue };
+        if before.is_some_and(|b| lint_source(php, b).is_some()) {
             continue;
         }
-        let text = format!("{}\n{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
-        let full = path.to_string_lossy();
-        let line = text
-            .lines()
-            .map(str::trim)
-            .find(|l| l.to_ascii_lowercase().contains("error") && !l.starts_with("Errors parsing"))
-            .or_else(|| text.lines().map(str::trim).find(|l| !l.is_empty()))
-            .unwrap_or_default();
-        let line = line.trim_start_matches("PHP ").replace(full.as_ref(), rel);
-        errors.push(format!("{rel} — {line}"));
+        errors.push(format!("{rel} — {}", error.replace("Standard input code", rel)));
     }
     errors
 }
@@ -324,20 +338,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn lint_reports_only_broken_files() {
+    fn lint_reports_only_newly_broken_files() {
         let Some(php) = find_php(None) else {
             eprintln!("php not found; lint test skipped");
             return;
         };
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join("src")).unwrap();
-        std::fs::write(dir.path().join("src/ok.php"), "<?php\necho 1;\n").unwrap();
-        std::fs::write(dir.path().join("src/bad.php"), "<?php\nfunction f( {\n").unwrap();
-        let errors = lint(&php, dir.path(), &["src/ok.php".into(), "src/bad.php".into()]);
+        let ok = "<?php\necho 1;\n";
+        let broken = "<?php\nfunction f( {\n";
+        let errors = new_syntax_errors(
+            &php,
+            [("src/ok.php", Some(ok), ok), ("src/new.php", Some(ok), broken), ("src/old.php", Some(broken), broken)],
+        );
         assert_eq!(errors.len(), 1, "{errors:?}");
-        assert!(errors[0].starts_with("src/bad.php — "), "{errors:?}");
-        assert!(errors[0].contains("line 2"), "{errors:?}");
-        assert!(!errors[0].contains(&*dir.path().to_string_lossy()), "{errors:?}");
+        assert!(errors[0].starts_with("src/new.php — "), "{errors:?}");
+        assert!(errors[0].contains("in src/new.php on line 2"), "{errors:?}");
     }
 
     #[cfg(unix)]
