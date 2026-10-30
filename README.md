@@ -65,6 +65,7 @@ Ferry has its own PHP lexer and rule set, so it reads code the way PHP does: met
 - syntax that no longer parses, such as `$str{0}`, `(real)` and `(unset)` casts, and PHP 7 `#[` comments, which PHP 8 reads as attributes
 - deprecations, such as `"${var}"` interpolation, implicit nullable parameters, `utf8_encode()`, `FILTER_SANITIZE_STRING`, and `E_STRICT`
 - parameter and call patterns, such as an optional parameter before a required one, a literal `null` passed to built-in string functions, and `"self::method"` style callables
+- methods that override a built-in class or interface without a return type, such as `PDO::query()` or `Iterator::current()`, which need `#[\ReturnTypeWillChange]` from PHP 8.1
 - code worth a manual check, such as `eval()`, `extract()`, and variable variables
 
 ### Review every change before it is applied
@@ -195,7 +196,6 @@ Everything runs on your computer:
   - PDO MySQL and SQLite return real integers and floats, so `=== "1"` comparisons fail.
   - Passing `null` through a variable to a built-in function is deprecated. Ferry reports a literal `null`, but can't see what a variable holds.
   - Dynamic properties are deprecated. Ferry follows parent classes and traits inside your project, but skips classes that extend something it can't see, such as a framework class in `vendor/`, because that parent could declare the property.
-  - Missing `#[\ReturnTypeWillChange]` on `ArrayAccess`, `Iterator` and similar methods is deprecated.
   - Required extensions such as imap or mcrypt may be missing on the new server.
 - **Method calls:** Ferry can't know an object's class without running the code, so a method call such as `$db->ping()` is only flagged when the same file mentions the class (`mysqli`, `Reflection…`, `SplObjectStorage`). Static calls and class constants like `PDO::MYSQL_ATTR_INIT_COMMAND` are always checked.
 - **Encodings:** automatic fixes skip files that are not UTF-8 (for example, Windows-1254 or Latin-1), so they are never corrupted. Convert them to UTF-8 to have them fixed.
@@ -217,6 +217,8 @@ pnpm tauri build          # installers → target/release/bundle/
 ```
 
 To run the tests against real Rector, point `FERRY_TEST_TOOLS` to a folder where Rector is installed: `FERRY_TEST_TOOLS=/path/to/tools cargo test --workspace`.
+
+`scripts/fetch-corpus.sh` downloads old releases of WordPress, Drupal, CodeIgniter and phpBB, and `CORPUS=<folder> CORPUS_PHP=$(which php) cargo test -p ferry-core --test corpus -- --ignored --nocapture` compares the scanner with what that PHP itself reports for them.
 
 `pnpm e2e:native` drives a debug build of the real app through the demo projects and edge cases such as a Unicode path, a symlink loop and an empty project, and reports each scenario.
 
