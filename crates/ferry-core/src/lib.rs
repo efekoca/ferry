@@ -3,6 +3,7 @@ pub mod deps;
 pub mod diff;
 mod guards;
 pub mod i18n;
+pub mod index;
 pub mod lexer;
 pub mod project;
 pub mod rector;

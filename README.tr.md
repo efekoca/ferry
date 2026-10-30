@@ -172,7 +172,7 @@ Her şey kendi bilgisayarınızda çalışır:
 
 ## Bilinen sınırlamalar
 
-- **Statik analiz:** Tarama kodu çalıştırmadan okur. Bu yüzden çalışma anındaki değerlere bağlı davranışlar (örneğin adı bir metinden gelen fonksiyon çağrıları) her zaman bulunamaz. Bu tür durumlar mümkün olduğunda **Riskli** olarak işaretlenir. Yalnızca eski sürümlerde çalışan kod atlanır: `if (PHP_VERSION_ID < 80100)` ya da `version_compare(PHP_VERSION, '8.0', '<')` bloklarının içi, sürüm kontrolü yapan bir ternary'nin ya da `&&`'nin hiç çalışmayacak tarafı ve `if (function_exists('mysql_connect'))` gibi bloklar.
+- **Statik analiz:** Tarama kodu çalıştırmadan okur. Bu yüzden çalışma anındaki değerlere bağlı davranışlar (örneğin adı bir metinden gelen fonksiyon çağrıları) her zaman bulunamaz. Bu tür durumlar mümkün olduğunda **Riskli** olarak işaretlenir. Yalnızca eski sürümlerde çalışan kod atlanır: `if (PHP_VERSION_ID < 80100)` ya da `version_compare(PHP_VERSION, '8.0', '<')` bloklarının içi, sürüm kontrolü yapan bir ternary'nin ya da `&&`'nin hiç çalışmayacak tarafı ve `if (function_exists('mysql_connect'))` gibi bloklar. Kaldırılmış bir adla kendi tanımladığınız fonksiyonlar da raporlanmaz; örneğin bir `each()` polyfill'i ya da Composer ile yüklenen bir `mysql_*` uyumluluk katmanı.
 - **Davranış değişiklikleri:** Bazı değişiklikler ancak kod çalışınca ortaya çıkar, bu yüzden hiçbir statik araç bunları bulamaz. Uygulamanızı yeni sürümde çalıştırarak test edin:
   - `0 == "foo"` artık `false` döner; bu `in_array()`, `array_search()` ve `switch`'i de etkiler.
   - Sayı olmayan metinlerle yapılan aritmetik işlemler `TypeError` fırlatır.
@@ -180,7 +180,7 @@ Her şey kendi bilgisayarınızda çalışır:
   - curl, GD ve XML gibi resource'lar artık nesne, bu yüzden `is_resource()` kontrolleri bozulur.
   - PDO MySQL ve SQLite artık gerçek sayı döndürür, bu yüzden `=== "1"` karşılaştırmaları bozulur.
   - Yerleşik fonksiyonlara değişken üzerinden `null` vermek kullanımdan kalktı.
-  - Dinamik property'ler kullanımdan kalktı. Ferry bunları yalnızca başka bir sınıftan türemeyen ve trait kullanmayan sınıflarda bulur, çünkü property üst sınıfta tanımlanmış olabilir.
+  - Dinamik property'ler kullanımdan kalktı. Ferry projenizdeki üst sınıfları ve trait'leri izler; ancak `vendor/` içindeki bir framework sınıfı gibi göremediği bir sınıftan türeyenleri atlar, çünkü property orada tanımlanmış olabilir.
   - `ArrayAccess`, `Iterator` ve benzeri arayüzlerin metotlarında `#[\ReturnTypeWillChange]` eksikse uyarı verilir.
   - imap ya da mcrypt gibi gerekli eklentiler yeni sunucuda kurulu olmayabilir.
 - **Metot çağrıları:** Ferry kodu çalıştırmadan bir nesnenin sınıfını bilemez. Bu yüzden `$db->ping()` gibi bir metot çağrısı yalnızca aynı dosyada sınıfın adı geçiyorsa (`mysqli`, `Reflection…`, `SplObjectStorage`) işaretlenir. Statik çağrılar ve `PDO::MYSQL_ATTR_INIT_COMMAND` gibi sınıf sabitleri her zaman kontrol edilir.

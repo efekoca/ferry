@@ -123,3 +123,41 @@ fn rector_sees_the_same_files_as_the_scanner() {
     changed.sort();
     assert_eq!(changed, ["src/m.module", "src/t.phtml", "src/x.inc", "variables.php", "web/core.install"]);
 }
+
+#[test]
+fn project_index_sees_polyfills_and_class_hierarchies() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let write = |rel: &str, body: &str| {
+        let path = root.join(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, body).unwrap();
+    };
+    write("lib/polyfill.php", "<?php\nif (!function_exists('each')) {\n    function each(&$a) { return []; }\n}\n");
+    write("src/uses.php", "<?php\nnamespace App;\n$x = each($arr);\n$y = \\each($arr);\nmysql_query('x');\nereg('a', 'b');\n");
+    write("vendor/shim/mysql.php", "<?php\nfunction mysql_query($q) {}\n");
+    write("vendor/composer/autoload_files.php", "<?php\n$vendorDir = dirname(__DIR__);\nreturn array('abc' => $vendorDir . '/shim/mysql.php');\n");
+    write("src/Base.php", "<?php\nnamespace App;\nclass Base { protected $name; }\n");
+    write("src/Child.php", "<?php\nnamespace App;\nclass Child extends Base {\n    function f() { $this->name = 1; $this->extra = 2; }\n}\n");
+    write("src/Open.php", "<?php\nclass Open extends \\stdClass { function f() { $this->any = 1; } }\n");
+    write("src/Magic.php", "<?php\nclass MagicBase { function __set($n, $v) {} }\nclass Kid extends MagicBase { function f() { $this->x = 1; } }\n");
+    write("src/Post.php", "<?php\ntrait HasTitle { public $title; }\nclass Post { use HasTitle;\n    function f() { $this->title = 1; $this->body = 2; }\n}\n");
+    write("src/Vendor.php", "<?php\nclass UsesFramework extends \\Illuminate\\Database\\Eloquent\\Model { function f() { $this->x = 1; } }\n");
+    write("src/Allowed.php", "<?php\n#[\\AllowDynamicProperties]\nclass Loose {}\nclass Looser extends Loose { function f() { $this->z = 1; } }\n");
+
+    let info = project::inspect(root).unwrap();
+    let files = project::collect_php_files(root, &info.excluded_dirs);
+    let scan = analyzer::analyze_files(root, &files, PhpVersion::new(8, 4), |_, _, _| {});
+    let mut found: Vec<String> = scan.findings.iter().map(|f| format!("{}:{}:{}", f.file, f.line, f.rule_id)).collect();
+    found.sort();
+    assert_eq!(
+        found,
+        [
+            "src/Child.php:4:deprecated.dynamic_property",
+            "src/Post.php:4:deprecated.dynamic_property",
+            "src/uses.php:6:removed.ereg",
+        ]
+    );
+    let titles: Vec<&str> = scan.findings.iter().filter(|f| f.rule_id == "deprecated.dynamic_property").map(|f| f.snippet.as_str()).collect();
+    assert!(titles.iter().all(|s| s.contains("extra") || s.contains("body")), "{titles:?}");
+}

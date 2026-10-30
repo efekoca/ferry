@@ -63,6 +63,7 @@ pub fn analyze_files(
     mut progress: impl FnMut(usize, usize, &str),
 ) -> ScanResult {
     let started = Instant::now();
+    let index = crate::index::ProjectIndex::build(root, files);
     let mut findings = Vec::new();
     let mut errors = Vec::new();
     let mut lines = 0;
@@ -91,7 +92,7 @@ pub fn analyze_files(
             Ok(bytes) => {
                 let src = String::from_utf8_lossy(&bytes);
                 lines += src.lines().count();
-                findings.extend(analyze_source(&rel, &src, target));
+                findings.extend(analyze_source_in(&rel, &src, target, &index));
             }
             Err(e) => errors.push(FileError {
                 file: rel,
@@ -263,6 +264,11 @@ pub fn fix_curly_offsets(src: &str) -> Option<String> {
 }
 
 pub fn analyze_source(file: &str, src: &str, target: PhpVersion) -> Vec<Finding> {
+    let index = crate::index::ProjectIndex::from_tokens(&lex(src).tokens);
+    analyze_source_in(file, src, target, &index)
+}
+
+pub fn analyze_source_in(file: &str, src: &str, target: PhpVersion, index: &crate::index::ProjectIndex) -> Vec<Finding> {
     let lexed = lex(src);
     let tokens = lexed.tokens;
     let mut line_starts = vec![0];
@@ -280,6 +286,8 @@ pub fn analyze_source(file: &str, src: &str, target: PhpVersion) -> Vec<Finding>
             .any(|w| w[0].is_ident_ci("namespace") && (w[1].kind == TokenKind::Ident || w[1].is_punct("{"))),
         classes: class_references(&tokens),
         dead: [crate::guards::dead_spans(&tokens, target), crate::guards::dead_expressions(&tokens, target)].concat(),
+        index,
+        namespaces: crate::index::namespaces(&tokens),
         out: Vec::new(),
     };
     for &(line, column) in &lexed.stray_hash_brackets {
@@ -312,7 +320,7 @@ pub fn analyze_source(file: &str, src: &str, target: PhpVersion) -> Vec<Finding>
     for k in serializable_without_magic(&tokens) {
         ctx.pattern(&patterns::SERIALIZABLE, &tokens[k], None);
     }
-    for k in dynamic_properties(&tokens) {
+    for k in dynamic_properties(&tokens, index) {
         ctx.pattern(&patterns::DYNAMIC_PROPERTY, &tokens[k], None);
     }
     let mut i = 0;
@@ -396,6 +404,8 @@ struct Ctx<'a> {
     classes: std::collections::HashSet<String>,
     namespaced: bool,
     dead: Vec<crate::guards::Span>,
+    index: &'a crate::index::ProjectIndex,
+    namespaces: Vec<(usize, String)>,
     out: Vec<Finding>,
 }
 
@@ -580,7 +590,11 @@ impl<'a> Ctx<'a> {
                 }
                 _ => {}
             }
-            if !tok.text.starts_with('\\') && self.local_functions.contains(&lower) {
+            let rooted = tok.text.starts_with('\\');
+            if !rooted && self.local_functions.contains(&lower) {
+                return;
+            }
+            if self.index.declares_function(crate::index::namespace_at(&self.namespaces, i), &lower, rooted) {
                 return;
             }
             let args = call_args(tokens, i + 1);
@@ -803,7 +817,7 @@ impl<'a> Ctx<'a> {
     }
 }
 
-fn method_tokens(tokens: &[Token]) -> std::collections::HashSet<usize> {
+pub(crate) fn method_tokens(tokens: &[Token]) -> std::collections::HashSet<usize> {
     let modifiers = ["public", "protected", "private", "static", "abstract", "final"];
     let mut methods = std::collections::HashSet::new();
     let mut stack: Vec<bool> = Vec::new();
@@ -1254,43 +1268,11 @@ fn serializable_without_magic(tokens: &[Token]) -> Vec<usize> {
         .collect()
 }
 
-fn dynamic_properties(tokens: &[Token]) -> Vec<usize> {
+fn dynamic_properties(tokens: &[Token], index: &crate::index::ProjectIndex) -> Vec<usize> {
     let mut out = Vec::new();
-    for (i, open, close) in class_bodies(tokens) {
-        let header = &tokens[i..open];
-        if header.iter().any(|t| t.is_ident_ci("extends")) || declares_method(tokens, open, close, "__set") {
-            continue;
-        }
-        let attr_start = (0..i).rev().find(|&k| tokens[k].is_punct(";") || tokens[k].is_punct("}") || tokens[k].is_punct("{")).unwrap_or(0);
-        if tokens[attr_start..i].iter().any(|t| t.text.trim_start_matches('\\').eq_ignore_ascii_case("AllowDynamicProperties")) {
-            continue;
-        }
-        let mut declared = std::collections::HashSet::new();
-        let mut depth = 0;
-        let mut uses_trait = false;
-        let modifiers = ["public", "protected", "private", "readonly", "var"];
-        for k in open..close {
-            let t = &tokens[k];
-            if t.is_punct("{") || t.is_punct("(") {
-                depth += 1;
-            } else if t.is_punct("}") || t.is_punct(")") {
-                depth -= 1;
-            } else if depth == 1 && t.is_ident_ci("use") {
-                uses_trait = true;
-            } else if t.kind == TokenKind::Variable {
-                let promoted = depth == 2
-                    && (0..k)
-                        .rev()
-                        .take_while(|&j| !tokens[j].is_punct("(") && !tokens[j].is_punct(","))
-                        .any(|j| modifiers.iter().any(|m| tokens[j].is_ident_ci(m)));
-                if depth == 1 || promoted {
-                    declared.insert(t.text.to_ascii_lowercase());
-                }
-            }
-        }
-        if uses_trait {
-            continue;
-        }
+    for decl in crate::index::class_decls(tokens) {
+        let (open, close) = (decl.open, decl.close);
+        let Some(declared) = index.properties(&decl.info) else { continue };
         let nested: Vec<(usize, usize)> = (open..close)
             .filter(|&k| tokens[k].is_ident_ci("class") && k > 0 && tokens[k - 1].is_ident_ci("new"))
             .filter_map(|k| {
@@ -1433,7 +1415,8 @@ mod tests {
     fn user_functions_with_removed_names_are_not_flagged() {
         assert!(rule_ids("<?php namespace App; function each($a) {} each($x);").is_empty());
         assert!(rule_ids("<?php use function App\\Util\\each; each($x);").is_empty());
-        assert_eq!(rule_ids("<?php function each($a) {} \\each($x);"), ["removed.each"]);
+        assert_eq!(rule_ids("<?php namespace App; function each($a) {} \\each($x);"), ["removed.each"]);
+        assert!(rule_ids("<?php function each($a) {} \\each($x);").is_empty(), "a global polyfill also serves rooted calls");
         assert!(rule_ids("<?php mysql_escape_custom($x);").is_empty());
         assert_eq!(rule_ids("<?php mysql_fetch_assoc($r);"), ["removed.mysql"]);
         assert_eq!(rule_ids("<?php user_error('x', E_USER_ERROR);"), ["deprecated.e_user_error"]);
