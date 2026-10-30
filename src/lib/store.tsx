@@ -372,7 +372,15 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
         const result = await api.applyChanges(root, preview.id, files, label);
         if (rootRef.current !== root) return true;
         setPreview((p) => (p ? { ...p, changes: p.changes.filter((c) => !result.written.includes(c.file)) } : p));
-        toast.push({ tone: "success", title: t.toast.applied(result.written.length), description: t.toast.appliedText });
+        if (result.lintErrors.length > 0) {
+          toast.push({
+            tone: "error",
+            title: t.toast.lintFailed(result.lintErrors.length),
+            description: `${result.lintErrors.slice(0, 3).join("\n")}\n${t.toast.lintFailedText}`,
+          });
+        } else {
+          toast.push({ tone: "success", title: t.toast.applied(result.written.length), description: t.toast.appliedText });
+        }
         await refreshSnapshots();
         if (scan && rootRef.current === root) await runScan();
         return true;

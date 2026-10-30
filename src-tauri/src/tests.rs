@@ -154,9 +154,11 @@ fn messages_follow_the_ui_language() {
 #[test]
 fn settings_round_trip() {
     let h = harness();
-    assert_eq!(h.ok("get_settings", json!({})), json!({ "phpPath": null }));
+    assert_eq!(h.ok("get_settings", json!({})), json!({ "phpPath": null, "snapshotLimit": null }));
     h.ok("save_settings", json!({ "settings": { "phpPath": "/opt/php/bin/php" } }));
-    assert_eq!(h.ok("get_settings", json!({}))["phpPath"], "/opt/php/bin/php");
+    assert_eq!(h.ok("get_settings", json!({})), json!({ "phpPath": "/opt/php/bin/php", "snapshotLimit": null }));
+    h.ok("save_settings", json!({ "settings": { "phpPath": null, "snapshotLimit": 10 } }));
+    assert_eq!(h.ok("get_settings", json!({}))["snapshotLimit"], 10);
 }
 
 #[test]
@@ -217,6 +219,7 @@ fn rector_preview_apply_restore_over_ipc() {
         json!({ "path": root, "previewId": id, "files": ["src/Greeter.php"], "label": "Uyumluluk düzeltmeleri · PHP 8.4" }),
     );
     assert_eq!(applied["written"], json!(["src/Greeter.php"]));
+    assert_eq!(applied["lintErrors"], json!([]), "Rector's output must still parse");
     let changed = std::fs::read_to_string(Path::new(&root).join("src/Greeter.php")).unwrap();
     assert_ne!(changed, original);
 
