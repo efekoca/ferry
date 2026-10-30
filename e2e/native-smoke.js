@@ -37,7 +37,7 @@
   try {
     await step("welcome");
     (await until(() => document.querySelector(".recent__item"), "son projeler")).click();
-    await until(() => text().includes("Hangi sürüme geçiyorsun?"), "genel bakış");
+    await until(() => text().includes("Hangi sürüme geçiyorsunuz?"), "genel bakış");
     await emit(`project ${document.querySelector(".project-chip__name")?.textContent}`);
 
     await click("Taramayı başlat");
@@ -59,7 +59,7 @@
       await emit("rector installed");
     }
     await click("Değişiklikleri hesapla");
-    await until(() => document.querySelector(".change-item") || text().includes("Uygulanacak değişiklik yok"), "önizleme", 300000);
+    await until(() => document.querySelector(".change-item") || text().includes("Yapılacak değişiklik yok"), "önizleme", 300000);
     const files = [...document.querySelectorAll(".change-item__file")].map((e) => e.textContent);
     await emit(`preview files=${JSON.stringify(files)}`);
     await step("changes");

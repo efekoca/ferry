@@ -122,3 +122,58 @@ fn rector_handles_every_demo_project() {
         assert!(preview.changes.iter().all(|c| !c.file.starts_with("vendor/")), "{name}");
     }
 }
+
+#[test]
+fn auto_findings_are_fixed_by_rector() {
+    let Some(tools) = std::env::var_os("FERRY_TEST_TOOLS").map(PathBuf::from) else {
+        return;
+    };
+    let php = ferry_core::toolchain::find_php(None).expect("php gerekli");
+    let mut unfixed = BTreeSet::new();
+    for name in ["kuzey-magaza", "wp-blog", "laravel-api"] {
+        let root = demo(name);
+        let info = project::inspect(&root).unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let target = PhpVersion::new(8, 5);
+        let preview = ferry_core::rector::preview(
+            &php,
+            &ferry_core::toolchain::rector_entry(&tools),
+            &root,
+            target,
+            ferry_core::rector::RectorMode::Compat,
+            &info.excluded_dirs,
+            work.path(),
+            &std::sync::atomic::AtomicBool::new(false),
+        )
+        .unwrap();
+        let findings = analyzer::analyze_files(&root, &project::collect_php_files(&root, &info.excluded_dirs), target, |_, _, _| {}).findings;
+        for f in findings.iter().filter(|f| f.fix != ferry_core::rules::FixKind::Manual) {
+            let Some(change) = preview.changes.iter().find(|c| c.file == f.file) else {
+                unfixed.insert(format!("{} ({:?}) {}:{}", f.rule_id, f.fix, f.file, f.line));
+                continue;
+            };
+            let touched = if FUNCTIONS.iter().chain(CONSTANTS).any(|r| r.id == f.rule_id) {
+                let source = std::fs::read_to_string(root.join(&f.file)).unwrap();
+                let line = source.lines().nth(f.line - 1).unwrap_or_default();
+                let word: String = line.chars().skip(f.column - 1).take_while(|c| c.is_alphanumeric() || *c == '_').collect();
+                let count = |s: &str| {
+                    let lower = s.to_lowercase();
+                    let w = word.to_lowercase();
+                    lower.match_indices(&w).filter(|(i, _)| {
+                        let before = lower[..*i].chars().last();
+                        let after = lower[i + w.len()..].chars().next();
+                        !before.is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '$')
+                            && !after.is_some_and(|c| c.is_alphanumeric() || c == '_')
+                    }).count()
+                };
+                !word.is_empty() && count(&change.new_content) < count(&source)
+            } else {
+                change.diff.hunks.iter().flat_map(|h| &h.lines).any(|l| l.kind == ferry_core::diff::LineKind::Del && l.old_no == Some(f.line))
+            };
+            if !touched {
+                unfixed.insert(format!("{} ({:?}) {}:{}", f.rule_id, f.fix, f.file, f.line));
+            }
+        }
+    }
+    assert!(unfixed.is_empty(), "classified as fixable but Rector left them:\n{}", unfixed.into_iter().collect::<Vec<_>>().join("\n"));
+}

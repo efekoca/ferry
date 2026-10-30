@@ -118,8 +118,8 @@ pub const FUNCTIONS: &[SymbolRule] = &[
         "sql_regcase() was removed and has no direct replacement.")),
     rule!("removed.call_user_method", "call_user_method", R, (7, 0), code("call_user_func([$obj, 'method'])"), A, REMOVED_FN),
     rule!("removed.call_user_method_array", "call_user_method_array", R, (7, 0), code("call_user_func_array([$obj, 'method'], $args)"), A, REMOVED_FN),
-    rule!("removed.set_magic_quotes_runtime", "set_magic_quotes_runtime", R, (7, 0), REMOVE_CALL, A, MAGIC_QUOTES_SET),
-    rule!("removed.magic_quotes_runtime", "magic_quotes_runtime", R, (7, 0), REMOVE_CALL, A, MAGIC_QUOTES_SET),
+    rule!("removed.set_magic_quotes_runtime", "set_magic_quotes_runtime", R, (7, 0), REMOVE_CALL, M, MAGIC_QUOTES_SET),
+    rule!("removed.magic_quotes_runtime", "magic_quotes_runtime", R, (7, 0), REMOVE_CALL, M, MAGIC_QUOTES_SET),
     rule!("removed.mcrypt", "mcrypt_*", R, (7, 2), tx("openssl_* ya da sodium_*", "openssl_* or sodium_*"), M, Text::new(
         "ext/mcrypt PHP 7.2'de çekirdekten çıkarıldı. Şifreleme openssl ya da sodium ile yeniden yazılmalı; eski şifreli verinin hâlâ çözülebildiğini doğrulayın.",
         "ext/mcrypt was dropped from core in PHP 7.2. Rewrite the encryption with openssl or sodium and make sure existing encrypted data can still be decrypted.")),
@@ -134,16 +134,16 @@ pub const FUNCTIONS: &[SymbolRule] = &[
     rule!("removed.image2wbmp", "image2wbmp", R, (8, 0), code("imagewbmp"), A, REMOVED_FN),
     rule!("removed.png2wbmp", "png2wbmp", R, (8, 0), None, M, REMOVED_FN),
     rule!("removed.jpeg2wbmp", "jpeg2wbmp", R, (8, 0), None, M, REMOVED_FN),
-    rule!("removed.fgetss", "fgetss", R, (8, 0), code("strip_tags(fgets(...))"), L, REMOVED_FN),
+    rule!("removed.fgetss", "fgetss", R, (8, 0), code("strip_tags(fgets(...))"), M, REMOVED_FN),
     rule!("removed.money_format", "money_format", R, (8, 0), code("NumberFormatter"), M, Text::new(
         "money_format() kaldırıldı. Yerine intl eklentisindeki NumberFormatter kullanılmalı.",
         "money_format() was removed. Use NumberFormatter from the intl extension instead.")),
     rule!("removed.restore_include_path", "restore_include_path", R, (8, 0), code("ini_restore('include_path')"), A, REMOVED_FN),
     rule!("removed.ezmlm_hash", "ezmlm_hash", R, (8, 0), None, M, REMOVED_FN),
     rule!("removed.hebrevc", "hebrevc", R, (8, 0), code("nl2br(hebrev(...))"), A, REMOVED_FN),
-    rule!("removed.convert_cyr_string", "convert_cyr_string", R, (8, 0), tx("mb_convert_encoding ya da iconv", "mb_convert_encoding or iconv"), L, REMOVED_FN),
-    rule!("removed.get_magic_quotes_gpc", "get_magic_quotes_gpc", R, (8, 0), code("false"), A, MAGIC_QUOTES_GET),
-    rule!("removed.get_magic_quotes_runtime", "get_magic_quotes_runtime", R, (8, 0), code("false"), A, MAGIC_QUOTES_GET),
+    rule!("removed.convert_cyr_string", "convert_cyr_string", R, (8, 0), tx("mb_convert_encoding ya da iconv", "mb_convert_encoding or iconv"), M, REMOVED_FN),
+    rule!("removed.get_magic_quotes_gpc", "get_magic_quotes_gpc", R, (8, 0), code("false"), M, MAGIC_QUOTES_GET),
+    rule!("removed.get_magic_quotes_runtime", "get_magic_quotes_runtime", R, (8, 0), code("false"), M, MAGIC_QUOTES_GET),
     rule!("removed.is_real", "is_real", R, (8, 0), code("is_float"), A, REMOVED_ALIAS),
     rule!("removed.ldap_sort", "ldap_sort", R, (8, 0), None, M, REMOVED_FN),
     rule!("removed.ldap_control_paged_result", "ldap_control_paged_result", R, (8, 0), tx("ldap_search'teki $controls", "$controls in ldap_search"), M, REMOVED_FN),
@@ -156,9 +156,9 @@ pub const FUNCTIONS: &[SymbolRule] = &[
         "strftime() is deprecated and will be removed in PHP 9. Its format characters don't map one-to-one to date().")),
     rule!("deprecated.gmstrftime", "gmstrftime", D, (8, 1), tx("IntlDateFormatter ya da gmdate()", "IntlDateFormatter or gmdate()"), M, DEPRECATED_FN),
     rule!("deprecated.strptime", "strptime", D, (8, 1), tx("date_parse_from_format ya da IntlDateFormatter::parse", "date_parse_from_format or IntlDateFormatter::parse"), M, DEPRECATED_FN),
-    rule!("deprecated.date_sunrise", "date_sunrise", D, (8, 1), code("date_sun_info"), L, DEPRECATED_FN),
-    rule!("deprecated.date_sunset", "date_sunset", D, (8, 1), code("date_sun_info"), L, DEPRECATED_FN),
-    rule!("deprecated.mhash", "mhash*", D, (8, 1), code("hash_*"), L, Text::new(
+    rule!("deprecated.date_sunrise", "date_sunrise", D, (8, 1), code("date_sun_info"), M, DEPRECATED_FN),
+    rule!("deprecated.date_sunset", "date_sunset", D, (8, 1), code("date_sun_info"), M, DEPRECATED_FN),
+    rule!("deprecated.mhash", "mhash*", D, (8, 1), code("hash_*"), M, Text::new(
         "mhash fonksiyonları kullanımdan kalktı.",
         "The mhash functions are deprecated.")),
     rule!("deprecated.odbc_result_all", "odbc_result_all", D, (8, 1), None, M, DEPRECATED_FN),
@@ -166,13 +166,13 @@ pub const FUNCTIONS: &[SymbolRule] = &[
         "utf8_encode() kullanımdan kalktı. Kaynak metnin gerçekten ISO-8859-1 olduğundan emin olun.",
         "utf8_encode() is deprecated. Make sure the source text really is ISO-8859-1.")),
     rule!("deprecated.utf8_decode", "utf8_decode", D, (8, 2), code("mb_convert_encoding($s, 'ISO-8859-1', 'UTF-8')"), L, DEPRECATED_FN),
-    rule!("deprecated.lcg_value", "lcg_value", D, (8, 4), code("Random\\Randomizer::getFloat()"), L, DEPRECATED_FN),
+    rule!("deprecated.lcg_value", "lcg_value", D, (8, 4), code("Random\\Randomizer::getFloat()"), M, DEPRECATED_FN),
     rule!("deprecated.mysqli_ping", "mysqli_ping", D, (8, 4), None, M, Text::new(
         "mysqli_ping() kullanımdan kalktı; kopan bağlantı artık kendiliğinden yeniden kurulmuyor.",
         "mysqli_ping() is deprecated; dropped connections are no longer reconnected automatically.")),
     rule!("deprecated.mysqli_kill", "mysqli_kill", D, (8, 4), tx("KILL CONNECTION sorgusu", "a KILL CONNECTION query"), M, DEPRECATED_FN),
     rule!("deprecated.mysqli_refresh", "mysqli_refresh", D, (8, 4), tx("FLUSH sorguları", "FLUSH queries"), M, DEPRECATED_FN),
-    rule!("deprecated.xml_set_object", "xml_set_object", D, (8, 4), tx("xml_set_*_handler'a doğrudan callable verin", "pass a callable to xml_set_*_handler"), L, DEPRECATED_FN),
+    rule!("deprecated.xml_set_object", "xml_set_object", D, (8, 4), tx("xml_set_*_handler'a doğrudan callable verin", "pass a callable to xml_set_*_handler"), M, DEPRECATED_FN),
     rule!("deprecated.curl_close", "curl_close", D, (8, 5), REMOVE_CALL, A, NOOP_SINCE_80),
     rule!("deprecated.curl_share_close", "curl_share_close", D, (8, 5), REMOVE_CALL, A, NOOP_SINCE_80),
     rule!("deprecated.finfo_close", "finfo_close", D, (8, 5), REMOVE_CALL, A, Text::new(
@@ -189,7 +189,7 @@ pub const CONSTANTS: &[SymbolRule] = &[
     rule!("deprecated.filter_sanitize_stripped", "filter_sanitize_stripped", D, (8, 1), code("htmlspecialchars()"), M, Text::new(
         "FILTER_SANITIZE_STRIPPED kullanımdan kalktı.",
         "FILTER_SANITIZE_STRIPPED is deprecated.")),
-    rule!("deprecated.e_strict", "e_strict", D, (8, 4), tx("E_STRICT'i kaldırın", "remove E_STRICT"), A, Text::new(
+    rule!("deprecated.e_strict", "e_strict", D, (8, 4), tx("E_STRICT'i kaldırın", "remove E_STRICT"), M, Text::new(
         "E_STRICT kullanımdan kalktı; bu hata seviyesi artık hiç tetiklenmiyor.",
         "E_STRICT is deprecated; this error level is never raised anymore.")),
     rule!("deprecated.e_user_error", "e_user_error", D, (8, 4), tx("exception fırlatın ya da exit() kullanın", "throw an exception or call exit()"), M, Text::new(
@@ -223,7 +223,7 @@ pub mod patterns {
         severity: Severity::Breaking,
         since: (8, 0),
         replacement: code("spl_autoload_register()"),
-        fix: FixKind::Auto,
+        fix: FixKind::Manual,
         note: Text::new(
             "__autoload() PHP 8.0'da kaldırıldı; artık hiç çağrılmıyor.",
             "__autoload() was removed in PHP 8.0 and is never called anymore.",

@@ -134,7 +134,7 @@ const RULE_TITLES: &[(&str, Text)] = &[
     ("UnsetCastRector", Text::new("(unset) dönüşümü kaldırılır", "Remove (unset) casts")),
     ("ShellExecFunctionCallOverBackticksRector", Text::new("Ters tırnak → shell_exec()", "Backticks → shell_exec()")),
     ("ColonAfterSwitchCaseRector", Text::same("case …; → case …:")),
-    ("OptionalParametersAfterRequiredRector", Text::new("İsteğe bağlı parametreler sona alınır", "Move optional params last")),
+    ("OptionalParametersAfterRequiredRector", Text::new("Sonraki zorunlu parametrelere varsayılan değer eklenir", "Give later required params a default")),
     ("AddEscapeArgumentRector", Text::new("CSV fonksiyonlarına escape parametresi eklenir", "Add the escape argument to CSV functions")),
     ("RenameFunctionRector", Text::new("Kaldırılan fonksiyon yeni adıyla değiştirilir", "Rename removed functions")),
     ("StringifyStrNeedlesRector", Text::new("Sayı olan aramalar metne çevrilir", "Stringify numeric needles")),
