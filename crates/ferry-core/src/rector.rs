@@ -308,6 +308,7 @@ fn php_str(s: &str) -> String {
 pub struct Staging {
     dir: PathBuf,
     files: Vec<StagedFile>,
+    scope: Option<std::collections::HashSet<String>>,
 }
 
 struct StagedFile {
@@ -321,7 +322,9 @@ impl Staging {
     fn prepare(root: &Path, excluded_dirs: &[String], dir: PathBuf) -> Result<Self, RectorError> {
         let _ = std::fs::remove_dir_all(&dir);
         let mut files = Vec::new();
+        let mut scope = std::collections::HashSet::new();
         for path in crate::project::collect_php_files(root, excluded_dirs) {
+            scope.insert(crate::analyzer::relative_path(root, &path));
             let Ok(bytes) = std::fs::read(&path) else { continue };
             let Ok(text) = std::str::from_utf8(&bytes) else { continue };
             let Some((fixed, applied)) = crate::analyzer::fix_legacy_syntax(text) else {
@@ -340,11 +343,15 @@ impl Staging {
                 rules: applied.into_iter().map(describe_rule).collect(),
             });
         }
-        Ok(Staging { dir, files })
+        Ok(Staging { dir, files, scope: Some(scope) })
     }
 
     fn get(&self, rel: &str) -> Option<&StagedFile> {
         self.files.iter().find(|f| f.rel == rel)
+    }
+
+    fn in_scope(&self, rel: &str) -> bool {
+        self.scope.as_ref().is_none_or(|s| s.contains(rel))
     }
 }
 
@@ -383,7 +390,12 @@ pub fn build_config(
         .collect();
     if !staging.files.is_empty() {
         paths.push(php_str(&staging.dir.to_string_lossy()));
-        skip.extend(staging.files.iter().map(|f| php_str(&root.join(&f.rel).to_string_lossy())));
+        skip.extend(
+            staging
+                .files
+                .iter()
+                .flat_map(|f| bases.iter().map(move |base| php_str(&format!("{base}/{}", glob_literal(&f.rel))))),
+        );
     }
     if mode == RectorMode::Compat {
         skip.extend(
@@ -465,6 +477,9 @@ pub fn parse_output(root: &Path, stdout: &str, staging: &Staging) -> Result<(Vec
             Some(_) => staged_rel.clone(),
             None => crate::analyzer::relative_path(root, &abs),
         };
+        if staged.is_none() && (staging.get(&rel).is_some() || !staging.in_scope(&rel)) {
+            continue;
+        }
         if Path::new(&rel).is_absolute() || Path::new(&rel).components().any(|c| matches!(c, std::path::Component::ParentDir)) {
             errors.push(crate::t!(
                 "{rel} — proje klasörünün dışında; atlandı.",
@@ -629,15 +644,50 @@ pub fn preview(
 
 fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
+    let meta = std::fs::symlink_metadata(path).ok();
+    if meta.as_ref().is_some_and(|m| m.file_type().is_symlink()) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            crate::t!("sembolik bağlantı; hedef dosya elle düzenlenmeli", "it's a symbolic link; edit the target file by hand"),
+        ));
+    }
+    #[cfg(unix)]
+    if meta.as_ref().is_some_and(|m| std::os::unix::fs::MetadataExt::nlink(m) > 1) {
+        let mut file = std::fs::OpenOptions::new().write(true).truncate(true).open(path)?;
+        file.write_all(bytes)?;
+        return file.sync_all();
+    }
     let dir = path.parent().unwrap_or(Path::new("."));
     let mut tmp = tempfile::NamedTempFile::new_in(dir)?;
     tmp.write_all(bytes)?;
     tmp.as_file().sync_all()?;
-    if let Ok(meta) = std::fs::metadata(path) {
-        let _ = tmp.as_file().set_permissions(meta.permissions());
+    let readonly = meta.as_ref().is_some_and(|m| m.permissions().readonly());
+    if let Some(meta) = &meta {
+        let mut perms = meta.permissions();
+        #[allow(clippy::permissions_set_readonly_false)]
+        perms.set_readonly(false);
+        let _ = tmp.as_file().set_permissions(perms);
     }
-    tmp.persist(path).map_err(|e| e.error)?;
+    if readonly && cfg!(windows) {
+        set_readonly(path, false)?;
+    }
+    if let Err(e) = tmp.persist(path) {
+        if readonly && cfg!(windows) {
+            let _ = set_readonly(path, true);
+        }
+        return Err(e.error);
+    }
+    if readonly {
+        set_readonly(path, true)?;
+    }
     Ok(())
+}
+
+fn set_readonly(path: &Path, readonly: bool) -> std::io::Result<()> {
+    let mut perms = std::fs::metadata(path)?.permissions();
+    #[allow(clippy::permissions_set_readonly_false)]
+    perms.set_readonly(readonly);
+    std::fs::set_permissions(path, perms)
 }
 
 pub fn check_fresh(root: &Path, changes: &[&FileChange]) -> Result<(), RectorError> {
@@ -684,6 +734,7 @@ mod tests {
                 original: "<?php\necho $s{0};\n".into(),
                 rules: Vec::new(),
             }],
+            scope: None,
         };
         let (changes, errors) = parse_output(root, r#"{"totals":{"changed_files":0},"file_diffs":[]}"#, &staging).unwrap();
         assert!(errors.is_empty());
@@ -762,6 +813,99 @@ mod tests {
         assert_eq!(errors.len(), 1);
         assert!(errors[0].contains("UTF-8"), "{errors:?}");
         assert!(parse_output(root, "Fatal error in {closure}", &Staging::default()).is_err());
+    }
+
+    fn nullable_diff(file: &str) -> String {
+        format!(
+            r#"{{"file": "{file}", "diff": "@@ -1,2 +1,2 @@\n <?php\n-function f(Foo $a = null) {{}}\n+function f(?Foo $a = null) {{}}\n", "applied_rectors": []}}"#
+        )
+    }
+
+    #[test]
+    fn ignores_files_the_scanner_skips() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let src = "<?php\nfunction f(Foo $a = null) {}\n";
+        for f in ["src/a.php", ".ddev/b.php", ".git/hooks/c.php"] {
+            std::fs::create_dir_all(root.join(f).parent().unwrap()).unwrap();
+            std::fs::write(root.join(f), src).unwrap();
+        }
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(root.join("src/a.php"), root.join("src/link.php")).unwrap();
+        let staging = Staging::prepare(root, &[], root.join(".ferry-staged")).unwrap();
+        let diffs: Vec<String> = ["src/a.php", ".ddev/b.php", ".git/hooks/c.php", "src/link.php"].iter().map(|f| nullable_diff(f)).collect();
+        let stdout = format!(r#"{{"file_diffs": [{}]}}"#, diffs.join(","));
+        let (changes, errors) = parse_output(root, &stdout, &staging).unwrap();
+        assert!(errors.is_empty(), "{errors:?}");
+        let files: Vec<&str> = changes.iter().map(|c| c.file.as_str()).collect();
+        assert_eq!(files, ["src/a.php"]);
+    }
+
+    #[test]
+    fn a_staged_file_reported_twice_yields_one_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.php"), "<?php\necho $s{0};\nfunction f(Foo $a = null) {}\n").unwrap();
+        let staging = Staging::prepare(root, &[], root.join("[staged]")).unwrap();
+        assert_eq!(staging.files.len(), 1);
+        let staged = root.join("[staged]/a.php").to_string_lossy().replace('\\', "/");
+        let stdout = format!(
+            r#"{{"file_diffs": [
+                {{"file": "a.php", "diff": "@@ -1,1 +1,1 @@\n-<?php\n+<?php // original\n", "applied_rectors": []}},
+                {{"file": "{staged}", "diff": "@@ -3,1 +3,1 @@\n-function f(Foo $a = null) {{}}\n+function f(?Foo $a = null) {{}}\n", "applied_rectors": []}}
+            ]}}"#
+        );
+        let (changes, errors) = parse_output(root, &stdout, &staging).unwrap();
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].new_content, "<?php\necho $s[0];\nfunction f(?Foo $a = null) {}\n");
+    }
+
+    #[test]
+    fn staged_originals_are_skipped_with_literal_globs() {
+        let root = Path::new(r"C:\Users\me\[old] site");
+        let staging = Staging {
+            dir: PathBuf::from(r"C:\tmp\staged"),
+            files: vec![StagedFile {
+                rel: "src/a[1].php".into(),
+                fixed: String::new(),
+                original: String::new(),
+                rules: Vec::new(),
+            }],
+            scope: None,
+        };
+        let cfg = build_config(root, PhpVersion::new(8, 4), RectorMode::Compat, &[], &staging, Path::new("/c"));
+        assert!(cfg.contains("'C:/Users/me/[[]old] site/src/a[[]1].php'"), "{cfg}");
+    }
+
+    #[test]
+    fn writes_keep_read_only_files_read_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.php");
+        std::fs::write(&path, "old").unwrap();
+        set_readonly(&path, true).unwrap();
+        write_atomic(&path, b"new").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "new");
+        assert!(std::fs::metadata(&path).unwrap().permissions().readonly());
+        set_readonly(&path, false).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn writes_refuse_symlinks_and_keep_hard_links() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("target.php");
+        std::fs::write(&target, "old").unwrap();
+        let link = dir.path().join("link.php");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        assert!(write_atomic(&link, b"new").is_err());
+        assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "old");
+
+        let hard = dir.path().join("hard.php");
+        std::fs::hard_link(&target, &hard).unwrap();
+        write_atomic(&hard, b"new").unwrap();
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "new");
     }
 
     #[cfg(unix)]
