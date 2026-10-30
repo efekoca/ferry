@@ -252,6 +252,12 @@ describe("Ferry app", () => {
     const user = userEvent.setup();
     const api = mockApi({ delay: 0 });
     api.snapshotConflicts = async () => ["includes/helpers.php"];
+    const restored: string[][] = [];
+    const real = api.restoreSnapshot;
+    api.restoreSnapshot = (path, id, acknowledged) => {
+      restored.push(acknowledged);
+      return real(path, id, acknowledged);
+    };
     render(<App api={api} />);
     await openAndScan(user);
     await user.click(nav(/Geçmiş/));
@@ -260,6 +266,9 @@ describe("Ferry app", () => {
     const dialog = await screen.findByRole("dialog");
     expect(await within(dialog).findByText("Bu dosya uygulamadan sonra değiştirilmiş:")).toBeInTheDocument();
     expect(within(dialog).getByText("includes/helpers.php")).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Geri yükle" }));
+    expect(await screen.findByText("Geri yüklendi")).toBeInTheDocument();
+    expect(restored).toEqual([["includes/helpers.php"]]);
   });
 
   it("deletes every snapshot of the project after confirming", async () => {
