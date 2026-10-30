@@ -33,7 +33,7 @@ pub struct AppState {
     latest_scan: Mutex<HashMap<String, u64>>,
     previews: Mutex<HashMap<String, (u64, RectorPreview)>>,
     writes: Arc<Mutex<()>>,
-    rector_cancel: Mutex<Arc<AtomicBool>>,
+    rector_cancel: Mutex<HashMap<String, Arc<AtomicBool>>>,
     rector_running: Arc<AtomicUsize>,
     shutdown: Arc<AtomicBool>,
     next_preview: AtomicU64,
@@ -53,7 +53,7 @@ impl AppState {
             latest_scan: Mutex::new(HashMap::new()),
             previews: Mutex::new(HashMap::new()),
             writes: Arc::new(Mutex::new(())),
-            rector_cancel: Mutex::new(Arc::new(AtomicBool::new(false))),
+            rector_cancel: Mutex::new(HashMap::new()),
             rector_running: Arc::new(AtomicUsize::new(0)),
             shutdown: Arc::new(AtomicBool::new(false)),
             next_preview: AtomicU64::new(1),
@@ -228,7 +228,9 @@ async fn rector_preview(
     let php_override = state.php_override();
     let key = path.clone();
     let cancel = Arc::new(AtomicBool::new(false));
-    std::mem::replace(&mut *state.rector_cancel.lock().unwrap(), cancel.clone()).store(true, Ordering::Relaxed);
+    if let Some(previous) = state.rector_cancel.lock().unwrap().insert(key.clone(), cancel.clone()) {
+        previous.store(true, Ordering::Relaxed);
+    }
     let mine = cancel.clone();
     let running = state.rector_running.clone();
     running.fetch_add(1, Ordering::SeqCst);
@@ -250,10 +252,18 @@ async fn rector_preview(
         )
         .map_err(|e| e.to_string())
     })
-    .await?;
-    if !Arc::ptr_eq(&state.rector_cancel.lock().unwrap(), &mine) {
-        return Err(RectorError::Cancelled.to_string());
+    .await;
+    {
+        let mut tokens = state.rector_cancel.lock().unwrap();
+        let current = tokens.get(&key).is_some_and(|t| Arc::ptr_eq(t, &mine));
+        if current {
+            tokens.remove(&key);
+        }
+        if !current || mine.load(Ordering::Relaxed) {
+            return Err(RectorError::Cancelled.to_string());
+        }
     }
+    let preview = preview?;
     let id = state.next_preview.fetch_add(1, Ordering::Relaxed);
     state.previews.lock().unwrap().insert(key, (id, preview.clone()));
     Ok(PreviewResponse { id, preview })
@@ -276,8 +286,16 @@ struct PreviewResponse {
 }
 
 #[tauri::command]
-fn cancel_rector_preview(state: State<'_, AppState>) {
-    state.rector_cancel.lock().unwrap().store(true, Ordering::Relaxed);
+fn cancel_rector_preview(state: State<'_, AppState>, path: Option<String>) {
+    let tokens = state.rector_cancel.lock().unwrap();
+    match path.map(normalize_path) {
+        Some(path) => {
+            if let Some(token) = tokens.get(&path) {
+                token.store(true, Ordering::Relaxed);
+            }
+        }
+        None => tokens.values().for_each(|t| t.store(true, Ordering::Relaxed)),
+    }
 }
 
 #[derive(Serialize)]
@@ -380,37 +398,56 @@ async fn list_snapshots(state: State<'_, AppState>, path: String) -> CmdResult<V
 }
 
 #[tauri::command]
-async fn restore_snapshot(state: State<'_, AppState>, path: String, id: String) -> CmdResult<Vec<String>> {
+async fn restore_snapshot(
+    state: State<'_, AppState>,
+    path: String,
+    id: String,
+    acknowledged: Option<Vec<String>>,
+) -> CmdResult<Vec<String>> {
     let path = normalize_path(path);
     let store = state.snapshots();
-    state.previews.lock().unwrap().remove(&path);
     let writes = state.writes.clone();
-    blocking(move || {
+    let restored = blocking(move || {
         let _guard = writes.lock().unwrap_or_else(|e| e.into_inner());
-        store.restore(&project_root(&path)?, &id).map_err(|e| e.to_string())
+        let root = project_root(&path)?;
+        let acknowledged = acknowledged.unwrap_or_default();
+        let unseen: Vec<String> = conflicts(&store, &root, &id)?
+            .into_iter()
+            .filter(|f| !acknowledged.contains(f))
+            .collect();
+        if !unseen.is_empty() {
+            let files = unseen.join(", ");
+            return Err(t!(
+                "Şu dosyalar onaydan sonra değişti: {files}. Geri yüklemeden önce yeniden gözden geçirin.",
+                "These files changed after you confirmed: {files}. Review them again before restoring."
+            ));
+        }
+        store.restore(&root, &id).map_err(|e| e.to_string()).map(|files| (path, files))
     })
-    .await
+    .await?;
+    state.previews.lock().unwrap().remove(&restored.0);
+    Ok(restored.1)
+}
+
+fn conflicts(store: &SnapshotStore, root: &Path, id: &str) -> CmdResult<Vec<String>> {
+    let Some(bytes) = store.read_attachment(root, id, WRITTEN_FILE).map_err(|e| e.to_string())? else {
+        return Ok(Vec::new());
+    };
+    let written: HashMap<String, u64> = serde_json::from_slice(&bytes).unwrap_or_default();
+    let mut changed: Vec<String> = written
+        .into_iter()
+        .filter(|(file, hash)| std::fs::read(root.join(file)).map(|b| fnv1a(&b)).ok() != Some(*hash))
+        .map(|(file, _)| file)
+        .collect();
+    changed.sort();
+    Ok(changed)
 }
 
 #[tauri::command]
 async fn snapshot_conflicts(state: State<'_, AppState>, path: String, id: String) -> CmdResult<Vec<String>> {
     let path = normalize_path(path);
     let store = state.snapshots();
-    blocking(move || {
-        let root = project_root(&path)?;
-        let Some(bytes) = store.read_attachment(&root, &id, WRITTEN_FILE).map_err(|e| e.to_string())? else {
-            return Ok(Vec::new());
-        };
-        let written: HashMap<String, u64> = serde_json::from_slice(&bytes).unwrap_or_default();
-        let mut changed: Vec<String> = written
-            .into_iter()
-            .filter(|(file, hash)| std::fs::read(root.join(file)).map(|b| fnv1a(&b)).ok() != Some(*hash))
-            .map(|(file, _)| file)
-            .collect();
-        changed.sort();
-        Ok(changed)
-    })
-    .await
+    blocking(move || conflicts(&store, &project_root(&path)?, &id)).await
 }
 
 #[tauri::command]
@@ -555,7 +592,7 @@ pub fn run() {
             if let tauri::RunEvent::Exit = event {
                 let state = app.state::<AppState>();
                 state.shutdown.store(true, Ordering::Relaxed);
-                state.rector_cancel.lock().unwrap().store(true, Ordering::Relaxed);
+                state.rector_cancel.lock().unwrap().values().for_each(|t| t.store(true, Ordering::Relaxed));
                 let started = Instant::now();
                 while state.rector_running.load(Ordering::SeqCst) > 0 && started.elapsed() < Duration::from_secs(3) {
                     std::thread::sleep(Duration::from_millis(50));

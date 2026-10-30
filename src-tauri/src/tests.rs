@@ -244,3 +244,44 @@ fn rector_preview_apply_restore_over_ipc() {
     h.ok("delete_snapshot", json!({ "path": root, "id": snap_id }));
     assert_eq!(h.ok("list_snapshots", json!({ "path": root })), json!([]));
 }
+
+#[test]
+fn restore_refuses_files_edited_after_the_confirmation() {
+    let _lang = turkish();
+    let h = harness();
+    let root = PathBuf::from(normalize_path(h.root.clone()));
+    let store = h._app.state::<AppState>().snapshots();
+    let file = root.join("src/Greeter.php");
+    let original = std::fs::read_to_string(&file).unwrap();
+    let snap = store.create(&root, &["src/Greeter.php".into()], "eski").unwrap();
+    let applied = format!("{original}// applied\n");
+    std::fs::write(&file, &applied).unwrap();
+    let written = json!({ "src/Greeter.php": fnv1a(applied.as_bytes()) }).to_string();
+    store.write_attachment(&root, &snap.id, WRITTEN_FILE, written.as_bytes()).unwrap();
+
+    std::fs::write(&file, format!("{applied}// edited later\n")).unwrap();
+    let err = h.invoke("restore_snapshot", json!({ "path": h.root, "id": snap.id })).unwrap_err();
+    assert!(err.as_str().unwrap().contains("src/Greeter.php"), "{err}");
+    assert!(std::fs::read_to_string(&file).unwrap().ends_with("// edited later\n"));
+
+    h.ok("restore_snapshot", json!({ "path": h.root, "id": snap.id, "acknowledged": ["src/Greeter.php"] }));
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), original);
+}
+
+#[test]
+fn cancelling_one_project_leaves_other_previews_running() {
+    let h = harness();
+    let state = h._app.state::<AppState>();
+    let a = Arc::new(AtomicBool::new(false));
+    let b = Arc::new(AtomicBool::new(false));
+    let path_a = normalize_path(h.root.clone());
+    state.rector_cancel.lock().unwrap().insert(path_a, a.clone());
+    state.rector_cancel.lock().unwrap().insert("/elsewhere".into(), b.clone());
+
+    h.ok("cancel_rector_preview", json!({ "path": h.root }));
+    assert!(a.load(Ordering::Relaxed));
+    assert!(!b.load(Ordering::Relaxed));
+
+    h.ok("cancel_rector_preview", json!({}));
+    assert!(b.load(Ordering::Relaxed));
+}

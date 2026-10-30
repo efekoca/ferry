@@ -88,6 +88,22 @@ pub const PG_ALIASES: [(&str, &str); 24] = [
     ("pg_numrows", "pg_num_rows"), ("pg_result", "pg_fetch_result"), ("pg_setclientencoding", "pg_set_client_encoding"),
 ];
 
+pub const NULL_STRING_ARGS: &[(&str, &[usize])] = &[
+    ("strlen", &[0]), ("trim", &[0]), ("ltrim", &[0]), ("rtrim", &[0]), ("strtolower", &[0]), ("strtoupper", &[0]),
+    ("ucfirst", &[0]), ("lcfirst", &[0]), ("ucwords", &[0]), ("str_replace", &[2]), ("str_ireplace", &[2]),
+    ("strpos", &[0, 1]), ("stripos", &[0, 1]), ("strrpos", &[0, 1]), ("str_contains", &[0, 1]),
+    ("str_starts_with", &[0, 1]), ("str_ends_with", &[0, 1]), ("strstr", &[0, 1]), ("substr", &[0]),
+    ("substr_count", &[0, 1]), ("str_pad", &[0]), ("str_repeat", &[0]), ("str_split", &[0]), ("strrev", &[0]),
+    ("strcmp", &[0, 1]), ("strcasecmp", &[0, 1]), ("strncmp", &[0, 1]), ("htmlspecialchars", &[0]),
+    ("htmlentities", &[0]), ("html_entity_decode", &[0]), ("htmlspecialchars_decode", &[0]), ("strip_tags", &[0]),
+    ("addslashes", &[0]), ("stripslashes", &[0]), ("nl2br", &[0]), ("explode", &[0, 1]), ("sprintf", &[0]),
+    ("urlencode", &[0]), ("rawurlencode", &[0]), ("urldecode", &[0]), ("rawurldecode", &[0]),
+    ("base64_encode", &[0]), ("base64_decode", &[0]), ("md5", &[0]), ("sha1", &[0]), ("crc32", &[0]),
+    ("json_decode", &[0]), ("preg_match", &[0, 1]), ("preg_split", &[0, 1]), ("preg_quote", &[0]),
+    ("mb_strlen", &[0]), ("mb_substr", &[0]), ("mb_strtolower", &[0]), ("mb_strtoupper", &[0]),
+    ("mb_strpos", &[0, 1]), ("number_format", &[0]), ("strtotime", &[0]),
+];
+
 pub const DEPRECATED_INI: [(&str, u32, u32); 13] = [
     ("mbstring.func_overload", 8, 0), ("track_errors", 8, 0), ("filter.default", 8, 1), ("filter.default_flags", 8, 1),
     ("auto_detect_line_endings", 8, 1), ("assert.active", 8, 3), ("assert.bail", 8, 3), ("assert.callback", 8, 3),
@@ -820,6 +836,42 @@ pub mod patterns {
         note: Text::new(
             "Bu ad yeni PHP sürümlerinde ayrılmış bir kelime; sınıf ya da fonksiyon adı olarak kullanılamaz.",
             "This name is reserved in newer PHP versions and can't be used as a class or function name.",
+        ),
+    };
+    pub const OPTIONAL_BEFORE_REQUIRED: PatternRule = PatternRule {
+        id: "deprecated.optional_before_required",
+        title: Text::new("Zorunludan önce isteğe bağlı parametre", "Optional parameter before a required one"),
+        severity: Severity::Deprecated,
+        since: (8, 0),
+        replacement: tx("varsayılan değeri kaldırın ya da parametreyi sona taşıyın", "drop the default or move the parameter last"),
+        fix: FixKind::Likely,
+        note: Text::new(
+            "Zorunlu bir parametreden önce gelen varsayılan değer hiçbir zaman kullanılamaz; PHP 8.0 bunu kullanımdan kaldırdı ve parametreyi zorunlu sayar.",
+            "A default before a required parameter can never be used; PHP 8.0 deprecates it and treats the parameter as required.",
+        ),
+    };
+    pub const NULL_TO_INTERNAL: PatternRule = PatternRule {
+        id: "deprecated.null_to_internal",
+        title: Text::new("Dahili fonksiyona null", "null passed to a built-in function"),
+        severity: Severity::Deprecated,
+        since: (8, 1),
+        replacement: tx("'' ya da uygun bir değer", "'' or a suitable value"),
+        fix: FixKind::Likely,
+        note: Text::new(
+            "Dahili fonksiyonların nullable olmayan parametrelerine null vermek 8.1'de kullanımdan kalktı ve PHP 9'da TypeError olacak.",
+            "Passing null to non-nullable parameters of built-in functions is deprecated in 8.1 and will be a TypeError in PHP 9.",
+        ),
+    };
+    pub const PARTIAL_CALLABLE: PatternRule = PatternRule {
+        id: "deprecated.partial_callable",
+        title: Text::new("Kısmen desteklenen callable", "Partially supported callable"),
+        severity: Severity::Deprecated,
+        since: (8, 2),
+        replacement: code("[self::class, 'm'] / self::m(...)"),
+        fix: FixKind::Manual,
+        note: Text::new(
+            "\"self::m\", \"parent::m\", \"static::m\" ve ['self', 'm'] gibi callable'lar call_user_func() ile çalışır ama $callable() ile çalışmaz; 8.2'de kullanımdan kalktı.",
+            "Callables like \"self::m\", \"parent::m\", \"static::m\" and ['self', 'm'] work with call_user_func() but not $callable(); they are deprecated in 8.2.",
         ),
     };
 }

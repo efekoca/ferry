@@ -118,7 +118,7 @@ interface AppStore {
 
   snapshots: Snapshot[];
   refreshSnapshots(): Promise<void>;
-  restoreSnapshot(id: string): Promise<void>;
+  restoreSnapshot(id: string, acknowledged: string[]): Promise<void>;
   deleteSnapshot(id: string): Promise<void>;
   deleteAllSnapshots(): Promise<void>;
 
@@ -358,8 +358,8 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
 
   const cancelPreview = useCallback(() => {
     cancelledSeq.current = previewSeq.current;
-    api?.cancelPreview().catch(() => {});
-  }, [api]);
+    api?.cancelPreview(project?.root).catch(() => {});
+  }, [api, project]);
 
   const applyChanges = useCallback(
     async (files: string[]) => {
@@ -395,11 +395,11 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
   );
 
   const restoreSnapshot = useCallback(
-    async (id: string) => {
+    async (id: string, acknowledged: string[]) => {
       if (!api || !project) return;
       try {
         const root = project.root;
-        const files = await api.restoreSnapshot(root, id);
+        const files = await api.restoreSnapshot(root, id, acknowledged);
         if (rootRef.current !== root) return;
         setPreview(null);
         toast.push({ tone: "success", title: t.toast.restored, description: t.toast.restoredText(files.length) });
