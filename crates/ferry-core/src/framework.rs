@@ -5,27 +5,11 @@ use crate::rules::{FixKind, Severity};
 use crate::PhpVersion;
 use std::path::Path;
 
-const LARAVEL_MAX_PHP: [(u32, (u32, u32)); 9] = [
-    (5, (7, 4)),
-    (6, (8, 0)),
-    (7, (8, 0)),
-    (8, (8, 1)),
-    (9, (8, 2)),
-    (10, (8, 3)),
-    (11, (8, 4)),
-    (12, (8, 5)),
-    (13, (8, 5)),
-];
+const LARAVEL_MAX_PHP: [(u32, (u32, u32)); 9] =
+    [(5, (7, 4)), (6, (8, 0)), (7, (8, 0)), (8, (8, 1)), (9, (8, 2)), (10, (8, 3)), (11, (8, 4)), (12, (8, 5)), (13, (8, 5))];
 
-const WORDPRESS_MIN: [((u32, u32), (u32, u32)); 7] = [
-    ((7, 4), (5, 3)),
-    ((8, 0), (5, 6)),
-    ((8, 1), (5, 9)),
-    ((8, 2), (6, 1)),
-    ((8, 3), (6, 4)),
-    ((8, 4), (6, 7)),
-    ((8, 5), (6, 9)),
-];
+const WORDPRESS_MIN: [((u32, u32), (u32, u32)); 7] =
+    [((7, 4), (5, 3)), ((8, 0), (5, 6)), ((8, 1), (5, 9)), ((8, 2), (6, 1)), ((8, 3), (6, 4)), ((8, 4), (6, 7)), ((8, 5), (6, 9))];
 
 const DRUPAL_MAX_PHP: [((u32, u32), (u32, u32)); 9] = [
     ((8, 0), (7, 4)),
@@ -79,10 +63,7 @@ pub(crate) fn package_limit(name: &str, version: &str) -> Option<PackageLimit> {
     } else {
         return None;
     };
-    Some(PackageLimit {
-        max: PhpVersion::new(max.0, max.1),
-        official,
-    })
+    Some(PackageLimit { max: PhpVersion::new(max.0, max.1), official })
 }
 
 pub fn check(root: &Path, framework: Framework, target: PhpVersion) -> Vec<Finding> {
@@ -225,22 +206,14 @@ fn finding(
 
 fn laravel(root: &Path, target: PhpVersion) -> Option<Finding> {
     let lock: serde_json::Value = serde_json::from_slice(&std::fs::read(root.join("composer.lock")).ok()?).ok()?;
-    let version = lock["packages"]
-        .as_array()?
-        .iter()
-        .find(|p| p["name"] == "laravel/framework")?["version"]
-        .as_str()?
-        .to_string();
+    let version = lock["packages"].as_array()?.iter().find(|p| p["name"] == "laravel/framework")?["version"].as_str()?.to_string();
     let (major, _) = version_parts(&version)?;
     let &(_, max) = LARAVEL_MAX_PHP.iter().find(|(m, _)| *m == major.max(5))?;
     let since = next_minor(max);
     if target < since {
         return None;
     }
-    let needed = LARAVEL_MAX_PHP
-        .iter()
-        .find(|(_, m)| PhpVersion::new(m.0, m.1) >= target)
-        .map(|(m, _)| *m)?;
+    let needed = LARAVEL_MAX_PHP.iter().find(|(_, m)| PhpVersion::new(m.0, m.1) >= target).map(|(m, _)| *m)?;
     let (file, (line, snippet)) = std::fs::read_to_string(root.join("composer.json"))
         .ok()
         .and_then(|t| line_of(&t, "\"laravel/framework\""))
@@ -287,7 +260,9 @@ fn wordpress(root: &Path, target: PhpVersion) -> Option<Finding> {
         since,
         Severity::Breaking,
         Localized {
-            tr: format!("WordPress {cur}, PHP {t} ile çalışmaz. PHP {t} için en az WordPress {need} gerekiyor; önce WordPress'i güncelleyin."),
+            tr: format!(
+                "WordPress {cur}, PHP {t} ile çalışmaz. PHP {t} için en az WordPress {need} gerekiyor; önce WordPress'i güncelleyin."
+            ),
             en: format!("WordPress {cur} doesn't run on PHP {t}. PHP {t} needs at least WordPress {need}; update WordPress first."),
         },
         Localized::same(format!("WordPress {need}+")),

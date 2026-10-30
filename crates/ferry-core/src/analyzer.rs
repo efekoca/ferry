@@ -42,10 +42,8 @@ pub struct FileError {
 }
 
 pub fn relative_path(root: &Path, path: &Path) -> String {
-    let lexical = path
-        .strip_prefix(root)
-        .ok()
-        .filter(|rel| rel.components().all(|c| matches!(c, Component::Normal(_) | Component::CurDir)));
+    let lexical =
+        path.strip_prefix(root).ok().filter(|rel| rel.components().all(|c| matches!(c, Component::Normal(_) | Component::CurDir)));
     let rel = match lexical {
         Some(rel) => rel.to_path_buf(),
         None => match (root.canonicalize(), path.canonicalize()) {
@@ -56,12 +54,7 @@ pub fn relative_path(root: &Path, path: &Path) -> String {
     rel.to_string_lossy().replace('\\', "/")
 }
 
-pub fn analyze_files(
-    root: &Path,
-    files: &[PathBuf],
-    target: PhpVersion,
-    mut progress: impl FnMut(usize, usize, &str),
-) -> ScanResult {
+pub fn analyze_files(root: &Path, files: &[PathBuf], target: PhpVersion, mut progress: impl FnMut(usize, usize, &str)) -> ScanResult {
     let started = Instant::now();
     let index = crate::index::ProjectIndex::build(root, files);
     let mut findings = Vec::new();
@@ -81,10 +74,7 @@ pub fn analyze_files(
         if std::fs::metadata(path).is_ok_and(|m| m.len() > crate::project::MAX_FILE_BYTES) {
             errors.push(FileError {
                 file: rel,
-                message: crate::t!(
-                    "Atlandı: dosya çok büyük (2 MB üstü).",
-                    "Skipped: file is too large (over 2 MB)."
-                ),
+                message: crate::t!("Atlandı: dosya çok büyük (2 MB üstü).", "Skipped: file is too large (over 2 MB)."),
             });
             continue;
         }
@@ -94,19 +84,14 @@ pub fn analyze_files(
                 lines += src.lines().count();
                 findings.extend(analyze_source_in(&rel, &src, target, &index));
             }
-            Err(e) => errors.push(FileError {
-                file: rel,
-                message: e.to_string(),
-            }),
+            Err(e) => errors.push(FileError { file: rel, message: e.to_string() }),
         }
     }
     progress(files.len(), files.len(), "");
     if let Some(framework) = index.framework {
         findings.extend(crate::framework::check(root, framework, target));
     }
-    findings.sort_by(|a, b| {
-        (a.severity, &a.file, a.line, a.column).cmp(&(b.severity, &b.file, b.line, b.column))
-    });
+    findings.sort_by(|a, b| (a.severity, &a.file, a.line, a.column).cmp(&(b.severity, &b.file, b.line, b.column)));
     ScanResult {
         target,
         files_scanned: files.len(),
@@ -121,9 +106,8 @@ fn offset_base(tokens: &[Token], i: usize) -> bool {
     let tok = &tokens[i];
     match tok.kind {
         TokenKind::Variable => {
-            let declaration = i > 0
-                && tokens[i - 1].kind == TokenKind::Ident
-                && !EXPR_KEYWORDS.iter().any(|k| tokens[i - 1].is_ident_ci(k));
+            let declaration =
+                i > 0 && tokens[i - 1].kind == TokenKind::Ident && !EXPR_KEYWORDS.iter().any(|k| tokens[i - 1].is_ident_ci(k));
             !declaration
         }
         TokenKind::Ident => i > 0 && (tokens[i - 1].is_punct("->") || tokens[i - 1].is_punct("?->")),
@@ -180,7 +164,9 @@ fn class_references(tokens: &[Token]) -> std::collections::HashSet<String> {
         .enumerate()
         .filter(|&(i, t)| {
             t.kind == TokenKind::Ident
-                && (i > 0 && (before.iter().any(|b| tokens[i - 1].is_ident_ci(b)) || tokens[i - 1].is_punct("(") && tokens.get(i + 1).is_some_and(|n| n.kind == TokenKind::Variable))
+                && (i > 0
+                    && (before.iter().any(|b| tokens[i - 1].is_ident_ci(b))
+                        || tokens[i - 1].is_punct("(") && tokens.get(i + 1).is_some_and(|n| n.kind == TokenKind::Variable))
                     || tokens.get(i + 1).is_some_and(|n| n.is_punct("::") || n.kind == TokenKind::Variable))
         })
         .map(|(_, t)| t.text.rsplit('\\').next().unwrap_or_default().to_ascii_lowercase())
@@ -284,9 +270,7 @@ pub fn analyze_source_in(file: &str, src: &str, target: PhpVersion, index: &crat
         target,
         local_functions: local_functions(&tokens, &methods),
         methods,
-        namespaced: tokens
-            .windows(2)
-            .any(|w| w[0].is_ident_ci("namespace") && (w[1].kind == TokenKind::Ident || w[1].is_punct("{"))),
+        namespaced: tokens.windows(2).any(|w| w[0].is_ident_ci("namespace") && (w[1].kind == TokenKind::Ident || w[1].is_punct("{"))),
         classes: class_references(&tokens),
         dead: [crate::guards::dead_spans(&tokens, target), crate::guards::dead_expressions(&tokens, target)].concat(),
         index,
@@ -347,9 +331,7 @@ pub fn analyze_source_in(file: &str, src: &str, target: PhpVersion, index: &crat
             TokenKind::Ident => ctx.ident(&tokens, i),
             TokenKind::Punct if tok.text == "$" => {
                 if let Some(next) = tokens.get(i + 1) {
-                    if next.start == tok.end
-                        && (next.kind == TokenKind::Variable || next.is_punct("{"))
-                    {
+                    if next.start == tok.end && (next.kind == TokenKind::Variable || next.is_punct("{")) {
                         ctx.pattern(&patterns::VARIABLE_VARIABLE, tok, None);
                     }
                 }
@@ -413,14 +395,27 @@ struct Ctx<'a> {
 }
 
 const EXPR_KEYWORDS: [&str; 17] = [
-    "return", "echo", "print", "yield", "from", "case", "else", "and", "or", "xor", "throw",
-    "include", "include_once", "require", "require_once", "clone", "default",
+    "return",
+    "echo",
+    "print",
+    "yield",
+    "from",
+    "case",
+    "else",
+    "and",
+    "or",
+    "xor",
+    "throw",
+    "include",
+    "include_once",
+    "require",
+    "require_once",
+    "clone",
+    "default",
 ];
 
-const DECL_KEYWORDS: [&str; 13] = [
-    "function", "fn", "new", "const", "class", "interface", "trait", "enum", "use", "goto",
-    "instanceof", "extends", "implements",
-];
+const DECL_KEYWORDS: [&str; 13] =
+    ["function", "fn", "new", "const", "class", "interface", "trait", "enum", "use", "goto", "instanceof", "extends", "implements"];
 
 impl<'a> Ctx<'a> {
     fn applies(&self, since: PhpVersion) -> bool {
@@ -464,11 +459,7 @@ impl<'a> Ctx<'a> {
             return;
         }
         let name = tok.text.trim_start_matches('\\');
-        let title = if is_call {
-            format!("{name}()")
-        } else {
-            name.to_string()
-        };
+        let title = if is_call { format!("{name}()") } else { name.to_string() };
         let hit = Hit {
             rule_id: rule.id,
             title: Localized::same(title),
@@ -515,16 +506,13 @@ impl<'a> Ctx<'a> {
         let lower = bare.to_ascii_lowercase();
         let prev = i.checked_sub(1).map(|p| &tokens[p]);
         let next = tokens.get(i + 1);
-        let by_ref_fn = prev.is_some_and(|p| p.is_punct("&"))
-            && i >= 2
-            && (tokens[i - 2].is_ident_ci("function") || tokens[i - 2].is_ident_ci("fn"));
+        let by_ref_fn =
+            prev.is_some_and(|p| p.is_punct("&")) && i >= 2 && (tokens[i - 2].is_ident_ci("function") || tokens[i - 2].is_ident_ci("fn"));
         let decl_idx = if by_ref_fn { i - 2 } else { i.saturating_sub(1) };
         let prev = if by_ref_fn { Some(&tokens[i - 2]) } else { prev };
 
         let is_member = !by_ref_fn && prev.is_some_and(|p| p.is_punct("->") || p.is_punct("?->") || p.is_punct("::"));
-        let after_decl = prev.is_some_and(|p| {
-            p.kind == TokenKind::Ident && DECL_KEYWORDS.iter().any(|k| p.text.eq_ignore_ascii_case(k))
-        });
+        let after_decl = prev.is_some_and(|p| p.kind == TokenKind::Ident && DECL_KEYWORDS.iter().any(|k| p.text.eq_ignore_ascii_case(k)));
 
         if lower == "function" || lower == "fn" {
             self.function_params(tokens, i);
@@ -544,9 +532,7 @@ impl<'a> Ctx<'a> {
                 match lower.as_str() {
                     "real" => return self.pattern(&patterns::REAL_CAST, open, None),
                     "unset" => return self.pattern(&patterns::UNSET_CAST, open, None),
-                    "boolean" | "integer" | "double" | "binary" => {
-                        return self.pattern(&patterns::NON_CANONICAL_CAST, open, None)
-                    }
+                    "boolean" | "integer" | "double" | "binary" => return self.pattern(&patterns::NON_CANONICAL_CAST, open, None),
                     _ => {}
                 }
             }
@@ -663,7 +649,9 @@ impl<'a> Ctx<'a> {
                 }
                 "fputcsv" | "fgetcsv" | "str_getcsv" => {
                     let needed = if lower == "str_getcsv" { 4 } else { 5 };
-                    let has_escape = args.iter().any(|a| a.first().is_some_and(|t| t.is_ident_ci("escape")) && a.get(1).is_some_and(|t| t.is_punct(":")));
+                    let has_escape = args
+                        .iter()
+                        .any(|a| a.first().is_some_and(|t| t.is_ident_ci("escape")) && a.get(1).is_some_and(|t| t.is_punct(":")));
                     if !has_escape && !spread && (named || args.len() < needed) {
                         self.pattern(&patterns::CSV_ESCAPE, tok, None);
                     }
@@ -762,7 +750,9 @@ impl<'a> Ctx<'a> {
         if name.is_empty() || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
             return;
         }
-        if self.local_functions.contains(&name) || self.index.declares_function(crate::index::namespace_at(&self.namespaces, call), &name, true) {
+        if self.local_functions.contains(&name)
+            || self.index.declares_function(crate::index::namespace_at(&self.namespaces, call), &name, true)
+        {
             return;
         }
         let Some(rule) = FUNCTIONS.iter().find(|r| r.matches(&name)) else { return };
@@ -786,9 +776,8 @@ impl<'a> Ctx<'a> {
         let inner = text.get(1..text.len().saturating_sub(1)).unwrap_or_default();
         let deprecated = ["html-entities", "html", "base64", "uuencode", "qprint", "quoted-printable"];
         if deprecated.iter().any(|e| inner.eq_ignore_ascii_case(e))
-            && argument_position(tokens, i).is_some_and(|(f, n)| {
-                MB_ENCODING_ARGS.iter().any(|(name, slots)| f.eq_ignore_ascii_case(name) && slots.contains(&n))
-            })
+            && argument_position(tokens, i)
+                .is_some_and(|(f, n)| MB_ENCODING_ARGS.iter().any(|(name, slots)| f.eq_ignore_ascii_case(name) && slots.contains(&n)))
         {
             self.pattern(&patterns::MB_ENCODING, &tokens[i], None);
         }
@@ -832,7 +821,9 @@ impl<'a> Ctx<'a> {
             let typed_null = has_default
                 && param[var_pos + 1..].len() == 2
                 && param[var_pos + 2].is_ident_ci("null")
-                && param[..var_pos].iter().any(|t| t.kind == TokenKind::Ident && !["public", "protected", "private", "readonly"].iter().any(|m| t.is_ident_ci(m)));
+                && param[..var_pos].iter().any(|t| {
+                    t.kind == TokenKind::Ident && !["public", "protected", "private", "readonly"].iter().any(|m| t.is_ident_ci(m))
+                });
             if has_default {
                 if !typed_null && optional.is_none() {
                     optional = Some(param[var_pos]);
@@ -865,9 +856,7 @@ impl<'a> Ctx<'a> {
                     continue;
                 }
                 let modifier = t.kind == TokenKind::Ident
-                    && ["public", "protected", "private", "readonly"]
-                        .iter()
-                        .any(|m| t.text.eq_ignore_ascii_case(m));
+                    && ["public", "protected", "private", "readonly"].iter().any(|m| t.text.eq_ignore_ascii_case(m));
                 if modifier || t.is_punct("&") || t.is_punct("...") {
                     continue;
                 }
@@ -876,9 +865,7 @@ impl<'a> Ctx<'a> {
             if type_tokens.is_empty() {
                 continue;
             }
-            let already_nullable = type_tokens
-                .iter()
-                .any(|t| t.is_punct("?") || t.is_ident_ci("null") || t.is_ident_ci("mixed"));
+            let already_nullable = type_tokens.iter().any(|t| t.is_punct("?") || t.is_ident_ci("null") || t.is_ident_ci("mixed"));
             if already_nullable {
                 continue;
             }
@@ -973,23 +960,65 @@ fn enclosing_call(tokens: &[Token], i: usize) -> Option<&str> {
 }
 
 const CALLABLE_ARGS: [(&str, usize); 23] = [
-    ("array_map", 0), ("array_filter", 1), ("array_walk", 1), ("array_walk_recursive", 1), ("array_reduce", 1),
-    ("usort", 1), ("uasort", 1), ("uksort", 1), ("call_user_func", 0), ("call_user_func_array", 0),
-    ("forward_static_call", 0), ("forward_static_call_array", 0), ("register_shutdown_function", 0),
-    ("spl_autoload_register", 0), ("set_error_handler", 0), ("set_exception_handler", 0),
-    ("preg_replace_callback", 1), ("iterator_apply", 1), ("ob_start", 0), ("header_register_callback", 0),
-    ("register_tick_function", 0), ("array_udiff", 2), ("array_uintersect", 2),
+    ("array_map", 0),
+    ("array_filter", 1),
+    ("array_walk", 1),
+    ("array_walk_recursive", 1),
+    ("array_reduce", 1),
+    ("usort", 1),
+    ("uasort", 1),
+    ("uksort", 1),
+    ("call_user_func", 0),
+    ("call_user_func_array", 0),
+    ("forward_static_call", 0),
+    ("forward_static_call_array", 0),
+    ("register_shutdown_function", 0),
+    ("spl_autoload_register", 0),
+    ("set_error_handler", 0),
+    ("set_exception_handler", 0),
+    ("preg_replace_callback", 1),
+    ("iterator_apply", 1),
+    ("ob_start", 0),
+    ("header_register_callback", 0),
+    ("register_tick_function", 0),
+    ("array_udiff", 2),
+    ("array_uintersect", 2),
 ];
 
 const MB_ENCODING_ARGS: [(&str, &[usize]); 34] = [
-    ("mb_convert_encoding", &[1, 2]), ("mb_check_encoding", &[1]), ("mb_strlen", &[1]), ("mb_substr", &[3]),
-    ("mb_strcut", &[3]), ("mb_strtolower", &[1]), ("mb_strtoupper", &[1]), ("mb_convert_case", &[2]),
-    ("mb_internal_encoding", &[0]), ("mb_strpos", &[3]), ("mb_stripos", &[3]), ("mb_strrpos", &[3]),
-    ("mb_strripos", &[3]), ("mb_strstr", &[3]), ("mb_stristr", &[3]), ("mb_strrchr", &[3]), ("mb_strrichr", &[3]),
-    ("mb_substr_count", &[2]), ("mb_strwidth", &[1]), ("mb_strimwidth", &[4]), ("mb_detect_encoding", &[1]),
-    ("mb_encode_numericentity", &[2]), ("mb_decode_numericentity", &[2]), ("mb_preferred_mime_name", &[0]),
-    ("mb_regex_encoding", &[0]), ("mb_http_output", &[0]), ("mb_str_split", &[2]), ("mb_ord", &[1]), ("mb_chr", &[1]),
-    ("mb_scrub", &[1]), ("mb_convert_variables", &[0, 1]), ("mb_encode_mimeheader", &[1]), ("mb_str_pad", &[4]),
+    ("mb_convert_encoding", &[1, 2]),
+    ("mb_check_encoding", &[1]),
+    ("mb_strlen", &[1]),
+    ("mb_substr", &[3]),
+    ("mb_strcut", &[3]),
+    ("mb_strtolower", &[1]),
+    ("mb_strtoupper", &[1]),
+    ("mb_convert_case", &[2]),
+    ("mb_internal_encoding", &[0]),
+    ("mb_strpos", &[3]),
+    ("mb_stripos", &[3]),
+    ("mb_strrpos", &[3]),
+    ("mb_strripos", &[3]),
+    ("mb_strstr", &[3]),
+    ("mb_stristr", &[3]),
+    ("mb_strrchr", &[3]),
+    ("mb_strrichr", &[3]),
+    ("mb_substr_count", &[2]),
+    ("mb_strwidth", &[1]),
+    ("mb_strimwidth", &[4]),
+    ("mb_detect_encoding", &[1]),
+    ("mb_encode_numericentity", &[2]),
+    ("mb_decode_numericentity", &[2]),
+    ("mb_preferred_mime_name", &[0]),
+    ("mb_regex_encoding", &[0]),
+    ("mb_http_output", &[0]),
+    ("mb_str_split", &[2]),
+    ("mb_ord", &[1]),
+    ("mb_chr", &[1]),
+    ("mb_scrub", &[1]),
+    ("mb_convert_variables", &[0, 1]),
+    ("mb_encode_mimeheader", &[1]),
+    ("mb_str_pad", &[4]),
     ("mb_trim", &[2]),
 ];
 
@@ -1063,16 +1092,24 @@ fn call_args(tokens: &[Token], open: usize) -> Vec<&[Token]> {
 }
 
 const RESERVED_CLASS_NAMES: [(&str, u32, u32); 12] = [
-    ("int", 7, 0), ("float", 7, 0), ("bool", 7, 0), ("string", 7, 0), ("null", 7, 0), ("true", 7, 0), ("false", 7, 0),
-    ("void", 7, 1), ("iterable", 7, 1), ("object", 7, 2), ("mixed", 8, 0), ("never", 8, 1),
+    ("int", 7, 0),
+    ("float", 7, 0),
+    ("bool", 7, 0),
+    ("string", 7, 0),
+    ("null", 7, 0),
+    ("true", 7, 0),
+    ("false", 7, 0),
+    ("void", 7, 1),
+    ("iterable", 7, 1),
+    ("object", 7, 2),
+    ("mixed", 8, 0),
+    ("never", 8, 1),
 ];
 
 fn expression_end(t: &Token) -> bool {
     let modifiers = ["public", "protected", "private", "static", "readonly", "var", "const", "function", "fn"];
     matches!(t.kind, TokenKind::Variable | TokenKind::Number | TokenKind::Str { .. })
-        || (t.kind == TokenKind::Ident
-            && !EXPR_KEYWORDS.iter().any(|k| t.is_ident_ci(k))
-            && !modifiers.iter().any(|k| t.is_ident_ci(k)))
+        || (t.kind == TokenKind::Ident && !EXPR_KEYWORDS.iter().any(|k| t.is_ident_ci(k)) && !modifiers.iter().any(|k| t.is_ident_ci(k)))
         || t.is_punct(")")
         || t.is_punct("]")
 }
@@ -1236,10 +1273,8 @@ fn untyped_interface_methods(tokens: &[Token]) -> Vec<usize> {
                     d == 0
                 });
                 let typed = close.is_some_and(|c| tokens.get(c + 1).is_some_and(|t| t.is_punct(":")));
-                let start = (0..k)
-                    .rev()
-                    .find(|&j| tokens[j].is_punct(";") || tokens[j].is_punct("{") || tokens[j].is_punct("}"))
-                    .unwrap_or(0);
+                let start =
+                    (0..k).rev().find(|&j| tokens[j].is_punct(";") || tokens[j].is_punct("{") || tokens[j].is_punct("}")).unwrap_or(0);
                 let marked = tokens[start..k].iter().any(|t| t.text.trim_start_matches('\\').eq_ignore_ascii_case("ReturnTypeWillChange"));
                 if !typed && !marked {
                     out.push(k + 1);
@@ -1317,8 +1352,8 @@ fn case_semicolons(tokens: &[Token]) -> Vec<usize> {
 
 fn concat_with_arithmetic(tokens: &[Token]) -> Vec<usize> {
     let resets = [
-        ";", ",", "=>", "=", "?", ":", "??", "&&", "||", "==", "===", "!=", "!==", "<>", "<", ">", "<=", ">=", "<=>",
-        "and", "or", "xor", "??=", "**=", "<<=", ">>=",
+        ";", ",", "=>", "=", "?", ":", "??", "&&", "||", "==", "===", "!=", "!==", "<>", "<", ">", "<=", ">=", "<=>", "and", "or", "xor",
+        "??=", "**=", "<<=", ">>=",
     ];
     let mut out = Vec::new();
     let mut stack = vec![(false, false, None::<usize>)];
@@ -1391,8 +1426,7 @@ fn serializable_without_magic(tokens: &[Token]) -> Vec<usize> {
         .into_iter()
         .filter(|&(i, open, close)| {
             let implements = tokens[i..open].iter().any(|t| t.text.trim_start_matches('\\').eq_ignore_ascii_case("Serializable"));
-            let extends = tokens[i..open].iter().any(|t| t.is_ident_ci("extends"))
-                || i > 0 && tokens[i - 1].is_ident_ci("abstract");
+            let extends = tokens[i..open].iter().any(|t| t.is_ident_ci("extends")) || i > 0 && tokens[i - 1].is_ident_ci("abstract");
             implements && !extends && !declares_method(tokens, open, close, "__serialize")
         })
         .filter_map(|(i, _, _)| tokens.get(i + 1).filter(|t| t.kind == TokenKind::Ident).map(|_| i + 1))
@@ -1450,7 +1484,7 @@ fn dynamic_properties(tokens: &[Token], index: &crate::index::ProjectIndex) -> V
             let Some(next) = tokens.get(j) else { continue };
             let assigns = next.is_punct("=")
                 || next.is_punct("??=")
-                || (["." , "+", "-", "*", "/", "%", "|", "&", "^"].iter().any(|op| next.is_punct(op))
+                || ([".", "+", "-", "*", "/", "%", "|", "&", "^"].iter().any(|op| next.is_punct(op))
                     && tokens.get(j + 1).is_some_and(|n| n.is_punct("=") && n.start == next.end));
             if assigns && seen.insert(name.text.to_ascii_lowercase()) {
                 out.push(k + 2);
@@ -1500,10 +1534,7 @@ fn bareword_keys(tokens: &[Token]) -> Vec<usize> {
     let defined = defined_constants(tokens);
     (2..tokens.len().saturating_sub(1))
         .filter(|&i| {
-            tokens[i - 1].is_punct("[")
-                && tokens[i + 1].is_punct("]")
-                && is_bareword(&tokens[i], &defined)
-                && offset_base(tokens, i - 2)
+            tokens[i - 1].is_punct("[") && tokens[i + 1].is_punct("]") && is_bareword(&tokens[i], &defined) && offset_base(tokens, i - 2)
         })
         .collect()
 }
@@ -1520,10 +1551,7 @@ mod tests {
     fn curly_offsets_on_properties_and_elements() {
         let src = "<?php\n$this->name{0}; $a['k']{1}; $str {2}; $o?->p{3};\nif ($x) { echo 1; }\n";
         assert_eq!(rule_ids(src).iter().filter(|r| *r == "removed.curly_offset").count(), 4);
-        assert_eq!(
-            fix_curly_offsets(src).unwrap(),
-            "<?php\n$this->name[0]; $a['k'][1]; $str [2]; $o?->p[3];\nif ($x) { echo 1; }\n"
-        );
+        assert_eq!(fix_curly_offsets(src).unwrap(), "<?php\n$this->name[0]; $a['k'][1]; $str [2]; $o?->p[3];\nif ($x) { echo 1; }\n");
         assert_eq!(fix_curly_offsets("<?php foreach ($a['x'] as $v) { } function f($a = []) { }"), None);
     }
 
@@ -1587,13 +1615,26 @@ mod tests {
         assert_eq!(count("<?php assert('$a > 0'); assert($a > 0);", "removed.assert_string"), 1);
         let csv = "<?php fputcsv($f, $row); fputcsv($f, $row, ',', '\"', ''); fputcsv($f, $row, escape: ''); str_getcsv($s); str_getcsv($s, ',', '\"', '\\\\'); fgetcsv($f);";
         assert_eq!(count(csv, "deprecated.csv_escape"), 3);
-        assert_eq!(count("<?php mb_convert_encoding($h, 'HTML-ENTITIES', 'UTF-8'); mb_convert_encoding($h, 'UTF-8'); echo 'html';", "deprecated.mb_encoding"), 1);
+        assert_eq!(
+            count(
+                "<?php mb_convert_encoding($h, 'HTML-ENTITIES', 'UTF-8'); mb_convert_encoding($h, 'UTF-8'); echo 'html';",
+                "deprecated.mb_encoding"
+            ),
+            1
+        );
     }
 
     #[test]
     fn bareword_keys_and_reserved_names() {
-        assert_eq!(count("<?php echo $row[id]; echo $a['id'][name]; $b[ID]; $c[true]; $d[Foo\\BAR]; $e = [id];", "removed.bareword_key"), 2);
-        let f = analyze_source("a.php", "<?php class Object {} class Foo {} function match() {} class M { function match() {} }", PhpVersion::new(8, 4));
+        assert_eq!(
+            count("<?php echo $row[id]; echo $a['id'][name]; $b[ID]; $c[true]; $d[Foo\\BAR]; $e = [id];", "removed.bareword_key"),
+            2
+        );
+        let f = analyze_source(
+            "a.php",
+            "<?php class Object {} class Foo {} function match() {} class M { function match() {} }",
+            PhpVersion::new(8, 4),
+        );
         let reserved: Vec<_> = f.iter().filter(|f| f.rule_id == "removed.reserved_name").map(|f| f.since.to_string()).collect();
         assert_eq!(reserved, ["7.2", "8.0"]);
     }
@@ -1610,7 +1651,17 @@ mod tests {
         let src = "<?php\n$db = new mysqli('h'); $db->ping(); $r = new \\ReflectionProperty($o, 'x'); $r->setAccessible(true);\n$s = new SplObjectStorage(); $s->attach($o);\nReflectionClass::export('A'); $pdo->setAttribute(PDO::MYSQL_ATTR_INIT_COMMAND, 'x'); $x = PDO::FETCH_SERIALIZE;";
         let hits = at(src, (8, 5));
         let titles: Vec<&str> = hits.iter().map(|(_, t)| t.as_str()).collect();
-        assert_eq!(titles, ["->ping()", "->setAccessible()", "->attach()", "ReflectionClass::export()", "PDO::MYSQL_ATTR_INIT_COMMAND", "PDO::FETCH_SERIALIZE"]);
+        assert_eq!(
+            titles,
+            [
+                "->ping()",
+                "->setAccessible()",
+                "->attach()",
+                "ReflectionClass::export()",
+                "PDO::MYSQL_ATTR_INIT_COMMAND",
+                "PDO::FETCH_SERIALIZE"
+            ]
+        );
         assert!(at("<?php $client->ping(); $set->attach($x); $q->refresh();", (8, 5)).is_empty(), "no hint, no finding");
         assert!(at("<?php $r = new ReflectionMethod('A', 'b'); $r->setAccessible(true);", (8, 4)).is_empty(), "below the target");
     }
@@ -1636,11 +1687,26 @@ mod tests {
     fn more_call_and_constant_rules() {
         assert_eq!(count85("<?php implode($items, ', '); implode(', ', $items); join($a, '-'); implode($a);", "removed.implode_order"), 2);
         assert_eq!(count85("<?php mb_check_encoding(); mb_check_encoding($s); readdir(); readdir($h);", "deprecated.implicit_argument"), 2);
-        assert_eq!(count85("<?php session_set_save_handler('o', 'c', 'r', 'w', 'd', 'g'); session_set_save_handler($h, true);", "deprecated.session_set_save_handler"), 1);
-        assert_eq!(count85("<?php ini_set('session.sid_length', 32); ini_get('mbstring.func_overload'); ini_set('mbstring.func_overload', 0);", "deprecated.ini_setting"), 2);
+        assert_eq!(
+            count85(
+                "<?php session_set_save_handler('o', 'c', 'r', 'w', 'd', 'g'); session_set_save_handler($h, true);",
+                "deprecated.session_set_save_handler"
+            ),
+            1
+        );
+        assert_eq!(
+            count85(
+                "<?php ini_set('session.sid_length', 32); ini_get('mbstring.func_overload'); ini_set('mbstring.func_overload', 0);",
+                "deprecated.ini_setting"
+            ),
+            2
+        );
         assert_eq!(count85("<?php $a[null] = 1; array_key_exists(null, $a); $b = [null]; $c[0];", "deprecated.null_offset"), 2);
         assert_eq!(count85("<?php pg_numrows($r); pg_num_rows($r); pg_query($c, $q);", "deprecated.pg_alias"), 1);
-        assert_eq!(count85("<?php $x = ASSERT_ACTIVE; $y = ASSERT_QUIET_EVAL; $z = MHASH_MD5; $w = FILE_BINARY;", "deprecated.assert_constants"), 1);
+        assert_eq!(
+            count85("<?php $x = ASSERT_ACTIVE; $y = ASSERT_QUIET_EVAL; $z = MHASH_MD5; $w = FILE_BINARY;", "deprecated.assert_constants"),
+            1
+        );
         assert_eq!(count85("<?php $y = ASSERT_QUIET_EVAL;", "removed.assert_quiet_eval"), 1);
         assert_eq!(count85("<?php echo $php_errormsg; echo $HTTP_RAW_POST_DATA; echo $errormsg;", "removed.magic_variable"), 2);
     }
@@ -1666,7 +1732,8 @@ mod tests {
     fn dynamic_properties_in_simple_classes() {
         let id = "deprecated.dynamic_property";
         let src = "<?php class A {\n public $declared;\n public function __construct(private $promoted, $plain) { $this->declared = 1; $this->promoted = 2; $this->extra = 3; $this->extra = 4; $this->list[] = 5; $this->total += 1; $x = $this->read; }\n}";
-        let found: Vec<_> = analyze_source("a.php", src, PhpVersion::new(8, 2)).into_iter().filter(|f| f.rule_id == id).map(|f| f.snippet).collect();
+        let found: Vec<_> =
+            analyze_source("a.php", src, PhpVersion::new(8, 2)).into_iter().filter(|f| f.rule_id == id).map(|f| f.snippet).collect();
         assert_eq!(found.len(), 3, "{found:?}");
         assert_eq!(count85("<?php class B extends A { function f() { $this->x = 1; } }", id), 0);
         assert_eq!(count85("<?php #[\\AllowDynamicProperties]\nclass C { function f() { $this->x = 1; } }", id), 0);
@@ -1689,24 +1756,49 @@ mod tests {
         assert!(!rule_ids(hooks).iter().any(|r| r == "removed.curly_offset"));
         assert_eq!(fix_legacy_syntax(hooks), None);
 
-        let keys = "<?php const key = 'k'; define('lower', 1); use const Foo\\bar; echo $a[__line__], $a[key], $a[lower], $a[bar], $a[name];";
+        let keys =
+            "<?php const key = 'k'; define('lower', 1); use const Foo\\bar; echo $a[__line__], $a[key], $a[lower], $a[bar], $a[name];";
         assert_eq!(fix_legacy_syntax(keys).unwrap().0, keys.replace("$a[name]", "$a['name']"));
         assert_eq!(fix_legacy_syntax("<?php echo $a{id};").unwrap().0, "<?php echo $a['id'];");
 
-        assert!(rule_ids("<?php function f(#[Attr] (A&B)|null $x = null) { return mysql_query($x); }")
-            .iter()
-            .eq(["removed.mysql"].iter()));
-        assert_eq!(count85("<?php $x = $a ? 1 : 2 and $b ? 3 : 4; switch ($x) { case $a ? 1 : 2: return $b ? 3 : 4; }", "removed.nested_ternary"), 0);
+        assert!(rule_ids("<?php function f(#[Attr] (A&B)|null $x = null) { return mysql_query($x); }").iter().eq(["removed.mysql"].iter()));
+        assert_eq!(
+            count85("<?php $x = $a ? 1 : 2 and $b ? 3 : 4; switch ($x) { case $a ? 1 : 2: return $b ? 3 : 4; }", "removed.nested_ternary"),
+            0
+        );
         assert!(rule_ids("<?php namespace Foo; function __autoload($c) {}").is_empty());
         assert_eq!(count85("<?php mb_stripos($ct, 'html'); mb_strlen($s, 'BASE64');", "deprecated.mb_encoding"), 1);
-        assert!(at("<?php $r = $res->fetch_assoc(MYSQLI_ASSOC); $redis->ping(); $user->refresh();", (8, 5)).iter().all(|(r, _)| r != "deprecated.mysqli_method"));
+        assert!(at("<?php $r = $res->fetch_assoc(MYSQLI_ASSOC); $redis->ping(); $user->refresh();", (8, 5))
+            .iter()
+            .all(|(r, _)| r != "deprecated.mysqli_method"));
         assert_eq!(count85("<?php function f(mysqli $db) { $db->ping(); }", "deprecated.mysqli_method"), 1);
-        assert_eq!(count85("<?php [$body, $http_response_header] = fetch($u); echo $http_response_header[0];", "deprecated.http_response_header"), 0);
-        assert_eq!(count85("<?php list($body, $http_response_header) = fetch($u); echo $http_response_header[0];", "deprecated.http_response_header"), 0);
+        assert_eq!(
+            count85("<?php [$body, $http_response_header] = fetch($u); echo $http_response_header[0];", "deprecated.http_response_header"),
+            0
+        );
+        assert_eq!(
+            count85(
+                "<?php list($body, $http_response_header) = fetch($u); echo $http_response_header[0];",
+                "deprecated.http_response_header"
+            ),
+            0
+        );
         assert_eq!(count85("<?php abstract class N implements \\Serializable {}", "deprecated.serializable"), 0);
         assert_eq!(count85("<?php namespace App; interface Countable { function count(); } class C implements Countable { function count() { return 1; } }", "deprecated.tentative_return_type"), 0);
-        assert_eq!(count85("<?php namespace App; class C implements \\Countable { function count() { return 1; } }", "deprecated.tentative_return_type"), 1);
-        assert_eq!(count85("<?php enum E implements JsonSerializable { case A; public function jsonSerialize() { return 1; } }", "deprecated.tentative_return_type"), 1);
+        assert_eq!(
+            count85(
+                "<?php namespace App; class C implements \\Countable { function count() { return 1; } }",
+                "deprecated.tentative_return_type"
+            ),
+            1
+        );
+        assert_eq!(
+            count85(
+                "<?php enum E implements JsonSerializable { case A; public function jsonSerialize() { return 1; } }",
+                "deprecated.tentative_return_type"
+            ),
+            1
+        );
         assert_eq!(count85("<?php fgetcsv($f, length: 0, separator: ','); fgetcsv($f, escape: '');", "deprecated.csv_escape"), 1);
         assert!(rule_ids("<?php const REAL = 1.0; $x = (\nREAL\n);").iter().all(|r| r != "removed.real_cast"));
         assert_eq!(count85("<?php new class(function () {}) { function __autoload($c) {} }; each($x);", "removed.each"), 1);
@@ -1749,8 +1841,12 @@ mod tests {
 
     #[test]
     fn dollar_brace_inside_backticks() {
-        let ids: Vec<String> = analyze_source("a.php", "<?php `ls ${dir}`;", PhpVersion::new(8, 5)).into_iter().map(|f| f.rule_id).collect();
-        assert!(ids.contains(&"deprecated.backtick".to_string()) && ids.contains(&"deprecated.dollar_brace_interpolation".to_string()), "{ids:?}");
+        let ids: Vec<String> =
+            analyze_source("a.php", "<?php `ls ${dir}`;", PhpVersion::new(8, 5)).into_iter().map(|f| f.rule_id).collect();
+        assert!(
+            ids.contains(&"deprecated.backtick".to_string()) && ids.contains(&"deprecated.dollar_brace_interpolation".to_string()),
+            "{ids:?}"
+        );
     }
 
     #[test]
@@ -1768,18 +1864,11 @@ mod tests {
     }
 
     fn rules(src: &str, target: &str) -> Vec<String> {
-        analyze_source("t.php", src, target.parse().unwrap())
-            .into_iter()
-            .map(|f| f.rule_id)
-            .collect()
+        analyze_source("t.php", src, target.parse().unwrap()).into_iter().map(|f| f.rule_id).collect()
     }
 
     fn lines_of(src: &str, target: &str, rule: &str) -> Vec<usize> {
-        analyze_source("t.php", src, target.parse().unwrap())
-            .into_iter()
-            .filter(|f| f.rule_id == rule)
-            .map(|f| f.line)
-            .collect()
+        analyze_source("t.php", src, target.parse().unwrap()).into_iter().filter(|f| f.rule_id == rule).map(|f| f.line).collect()
     }
 
     #[test]
@@ -1796,7 +1885,8 @@ function e(public $x = null, $y) {}";
         let rule = "deprecated.optional_before_required";
         assert_eq!(lines_of(src, "8.0", rule), vec![2, 6, 7, 8, 9]);
         assert!(lines_of(src, "7.4", rule).is_empty());
-        let fixes: Vec<FixKind> = analyze_source("t.php", src, PhpVersion::new(8, 3)).into_iter().filter(|f| f.rule_id == rule).map(|f| f.fix).collect();
+        let fixes: Vec<FixKind> =
+            analyze_source("t.php", src, PhpVersion::new(8, 3)).into_iter().filter(|f| f.rule_id == rule).map(|f| f.fix).collect();
         assert!(fixes.iter().all(|f| *f == FixKind::Likely));
     }
 
@@ -1872,23 +1962,14 @@ $x = 'self::create';";
         let src = "<?php\n$c = $str{0};\n$f = (real) $x;\n$n = (unset) $x;\n$b = (boolean) $x;\n$o = `ls`;\n$p = foo(REAL);";
         assert_eq!(
             rules(src, "8.5"),
-            vec![
-                "removed.curly_offset",
-                "removed.real_cast",
-                "removed.unset_cast",
-                "deprecated.non_canonical_cast",
-                "deprecated.backtick"
-            ]
+            vec!["removed.curly_offset", "removed.real_cast", "removed.unset_cast", "deprecated.non_canonical_cast", "deprecated.backtick"]
         );
     }
 
     #[test]
     fn rewrites_curly_offsets() {
         let src = "<?php\n$a = $s{0} . $m{$i}{f($x{1})};\nif ($b){ echo \"{$c}\"; }\n";
-        assert_eq!(
-            fix_curly_offsets(src).unwrap(),
-            "<?php\n$a = $s[0] . $m[$i][f($x[1])];\nif ($b){ echo \"{$c}\"; }\n"
-        );
+        assert_eq!(fix_curly_offsets(src).unwrap(), "<?php\n$a = $s[0] . $m[$i][f($x[1])];\nif ($b){ echo \"{$c}\"; }\n");
         assert_eq!(fix_curly_offsets("<?php $a[0]; ${'x'};"), None);
     }
 
@@ -1907,11 +1988,7 @@ $x = 'self::create';";
         let ids: Vec<_> = f.iter().map(|f| (f.rule_id.as_str(), f.line)).collect();
         assert_eq!(
             ids,
-            vec![
-                ("deprecated.implicit_nullable", 2),
-                ("deprecated.implicit_nullable", 3),
-                ("deprecated.implicit_nullable", 4)
-            ]
+            vec![("deprecated.implicit_nullable", 2), ("deprecated.implicit_nullable", 3), ("deprecated.implicit_nullable", 4)]
         );
         assert!(rules(src, "8.3").is_empty());
     }
@@ -1930,10 +2007,7 @@ $x = 'self::create';";
     #[test]
     fn constants() {
         let src = "<?php\nfilter_var($s, FILTER_SANITIZE_STRING);\nerror_reporting(E_ALL & ~E_STRICT);\ntrigger_error('x', E_USER_ERROR);\nif ($n === E_USER_ERROR) {}";
-        assert_eq!(
-            rules(src, "8.4"),
-            vec!["deprecated.filter_sanitize_string", "deprecated.e_strict", "deprecated.e_user_error"]
-        );
+        assert_eq!(rules(src, "8.4"), vec!["deprecated.filter_sanitize_string", "deprecated.e_strict", "deprecated.e_user_error"]);
     }
 
     #[test]

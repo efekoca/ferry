@@ -64,51 +64,173 @@ impl SymbolRule {
 use Change::{Deprecated as D, Removed as R};
 
 const MYSQL_FUNCTIONS: [&str; 65] = [
-    "mysql_affected_rows", "mysql_client_encoding", "mysql_close", "mysql_connect", "mysql_create_db", "mysql_createdb",
-    "mysql_data_seek", "mysql_db_name", "mysql_dbname", "mysql_db_query", "mysql_drop_db", "mysql_dropdb", "mysql_errno",
-    "mysql_error", "mysql_escape_string", "mysql_fetch_array", "mysql_fetch_assoc", "mysql_fetch_field",
-    "mysql_fetch_lengths", "mysql_fetch_object", "mysql_fetch_row", "mysql_field_flags", "mysql_fieldflags",
-    "mysql_field_len", "mysql_fieldlen", "mysql_field_name", "mysql_fieldname", "mysql_field_seek", "mysql_field_table",
-    "mysql_fieldtable", "mysql_field_type", "mysql_fieldtype", "mysql_free_result", "mysql_freeresult",
-    "mysql_get_client_info", "mysql_get_host_info", "mysql_get_proto_info", "mysql_get_server_info", "mysql_info",
-    "mysql_insert_id", "mysql_list_dbs", "mysql_listdbs", "mysql_list_fields", "mysql_listfields", "mysql_list_processes",
-    "mysql_list_tables", "mysql_listtables", "mysql_num_fields", "mysql_numfields", "mysql_num_rows", "mysql_numrows",
-    "mysql_pconnect", "mysql_ping", "mysql_query", "mysql_real_escape_string", "mysql_result", "mysql_select_db",
-    "mysql_selectdb", "mysql_set_charset", "mysql_stat", "mysql_tablename", "mysql_table_name", "mysql_thread_id",
-    "mysql_unbuffered_query", "mysql",
+    "mysql_affected_rows",
+    "mysql_client_encoding",
+    "mysql_close",
+    "mysql_connect",
+    "mysql_create_db",
+    "mysql_createdb",
+    "mysql_data_seek",
+    "mysql_db_name",
+    "mysql_dbname",
+    "mysql_db_query",
+    "mysql_drop_db",
+    "mysql_dropdb",
+    "mysql_errno",
+    "mysql_error",
+    "mysql_escape_string",
+    "mysql_fetch_array",
+    "mysql_fetch_assoc",
+    "mysql_fetch_field",
+    "mysql_fetch_lengths",
+    "mysql_fetch_object",
+    "mysql_fetch_row",
+    "mysql_field_flags",
+    "mysql_fieldflags",
+    "mysql_field_len",
+    "mysql_fieldlen",
+    "mysql_field_name",
+    "mysql_fieldname",
+    "mysql_field_seek",
+    "mysql_field_table",
+    "mysql_fieldtable",
+    "mysql_field_type",
+    "mysql_fieldtype",
+    "mysql_free_result",
+    "mysql_freeresult",
+    "mysql_get_client_info",
+    "mysql_get_host_info",
+    "mysql_get_proto_info",
+    "mysql_get_server_info",
+    "mysql_info",
+    "mysql_insert_id",
+    "mysql_list_dbs",
+    "mysql_listdbs",
+    "mysql_list_fields",
+    "mysql_listfields",
+    "mysql_list_processes",
+    "mysql_list_tables",
+    "mysql_listtables",
+    "mysql_num_fields",
+    "mysql_numfields",
+    "mysql_num_rows",
+    "mysql_numrows",
+    "mysql_pconnect",
+    "mysql_ping",
+    "mysql_query",
+    "mysql_real_escape_string",
+    "mysql_result",
+    "mysql_select_db",
+    "mysql_selectdb",
+    "mysql_set_charset",
+    "mysql_stat",
+    "mysql_tablename",
+    "mysql_table_name",
+    "mysql_thread_id",
+    "mysql_unbuffered_query",
+    "mysql",
 ];
 pub const PG_ALIASES: [(&str, &str); 24] = [
-    ("pg_clientencoding", "pg_client_encoding"), ("pg_cmdtuples", "pg_affected_rows"), ("pg_errormessage", "pg_last_error"),
-    ("pg_fieldisnull", "pg_field_is_null"), ("pg_fieldname", "pg_field_name"), ("pg_fieldnum", "pg_field_num"),
-    ("pg_fieldprtlen", "pg_field_prtlen"), ("pg_fieldsize", "pg_field_size"), ("pg_fieldtype", "pg_field_type"),
-    ("pg_freeresult", "pg_free_result"), ("pg_getlastoid", "pg_last_oid"), ("pg_loclose", "pg_lo_close"),
-    ("pg_locreate", "pg_lo_create"), ("pg_loexport", "pg_lo_export"), ("pg_loimport", "pg_lo_import"),
-    ("pg_loopen", "pg_lo_open"), ("pg_loread", "pg_lo_read"), ("pg_loreadall", "pg_lo_read_all"),
-    ("pg_lounlink", "pg_lo_unlink"), ("pg_lowrite", "pg_lo_write"), ("pg_numfields", "pg_num_fields"),
-    ("pg_numrows", "pg_num_rows"), ("pg_result", "pg_fetch_result"), ("pg_setclientencoding", "pg_set_client_encoding"),
+    ("pg_clientencoding", "pg_client_encoding"),
+    ("pg_cmdtuples", "pg_affected_rows"),
+    ("pg_errormessage", "pg_last_error"),
+    ("pg_fieldisnull", "pg_field_is_null"),
+    ("pg_fieldname", "pg_field_name"),
+    ("pg_fieldnum", "pg_field_num"),
+    ("pg_fieldprtlen", "pg_field_prtlen"),
+    ("pg_fieldsize", "pg_field_size"),
+    ("pg_fieldtype", "pg_field_type"),
+    ("pg_freeresult", "pg_free_result"),
+    ("pg_getlastoid", "pg_last_oid"),
+    ("pg_loclose", "pg_lo_close"),
+    ("pg_locreate", "pg_lo_create"),
+    ("pg_loexport", "pg_lo_export"),
+    ("pg_loimport", "pg_lo_import"),
+    ("pg_loopen", "pg_lo_open"),
+    ("pg_loread", "pg_lo_read"),
+    ("pg_loreadall", "pg_lo_read_all"),
+    ("pg_lounlink", "pg_lo_unlink"),
+    ("pg_lowrite", "pg_lo_write"),
+    ("pg_numfields", "pg_num_fields"),
+    ("pg_numrows", "pg_num_rows"),
+    ("pg_result", "pg_fetch_result"),
+    ("pg_setclientencoding", "pg_set_client_encoding"),
 ];
 
 pub const NULL_STRING_ARGS: &[(&str, &[usize])] = &[
-    ("strlen", &[0]), ("trim", &[0]), ("ltrim", &[0]), ("rtrim", &[0]), ("strtolower", &[0]), ("strtoupper", &[0]),
-    ("ucfirst", &[0]), ("lcfirst", &[0]), ("ucwords", &[0]), ("str_replace", &[2]), ("str_ireplace", &[2]),
-    ("strpos", &[0, 1]), ("stripos", &[0, 1]), ("strrpos", &[0, 1]), ("str_contains", &[0, 1]),
-    ("str_starts_with", &[0, 1]), ("str_ends_with", &[0, 1]), ("strstr", &[0, 1]), ("substr", &[0]),
-    ("substr_count", &[0, 1]), ("str_pad", &[0]), ("str_repeat", &[0]), ("str_split", &[0]), ("strrev", &[0]),
-    ("strcmp", &[0, 1]), ("strcasecmp", &[0, 1]), ("strncmp", &[0, 1]), ("htmlspecialchars", &[0]),
-    ("htmlentities", &[0]), ("html_entity_decode", &[0]), ("htmlspecialchars_decode", &[0]), ("strip_tags", &[0]),
-    ("addslashes", &[0]), ("stripslashes", &[0]), ("nl2br", &[0]), ("explode", &[0, 1]), ("sprintf", &[0]),
-    ("urlencode", &[0]), ("rawurlencode", &[0]), ("urldecode", &[0]), ("rawurldecode", &[0]),
-    ("base64_encode", &[0]), ("base64_decode", &[0]), ("md5", &[0]), ("sha1", &[0]), ("crc32", &[0]),
-    ("json_decode", &[0]), ("preg_match", &[0, 1]), ("preg_split", &[0, 1]), ("preg_quote", &[0]),
-    ("mb_strlen", &[0]), ("mb_substr", &[0]), ("mb_strtolower", &[0]), ("mb_strtoupper", &[0]),
-    ("mb_strpos", &[0, 1]), ("number_format", &[0]), ("strtotime", &[0]),
+    ("strlen", &[0]),
+    ("trim", &[0]),
+    ("ltrim", &[0]),
+    ("rtrim", &[0]),
+    ("strtolower", &[0]),
+    ("strtoupper", &[0]),
+    ("ucfirst", &[0]),
+    ("lcfirst", &[0]),
+    ("ucwords", &[0]),
+    ("str_replace", &[2]),
+    ("str_ireplace", &[2]),
+    ("strpos", &[0, 1]),
+    ("stripos", &[0, 1]),
+    ("strrpos", &[0, 1]),
+    ("str_contains", &[0, 1]),
+    ("str_starts_with", &[0, 1]),
+    ("str_ends_with", &[0, 1]),
+    ("strstr", &[0, 1]),
+    ("substr", &[0]),
+    ("substr_count", &[0, 1]),
+    ("str_pad", &[0]),
+    ("str_repeat", &[0]),
+    ("str_split", &[0]),
+    ("strrev", &[0]),
+    ("strcmp", &[0, 1]),
+    ("strcasecmp", &[0, 1]),
+    ("strncmp", &[0, 1]),
+    ("htmlspecialchars", &[0]),
+    ("htmlentities", &[0]),
+    ("html_entity_decode", &[0]),
+    ("htmlspecialchars_decode", &[0]),
+    ("strip_tags", &[0]),
+    ("addslashes", &[0]),
+    ("stripslashes", &[0]),
+    ("nl2br", &[0]),
+    ("explode", &[0, 1]),
+    ("sprintf", &[0]),
+    ("urlencode", &[0]),
+    ("rawurlencode", &[0]),
+    ("urldecode", &[0]),
+    ("rawurldecode", &[0]),
+    ("base64_encode", &[0]),
+    ("base64_decode", &[0]),
+    ("md5", &[0]),
+    ("sha1", &[0]),
+    ("crc32", &[0]),
+    ("json_decode", &[0]),
+    ("preg_match", &[0, 1]),
+    ("preg_split", &[0, 1]),
+    ("preg_quote", &[0]),
+    ("mb_strlen", &[0]),
+    ("mb_substr", &[0]),
+    ("mb_strtolower", &[0]),
+    ("mb_strtoupper", &[0]),
+    ("mb_strpos", &[0, 1]),
+    ("number_format", &[0]),
+    ("strtotime", &[0]),
 ];
 
 pub const DEPRECATED_INI: [(&str, u32, u32); 13] = [
-    ("mbstring.func_overload", 8, 0), ("track_errors", 8, 0), ("filter.default", 8, 1), ("filter.default_flags", 8, 1),
-    ("auto_detect_line_endings", 8, 1), ("assert.active", 8, 3), ("assert.bail", 8, 3), ("assert.callback", 8, 3),
-    ("assert.exception", 8, 3), ("assert.warning", 8, 3), ("session.sid_length", 8, 4),
-    ("session.sid_bits_per_character", 8, 4), ("session.use_trans_sid", 8, 4),
+    ("mbstring.func_overload", 8, 0),
+    ("track_errors", 8, 0),
+    ("filter.default", 8, 1),
+    ("filter.default_flags", 8, 1),
+    ("auto_detect_line_endings", 8, 1),
+    ("assert.active", 8, 3),
+    ("assert.bail", 8, 3),
+    ("assert.callback", 8, 3),
+    ("assert.exception", 8, 3),
+    ("assert.warning", 8, 3),
+    ("session.sid_length", 8, 4),
+    ("session.sid_bits_per_character", 8, 4),
+    ("session.use_trans_sid", 8, 4),
 ];
 
 use FixKind::{Auto as A, Likely as L, Manual as M};
@@ -128,10 +250,8 @@ const POSIX_REGEX: Text = Text::new(
     "POSIX regex fonksiyonları kaldırıldı. Desen, sınırlayıcılarla PCRE sözdizimine çevrilmelidir.",
     "POSIX regex functions were removed. The pattern has to be converted to PCRE syntax with delimiters.",
 );
-const MAGIC_QUOTES_SET: Text = Text::new(
-    "Magic quotes artık yok; bu çağrı silinebilir.",
-    "Magic quotes no longer exist; this call can be removed.",
-);
+const MAGIC_QUOTES_SET: Text =
+    Text::new("Magic quotes artık yok; bu çağrı silinebilir.", "Magic quotes no longer exist; this call can be removed.");
 const MAGIC_QUOTES_GET: Text = Text::new(
     "Magic quotes PHP 5.4'ten beri yok; çağrının yerine false yazılabilir.",
     "Magic quotes have been gone since PHP 5.4; replace the call with false.",
@@ -144,15 +264,7 @@ const REMOVE_CALL: Option<Text> = tx("çağrıyı silin", "remove the call");
 
 macro_rules! rule {
     ($id:literal, $name:literal, $change:expr, $since:expr, $repl:expr, $fix:expr, $note:expr) => {
-        SymbolRule {
-            id: $id,
-            name: $name,
-            change: $change,
-            since: $since,
-            replacement: $repl,
-            fix: $fix,
-            note: $note,
-        }
+        SymbolRule { id: $id, name: $name, change: $change, since: $since, replacement: $repl, fix: $fix, note: $note }
     };
 }
 
@@ -285,63 +397,203 @@ pub const FUNCTIONS: &[SymbolRule] = &[
 ];
 
 pub const CONSTANTS: &[SymbolRule] = &[
-    rule!("deprecated.filter_sanitize_string", "filter_sanitize_string", D, (8, 1), code("htmlspecialchars()"), M, Text::new(
-        "FILTER_SANITIZE_STRING kullanımdan kalktı. İhtiyacınıza göre htmlspecialchars() ya da strip_tags() kullanın.",
-        "FILTER_SANITIZE_STRING is deprecated. Use htmlspecialchars() or strip_tags(), depending on what you need.")),
-    rule!("deprecated.filter_sanitize_stripped", "filter_sanitize_stripped", D, (8, 1), code("htmlspecialchars()"), M, Text::new(
-        "FILTER_SANITIZE_STRIPPED kullanımdan kalktı.",
-        "FILTER_SANITIZE_STRIPPED is deprecated.")),
-    rule!("deprecated.e_strict", "e_strict", D, (8, 4), tx("E_STRICT'i kaldırın", "remove E_STRICT"), M, Text::new(
-        "E_STRICT kullanımdan kalktı; bu hata seviyesi artık hiç tetiklenmiyor.",
-        "E_STRICT is deprecated; this error level is never raised anymore.")),
-    rule!("deprecated.e_user_error", "e_user_error", D, (8, 4), tx("exception fırlatın ya da exit() kullanın", "throw an exception or call exit()"), M, Text::new(
-        "trigger_error() ile E_USER_ERROR kullanmak 8.4'te kullanımdan kalktı.",
-        "Passing E_USER_ERROR to trigger_error() is deprecated in 8.4.")),
-    rule!("removed.filter_sanitize_magic_quotes", "filter_sanitize_magic_quotes", R, (8, 0), code("FILTER_SANITIZE_ADD_SLASHES"), M, Text::new(
-        "FILTER_SANITIZE_MAGIC_QUOTES PHP 8.0'da kaldırıldı.",
-        "FILTER_SANITIZE_MAGIC_QUOTES was removed in PHP 8.0.")),
-    rule!("removed.intl_idna_variant_2003", "intl_idna_variant_2003", R, (8, 0), code("INTL_IDNA_VARIANT_UTS46"), M, Text::new(
-        "INTL_IDNA_VARIANT_2003 PHP 8.0'da kaldırıldı.",
-        "INTL_IDNA_VARIANT_2003 was removed in PHP 8.0.")),
-    rule!("removed.input_request", "input_request", R, (8, 0), code("$_REQUEST"), M, Text::new(
-        "INPUT_REQUEST hiç uygulanmamıştı ve PHP 8.0'da kaldırıldı.",
-        "INPUT_REQUEST was never implemented and was removed in PHP 8.0.")),
-    rule!("removed.input_session", "input_session", R, (8, 0), code("$_SESSION"), M, Text::new(
-        "INPUT_SESSION hiç uygulanmamıştı ve PHP 8.0'da kaldırıldı.",
-        "INPUT_SESSION was never implemented and was removed in PHP 8.0.")),
-    rule!("removed.assert_quiet_eval", "assert_quiet_eval", R, (8, 0), tx("sabiti silin", "remove the constant"), M, Text::new(
-        "ASSERT_QUIET_EVAL PHP 8.0'da kaldırıldı.",
-        "ASSERT_QUIET_EVAL was removed in PHP 8.0.")),
-    rule!("removed.mb_overload", "mb_overload_*", R, (8, 0), tx("sabiti silin", "remove the constant"), M, Text::new(
-        "mbstring fonksiyon aşırı yüklemesi PHP 8.0'da kaldırıldı.",
-        "mbstring function overloading was removed in PHP 8.0.")),
-    rule!("removed.pgsql_libpq_version_str", "pgsql_libpq_version_str", R, (8, 0), code("PGSQL_LIBPQ_VERSION"), M, Text::new(
-        "PGSQL_LIBPQ_VERSION_STR PHP 8.0'da kaldırıldı.",
-        "PGSQL_LIBPQ_VERSION_STR was removed in PHP 8.0.")),
+    rule!(
+        "deprecated.filter_sanitize_string",
+        "filter_sanitize_string",
+        D,
+        (8, 1),
+        code("htmlspecialchars()"),
+        M,
+        Text::new(
+            "FILTER_SANITIZE_STRING kullanımdan kalktı. İhtiyacınıza göre htmlspecialchars() ya da strip_tags() kullanın.",
+            "FILTER_SANITIZE_STRING is deprecated. Use htmlspecialchars() or strip_tags(), depending on what you need."
+        )
+    ),
+    rule!(
+        "deprecated.filter_sanitize_stripped",
+        "filter_sanitize_stripped",
+        D,
+        (8, 1),
+        code("htmlspecialchars()"),
+        M,
+        Text::new("FILTER_SANITIZE_STRIPPED kullanımdan kalktı.", "FILTER_SANITIZE_STRIPPED is deprecated.")
+    ),
+    rule!(
+        "deprecated.e_strict",
+        "e_strict",
+        D,
+        (8, 4),
+        tx("E_STRICT'i kaldırın", "remove E_STRICT"),
+        M,
+        Text::new(
+            "E_STRICT kullanımdan kalktı; bu hata seviyesi artık hiç tetiklenmiyor.",
+            "E_STRICT is deprecated; this error level is never raised anymore."
+        )
+    ),
+    rule!(
+        "deprecated.e_user_error",
+        "e_user_error",
+        D,
+        (8, 4),
+        tx("exception fırlatın ya da exit() kullanın", "throw an exception or call exit()"),
+        M,
+        Text::new(
+            "trigger_error() ile E_USER_ERROR kullanmak 8.4'te kullanımdan kalktı.",
+            "Passing E_USER_ERROR to trigger_error() is deprecated in 8.4."
+        )
+    ),
+    rule!(
+        "removed.filter_sanitize_magic_quotes",
+        "filter_sanitize_magic_quotes",
+        R,
+        (8, 0),
+        code("FILTER_SANITIZE_ADD_SLASHES"),
+        M,
+        Text::new("FILTER_SANITIZE_MAGIC_QUOTES PHP 8.0'da kaldırıldı.", "FILTER_SANITIZE_MAGIC_QUOTES was removed in PHP 8.0.")
+    ),
+    rule!(
+        "removed.intl_idna_variant_2003",
+        "intl_idna_variant_2003",
+        R,
+        (8, 0),
+        code("INTL_IDNA_VARIANT_UTS46"),
+        M,
+        Text::new("INTL_IDNA_VARIANT_2003 PHP 8.0'da kaldırıldı.", "INTL_IDNA_VARIANT_2003 was removed in PHP 8.0.")
+    ),
+    rule!(
+        "removed.input_request",
+        "input_request",
+        R,
+        (8, 0),
+        code("$_REQUEST"),
+        M,
+        Text::new(
+            "INPUT_REQUEST hiç uygulanmamıştı ve PHP 8.0'da kaldırıldı.",
+            "INPUT_REQUEST was never implemented and was removed in PHP 8.0."
+        )
+    ),
+    rule!(
+        "removed.input_session",
+        "input_session",
+        R,
+        (8, 0),
+        code("$_SESSION"),
+        M,
+        Text::new(
+            "INPUT_SESSION hiç uygulanmamıştı ve PHP 8.0'da kaldırıldı.",
+            "INPUT_SESSION was never implemented and was removed in PHP 8.0."
+        )
+    ),
+    rule!(
+        "removed.assert_quiet_eval",
+        "assert_quiet_eval",
+        R,
+        (8, 0),
+        tx("sabiti silin", "remove the constant"),
+        M,
+        Text::new("ASSERT_QUIET_EVAL PHP 8.0'da kaldırıldı.", "ASSERT_QUIET_EVAL was removed in PHP 8.0.")
+    ),
+    rule!(
+        "removed.mb_overload",
+        "mb_overload_*",
+        R,
+        (8, 0),
+        tx("sabiti silin", "remove the constant"),
+        M,
+        Text::new("mbstring fonksiyon aşırı yüklemesi PHP 8.0'da kaldırıldı.", "mbstring function overloading was removed in PHP 8.0.")
+    ),
+    rule!(
+        "removed.pgsql_libpq_version_str",
+        "pgsql_libpq_version_str",
+        R,
+        (8, 0),
+        code("PGSQL_LIBPQ_VERSION"),
+        M,
+        Text::new("PGSQL_LIBPQ_VERSION_STR PHP 8.0'da kaldırıldı.", "PGSQL_LIBPQ_VERSION_STR was removed in PHP 8.0.")
+    ),
     rule!("deprecated.file_binary", "file_binary", D, (8, 1), tx("bayrağı silin", "remove the flag"), M, NO_EFFECT),
     rule!("deprecated.file_text", "file_text", D, (8, 1), tx("bayrağı silin", "remove the flag"), M, NO_EFFECT),
-    rule!("deprecated.assert_constants", "assert_*", D, (8, 3), tx("zend.assertions ve assert.exception", "zend.assertions and assert.exception"), M, Text::new(
-        "ASSERT_* sabitleri 8.3'te kullanımdan kalktı.",
-        "The ASSERT_* constants are deprecated in 8.3.")),
-    rule!("deprecated.mt_rand_php", "mt_rand_php", D, (8, 3), code("MT_RAND_MT19937"), M, Text::new(
-        "MT_RAND_PHP hatalı bir modulo uygulamasıdır ve 8.3'te kullanımdan kalktı.",
-        "MT_RAND_PHP is a broken modulo implementation and is deprecated in 8.3.")),
+    rule!(
+        "deprecated.assert_constants",
+        "assert_*",
+        D,
+        (8, 3),
+        tx("zend.assertions ve assert.exception", "zend.assertions and assert.exception"),
+        M,
+        Text::new("ASSERT_* sabitleri 8.3'te kullanımdan kalktı.", "The ASSERT_* constants are deprecated in 8.3.")
+    ),
+    rule!(
+        "deprecated.mt_rand_php",
+        "mt_rand_php",
+        D,
+        (8, 3),
+        code("MT_RAND_MT19937"),
+        M,
+        Text::new(
+            "MT_RAND_PHP hatalı bir modulo uygulamasıdır ve 8.3'te kullanımdan kalktı.",
+            "MT_RAND_PHP is a broken modulo implementation and is deprecated in 8.3."
+        )
+    ),
     rule!("deprecated.sunfuncs_ret", "sunfuncs_ret_*", D, (8, 4), code("date_sun_info()"), M, DEPRECATED_FN),
     rule!("deprecated.mysqli_refresh_constant", "mysqli_refresh_*", D, (8, 4), tx("FLUSH sorguları", "FLUSH queries"), M, DEPRECATED_FN),
-    rule!("deprecated.soap_functions_all", "soap_functions_all", D, (8, 4), tx("fonksiyonları tek tek ekleyin", "add the functions one by one"), M, DEPRECATED_FN),
-    rule!("deprecated.date_rfc7231", "date_rfc7231", D, (8, 5), code("DATE_RFC1123"), M, Text::new(
-        "DATE_RFC7231 saat dilimini yok sayıyordu ve 8.5'te kullanımdan kalktı.",
-        "DATE_RFC7231 ignored the time zone and is deprecated in 8.5.")),
+    rule!(
+        "deprecated.soap_functions_all",
+        "soap_functions_all",
+        D,
+        (8, 4),
+        tx("fonksiyonları tek tek ekleyin", "add the functions one by one"),
+        M,
+        DEPRECATED_FN
+    ),
+    rule!(
+        "deprecated.date_rfc7231",
+        "date_rfc7231",
+        D,
+        (8, 5),
+        code("DATE_RFC1123"),
+        M,
+        Text::new(
+            "DATE_RFC7231 saat dilimini yok sayıyordu ve 8.5'te kullanımdan kalktı.",
+            "DATE_RFC7231 ignored the time zone and is deprecated in 8.5."
+        )
+    ),
     rule!("deprecated.mhash_constant", "mhash_*", D, (8, 5), code("hash_*"), M, DEPRECATED_FN),
-    rule!("removed.filter_flag_scheme_required", "filter_flag_scheme_required", R, (8, 0), tx("bayrağı silin", "remove the flag"), M, Text::new(
-        "Bu bayrak PHP 8.0'da kaldırıldı; FILTER_VALIDATE_URL şemayı zaten zorunlu tutuyor.",
-        "This flag was removed in PHP 8.0; FILTER_VALIDATE_URL already requires a scheme.")),
-    rule!("removed.filter_flag_host_required", "filter_flag_host_required", R, (8, 0), tx("bayrağı silin", "remove the flag"), M, Text::new(
-        "Bu bayrak PHP 8.0'da kaldırıldı; FILTER_VALIDATE_URL host'u zaten zorunlu tutuyor.",
-        "This flag was removed in PHP 8.0; FILTER_VALIDATE_URL already requires a host.")),
-    rule!("deprecated.curlopt_binarytransfer", "curlopt_binarytransfer", D, (8, 4), tx("seçeneği silin", "remove the option"), M, Text::new(
-        "CURLOPT_BINARYTRANSFER uzun zamandır hiçbir şey yapmıyor ve 8.4'te kullanımdan kalktı.",
-        "CURLOPT_BINARYTRANSFER has done nothing for years and is deprecated in 8.4.")),
+    rule!(
+        "removed.filter_flag_scheme_required",
+        "filter_flag_scheme_required",
+        R,
+        (8, 0),
+        tx("bayrağı silin", "remove the flag"),
+        M,
+        Text::new(
+            "Bu bayrak PHP 8.0'da kaldırıldı; FILTER_VALIDATE_URL şemayı zaten zorunlu tutuyor.",
+            "This flag was removed in PHP 8.0; FILTER_VALIDATE_URL already requires a scheme."
+        )
+    ),
+    rule!(
+        "removed.filter_flag_host_required",
+        "filter_flag_host_required",
+        R,
+        (8, 0),
+        tx("bayrağı silin", "remove the flag"),
+        M,
+        Text::new(
+            "Bu bayrak PHP 8.0'da kaldırıldı; FILTER_VALIDATE_URL host'u zaten zorunlu tutuyor.",
+            "This flag was removed in PHP 8.0; FILTER_VALIDATE_URL already requires a host."
+        )
+    ),
+    rule!(
+        "deprecated.curlopt_binarytransfer",
+        "curlopt_binarytransfer",
+        D,
+        (8, 4),
+        tx("seçeneği silin", "remove the option"),
+        M,
+        Text::new(
+            "CURLOPT_BINARYTRANSFER uzun zamandır hiçbir şey yapmıyor ve 8.4'te kullanımdan kalktı.",
+            "CURLOPT_BINARYTRANSFER has done nothing for years and is deprecated in 8.4."
+        )
+    ),
 ];
 
 #[derive(Debug, Clone, Copy)]
@@ -382,40 +634,131 @@ const fn member(kind: MemberKind, class: &'static str, rule: SymbolRule) -> Memb
 use MemberKind::{Constant as K, Method as Mt, StaticCall as St};
 
 pub const MEMBERS: &[MemberRule] = &[
-    member(Mt, "mysqli", rule!("deprecated.mysqli_method", "ping", D, (8, 4), None, M, Text::new(
-        "mysqli::ping() kullanımdan kalktı; kopan bağlantı artık kendiliğinden yeniden kurulmuyor.",
-        "mysqli::ping() is deprecated; dropped connections are no longer reconnected automatically."))),
-    member(Mt, "mysqli", rule!("deprecated.mysqli_method", "kill", D, (8, 4), tx("KILL CONNECTION sorgusu", "a KILL CONNECTION query"), M, DEPRECATED_FN)),
+    member(
+        Mt,
+        "mysqli",
+        rule!(
+            "deprecated.mysqli_method",
+            "ping",
+            D,
+            (8, 4),
+            None,
+            M,
+            Text::new(
+                "mysqli::ping() kullanımdan kalktı; kopan bağlantı artık kendiliğinden yeniden kurulmuyor.",
+                "mysqli::ping() is deprecated; dropped connections are no longer reconnected automatically."
+            )
+        ),
+    ),
+    member(
+        Mt,
+        "mysqli",
+        rule!("deprecated.mysqli_method", "kill", D, (8, 4), tx("KILL CONNECTION sorgusu", "a KILL CONNECTION query"), M, DEPRECATED_FN),
+    ),
     member(Mt, "mysqli", rule!("deprecated.mysqli_method", "refresh", D, (8, 4), tx("FLUSH sorguları", "FLUSH queries"), M, DEPRECATED_FN)),
-    member(Mt, "reflection", rule!("deprecated.set_accessible", "setaccessible", D, (8, 5), REMOVE_CALL, A, Text::new(
-        "setAccessible() PHP 8.1'den beri hiçbir şey yapmıyor ve 8.5'te kullanımdan kalktı; çağrı silinebilir.",
-        "setAccessible() has done nothing since PHP 8.1 and is deprecated in 8.5; the call can be removed."))),
+    member(
+        Mt,
+        "reflection",
+        rule!(
+            "deprecated.set_accessible",
+            "setaccessible",
+            D,
+            (8, 5),
+            REMOVE_CALL,
+            A,
+            Text::new(
+                "setAccessible() PHP 8.1'den beri hiçbir şey yapmıyor ve 8.5'te kullanımdan kalktı; çağrı silinebilir.",
+                "setAccessible() has done nothing since PHP 8.1 and is deprecated in 8.5; the call can be removed."
+            )
+        ),
+    ),
     member(Mt, "splobjectstorage", rule!("deprecated.spl_object_storage", "attach", D, (8, 5), code("offsetSet()"), A, DEPRECATED_FN)),
     member(Mt, "splobjectstorage", rule!("deprecated.spl_object_storage", "detach", D, (8, 5), code("offsetUnset()"), A, DEPRECATED_FN)),
     member(Mt, "splobjectstorage", rule!("deprecated.spl_object_storage", "contains", D, (8, 5), code("offsetExists()"), A, DEPRECATED_FN)),
-    member(St, "reflection", rule!("removed.reflection_export", "export", R, (8, 0), tx("(string) new ReflectionX(...)", "(string) new ReflectionX(...)"), M, Text::new(
-        "Reflection*::export() PHP 8.0'da kaldırıldı; nesneyi metne çevirip yazdırın.",
-        "Reflection*::export() was removed in PHP 8.0; cast the object to a string and print it instead."))),
+    member(
+        St,
+        "reflection",
+        rule!(
+            "removed.reflection_export",
+            "export",
+            R,
+            (8, 0),
+            tx("(string) new ReflectionX(...)", "(string) new ReflectionX(...)"),
+            M,
+            Text::new(
+                "Reflection*::export() PHP 8.0'da kaldırıldı; nesneyi metne çevirip yazdırın.",
+                "Reflection*::export() was removed in PHP 8.0; cast the object to a string and print it instead."
+            )
+        ),
+    ),
     member(K, "pdo", rule!("deprecated.pdo_driver_constant", "mysql_attr_*", D, (8, 5), code("Pdo\\Mysql::ATTR_*"), A, PDO_DRIVER)),
     member(K, "pdo", rule!("deprecated.pdo_driver_constant", "pgsql_*", D, (8, 5), code("Pdo\\Pgsql::*"), A, PDO_DRIVER)),
     member(K, "pdo", rule!("deprecated.pdo_driver_constant", "sqlite_*", D, (8, 5), code("Pdo\\Sqlite::*"), A, PDO_DRIVER)),
     member(K, "pdo", rule!("deprecated.pdo_driver_constant", "odbc_*", D, (8, 5), code("Pdo\\Odbc::*"), A, PDO_DRIVER)),
     member(K, "pdo", rule!("deprecated.pdo_driver_constant", "dblib_*", D, (8, 5), code("Pdo\\Dblib::*"), A, PDO_DRIVER)),
     member(K, "pdo", rule!("deprecated.pdo_driver_constant", "fb_*", D, (8, 5), code("Pdo\\Firebird::*"), A, PDO_DRIVER)),
-    member(K, "pdo", rule!("deprecated.pdo_fetch_serialize", "fetch_serialize", D, (8, 1), None, M, Text::new(
-        "PDO::FETCH_SERIALIZE, Serializable arayüzüne dayandığı için 8.1'de kullanımdan kalktı.",
-        "PDO::FETCH_SERIALIZE relies on the Serializable interface and is deprecated in 8.1."))),
+    member(
+        K,
+        "pdo",
+        rule!(
+            "deprecated.pdo_fetch_serialize",
+            "fetch_serialize",
+            D,
+            (8, 1),
+            None,
+            M,
+            Text::new(
+                "PDO::FETCH_SERIALIZE, Serializable arayüzüne dayandığı için 8.1'de kullanımdan kalktı.",
+                "PDO::FETCH_SERIALIZE relies on the Serializable interface and is deprecated in 8.1."
+            )
+        ),
+    ),
 ];
 
 const NO_EFFECT: Text = Text::new("Hiçbir etkisi yok; silinebilir.", "Has no effect and can be removed.");
 
 pub const LARAVEL_HELPERS: [&str; 41] = [
-    "array_add", "array_collapse", "array_divide", "array_dot", "array_except", "array_first", "array_flatten",
-    "array_forget", "array_get", "array_has", "array_last", "array_only", "array_pluck", "array_prepend", "array_pull",
-    "array_random", "array_set", "array_sort", "array_sort_recursive", "array_where", "array_wrap", "camel_case",
-    "ends_with", "kebab_case", "snake_case", "starts_with", "str_after", "str_before", "str_finish", "str_is",
-    "str_limit", "str_plural", "str_random", "str_replace_array", "str_replace_first", "str_replace_last",
-    "str_singular", "str_slug", "str_start", "studly_case", "title_case",
+    "array_add",
+    "array_collapse",
+    "array_divide",
+    "array_dot",
+    "array_except",
+    "array_first",
+    "array_flatten",
+    "array_forget",
+    "array_get",
+    "array_has",
+    "array_last",
+    "array_only",
+    "array_pluck",
+    "array_prepend",
+    "array_pull",
+    "array_random",
+    "array_set",
+    "array_sort",
+    "array_sort_recursive",
+    "array_where",
+    "array_wrap",
+    "camel_case",
+    "ends_with",
+    "kebab_case",
+    "snake_case",
+    "starts_with",
+    "str_after",
+    "str_before",
+    "str_finish",
+    "str_is",
+    "str_limit",
+    "str_plural",
+    "str_random",
+    "str_replace_array",
+    "str_replace_first",
+    "str_replace_last",
+    "str_singular",
+    "str_slug",
+    "str_start",
+    "studly_case",
+    "title_case",
 ];
 
 pub const LARAVEL_HELPER: SymbolRule = rule!("framework.laravel_helper", "laravel_helper", R, (8, 0), tx(
@@ -424,9 +767,18 @@ pub const LARAVEL_HELPER: SymbolRule = rule!("framework.laravel_helper", "larave
     "Laravel 6 str_ ve array_ yardımcılarını çıkardı. PHP 8 en az Laravel 6.20 gerektirdiği için bu çağrı çalışmaz. Str ya da Arr sınıfını kullanın veya composer require laravel/helpers ile paketi ekleyin.",
     "Laravel 6 removed the str_ and array_ helpers. PHP 8 needs at least Laravel 6.20, so this call breaks. Use the Str or Arr class, or add the package with composer require laravel/helpers."));
 
-pub const LARAVEL_INPUT: SymbolRule = rule!("framework.laravel_input", "input", R, (8, 0), code("Request::input()"), M, Text::new(
-    "Input facade'ı Laravel 6'da kaldırıldı. PHP 8 en az Laravel 6.20 gerektirdiği için Request facade'ını kullanın.",
-    "The Input facade was removed in Laravel 6. PHP 8 needs at least Laravel 6.20, so use the Request facade instead."));
+pub const LARAVEL_INPUT: SymbolRule = rule!(
+    "framework.laravel_input",
+    "input",
+    R,
+    (8, 0),
+    code("Request::input()"),
+    M,
+    Text::new(
+        "Input facade'ı Laravel 6'da kaldırıldı. PHP 8 en az Laravel 6.20 gerektirdiği için Request facade'ını kullanın.",
+        "The Input facade was removed in Laravel 6. PHP 8 needs at least Laravel 6.20, so use the Request facade instead."
+    )
+);
 
 const PDO_DRIVER: Text = Text::new(
     "PDO'nun sürücüye özel sabitleri 8.5'te kullanımdan kalktı; sürücünün kendi sınıfındaki sabiti kullanın.",
@@ -545,10 +897,7 @@ pub mod patterns {
         since: (8, 5),
         replacement: code("shell_exec()"),
         fix: FixKind::Auto,
-        note: Text::new(
-            "Ters tırnak operatörü 8.5'te kullanımdan kalktı.",
-            "The backtick operator is deprecated in 8.5.",
-        ),
+        note: Text::new("Ters tırnak operatörü 8.5'te kullanımdan kalktı.", "The backtick operator is deprecated in 8.5."),
     };
     pub const EVAL: PatternRule = PatternRule {
         id: "review.eval",
@@ -675,7 +1024,10 @@ pub mod patterns {
         title: Text::new("Kullanımdan kalkan mbstring kodlaması", "Deprecated mbstring encoding"),
         severity: Severity::Deprecated,
         since: (8, 2),
-        replacement: tx("htmlspecialchars(), base64_encode() ya da quoted_printable_encode()", "htmlspecialchars(), base64_encode() or quoted_printable_encode()"),
+        replacement: tx(
+            "htmlspecialchars(), base64_encode() ya da quoted_printable_encode()",
+            "htmlspecialchars(), base64_encode() or quoted_printable_encode()",
+        ),
         fix: FixKind::Manual,
         note: Text::new(
             "HTML-ENTITIES, BASE64, UUENCODE ve QPrint kodlamaları mbstring'de 8.2'de kullanımdan kalktı.",

@@ -28,21 +28,15 @@ pub struct ProjectInfo {
     pub excluded_dirs: Vec<String>,
 }
 
-pub(crate) const PHP_EXTENSIONS: [&str; 13] = [
-    "php", "phtml", "inc", "module", "php3", "php4", "php5", "php7", "install", "theme", "profile", "engine", "ctp",
-];
+pub(crate) const PHP_EXTENSIONS: [&str; 13] =
+    ["php", "phtml", "inc", "module", "php3", "php4", "php5", "php7", "install", "theme", "profile", "engine", "ctp"];
 
-const ALWAYS_SKIP: [&str; 8] = [
-    "vendor", "node_modules", ".git", ".svn", ".hg", ".idea", ".vscode", ".ferry",
-];
+const ALWAYS_SKIP: [&str; 8] = ["vendor", "node_modules", ".git", ".svn", ".hg", ".idea", ".vscode", ".ferry"];
 
 pub(crate) const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
 
 pub fn detect_framework(root: &Path) -> Framework {
-    if root.join("wp-config.php").exists()
-        || root.join("wp-includes").is_dir()
-        || root.join("wp-config-sample.php").exists()
-    {
+    if root.join("wp-config.php").exists() || root.join("wp-includes").is_dir() || root.join("wp-config-sample.php").exists() {
         return Framework::WordPress;
     }
     if root.join("artisan").is_file() {
@@ -75,9 +69,7 @@ pub fn framework_excludes(framework: Framework) -> Vec<String> {
 const DRUPAL_DOCROOTS: [&str; 5] = ["", "web", "docroot", "html", "public"];
 
 fn drupal_core_dirs(root: &Path) -> impl Iterator<Item = &'static str> + '_ {
-    DRUPAL_DOCROOTS
-        .into_iter()
-        .filter(move |d| root.join(d).join("core/lib/Drupal.php").is_file())
+    DRUPAL_DOCROOTS.into_iter().filter(move |d| root.join(d).join("core/lib/Drupal.php").is_file())
 }
 
 fn project_excludes(root: &Path, framework: Framework) -> Vec<String> {
@@ -92,9 +84,7 @@ fn project_excludes(root: &Path, framework: Framework) -> Vec<String> {
 }
 
 fn is_php_file(path: &Path) -> bool {
-    path.extension()
-        .and_then(|e| e.to_str())
-        .is_some_and(|e| PHP_EXTENSIONS.iter().any(|x| x.eq_ignore_ascii_case(e)))
+    path.extension().and_then(|e| e.to_str()).is_some_and(|e| PHP_EXTENSIONS.iter().any(|x| x.eq_ignore_ascii_case(e)))
 }
 
 pub fn collect_php_files(root: &Path, excluded: &[String]) -> Vec<PathBuf> {
@@ -148,21 +138,11 @@ pub fn inspect(root: &Path) -> std::io::Result<ProjectInfo> {
     }
     let framework = detect_framework(root);
     let excluded_dirs = project_excludes(root, framework);
-    let php_files = collect_php_files(root, &excluded_dirs)
-        .iter()
-        .filter(|p| !p.is_dir())
-        .count();
+    let php_files = collect_php_files(root, &excluded_dirs).iter().filter(|p| !p.is_dir()).count();
     let php_constraint = composer_php_constraint(root);
-    let current_version = composer_platform_php(root).or_else(|| {
-        php_constraint
-            .as_deref()
-            .and_then(Constraint::parse)
-            .and_then(|c| c.lowest_known_line())
-    });
-    let name = root
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| root.to_string_lossy().to_string());
+    let current_version =
+        composer_platform_php(root).or_else(|| php_constraint.as_deref().and_then(Constraint::parse).and_then(|c| c.lowest_known_line()));
+    let name = root.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| root.to_string_lossy().to_string());
     Ok(ProjectInfo {
         root: root.to_string_lossy().to_string(),
         name,
@@ -207,11 +187,7 @@ mod tests {
     fn reads_composer_constraint() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        fs::write(
-            root.join("composer.json"),
-            r#"{"require": {"php": "^7.4 || ^8.0", "laravel/framework": "^8.0"}}"#,
-        )
-        .unwrap();
+        fs::write(root.join("composer.json"), r#"{"require": {"php": "^7.4 || ^8.0", "laravel/framework": "^8.0"}}"#).unwrap();
         let info = inspect(root).unwrap();
         assert_eq!(info.framework, Framework::Laravel);
         assert_eq!(info.php_constraint.as_deref(), Some("^7.4 || ^8.0"));
@@ -221,11 +197,7 @@ mod tests {
     #[test]
     fn platform_overrides_constraint() {
         let dir = tempfile::tempdir().unwrap();
-        fs::write(
-            dir.path().join("composer.json"),
-            r#"{"require": {"php": ">=7.1"}, "config": {"platform": {"php": "8.0.30"}}}"#,
-        )
-        .unwrap();
+        fs::write(dir.path().join("composer.json"), r#"{"require": {"php": ">=7.1"}, "config": {"platform": {"php": "8.0.30"}}}"#).unwrap();
         assert_eq!(inspect(dir.path()).unwrap().current_version, Some(PhpVersion::new(8, 0)));
     }
 

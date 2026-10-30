@@ -45,19 +45,9 @@ fn harness() -> Harness {
     if let Some(tools) = std::env::var_os("FERRY_TEST_TOOLS") {
         state.tools_dir = PathBuf::from(tools);
     }
-    let app = with_commands(mock_builder())
-        .manage(state)
-        .build(mock_context(noop_assets()))
-        .unwrap();
-    let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
-        .build()
-        .unwrap();
-    Harness {
-        _app: app,
-        webview,
-        _dirs: vec![data, project_dir],
-        root: root.to_string_lossy().to_string(),
-    }
+    let app = with_commands(mock_builder()).manage(state).build(mock_context(noop_assets())).unwrap();
+    let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
+    Harness { _app: app, webview, _dirs: vec![data, project_dir], root: root.to_string_lossy().to_string() }
 }
 
 impl Harness {
@@ -78,8 +68,7 @@ impl Harness {
     }
 
     fn ok(&self, cmd: &str, args: Value) -> Value {
-        self.invoke(cmd, args.clone())
-            .unwrap_or_else(|e| panic!("{cmd}({args}) failed: {e}"))
+        self.invoke(cmd, args.clone()).unwrap_or_else(|e| panic!("{cmd}({args}) failed: {e}"))
     }
 }
 
@@ -117,7 +106,11 @@ fn scan_flow_matches_ui_contract() {
     let canonical = PathBuf::from(normalize_path(root.clone()));
     store.create(&canonical, &["composer.json".into()], "x").unwrap();
     let spelled = format!("{root}/./");
-    assert_eq!(h.ok("list_snapshots", json!({ "path": spelled })).as_array().unwrap().len(), 1, "same history for any spelling of the path");
+    assert_eq!(
+        h.ok("list_snapshots", json!({ "path": spelled })).as_array().unwrap().len(),
+        1,
+        "same history for any spelling of the path"
+    );
     let tools = h.ok("toolchain_status", json!({}));
     assert!(tools["platform"].is_string());
 }
@@ -135,9 +128,7 @@ fn rejects_bad_input_with_messages() {
     assert!(err.as_str().unwrap().contains("dosya, proje klasörü değil"), "{err}");
     let err = h.invoke("export_report", json!({ "path": h.root, "destination": "/tmp/x.md" })).unwrap_err();
     assert!(err.as_str().unwrap().contains("Önce projeyi tarayın"));
-    let err = h
-        .invoke("apply_changes", json!({ "path": h.root, "previewId": 1, "files": ["a.php"], "label": "x" }))
-        .unwrap_err();
+    let err = h.invoke("apply_changes", json!({ "path": h.root, "previewId": 1, "files": ["a.php"], "label": "x" })).unwrap_err();
     assert!(err.as_str().unwrap().contains("Önce değişiklikleri hesaplayın"));
 }
 
@@ -201,15 +192,12 @@ fn rector_preview_apply_restore_over_ipc() {
     let preview = h.ok("rector_preview", json!({ "path": root, "target": "8.4", "mode": "compat" }));
     let id = preview["id"].as_u64().unwrap();
     assert_ne!(id, older);
-    let err = h
-        .invoke("apply_changes", json!({ "path": root, "previewId": older, "files": ["src/Greeter.php"], "label": "x" }))
-        .unwrap_err();
+    let err =
+        h.invoke("apply_changes", json!({ "path": root, "previewId": older, "files": ["src/Greeter.php"], "label": "x" })).unwrap_err();
     assert!(err.as_str().unwrap().contains("güncel değil"), "{err}");
 
     std::fs::write(&greeter_path, format!("{original}// edited after preview\n")).unwrap();
-    assert!(h
-        .invoke("apply_changes", json!({ "path": root, "previewId": id, "files": ["src/Greeter.php"], "label": "x" }))
-        .is_err());
+    assert!(h.invoke("apply_changes", json!({ "path": root, "previewId": id, "files": ["src/Greeter.php"], "label": "x" })).is_err());
     assert_eq!(h.ok("list_snapshots", json!({ "path": root })), json!([]), "no backup for a refused apply");
     assert!(std::fs::read_to_string(&greeter_path).unwrap().ends_with("// edited after preview\n"));
     std::fs::write(&greeter_path, &original).unwrap();
@@ -235,9 +223,7 @@ fn rector_preview_apply_restore_over_ipc() {
     assert_eq!(h.ok("snapshot_conflicts", json!({ "path": root, "id": snap_id })), json!(["src/Greeter.php"]));
     std::fs::write(&greeter_path, &changed).unwrap();
 
-    assert!(h
-        .invoke("apply_changes", json!({ "path": root, "previewId": id, "files": ["src/Greeter.php"], "label": "x" }))
-        .is_err());
+    assert!(h.invoke("apply_changes", json!({ "path": root, "previewId": id, "files": ["src/Greeter.php"], "label": "x" })).is_err());
 
     h.ok("restore_snapshot", json!({ "path": root, "id": snap_id }));
     assert_eq!(std::fs::read_to_string(Path::new(&root).join("src/Greeter.php")).unwrap(), original);

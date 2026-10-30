@@ -1,3 +1,12 @@
+use ferry_core::analyzer::{self, ScanResult};
+use ferry_core::deps::{self, DependencyReport};
+use ferry_core::i18n::{self, Lang};
+use ferry_core::project::{self, ProjectInfo};
+use ferry_core::rector::{self, FileChange, RectorError, RectorMode, RectorPreview};
+use ferry_core::rules::FixKind;
+use ferry_core::snapshot::{fnv1a, Snapshot, SnapshotStore};
+use ferry_core::toolchain::{self, ToolchainStatus};
+use ferry_core::{diff, report, t, PhpVersion};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -5,15 +14,6 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
-use ferry_core::analyzer::{self, ScanResult};
-use ferry_core::deps::{self, DependencyReport};
-use ferry_core::project::{self, ProjectInfo};
-use ferry_core::rector::{self, FileChange, RectorError, RectorMode, RectorPreview};
-use ferry_core::snapshot::{fnv1a, Snapshot, SnapshotStore};
-use ferry_core::toolchain::{self, ToolchainStatus};
-use ferry_core::i18n::{self, Lang};
-use ferry_core::rules::FixKind;
-use ferry_core::{diff, report, t, PhpVersion};
 
 const CHANGES_FILE: &str = "changes.json";
 const WRITTEN_FILE: &str = "written.json";
@@ -41,10 +41,7 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(data_dir: PathBuf) -> Self {
-        let settings = std::fs::read(data_dir.join("settings.json"))
-            .ok()
-            .and_then(|b| serde_json::from_slice(&b).ok())
-            .unwrap_or_default();
+        let settings = std::fs::read(data_dir.join("settings.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
         Self {
             tools_dir: data_dir.join("tools"),
             data_dir,
@@ -69,13 +66,7 @@ impl AppState {
     }
 
     fn php_override(&self) -> Option<PathBuf> {
-        self.settings
-            .lock()
-            .unwrap()
-            .php_path
-            .as_deref()
-            .filter(|p| !p.trim().is_empty())
-            .map(PathBuf::from)
+        self.settings.lock().unwrap().php_path.as_deref().filter(|p| !p.trim().is_empty()).map(PathBuf::from)
     }
 
     fn settings_path(&self) -> PathBuf {
@@ -120,9 +111,7 @@ fn project_root(path: &str) -> CmdResult<PathBuf> {
 }
 
 async fn blocking<T: Send + 'static>(f: impl FnOnce() -> CmdResult<T> + Send + 'static) -> CmdResult<T> {
-    tauri::async_runtime::spawn_blocking(f)
-        .await
-        .map_err(|e| t!("İş parçacığı hatası: {e}", "Worker thread failed: {e}"))?
+    tauri::async_runtime::spawn_blocking(f).await.map_err(|e| t!("İş parçacığı hatası: {e}", "Worker thread failed: {e}"))?
 }
 
 #[derive(Clone, Serialize)]
@@ -162,15 +151,7 @@ async fn scan_project<R: Runtime>(app: AppHandle<R>, path: String, target: Strin
         let scan = analyzer::analyze_files(&root, &files, target, |done, total, file| {
             if done == total || last.elapsed() >= Duration::from_millis(50) {
                 last = Instant::now();
-                let _ = handle.emit(
-                    "scan://progress",
-                    ScanProgress {
-                        run,
-                        done,
-                        total,
-                        file: file.to_string(),
-                    },
-                );
+                let _ = handle.emit("scan://progress", ScanProgress { run, done, total, file: file.to_string() });
             }
         });
         Ok((path, scan))
@@ -215,12 +196,7 @@ async fn install_rector(state: State<'_, AppState>) -> CmdResult<ToolchainStatus
 }
 
 #[tauri::command]
-async fn rector_preview(
-    state: State<'_, AppState>,
-    path: String,
-    target: String,
-    mode: RectorMode,
-) -> CmdResult<PreviewResponse> {
+async fn rector_preview(state: State<'_, AppState>, path: String, target: String, mode: RectorMode) -> CmdResult<PreviewResponse> {
     let path = normalize_path(path);
     let target = parse_target(&target)?;
     let tools = state.tools_dir();
@@ -240,17 +216,8 @@ async fn rector_preview(
         let php = toolchain::find_php(php_override.as_deref()).ok_or_else(|| toolchain::ToolError::PhpMissing.to_string())?;
         toolchain::require_supported_php(&php).map_err(|e| e.to_string())?;
         let info = project::inspect(&root).map_err(|e| e.to_string())?;
-        rector::preview(
-            &php,
-            &toolchain::rector_entry(&tools),
-            &root,
-            target,
-            mode,
-            &info.excluded_dirs,
-            &work,
-            &cancel,
-        )
-        .map_err(|e| e.to_string())
+        rector::preview(&php, &toolchain::rector_entry(&tools), &root, target, mode, &info.excluded_dirs, &work, &cancel)
+            .map_err(|e| e.to_string())
     })
     .await;
     {
@@ -318,9 +285,7 @@ async fn apply_changes(
     let root = project_root(&path)?;
     let (selected, target): (Vec<FileChange>, PhpVersion) = {
         let previews = state.previews.lock().unwrap();
-        let (id, preview) = previews
-            .get(&path)
-            .ok_or_else(|| t!("Önce değişiklikleri hesaplayın.", "Calculate the changes first."))?;
+        let (id, preview) = previews.get(&path).ok_or_else(|| t!("Önce değişiklikleri hesaplayın.", "Calculate the changes first."))?;
         if *id != preview_id {
             return Err(t!(
                 "Önizleme güncel değil. Değişiklikleri yeniden hesaplayın.",
@@ -342,9 +307,7 @@ async fn apply_changes(
         let _guard = writes.lock().unwrap_or_else(|e| e.into_inner());
         let refs: Vec<&FileChange> = selected.iter().collect();
         rector::check_fresh(&root, &refs).map_err(|e| e.to_string())?;
-        let snapshot = store
-            .create(&root, &applied_files, &label)
-            .map_err(|e| e.to_string())?;
+        let snapshot = store.create(&root, &applied_files, &label).map_err(|e| e.to_string())?;
         if let Err(e) = rector::check_fresh(&root, &refs) {
             let _ = store.delete(&root, &snapshot.id);
             return Err(e.to_string());
@@ -355,10 +318,8 @@ async fn apply_changes(
                 if let Ok(json) = serde_json::to_vec(&selected) {
                     let _ = store.write_attachment(&root, &snapshot.id, CHANGES_FILE, &json);
                 }
-                let written_hashes: HashMap<&str, u64> = selected
-                    .iter()
-                    .map(|c| (c.file.as_str(), fnv1a(c.new_content.as_bytes())))
-                    .collect();
+                let written_hashes: HashMap<&str, u64> =
+                    selected.iter().map(|c| (c.file.as_str(), fnv1a(c.new_content.as_bytes()))).collect();
                 if let Ok(json) = serde_json::to_vec(&written_hashes) {
                     let _ = store.write_attachment(&root, &snapshot.id, WRITTEN_FILE, &json);
                 }
@@ -411,10 +372,7 @@ async fn restore_snapshot(
         let _guard = writes.lock().unwrap_or_else(|e| e.into_inner());
         let root = project_root(&path)?;
         let acknowledged = acknowledged.unwrap_or_default();
-        let unseen: Vec<String> = conflicts(&store, &root, &id)?
-            .into_iter()
-            .filter(|f| !acknowledged.contains(f))
-            .collect();
+        let unseen: Vec<String> = conflicts(&store, &root, &id)?.into_iter().filter(|f| !acknowledged.contains(f)).collect();
         if !unseen.is_empty() {
             let files = unseen.join(", ");
             return Err(t!(
@@ -465,9 +423,7 @@ async fn snapshot_changes(state: State<'_, AppState>, path: String, id: String) 
         Ok(originals
             .into_iter()
             .map(|(file, before)| {
-                let after = std::fs::read(root.join(&file))
-                    .map(|b| String::from_utf8_lossy(&b).into_owned())
-                    .unwrap_or_default();
+                let after = std::fs::read(root.join(&file)).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default();
                 FileChange {
                     diff: diff::compute(before.as_deref().unwrap_or(""), &after, 3),
                     file,
@@ -492,13 +448,7 @@ async fn delete_snapshot(state: State<'_, AppState>, path: String, id: String) -
 #[tauri::command]
 async fn export_report(state: State<'_, AppState>, path: String, destination: String) -> CmdResult<()> {
     let path = normalize_path(path);
-    let scan = state
-        .scans
-        .lock()
-        .unwrap()
-        .get(&path)
-        .cloned()
-        .ok_or_else(|| t!("Önce projeyi tarayın.", "Scan the project first."))?;
+    let scan = state.scans.lock().unwrap().get(&path).cloned().ok_or_else(|| t!("Önce projeyi tarayın.", "Scan the project first."))?;
     blocking(move || {
         let root = project_root(&path)?;
         let info = project::inspect(&root).map_err(|e| e.to_string())?;
@@ -573,9 +523,7 @@ pub fn run() {
         })
         .on_page_load(|webview, payload| {
             #[cfg(debug_assertions)]
-            if let (Some(script), tauri::webview::PageLoadEvent::Finished) =
-                (std::env::var_os("FERRY_E2E"), payload.event())
-            {
+            if let (Some(script), tauri::webview::PageLoadEvent::Finished) = (std::env::var_os("FERRY_E2E"), payload.event()) {
                 if let Ok(body) = std::fs::read_to_string(script) {
                     let root = std::env::var("FERRY_E2E_ROOT").unwrap_or_default();
                     let prelude = format!("window.__FERRY_E2E_ROOT__ = {};", serde_json::to_string(&root).unwrap());
@@ -585,23 +533,20 @@ pub fn run() {
             #[cfg(not(debug_assertions))]
             let _ = (webview, payload);
         });
-    with_commands(builder)
-        .build(tauri::generate_context!())
-        .expect("failed to start Ferry")
-        .run(|app, event| {
-            if let tauri::RunEvent::Exit = event {
-                let state = app.state::<AppState>();
-                state.shutdown.store(true, Ordering::Relaxed);
-                state.rector_cancel.lock().unwrap().values().for_each(|t| t.store(true, Ordering::Relaxed));
-                let started = Instant::now();
-                while state.rector_running.load(Ordering::SeqCst) > 0 && started.elapsed() < Duration::from_secs(3) {
-                    std::thread::sleep(Duration::from_millis(50));
-                }
-                while state.writes.try_lock().is_err() && started.elapsed() < Duration::from_secs(10) {
-                    std::thread::sleep(Duration::from_millis(50));
-                }
+    with_commands(builder).build(tauri::generate_context!()).expect("failed to start Ferry").run(|app, event| {
+        if let tauri::RunEvent::Exit = event {
+            let state = app.state::<AppState>();
+            state.shutdown.store(true, Ordering::Relaxed);
+            state.rector_cancel.lock().unwrap().values().for_each(|t| t.store(true, Ordering::Relaxed));
+            let started = Instant::now();
+            while state.rector_running.load(Ordering::SeqCst) > 0 && started.elapsed() < Duration::from_secs(3) {
+                std::thread::sleep(Duration::from_millis(50));
             }
-        });
+            while state.writes.try_lock().is_err() && started.elapsed() < Duration::from_secs(10) {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        }
+    });
 }
 
 fn remove_stale_runs(work: &Path) {
@@ -609,10 +554,8 @@ fn remove_stale_runs(work: &Path) {
     for project in projects.flatten() {
         let Ok(entries) = std::fs::read_dir(project.path()) else { continue };
         for entry in entries.flatten() {
-            let old = entry
-                .metadata()
-                .and_then(|m| m.modified())
-                .is_ok_and(|t| t.elapsed().is_ok_and(|age| age > Duration::from_secs(60 * 60)));
+            let old =
+                entry.metadata().and_then(|m| m.modified()).is_ok_and(|t| t.elapsed().is_ok_and(|age| age > Duration::from_secs(60 * 60)));
             if old && entry.file_name().to_string_lossy().starts_with("run-") {
                 let _ = std::fs::remove_dir_all(entry.path());
             }

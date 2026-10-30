@@ -29,8 +29,8 @@ impl Token {
 }
 
 const MULTI_PUNCT: [&str; 22] = [
-    "<=>", "===", "!==", "??=", "?->", "...", "**=", "<<=", ">>=", "->", "::", "=>", "==", "!=",
-    "<>", "<=", ">=", "&&", "||", "??", "++", "--",
+    "<=>", "===", "!==", "??=", "?->", "...", "**=", "<<=", ">>=", "->", "::", "=>", "==", "!=", "<>", "<=", ">=", "&&", "||", "??", "++",
+    "--",
 ];
 
 pub struct Lexed {
@@ -72,15 +72,7 @@ impl<'a> Lexer<'a> {
                 line_starts.push(i + 1);
             }
         }
-        Self {
-            src,
-            b: src.as_bytes(),
-            pos: 0,
-            line_starts,
-            cursor: (0, 0, 1),
-            tokens: Vec::new(),
-            stray_hash_brackets: Vec::new(),
-        }
+        Self { src, b: src.as_bytes(), pos: 0, line_starts, cursor: (0, 0, 1), tokens: Vec::new(), stray_hash_brackets: Vec::new() }
     }
 
     fn line_col(&mut self, offset: usize) -> (usize, usize) {
@@ -102,14 +94,7 @@ impl<'a> Lexer<'a> {
 
     fn push(&mut self, kind: TokenKind, start: usize, end: usize, text: String) {
         let (line, column) = self.line_col(start);
-        self.tokens.push(Token {
-            kind,
-            text,
-            start,
-            end,
-            line,
-            column,
-        });
+        self.tokens.push(Token { kind, text, start, end, line, column });
     }
 
     fn peek(&self, offset: usize) -> Option<u8> {
@@ -133,10 +118,7 @@ impl<'a> Lexer<'a> {
                 self.pos = self.b.len();
             }
         }
-        Lexed {
-            tokens: self.tokens,
-            stray_hash_brackets: self.stray_hash_brackets,
-        }
+        Lexed { tokens: self.tokens, stray_hash_brackets: self.stray_hash_brackets }
     }
 
     fn halted(&self) -> bool {
@@ -159,9 +141,7 @@ impl<'a> Lexer<'a> {
                 self.pos += 3;
                 return;
             }
-            if self.starts_with("<?")
-                && self.peek(2).is_none_or(|c| c.is_ascii_whitespace())
-            {
+            if self.starts_with("<?") && self.peek(2).is_none_or(|c| c.is_ascii_whitespace()) {
                 self.pos += 2;
                 return;
             }
@@ -232,9 +212,7 @@ impl<'a> Lexer<'a> {
             self.pos += 1;
             while self.pos < self.b.len() {
                 let ch = self.b[self.pos];
-                if is_ident_char(ch)
-                    || (ch == b'\\' && self.peek(1).is_some_and(is_ident_start))
-                {
+                if is_ident_char(ch) || (ch == b'\\' && self.peek(1).is_some_and(is_ident_start)) {
                     self.pos += 1;
                 } else {
                     break;
@@ -290,15 +268,7 @@ impl<'a> Lexer<'a> {
         let start = self.pos;
         self.pos = skip_quoted(self.b, self.pos);
         let text = self.src[start..self.pos].to_string();
-        self.push(
-            TokenKind::Str {
-                interpolates,
-                backtick,
-            },
-            start,
-            self.pos,
-            text,
-        );
+        self.push(TokenKind::Str { interpolates, backtick }, start, self.pos, text);
     }
 
     fn lex_heredoc(&mut self) -> bool {
@@ -336,9 +306,7 @@ impl<'a> Lexer<'a> {
         let mut line_start = body_start;
         let mut end = self.b.len();
         while line_start < self.b.len() {
-            let line_end = self.src[line_start..]
-                .find('\n')
-                .map_or(self.b.len(), |i| line_start + i);
+            let line_end = self.src[line_start..].find('\n').map_or(self.b.len(), |i| line_start + i);
             let line = &self.src[line_start..line_end];
             let trimmed = line.trim_start();
             if let Some(rest) = trimmed.strip_prefix(id) {
@@ -351,15 +319,7 @@ impl<'a> Lexer<'a> {
         }
         self.pos = end;
         let text = self.src[start..end].to_string();
-        self.push(
-            TokenKind::Str {
-                interpolates: quote != Some(b'\''),
-                backtick: false,
-            },
-            start,
-            end,
-            text,
-        );
+        self.push(TokenKind::Str { interpolates: quote != Some(b'\''), backtick: false }, start, end, text);
         true
     }
 }
@@ -436,8 +396,23 @@ fn skip_name(b: &[u8], mut p: usize) -> Option<usize> {
 }
 
 const ATTRIBUTE_TARGETS: [&str; 17] = [
-    "function", "fn", "class", "interface", "trait", "enum", "abstract", "final", "readonly",
-    "public", "protected", "private", "static", "var", "const", "case", "new",
+    "function",
+    "fn",
+    "class",
+    "interface",
+    "trait",
+    "enum",
+    "abstract",
+    "final",
+    "readonly",
+    "public",
+    "protected",
+    "private",
+    "static",
+    "var",
+    "const",
+    "case",
+    "new",
 ];
 
 fn is_attribute(b: &[u8], at: usize) -> bool {
@@ -510,10 +485,7 @@ mod tests {
     use super::*;
 
     fn kinds(src: &str) -> Vec<(TokenKind, String)> {
-        tokenize(src)
-            .into_iter()
-            .map(|t| (t.kind, t.text))
-            .collect()
+        tokenize(src).into_iter().map(|t| (t.kind, t.text)).collect()
     }
 
     #[test]
@@ -559,10 +531,7 @@ mod tests {
 
     #[test]
     fn multi_char_punct_and_numbers() {
-        let texts: Vec<_> = kinds("<?php $a?->b ?? 1.5e-3 <=> 0x1F;")
-            .into_iter()
-            .map(|t| t.1)
-            .collect();
+        let texts: Vec<_> = kinds("<?php $a?->b ?? 1.5e-3 <=> 0x1F;").into_iter().map(|t| t.1).collect();
         assert!(texts.contains(&"?->".to_string()));
         assert!(texts.contains(&"??".to_string()));
         assert!(texts.contains(&"1.5e-3".to_string()));
@@ -622,7 +591,20 @@ mod tests {
 
     #[test]
     fn never_panics_on_garbage() {
-        for src in ["<?php '", "<?php \"\\", "<?php <<<", "<?php /*", "<?php $", "<?php ü€ $ç = 1;", "<?php #[", "<?php #[A(", "<?php #[A] ", "<?php \"{$a", "<?php \"${", "\u{FEFF}"] {
+        for src in [
+            "<?php '",
+            "<?php \"\\",
+            "<?php <<<",
+            "<?php /*",
+            "<?php $",
+            "<?php ü€ $ç = 1;",
+            "<?php #[",
+            "<?php #[A(",
+            "<?php #[A] ",
+            "<?php \"{$a",
+            "<?php \"${",
+            "\u{FEFF}",
+        ] {
             let _ = tokenize(src);
         }
     }
