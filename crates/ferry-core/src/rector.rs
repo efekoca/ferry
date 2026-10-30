@@ -335,12 +335,21 @@ pub fn build_config(
     cache_dir: &Path,
 ) -> String {
     let mut paths = vec![php_str(&root.to_string_lossy())];
-    let base = root.to_string_lossy().replace('\\', "/");
-    let base = base.trim_end_matches('/');
-    let mut skip: Vec<String> = ["vendor", "node_modules"]
+    let mut bases = vec![root.to_string_lossy().into_owned()];
+    if let Ok(real) = std::fs::canonicalize(root) {
+        let real = real.to_string_lossy().into_owned();
+        bases.push(real.strip_prefix(r"\\?\").map(str::to_string).unwrap_or(real));
+    }
+    let mut bases: Vec<String> = bases.iter().map(|b| b.replace('\\', "/").trim_end_matches('/').to_string()).collect();
+    bases.dedup();
+    let mut skip: Vec<String> = bases
         .iter()
-        .flat_map(|d| [format!("{base}/{d}/*"), format!("{base}/*/{d}/*")])
-        .chain(excluded_dirs.iter().map(|d| format!("{base}/{}/*", d.replace('\\', "/").trim_matches('/'))))
+        .flat_map(|base| {
+            ["vendor", "node_modules"]
+                .iter()
+                .flat_map(move |d| [format!("{base}/{d}/*"), format!("{base}/*/{d}/*")])
+                .chain(excluded_dirs.iter().map(move |d| format!("{base}/{}/*", d.replace('\\', "/").trim_matches('/'))))
+        })
         .map(|p| php_str(&p))
         .collect();
     if !staging.files.is_empty() {
