@@ -24,6 +24,13 @@ pub fn dead_spans(tokens: &[Token], target: PhpVersion) -> Vec<Span> {
             }
             taken |= value == Some(true);
             let next = body_end + 1;
+            let chained = tokens.get(next).is_some_and(|t| t.is_ident_ci("elseif") || t.is_ident_ci("else"));
+            if k == i && value == Some(true) && !chained && exits(tokens, body_start, body_end) && !in_switch(tokens, i) {
+                let end = block_end(tokens, next);
+                if end > next {
+                    out.push(span(tokens, next, end - 1));
+                }
+            }
             match tokens.get(next) {
                 Some(t) if t.is_ident_ci("elseif") => k = next,
                 Some(t) if t.is_ident_ci("else") && tokens.get(next + 1).is_some_and(|n| n.is_ident_ci("if")) => k = next + 1,
@@ -139,6 +146,77 @@ fn ternary_colon(tokens: &[Token], question: usize) -> Option<usize> {
         }
     }
     None
+}
+
+fn exits(tokens: &[Token], start: usize, end: usize) -> bool {
+    let leaves = |t: &Token| ["return", "throw", "exit", "die"].iter().any(|k| t.is_ident_ci(k));
+    if !tokens[start].is_punct("{") {
+        return leaves(&tokens[start]);
+    }
+    if end < 2 || !tokens[end - 1].is_punct(";") {
+        return false;
+    }
+    let mut depth = 0usize;
+    let mut stmt = start + 1;
+    for k in start + 1..end {
+        let t = &tokens[k];
+        if t.is_punct("(") || t.is_punct("[") || t.is_punct("{") {
+            depth += 1;
+        } else if t.is_punct(")") || t.is_punct("]") || t.is_punct("}") {
+            depth = depth.saturating_sub(1);
+            if depth == 0 && t.is_punct("}") {
+                stmt = k + 1;
+            }
+        } else if depth == 0 && t.is_punct(";") {
+            if k == end - 1 {
+                return tokens.get(stmt).is_some_and(leaves);
+            }
+            stmt = k + 1;
+        }
+    }
+    false
+}
+
+fn block_end(tokens: &[Token], from: usize) -> usize {
+    let mut depth = 0usize;
+    for (k, t) in tokens.iter().enumerate().skip(from) {
+        if t.is_punct("{") {
+            depth += 1;
+        } else if t.is_punct("}") {
+            if depth == 0 {
+                return k;
+            }
+            depth -= 1;
+        }
+    }
+    tokens.len()
+}
+
+fn in_switch(tokens: &[Token], at: usize) -> bool {
+    let mut depth = 0usize;
+    for k in (0..at).rev() {
+        if tokens[k].is_punct("}") {
+            depth += 1;
+        } else if tokens[k].is_punct("{") {
+            if depth == 0 {
+                if k == 0 || !tokens[k - 1].is_punct(")") {
+                    return false;
+                }
+                let mut d = 0usize;
+                let open = (0..k).rev().find(|&j| {
+                    if tokens[j].is_punct(")") {
+                        d += 1;
+                    } else if tokens[j].is_punct("(") {
+                        d -= 1;
+                    }
+                    d == 0
+                });
+                return open.is_some_and(|o| o > 0 && tokens[o - 1].is_ident_ci("switch"));
+            }
+            depth -= 1;
+        }
+    }
+    false
 }
 
 fn span(tokens: &[Token], a: usize, b: usize) -> Span {
@@ -405,6 +483,13 @@ mod tests {
         let found = analyze_source("a.php", src, PhpVersion::new(8, 4));
         let lines: Vec<usize> = found.iter().map(|f| f.line).collect();
         assert_eq!(lines, [2, 3, 4, 5, 5]);
+    }
+
+    #[test]
+    fn code_after_an_early_return_guard() {
+        let src = "<?php\nfunction a() {\n    if (PHP_VERSION_ID >= 80000) {\n        return modern();\n    }\n    return each($x);\n}\nfunction b() {\n    if (\\PHP_VERSION_ID >= 70400) return;\n    each($y);\n}\nfunction c() {\n    if (PHP_VERSION_ID >= 80000) {\n        if ($z) { return 1; }\n    }\n    each($kept1);\n}\nfunction d() {\n    if (PHP_VERSION_ID >= 80000) {\n        return 1;\n    } else {\n        each($deadElse);\n    }\n    each($kept2);\n}\nswitch ($m) {\n    case 1:\n        if (PHP_VERSION_ID >= 80000) { return; }\n        break;\n    case 2:\n        each($kept3);\n}\nif (PHP_VERSION_ID >= 80000) { throw new Exception(); }\neach($topLevelDead);";
+        let lines: Vec<usize> = analyze_source("a.php", src, PhpVersion::new(8, 4)).iter().map(|f| f.line).collect();
+        assert_eq!(lines, [16, 24, 31]);
     }
 
     #[test]
