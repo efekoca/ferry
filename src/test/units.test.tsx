@@ -3,9 +3,9 @@ import { describe, expect, it } from "vitest";
 import { DiffViewer, wordHighlight } from "../components/DiffViewer";
 import { ScoreRing } from "../components/ScoreRing";
 import { DICTS } from "../i18n";
-import { dependencyBlockers, formatDuration, formatRelative, joinPath, scoreHeadline, scoreTone } from "../lib/labels";
+import { commonTitle, dependencyBlockers, formatDuration, formatRelative, joinPath, scoreHeadline, scoreTone } from "../lib/labels";
+import { NO_FILTER, type FindingsFilter } from "../lib/store";
 import { filterFindings } from "../screens/Findings";
-import { commonTitle } from "../screens/Overview";
 import type { FileDiff, Finding } from "../lib/types";
 
 const { tr, en } = DICTS;
@@ -104,18 +104,20 @@ describe("filterFindings", () => {
   const findings: Finding[] = [
     { ...base, id: "1", file: "src/a.php", fix: "auto", severity: "breaking", title: { tr: "each()", en: "each()" } },
     { ...base, id: "2", file: "src/b.php", fix: "manual", severity: "deprecated", title: { tr: "Örtük nullable", en: "Implicitly nullable" } },
-    { ...base, id: "3", file: "lib/c.php", fix: "manual", severity: "breaking", title: { tr: "mysql_query()", en: "mysql_query()" } },
+    { ...base, id: "3", file: "lib/c.php", ruleId: "removed.mysql", fix: "manual", severity: "breaking", title: { tr: "mysql_query()", en: "mysql_query()" } },
   ];
   const ids = (list: Finding[]) => list.map((f) => f.id);
 
-  it("combines fix, severity and query filters", () => {
-    expect(ids(filterFindings(findings, "all", "all", ""))).toEqual(["1", "2", "3"]);
-    expect(ids(filterFindings(findings, "manual", "all", ""))).toEqual(["2", "3"]);
-    expect(ids(filterFindings(findings, "manual", "breaking", ""))).toEqual(["3"]);
-    expect(ids(filterFindings(findings, "all", "all", "SRC/"))).toEqual(["1", "2"]);
-    expect(ids(filterFindings(findings, "all", "all", "implicitly"))).toEqual(["2"]);
-    expect(ids(filterFindings(findings, "all", "all", "örtük"))).toEqual(["2"]);
-    expect(ids(filterFindings(findings, "auto", "deprecated", ""))).toEqual([]);
+  it("combines fix, severity, rule and query filters", () => {
+    const f = (patch: Partial<FindingsFilter>) => ids(filterFindings(findings, { ...NO_FILTER, ...patch }));
+    expect(f({})).toEqual(["1", "2", "3"]);
+    expect(f({ fix: "manual" })).toEqual(["2", "3"]);
+    expect(f({ fix: "manual", severity: "breaking" })).toEqual(["3"]);
+    expect(f({ query: "SRC/" })).toEqual(["1", "2"]);
+    expect(f({ query: "implicitly" })).toEqual(["2"]);
+    expect(f({ query: "örtük" })).toEqual(["2"]);
+    expect(f({ fix: "auto", severity: "deprecated" })).toEqual([]);
+    expect(f({ rule: "removed.mysql" })).toEqual(["3"]);
   });
 });
 

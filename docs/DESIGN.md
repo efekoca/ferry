@@ -52,7 +52,7 @@ Her risk rengi üç tonla gelir: `-fg` (metin/ikon), `-bg` (rozet zemini), `-bor
 
 | Anlam | Token öneki | Açık fg | Koyu fg | Ne zaman |
 |---|---|---|---|---|
-| Otomatik | `--risk-auto` | `#14804A` | `#4ADE80` | Kural tabanlı, güvenli dönüşüm |
+| Otomatik | `--risk-auto` | `#127A46` | `#4ADE80` | Kural tabanlı, güvenli dönüşüm |
 | Gözden geçir | `--risk-likely` | `#6D3FD8` | `#B29BFF` | Otomatik yapılır ama bakılmalı |
 | Elle düzelt | `--risk-manual` | `#B45309` | `#FBBF24` | Dinamik kod, belirsiz niyet |
 | Kritik | `--danger` | `#C62A2A` | `#F87171` | Yeni sürümde ölümcül hata |
@@ -159,6 +159,22 @@ katlanır.
 Sürüm seçici için segmentli kontrol: 8.1 · 8.2 · 8.3 · 8.4 · 8.5. Seçili segment
 `--surface` zemin + `--shadow-1` (macOS tarzı).
 
+Seçeneklerin açıklaması kararı etkiliyorsa (ör. Rector modu) segment yerine **seçenek
+kartları** (`.mode-card`) kullanılır: her kart başlık + bir cümle açıklama taşır, önerilen
+seçenek "Önerilen" etiketiyle işaretlenir. Kartlar yerel `<input type="radio">` üzerine kuruludur.
+
+### Filtre çubuğu
+
+Liste ekranlarında üstte tam genişlik arama, altında sarılabilen filtre çipleri, en altta
+"X / Y bulgu" özeti ve yalnızca filtre etkinken görünen **Filtreleri temizle**. Diğer
+ekranlardan gelen filtreler (ör. kural) kaldırılabilir bir çip olarak gösterilir. Filtre durumu
+store'da tutulur; ekrandan çıkıp dönünce korunur.
+
+### CommandLine
+
+Kullanıcının terminalde çalıştıracağı komut: mono metin + kopyala düğmesi. Komut her zaman
+projeye özgü olarak üretilir; `vendor/package` gibi yer tutucu yazılmaz.
+
 ### EmptyState
 
 Ortada ikon (48px, `--text-3`), başlık, tek cümle açıklama, en fazla bir birincil eylem.
@@ -174,13 +190,21 @@ kadar kalır. `role="status"` (hata için `role="alert"`).
   içerik, iç boşluk `--space-6`, en fazla 1180px genişlik.
 - **Liste + ayrıntı:** sol listede seçim, sağda ayrıntı paneli (bulgular, değişiklikler).
 - **İki aşamalı onay:** kalıcı değişikliklerden önce özet ("12 dosya değişecek, anlık
-  görüntü alınacak") ve açık onay.
+  görüntü alınacak") ve açık onay. Hesaplanmış bir önizlemeyi silecek işlemler (ör. hedef
+  sürümü değiştirmek) de önce onay ister.
+- **Özetten ayrıntıya:** özet ekranındaki her sayı tıklanabilir ve ilgili listeyi o filtreyle
+  açar (Kritik kartı → yalnızca kritik bulgular).
+- **Sonuçları canlı tut:** girdiyi değiştiren bir ayar (hedef sürüm) mevcut sonucu boşaltıp
+  kullanıcıyı yeniden başlatmaya zorlamaz; tarama varsa otomatik olarak yenilenir.
+- **Sabit stil yok:** bileşenlerde `style={{…}}` yalnızca veriye bağlı değerler için
+  (ilerleme genişliği, halka boyutu) kullanılır; geri kalan her şey sınıf + token'dır.
 
 ## Dil
 
 Arayüz Türkçe ve İngilizcedir. Metinler `src/i18n/tr.ts` ve `src/i18n/en.ts` sözlüklerindedir;
-bileşenlerde sabit metin yazılmaz. Türkçe metinler kısa, doğal ve "sen" dilindedir; çeviri kokan
-uzun cümlelerden ve gereksiz "-dır" eklerinden kaçınılır. Motorun ürettiği kural açıklamaları her iki
+bileşenlerde sabit metin yazılmaz. Türkçe metinler kısa, doğal ve saygılı "siz" dilindedir
+("seçin", "kullanıyorsunuz"); çeviri kokan uzun cümlelerden ve "-mektedir", "-dır" gibi resmî
+eklerden kaçınılır. Motorun ürettiği kural açıklamaları her iki
 dilde gelir (`{ tr, en }`), böylece dil değişince yeniden taramaya gerek kalmaz.
 
 ## Platformlar

@@ -131,26 +131,39 @@ export function Changes() {
       <>
         {header}
         <div className="page-scroll">
-          <div className="page-body stack" style={{ maxWidth: 760 }}>
+          <div className="page-body page-body--narrow stack">
             <Card bodyClassName="card__body stack">
-              <div className="row">
-                <Wand2 size={18} style={{ color: "var(--accent)" }} />
-                <h2 style={{ fontSize: "var(--text-lg)", fontWeight: 600 }}>{t.changes.introTitle(target)}</h2>
+              <div className="intro__title">
+                <Wand2 size={18} aria-hidden />
+                <h2>{t.changes.introTitle(target)}</h2>
               </div>
               <p className="muted">{t.changes.introText}</p>
-              <div>
-                <Segmented label={t.changes.mode} options={modes} value={mode} onChange={setMode} disabled={previewing} />
-              </div>
-              <p className="muted" style={{ fontSize: "var(--text-sm)" }}>
-                {mode === "compat" ? t.changes.compatText : t.changes.modernizeText}
-              </p>
-              {previewing ? (
-                <div className="stack" style={{ gap: 8 }}>
-                  <Progress value={null} label={t.changes.calculating} />
-                  <div className="row" style={{ justifyContent: "space-between" }}>
-                    <span className="subtle" style={{ fontSize: "var(--text-sm)" }}>
-                      {t.changes.calculatingHint}
+              <div className="mode-cards" role="radiogroup" aria-label={t.changes.mode}>
+                {modes.map((m) => (
+                  <label key={m.value} className="mode-card" data-checked={mode === m.value}>
+                    <input
+                      type="radio"
+                      name="rector-mode"
+                      className="sr-only"
+                      value={m.value}
+                      checked={mode === m.value}
+                      disabled={previewing}
+                      onChange={() => setMode(m.value)}
+                    />
+                    <span className="mode-card__title">
+                      {m.value === "compat" ? <ShieldCheck size={15} aria-hidden /> : <Sparkles size={15} aria-hidden />}
+                      {m.label}
+                      {m.value === "compat" && <span className="mode-card__tag">{t.changes.recommended}</span>}
                     </span>
+                    <span className="mode-card__text">{m.value === "compat" ? t.changes.compatText : t.changes.modernizeText}</span>
+                  </label>
+                ))}
+              </div>
+              {previewing ? (
+                <div className="stack stack--tight">
+                  <Progress value={null} label={t.changes.calculating} />
+                  <div className="row row--between">
+                    <span className="hint">{t.changes.calculatingHint}</span>
                     <Button variant="secondary" size="sm" icon={<CircleStop size={14} />} onClick={cancelPreview}>
                       {t.changes.stop}
                     </Button>
@@ -232,8 +245,8 @@ export function Changes() {
           </ul>
           <div className="apply-bar">
             {preview.errors.length > 0 && <ErrorList errors={preview.errors} compact />}
-            <div className="row" style={{ justifyContent: "space-between" }}>
-              <span className="subtle" style={{ fontSize: "var(--text-sm)" }}>
+            <div className="row row--between">
+              <span className="hint">
                 <span className="stat-add">+{totals.add}</span> <span className="stat-del">−{totals.del}</span> {t.common.lines}
               </span>
               <Button variant="primary" disabled={chosen.length === 0 || previewing} loading={applying} onClick={() => setConfirming(true)}>
@@ -252,13 +265,13 @@ export function Changes() {
                 </span>
                 <span className="stat-add">+{current.diff.additions}</span>
                 <span className="stat-del">−{current.diff.deletions}</span>
-                <span style={{ marginLeft: "auto" }}>
+                <span className="push-end">
                   <RiskBadge fix={current.fix} />
                 </span>
               </div>
               <RuleChips rules={current.rules} />
               {current.fix === "likely" && (
-                <div style={{ padding: "var(--space-3) var(--space-6) 0" }}>
+                <div className="diff-note">
                   <Callout tone="info" icon={<ShieldCheck size={15} />}>
                     {t.changes.likelyNote}
                   </Callout>
@@ -326,7 +339,7 @@ function ChangeItem({
           <RiskBadge fix={change.fix} />
           <span className="stat-add">+{change.diff.additions}</span>
           <span className="stat-del">−{change.diff.deletions}</span>
-          <span className="subtle" style={{ fontSize: "var(--text-xs)" }}>
+          <span className="meta">
             {t.common.rules(change.rules.length)}
           </span>
         </div>
@@ -341,11 +354,11 @@ function ErrorList({ errors, compact = false }: { errors: string[]; compact?: bo
     <Callout tone="warn" icon={<CircleAlert size={15} />}>
       <strong>{t.changes.failed(errors.length)}</strong>
       {compact ? (
-        <div className="selectable" style={{ marginTop: 2 }}>
+        <div className="selectable error-list__first">
           {errors[0]}
         </div>
       ) : (
-        <ul style={{ margin: "6px 0 0", paddingLeft: 16 }} className="selectable">
+        <ul className="error-list selectable">
           {errors.slice(0, 8).map((e) => (
             <li key={e}>{e}</li>
           ))}
