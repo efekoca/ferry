@@ -176,7 +176,7 @@ describe("Ferry app", () => {
     await user.click(await screen.findByRole("button", { name: /Değişiklikleri hesapla/ }));
     await user.click(await screen.findByRole("button", { name: "Tümünü uygula" }));
     await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Uygula" }));
-    const alert = await screen.findByText("1 dosyada sözdizimi hatası var");
+    const alert = await screen.findByText("4 dosya güncellendi, 1 dosyada yeni sözdizimi hatası var");
     expect(alert.closest("[role=alert]")).toHaveTextContent("includes/helpers.php — Parse error on line 3");
   });
 
@@ -322,6 +322,17 @@ describe("Ferry app", () => {
     const row = (await screen.findByText("illuminate/database")).closest("tr")!;
     expect(within(row).getByText("Bu sürüm resmi olarak en fazla PHP 8.1'i destekliyor.")).toBeInTheDocument();
     expect(within(row).getByText("Uyumsuz")).toBeInTheDocument();
+  });
+
+  it("limits the dependency warning to the packages shown", async () => {
+    const user = setup();
+    await openAndScan(user);
+    await user.click(nav(/Bağımlılıklar/));
+    expect(await screen.findByText("3 paket PHP 8.4 ile çalışmıyor.")).toBeInTheDocument();
+    expect(screen.getByText(/composer update .*phpunit\/phpunit/)).toBeInTheDocument();
+    await user.click(screen.getByRole("radio", { name: "Sadece üretim" }));
+    expect(screen.getByText("2 paket PHP 8.4 ile çalışmıyor.")).toBeInTheDocument();
+    expect(screen.queryByText(/phpunit\/phpunit/)).not.toBeInTheDocument();
   });
 
   it("supports keyboard selection in the version picker", async () => {

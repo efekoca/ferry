@@ -322,8 +322,9 @@ export const en: Dict = {
     previewFailed: "Couldn't calculate changes",
     applied: (n) => (n === 1 ? "1 file updated" : `${n} files updated`),
     appliedText: "Previous versions are in History if you want to undo.",
-    lintFailed: (n) => (n === 1 ? "1 file has a syntax error" : `${n} files have syntax errors`),
-    lintFailedText: "The files were written but php -l reported errors. You can roll them back from History.",
+    appliedWithErrors: (n, broken) =>
+      `${n === 1 ? "1 file" : `${n} files`} updated; ${broken === 1 ? "1 now has a syntax error" : `${broken} now have syntax errors`}`,
+    lintFailedText: "php -l found these after the change. You can roll the files back from History.",
     applyFailed: "Couldn't apply changes",
     restored: "Restored",
     restoredText: (n) => (n === 1 ? "1 file is back to how it was." : `${n} files are back to how they were.`),
