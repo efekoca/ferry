@@ -58,6 +58,7 @@ const COMPILE_TIME: &[&str] = &[
     "deprecated.non_canonical_cast",
     "deprecated.backtick",
     "deprecated.serializable",
+    "removed.incompatible_override",
 ];
 
 fn classify(msg: &str) -> String {
