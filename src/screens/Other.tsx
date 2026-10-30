@@ -83,7 +83,7 @@ export function Dependencies() {
   const packages = deps.packages
     .filter((p) => showDev || !p.dev)
     .sort((a, b) => DEP_ORDER[a.status] - DEP_ORDER[b.status] || Number(a.dev) - Number(b.dev) || a.name.localeCompare(b.name));
-  const incompatible = deps.packages.filter((p) => p.status === "incompatible");
+  const incompatible = packages.filter((p) => p.status === "incompatible");
   const bad = incompatible.length;
   const command = `composer update ${incompatible.map((p) => p.name).join(" ")} --with-all-dependencies`;
 
