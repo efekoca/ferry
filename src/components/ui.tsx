@@ -1,5 +1,5 @@
-import type { ButtonHTMLAttributes, ReactNode, Ref } from "react";
-import { AlertOctagon, CircleHelp, ShieldCheck, Sparkles, TriangleAlert, Wrench } from "lucide-react";
+import { useEffect, useState, type ButtonHTMLAttributes, type ReactNode, type Ref } from "react";
+import { AlertOctagon, Check, CircleHelp, Copy, ShieldCheck, Sparkles, TriangleAlert, Wrench } from "lucide-react";
 import { useI18n } from "../i18n";
 import type { AppliedRule, FixKind, Severity } from "../lib/types";
 
@@ -247,5 +247,35 @@ export function SeverityIcon({ severity }: { severity: Severity }) {
       <Icon size={14} strokeWidth={2.2} color={SEVERITY_COLOR[severity]} aria-hidden />
       <span className="sr-only">{t.severity[severity]}</span>
     </span>
+  );
+}
+
+export function CommandLine({ command }: { command: string }) {
+  const { t } = useI18n();
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const id = setTimeout(() => setCopied(false), 1600);
+    return () => clearTimeout(id);
+  }, [copied]);
+  return (
+    <div className="command">
+      <code className="command__text selectable">{command}</code>
+      <Button
+        variant="ghost"
+        size="sm"
+        iconOnly
+        aria-label={copied ? t.common.copied : t.common.copy}
+        title={copied ? t.common.copied : t.common.copy}
+        onClick={() =>
+          navigator.clipboard
+            ?.writeText(command)
+            .then(() => setCopied(true))
+            .catch(() => {})
+        }
+      >
+        {copied ? <Check size={14} /> : <Copy size={14} />}
+      </Button>
+    </div>
   );
 }

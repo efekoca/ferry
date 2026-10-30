@@ -58,3 +58,10 @@ export function dependencyBlockers(deps: DependencyReport | null) {
   const root = deps?.rootStatus === "incompatible";
   return { packages, root, total: packages + (root ? 1 : 0) };
 }
+
+export function commonTitle(titles: string[]): string {
+  if (titles.every((t) => t === titles[0])) return titles[0];
+  let prefix = titles[0];
+  for (const t of titles) while (!t.startsWith(prefix)) prefix = prefix.slice(0, -1);
+  return prefix ? `${prefix}*()` : titles[0];
+}

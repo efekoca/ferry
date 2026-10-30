@@ -11,7 +11,7 @@ import {
   Settings,
 } from "lucide-react";
 import { useI18n } from "../i18n";
-import { dependencyBlockers, FRAMEWORK_LABEL } from "../lib/labels";
+import { dependencyBlockers, FRAMEWORK_LABEL, modKey } from "../lib/labels";
 import { useStore, type View } from "../lib/store";
 
 export function Logo({ className = "brand__mark" }: { className?: string }) {
@@ -43,6 +43,7 @@ export function Logo({ className = "brand__mark" }: { className?: string }) {
 
 interface NavItem {
   view: View;
+  shortcut?: number;
   label: string;
   icon: ReactNode;
   count?: number;
@@ -55,11 +56,11 @@ export function Sidebar() {
   const blockers = dependencyBlockers(deps).total;
 
   const main: NavItem[] = [
-    { view: "overview", label: t.nav.overview, icon: <LayoutDashboard size={16} /> },
-    { view: "findings", label: t.nav.findings, icon: <ClipboardList size={16} />, count: scan?.summary.total, danger: (scan?.summary.breaking ?? 0) > 0 },
-    { view: "changes", label: t.nav.fixes, icon: <GitCompareArrows size={16} />, count: preview?.changes.length },
-    { view: "dependencies", label: t.nav.dependencies, icon: <Package size={16} />, count: blockers || undefined, danger: blockers > 0 },
-    { view: "history", label: t.nav.history, icon: <History size={16} /> },
+    { view: "overview", shortcut: 1, label: t.nav.overview, icon: <LayoutDashboard size={16} /> },
+    { view: "findings", shortcut: 2, label: t.nav.findings, icon: <ClipboardList size={16} />, count: scan?.summary.total, danger: (scan?.summary.breaking ?? 0) > 0 },
+    { view: "changes", shortcut: 3, label: t.nav.fixes, icon: <GitCompareArrows size={16} />, count: preview?.changes.length },
+    { view: "dependencies", shortcut: 4, label: t.nav.dependencies, icon: <Package size={16} />, count: blockers || undefined, danger: blockers > 0 },
+    { view: "history", shortcut: 5, label: t.nav.history, icon: <History size={16} /> },
   ];
   const upcoming: NavItem[] = [
     { view: "runtime", label: t.nav.runtime, icon: <Container size={16} /> },
@@ -73,6 +74,7 @@ export function Sidebar() {
       aria-current={(project || item.view === "overview") && view === item.view ? "page" : undefined}
       disabled={!project && item.view !== "overview"}
       onClick={() => setView(item.view)}
+      title={item.shortcut ? `${item.label} (${modKey()} ${item.shortcut})` : undefined}
     >
       {item.icon}
       <span>{item.label}</span>
@@ -106,7 +108,7 @@ export function Sidebar() {
             <FolderOpen size={15} />
           </span>
           <span className="project-chip__text">
-            <span className="project-chip__name" style={{ display: "block" }}>
+            <span className="project-chip__name">
               {project.name}
             </span>
             <span className="project-chip__meta">
@@ -128,7 +130,7 @@ export function Sidebar() {
           className="nav__item"
           aria-current={view === "settings" ? "page" : undefined}
           onClick={() => setView("settings")}
-          style={{ width: "100%" }}
+          title={`${t.nav.settings} (${modKey()} ,)`}
         >
           <Settings size={16} />
           <span>{t.nav.settings}</span>
