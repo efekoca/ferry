@@ -127,7 +127,7 @@
       await emit(`  score=${score} findings=${$(".nav__count")?.textContent}`);
       const rescan = async (version) => {
         radio(version).click();
-        await until(() => $(".badge")?.textContent === `PHP ${version}` && $(".score-ring"), `rescan for ${version}`, 120000);
+        await until(() => $(".score__meta .badge")?.textContent === `PHP ${version}` && $(".score-ring"), `rescan for ${version}`, 120000);
         return Number($(".score-ring__number")?.textContent);
       };
       const score85 = await rescan("8.5");
