@@ -51,6 +51,9 @@ impl SymbolRule {
         if self.id == "removed.mysql" {
             return MYSQL_FUNCTIONS.contains(&name);
         }
+        if self.id == "deprecated.pg_alias" {
+            return PG_ALIASES.iter().any(|(old, _)| *old == name);
+        }
         match self.name.strip_suffix('*') {
             Some(prefix) => name.starts_with(prefix),
             None => name == self.name,
@@ -74,6 +77,24 @@ const MYSQL_FUNCTIONS: [&str; 65] = [
     "mysql_selectdb", "mysql_set_charset", "mysql_stat", "mysql_tablename", "mysql_table_name", "mysql_thread_id",
     "mysql_unbuffered_query", "mysql",
 ];
+pub const PG_ALIASES: [(&str, &str); 24] = [
+    ("pg_clientencoding", "pg_client_encoding"), ("pg_cmdtuples", "pg_affected_rows"), ("pg_errormessage", "pg_last_error"),
+    ("pg_fieldisnull", "pg_field_is_null"), ("pg_fieldname", "pg_field_name"), ("pg_fieldnum", "pg_field_num"),
+    ("pg_fieldprtlen", "pg_field_prtlen"), ("pg_fieldsize", "pg_field_size"), ("pg_fieldtype", "pg_field_type"),
+    ("pg_freeresult", "pg_free_result"), ("pg_getlastoid", "pg_last_oid"), ("pg_loclose", "pg_lo_close"),
+    ("pg_locreate", "pg_lo_create"), ("pg_loexport", "pg_lo_export"), ("pg_loimport", "pg_lo_import"),
+    ("pg_loopen", "pg_lo_open"), ("pg_loread", "pg_lo_read"), ("pg_loreadall", "pg_lo_read_all"),
+    ("pg_lounlink", "pg_lo_unlink"), ("pg_lowrite", "pg_lo_write"), ("pg_numfields", "pg_num_fields"),
+    ("pg_numrows", "pg_num_rows"), ("pg_result", "pg_fetch_result"), ("pg_setclientencoding", "pg_set_client_encoding"),
+];
+
+pub const DEPRECATED_INI: [(&str, u32, u32); 13] = [
+    ("mbstring.func_overload", 8, 0), ("track_errors", 8, 0), ("filter.default", 8, 1), ("filter.default_flags", 8, 1),
+    ("auto_detect_line_endings", 8, 1), ("assert.active", 8, 3), ("assert.bail", 8, 3), ("assert.callback", 8, 3),
+    ("assert.exception", 8, 3), ("assert.warning", 8, 3), ("session.sid_length", 8, 4),
+    ("session.sid_bits_per_character", 8, 4), ("session.use_trans_sid", 8, 4),
+];
+
 use FixKind::{Auto as A, Likely as L, Manual as M};
 
 const fn tx(tr: &'static str, en: &'static str) -> Option<Text> {
@@ -198,6 +219,35 @@ pub const FUNCTIONS: &[SymbolRule] = &[
         "Has done nothing since PHP 8.1 and is deprecated in 8.5.")),
     rule!("deprecated.imagedestroy", "imagedestroy", D, (8, 5), REMOVE_CALL, A, NOOP_SINCE_80),
     rule!("deprecated.xml_parser_free", "xml_parser_free", D, (8, 5), REMOVE_CALL, A, NOOP_SINCE_80),
+    rule!("removed.mbregex_encoding", "mbregex_encoding", R, (8, 0), code("mb_regex_encoding"), A, REMOVED_ALIAS),
+    rule!("deprecated.pg_alias", "pg_*", D, (8, 0), tx("pg_ fonksiyonunun yeni adı", "the new pg_ function name"), A, Text::new(
+        "Eski pgsql takma adları 8.0'da kullanımdan kalktı; alt çizgili yeni adlarını kullanın.",
+        "The old pgsql aliases are deprecated in 8.0; use the new underscored names.")),
+    rule!("deprecated.zip_procedural", "zip_*", D, (8, 0), code("ZipArchive"), M, Text::new(
+        "Prosedürel zip_* API'si 8.0'da kullanımdan kalktı; ZipArchive sınıfını kullanın.",
+        "The procedural zip_* API is deprecated in 8.0; use the ZipArchive class.")),
+    rule!("removed.gzgetss", "gzgetss", R, (8, 0), code("strip_tags(gzgets(...))"), M, REMOVED_FN),
+    rule!("removed.ldap_control_paged_result_response", "ldap_control_paged_result_response", R, (8, 0), tx("ldap_search()'e kontrol dizisi verin", "pass controls to ldap_search()"), M, REMOVED_FN),
+    rule!("removed.xmlrpc", "xmlrpc_*", R, (8, 0), tx("PECL xmlrpc ya da bir XML-RPC kütüphanesi", "PECL xmlrpc or an XML-RPC library"), M, Text::new(
+        "xmlrpc eklentisi PHP 8.0'da çekirdekten çıkarıldı.",
+        "The xmlrpc extension was unbundled in PHP 8.0.")),
+    rule!("removed.wddx", "wddx_*", R, (7, 4), tx("JSON ya da serialize()", "JSON or serialize()"), M, Text::new(
+        "wddx eklentisi PHP 7.4'te kaldırıldı.",
+        "The wddx extension was removed in PHP 7.4.")),
+    rule!("removed.recode", "recode_*", R, (7, 4), code("iconv / mb_convert_encoding"), M, Text::new(
+        "recode eklentisi PHP 7.4'te kaldırıldı.",
+        "The recode extension was removed in PHP 7.4.")),
+    rule!("removed.interbase", "ibase_*", R, (7, 4), tx("PECL interbase ya da PDO_Firebird", "PECL interbase or PDO_Firebird"), M, Text::new(
+        "interbase eklentisi PHP 7.4'te çekirdekten çıkarıldı.",
+        "The interbase extension was unbundled in PHP 7.4.")),
+    rule!("removed.imageps", "imageps*", R, (7, 0), code("imagettftext / imagefttext"), M, Text::new(
+        "PostScript Type1 font desteği PHP 7.0'da kaldırıldı.",
+        "PostScript Type1 font support was removed in PHP 7.0.")),
+    rule!("removed.set_socket_blocking", "set_socket_blocking", R, (7, 0), code("stream_set_blocking"), A, REMOVED_ALIAS),
+    rule!("removed.datefmt_set_timezone_id", "datefmt_set_timezone_id", R, (7, 0), code("datefmt_set_timezone"), M, REMOVED_FN),
+    rule!("deprecated.assert_options", "assert_options", D, (8, 3), tx("ini ayarları ya da zend.assertions", "ini settings or zend.assertions"), M, DEPRECATED_FN),
+    rule!("deprecated.mysqli_execute", "mysqli_execute", D, (8, 5), code("mysqli_stmt_execute"), A, REMOVED_ALIAS),
+    rule!("deprecated.socket_set_timeout", "socket_set_timeout", D, (8, 5), code("stream_set_timeout"), A, REMOVED_ALIAS),
     rule!("removed.mssql", "mssql_*", R, (7, 0), tx("sqlsrv_* ya da PDO", "sqlsrv_* or PDO"), M, Text::new(
         "mssql eklentisi PHP 7.0'da kaldırıldı.",
         "The mssql extension was removed in PHP 7.0.")),
@@ -231,6 +281,42 @@ pub const CONSTANTS: &[SymbolRule] = &[
     rule!("deprecated.e_user_error", "e_user_error", D, (8, 4), tx("exception fırlatın ya da exit() kullanın", "throw an exception or call exit()"), M, Text::new(
         "trigger_error() ile E_USER_ERROR kullanmak 8.4'te kullanımdan kalktı.",
         "Passing E_USER_ERROR to trigger_error() is deprecated in 8.4.")),
+    rule!("removed.filter_sanitize_magic_quotes", "filter_sanitize_magic_quotes", R, (8, 0), code("FILTER_SANITIZE_ADD_SLASHES"), M, Text::new(
+        "FILTER_SANITIZE_MAGIC_QUOTES PHP 8.0'da kaldırıldı.",
+        "FILTER_SANITIZE_MAGIC_QUOTES was removed in PHP 8.0.")),
+    rule!("removed.intl_idna_variant_2003", "intl_idna_variant_2003", R, (8, 0), code("INTL_IDNA_VARIANT_UTS46"), M, Text::new(
+        "INTL_IDNA_VARIANT_2003 PHP 8.0'da kaldırıldı.",
+        "INTL_IDNA_VARIANT_2003 was removed in PHP 8.0.")),
+    rule!("removed.input_request", "input_request", R, (8, 0), code("$_REQUEST"), M, Text::new(
+        "INPUT_REQUEST hiç uygulanmamıştı ve PHP 8.0'da kaldırıldı.",
+        "INPUT_REQUEST was never implemented and was removed in PHP 8.0.")),
+    rule!("removed.input_session", "input_session", R, (8, 0), code("$_SESSION"), M, Text::new(
+        "INPUT_SESSION hiç uygulanmamıştı ve PHP 8.0'da kaldırıldı.",
+        "INPUT_SESSION was never implemented and was removed in PHP 8.0.")),
+    rule!("removed.assert_quiet_eval", "assert_quiet_eval", R, (8, 0), tx("sabiti silin", "remove the constant"), M, Text::new(
+        "ASSERT_QUIET_EVAL PHP 8.0'da kaldırıldı.",
+        "ASSERT_QUIET_EVAL was removed in PHP 8.0.")),
+    rule!("removed.mb_overload", "mb_overload_*", R, (8, 0), tx("sabiti silin", "remove the constant"), M, Text::new(
+        "mbstring fonksiyon aşırı yüklemesi PHP 8.0'da kaldırıldı.",
+        "mbstring function overloading was removed in PHP 8.0.")),
+    rule!("removed.pgsql_libpq_version_str", "pgsql_libpq_version_str", R, (8, 0), code("PGSQL_LIBPQ_VERSION"), M, Text::new(
+        "PGSQL_LIBPQ_VERSION_STR PHP 8.0'da kaldırıldı.",
+        "PGSQL_LIBPQ_VERSION_STR was removed in PHP 8.0.")),
+    rule!("deprecated.file_binary", "file_binary", D, (8, 1), tx("bayrağı silin", "remove the flag"), M, NO_EFFECT),
+    rule!("deprecated.file_text", "file_text", D, (8, 1), tx("bayrağı silin", "remove the flag"), M, NO_EFFECT),
+    rule!("deprecated.assert_constants", "assert_*", D, (8, 3), tx("zend.assertions ve assert.exception", "zend.assertions and assert.exception"), M, Text::new(
+        "ASSERT_* sabitleri 8.3'te kullanımdan kalktı.",
+        "The ASSERT_* constants are deprecated in 8.3.")),
+    rule!("deprecated.mt_rand_php", "mt_rand_php", D, (8, 3), code("MT_RAND_MT19937"), M, Text::new(
+        "MT_RAND_PHP hatalı bir modulo uygulamasıdır ve 8.3'te kullanımdan kalktı.",
+        "MT_RAND_PHP is a broken modulo implementation and is deprecated in 8.3.")),
+    rule!("deprecated.sunfuncs_ret", "sunfuncs_ret_*", D, (8, 4), code("date_sun_info()"), M, DEPRECATED_FN),
+    rule!("deprecated.mysqli_refresh_constant", "mysqli_refresh_*", D, (8, 4), tx("FLUSH sorguları", "FLUSH queries"), M, DEPRECATED_FN),
+    rule!("deprecated.soap_functions_all", "soap_functions_all", D, (8, 4), tx("fonksiyonları tek tek ekleyin", "add the functions one by one"), M, DEPRECATED_FN),
+    rule!("deprecated.date_rfc7231", "date_rfc7231", D, (8, 5), code("DATE_RFC1123"), M, Text::new(
+        "DATE_RFC7231 saat dilimini yok sayıyordu ve 8.5'te kullanımdan kalktı.",
+        "DATE_RFC7231 ignored the time zone and is deprecated in 8.5.")),
+    rule!("deprecated.mhash_constant", "mhash_*", D, (8, 5), code("hash_*"), M, DEPRECATED_FN),
     rule!("removed.filter_flag_scheme_required", "filter_flag_scheme_required", R, (8, 0), tx("bayrağı silin", "remove the flag"), M, Text::new(
         "Bu bayrak PHP 8.0'da kaldırıldı; FILTER_VALIDATE_URL şemayı zaten zorunlu tutuyor.",
         "This flag was removed in PHP 8.0; FILTER_VALIDATE_URL already requires a scheme.")),
@@ -304,6 +390,8 @@ pub const MEMBERS: &[MemberRule] = &[
         "PDO::FETCH_SERIALIZE, Serializable arayüzüne dayandığı için 8.1'de kullanımdan kalktı.",
         "PDO::FETCH_SERIALIZE relies on the Serializable interface and is deprecated in 8.1."))),
 ];
+
+const NO_EFFECT: Text = Text::new("Hiçbir etkisi yok; silinebilir.", "Has no effect and can be removed.");
 
 const PDO_DRIVER: Text = Text::new(
     "PDO'nun sürücüye özel sabitleri 8.5'te kullanımdan kalktı; sürücünün kendi sınıfındaki sabiti kullanın.",
@@ -581,6 +669,126 @@ pub mod patterns {
         note: Text::new(
             "Kendiliğinden oluşan $http_response_header değişkeni 8.5'te kullanımdan kalktı.",
             "The magic $http_response_header variable is deprecated in 8.5.",
+        ),
+    };
+    pub const IMPLODE_ORDER: PatternRule = PatternRule {
+        id: "removed.implode_order",
+        title: Text::new("Ters sıralı implode()", "implode() with reversed arguments"),
+        severity: Severity::Breaking,
+        since: (8, 0),
+        replacement: code("implode(', ', $items)"),
+        fix: FixKind::Likely,
+        note: Text::new(
+            "implode()'a önce diziyi sonra ayracı vermek PHP 8.0'da TypeError fırlatır.",
+            "Passing the array before the separator to implode() throws a TypeError in PHP 8.0.",
+        ),
+    };
+    pub const EMPTY_CALL: PatternRule = PatternRule {
+        id: "deprecated.implicit_argument",
+        title: Text::new("Parametresiz çağrı", "Call without its argument"),
+        severity: Severity::Deprecated,
+        since: (8, 1),
+        replacement: tx("argümanı açıkça verin", "pass the argument explicitly"),
+        fix: FixKind::Manual,
+        note: Text::new(
+            "Bu fonksiyonu varsayılan değere güvenerek parametresiz çağırmak kullanımdan kalktı.",
+            "Calling this function without its argument, relying on the implicit default, is deprecated.",
+        ),
+    };
+    pub const SESSION_HANDLER_ARGS: PatternRule = PatternRule {
+        id: "deprecated.session_set_save_handler",
+        title: Text::new("Fonksiyonlarla session_set_save_handler()", "session_set_save_handler() with callables"),
+        severity: Severity::Deprecated,
+        since: (8, 4),
+        replacement: code("session_set_save_handler(new MyHandler())"),
+        fix: FixKind::Manual,
+        note: Text::new(
+            "session_set_save_handler()'a ayrı fonksiyonlar vermek 8.4'te kullanımdan kalktı; SessionHandlerInterface uygulayan bir nesne verin.",
+            "Passing separate callables to session_set_save_handler() is deprecated in 8.4; pass an object implementing SessionHandlerInterface.",
+        ),
+    };
+    pub const INI_SETTING: PatternRule = PatternRule {
+        id: "deprecated.ini_setting",
+        title: Text::new("Kullanımdan kalkan ini ayarı", "Deprecated ini setting"),
+        severity: Severity::Deprecated,
+        since: (8, 0),
+        replacement: tx("ayarı silin", "remove the setting"),
+        fix: FixKind::Manual,
+        note: Text::new(
+            "Bu ini ayarı yeni PHP sürümlerinde kaldırıldı ya da kullanımdan kalktı.",
+            "This ini setting was removed or deprecated in newer PHP versions.",
+        ),
+    };
+    pub const NULL_OFFSET: PatternRule = PatternRule {
+        id: "deprecated.null_offset",
+        title: Text::new("Dizi anahtarı olarak null", "null as an array key"),
+        severity: Severity::Deprecated,
+        since: (8, 5),
+        replacement: code("$a['']"),
+        fix: FixKind::Manual,
+        note: Text::new(
+            "null'ı dizi anahtarı olarak kullanmak 8.5'te kullanımdan kalktı; null zaten boş metne dönüşüyordu.",
+            "Using null as an array key is deprecated in 8.5; it was already turned into an empty string.",
+        ),
+    };
+    pub const CASE_SEMICOLON: PatternRule = PatternRule {
+        id: "deprecated.case_semicolon",
+        title: Text::new("Noktalı virgülle biten case", "case ending with a semicolon"),
+        severity: Severity::Deprecated,
+        since: (8, 5),
+        replacement: code("case 1:"),
+        fix: FixKind::Auto,
+        note: Text::new(
+            "switch içinde case'i iki nokta yerine noktalı virgülle bitirmek 8.5'te kullanımdan kalktı.",
+            "Ending a switch case with a semicolon instead of a colon is deprecated in 8.5.",
+        ),
+    };
+    pub const CONCAT_PRECEDENCE: PatternRule = PatternRule {
+        id: "behavior.concat_precedence",
+        title: Text::new("Parantezsiz . ile + / -", "Unparenthesized . with + or -"),
+        severity: Severity::Behavior,
+        since: (8, 0),
+        replacement: code("\"Toplam: \" . ($a + $b)"),
+        fix: FixKind::Manual,
+        note: Text::new(
+            "PHP 8.0'da + ve - artık . işleminden önce yapılıyor; \"Toplam: \" . $a + $b artık farklı sonuç verir. Niyetinizi parantezle belirtin.",
+            "Since PHP 8.0, + and - are evaluated before .; \"Total: \" . $a + $b now gives a different result. Add parentheses to say what you mean.",
+        ),
+    };
+    pub const SERIALIZABLE: PatternRule = PatternRule {
+        id: "deprecated.serializable",
+        title: Text::new("__serialize olmadan Serializable", "Serializable without __serialize"),
+        severity: Severity::Deprecated,
+        since: (8, 1),
+        replacement: code("__serialize() / __unserialize()"),
+        fix: FixKind::Manual,
+        note: Text::new(
+            "Serializable arayüzünü __serialize() ve __unserialize() olmadan uygulamak 8.1'de kullanımdan kalktı.",
+            "Implementing Serializable without __serialize() and __unserialize() is deprecated in 8.1.",
+        ),
+    };
+    pub const REMOVED_VARIABLE: PatternRule = PatternRule {
+        id: "removed.magic_variable",
+        title: Text::new("Kaldırılan otomatik değişken", "Removed magic variable"),
+        severity: Severity::Breaking,
+        since: (7, 0),
+        replacement: tx("error_get_last() ya da file_get_contents('php://input')", "error_get_last() or file_get_contents('php://input')"),
+        fix: FixKind::Manual,
+        note: Text::new(
+            "$HTTP_RAW_POST_DATA ve $php_errormsg artık oluşturulmuyor.",
+            "$HTTP_RAW_POST_DATA and $php_errormsg are no longer created.",
+        ),
+    };
+    pub const DYNAMIC_PROPERTY: PatternRule = PatternRule {
+        id: "deprecated.dynamic_property",
+        title: Text::new("Dinamik property", "Dynamic property"),
+        severity: Severity::Deprecated,
+        since: (8, 2),
+        replacement: tx("property'yi sınıfta tanımlayın", "declare the property on the class"),
+        fix: FixKind::Manual,
+        note: Text::new(
+            "Sınıfta tanımlanmamış bir property'ye değer atamak 8.2'de kullanımdan kalktı. Property'yi tanımlayın ya da sınıfa #[\\AllowDynamicProperties] ekleyin.",
+            "Assigning to a property that isn't declared on the class is deprecated in 8.2. Declare it, or add #[\\AllowDynamicProperties] to the class.",
         ),
     };
     pub const RESERVED_NAME: PatternRule = PatternRule {

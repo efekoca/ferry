@@ -49,6 +49,16 @@ fn kuzey_magaza_triggers_every_rule() {
         patterns::RESERVED_NAME.id,
         patterns::RETURN_TYPE_WILL_CHANGE.id,
         patterns::HTTP_RESPONSE_HEADER.id,
+        patterns::IMPLODE_ORDER.id,
+        patterns::EMPTY_CALL.id,
+        patterns::SESSION_HANDLER_ARGS.id,
+        patterns::INI_SETTING.id,
+        patterns::NULL_OFFSET.id,
+        patterns::CASE_SEMICOLON.id,
+        patterns::CONCAT_PRECEDENCE.id,
+        patterns::SERIALIZABLE.id,
+        patterns::REMOVED_VARIABLE.id,
+        patterns::DYNAMIC_PROPERTY.id,
     ];
     let missing: Vec<&str> = FUNCTIONS
         .iter()

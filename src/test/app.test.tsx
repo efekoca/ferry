@@ -206,6 +206,34 @@ describe("Ferry app", () => {
     expect(await screen.findByText("Henüz bir değişiklik uygulanmadı")).toBeInTheDocument();
   });
 
+  it("keeps a running preview when the project is rescanned", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    let resolve: (p: Awaited<ReturnType<typeof api.rectorPreview>>) => void = () => {};
+    const real = api.rectorPreview;
+    api.rectorPreview = (...args) => new Promise((r) => (resolve = r)).then(() => real(...args));
+    render(<App api={api} />);
+    await openAndScan(user);
+    await user.click(nav(/Düzeltmeler/));
+    await user.click(await screen.findByRole("button", { name: /Değişiklikleri hesapla/ }));
+    await user.click(nav(/Genel bakış/));
+    await user.click(screen.getByRole("button", { name: /Tekrar tara/ }));
+    await screen.findByRole("img", { name: /Hazırlık skoru/ });
+    resolve(undefined as never);
+    await user.click(nav(/Düzeltmeler/));
+    expect(await screen.findByRole("list", { name: "Dosyalar" })).toBeInTheDocument();
+  });
+
+  it("focuses cancel first in destructive dialogs", async () => {
+    const user = setup();
+    await openAndScan(user);
+    await user.click(nav(/Geçmiş/));
+    const row = (await screen.findAllByRole("row"))[1];
+    await user.click(within(row).getByRole("button", { name: /Yedeği sil/ }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByRole("button", { name: "Vazgeç" })).toHaveFocus();
+  });
+
   it("supports keyboard selection in the version picker", async () => {
     const user = setup();
     await user.click(await screen.findByRole("button", { name: "Proje klasörü seçin" }));

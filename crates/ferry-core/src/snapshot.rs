@@ -175,6 +175,10 @@ impl SnapshotStore {
         };
         let mut out = Vec::new();
         for entry in entries.flatten() {
+            if entry.file_name().to_string_lossy().starts_with(".trash-") {
+                let _ = std::fs::remove_dir_all(entry.path());
+                continue;
+            }
             let manifest = entry.path().join("manifest.json");
             if let Ok(bytes) = std::fs::read(&manifest) {
                 if let Ok(s) = serde_json::from_slice::<Snapshot>(&bytes) {
@@ -268,7 +272,10 @@ impl SnapshotStore {
 
     pub fn delete(&self, project_root: &Path, id: &str) -> Result<(), SnapshotError> {
         let (_, dir) = self.load(project_root, id)?;
-        std::fs::remove_dir_all(&dir).map_err(io_err(&dir))
+        let trash = self.project_dir(project_root).join(format!(".trash-{id}"));
+        std::fs::rename(&dir, &trash).map_err(io_err(&dir))?;
+        let _ = std::fs::remove_dir_all(&trash);
+        Ok(())
     }
 }
 

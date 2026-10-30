@@ -488,6 +488,10 @@ fn is_attribute(b: &[u8], at: usize) -> bool {
     match b.get(p) {
         Some(b'$' | b'?' | b'&' | b'#') => true,
         Some(b'.') => b[p..].starts_with(b"..."),
+        Some(b'(') => {
+            let start = skip_space(b, p + 1);
+            skip_name(b, start).is_some_and(|end| b.get(skip_space(b, end)) == Some(&b'&'))
+        }
         Some(_) => {
             let Some(end) = skip_name(b, p) else { return false };
             let word = std::str::from_utf8(&b[p..end]).unwrap_or("");

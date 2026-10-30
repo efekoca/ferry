@@ -313,14 +313,13 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
     async (mode: RectorMode) => {
       if (!api || !project) return false;
       const root = project.root;
-      const gen = generation.current;
       const seq = ++previewSeq.current;
       const previous = previewMode;
       setPreviewMode(mode);
       setPreviewing(true);
       try {
         const result = await api.rectorPreview(root, target, mode);
-        if (gen === generation.current && seq === previewSeq.current) setPreview(result);
+        if (seq === previewSeq.current) setPreview(result);
         return true;
       } catch (e) {
         if (seq !== previewSeq.current || rootRef.current !== root) return true;
@@ -396,13 +395,16 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
 
   const deleteAllSnapshots = useCallback(async () => {
     if (!api || !project) return;
-    try {
-      for (const s of snapshots) await api.deleteSnapshot(project.root, s.id);
-    } catch (e) {
-      fail(t.toast.deleteFailed, e);
-    } finally {
-      await refreshSnapshots();
+    let error: unknown = null;
+    for (const s of snapshots) {
+      try {
+        await api.deleteSnapshot(project.root, s.id);
+      } catch (e) {
+        error ??= e;
+      }
     }
+    if (error) fail(t.toast.deleteFailed, error);
+    await refreshSnapshots();
   }, [api, project, snapshots, refreshSnapshots, fail, t]);
 
   const exportReport = useCallback(async () => {

@@ -34,6 +34,7 @@ pub struct AppState {
     writes: Arc<Mutex<()>>,
     rector_cancel: Mutex<Arc<AtomicBool>>,
     rector_running: Arc<AtomicUsize>,
+    shutdown: Arc<AtomicBool>,
     next_preview: AtomicU64,
 }
 
@@ -53,6 +54,7 @@ impl AppState {
             writes: Arc::new(Mutex::new(())),
             rector_cancel: Mutex::new(Arc::new(AtomicBool::new(false))),
             rector_running: Arc::new(AtomicUsize::new(0)),
+            shutdown: Arc::new(AtomicBool::new(false)),
             next_preview: AtomicU64::new(1),
         }
     }
@@ -93,22 +95,27 @@ fn parse_target(target: &str) -> CmdResult<PhpVersion> {
 fn normalize_path(path: String) -> String {
     let Ok(canonical) = std::fs::canonicalize(&path) else { return path };
     let text = canonical.to_string_lossy();
-    match text.strip_prefix(r"\\?\") {
-        Some(rest) if !rest.starts_with("UNC\\") => rest.to_string(),
-        Some(rest) => format!(r"\\{}", &rest[4..]),
-        None => text.into_owned(),
+    let Some(rest) = text.strip_prefix(r"\\?\") else { return text.into_owned() };
+    let drive = |s: &str| s.as_bytes().get(1) == Some(&b':') && s.as_bytes()[0].is_ascii_alphabetic();
+    match rest.strip_prefix("UNC\\") {
+        Some(_) if drive(&path) => path,
+        Some(unc) => format!(r"\\{unc}"),
+        None if drive(rest) => rest.to_string(),
+        None => path,
     }
 }
 
 fn project_root(path: &str) -> CmdResult<PathBuf> {
     let p = PathBuf::from(path);
-    if p.is_file() {
-        return Err(t!("Bu bir dosya, proje klasörü değil: {path}", "This is a file, not a project folder: {path}"));
+    match std::fs::metadata(&p) {
+        Ok(meta) if meta.is_dir() => Ok(p),
+        Ok(_) => Err(t!("Bu bir dosya, proje klasörü değil: {path}", "This is a file, not a project folder: {path}")),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(t!("Klasör bulunamadı: {path}", "Folder not found: {path}")),
+        Err(e) => {
+            let reason = ferry_core::i18n::io_error(&e);
+            Err(t!("Klasör açılamadı ({path}): {reason}", "Couldn't open the folder ({path}): {reason}"))
+        }
     }
-    if !p.is_dir() {
-        return Err(t!("Klasör bulunamadı: {path}", "Folder not found: {path}"));
-    }
-    Ok(p)
 }
 
 async fn blocking<T: Send + 'static>(f: impl FnOnce() -> CmdResult<T> + Send + 'static) -> CmdResult<T> {
@@ -195,8 +202,12 @@ async fn toolchain_status(state: State<'_, AppState>) -> CmdResult<ToolchainStat
 async fn install_rector(state: State<'_, AppState>) -> CmdResult<ToolchainStatus> {
     let tools = state.tools_dir();
     let php = state.php_override();
+    let shutdown = state.shutdown.clone();
+    let running = state.rector_running.clone();
+    running.fetch_add(1, Ordering::SeqCst);
     blocking(move || {
-        toolchain::install_rector(&tools, php.as_deref()).map_err(|e| e.to_string())?;
+        let _running = RunningGuard(running);
+        toolchain::install_rector(&tools, php.as_deref(), &shutdown).map_err(|e| e.to_string())?;
         Ok(toolchain::detect(&tools, php.as_deref()))
     })
     .await
@@ -536,9 +547,13 @@ pub fn run() {
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
                 let state = app.state::<AppState>();
+                state.shutdown.store(true, Ordering::Relaxed);
                 state.rector_cancel.lock().unwrap().store(true, Ordering::Relaxed);
                 let started = Instant::now();
                 while state.rector_running.load(Ordering::SeqCst) > 0 && started.elapsed() < Duration::from_secs(3) {
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                while state.writes.try_lock().is_err() && started.elapsed() < Duration::from_secs(10) {
                     std::thread::sleep(Duration::from_millis(50));
                 }
             }
@@ -550,7 +565,11 @@ fn remove_stale_runs(work: &Path) {
     for project in projects.flatten() {
         let Ok(entries) = std::fs::read_dir(project.path()) else { continue };
         for entry in entries.flatten() {
-            if entry.file_name().to_string_lossy().starts_with("run-") {
+            let old = entry
+                .metadata()
+                .and_then(|m| m.modified())
+                .is_ok_and(|t| t.elapsed().is_ok_and(|age| age > Duration::from_secs(60 * 60)));
+            if old && entry.file_name().to_string_lossy().starts_with("run-") {
                 let _ = std::fs::remove_dir_all(entry.path());
             }
         }

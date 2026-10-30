@@ -19,7 +19,22 @@ pub enum RectorMode {
     Modernize,
 }
 
+const UNVERSIONED_RULES: &[(&str, (u32, u32))] = &[
+    ("Rector\\CodingStyle\\Rector\\ArrowFunction\\ArrowFunctionDelegatingCallToFirstClassCallableRector", (8, 1)),
+    ("Rector\\CodingStyle\\Rector\\Closure\\ClosureDelegatingCallToFirstClassCallableRector", (8, 1)),
+    ("Rector\\CodingStyle\\Rector\\FuncCall\\ClosureFromCallableToFirstClassCallableRector", (8, 1)),
+    ("Rector\\CodingStyle\\Rector\\FuncCall\\FunctionFirstClassCallableRector", (8, 1)),
+    ("Rector\\TypeDeclaration\\Rector\\ClassMethod\\ReturnNeverTypeRector", (8, 1)),
+    ("Rector\\CodingStyle\\Rector\\FuncCall\\ConsistentImplodeRector", (8, 0)),
+    ("Rector\\DeadCode\\Rector\\StaticCall\\RemoveParentCallWithoutParentRector", (8, 0)),
+];
+
 const MODERNIZATION_RULES: &[&str] = &[
+    "Rector\\CodingStyle\\Rector\\ArrowFunction\\ArrowFunctionDelegatingCallToFirstClassCallableRector",
+    "Rector\\CodingStyle\\Rector\\Closure\\ClosureDelegatingCallToFirstClassCallableRector",
+    "Rector\\CodingStyle\\Rector\\FuncCall\\ClosureFromCallableToFirstClassCallableRector",
+    "Rector\\CodingStyle\\Rector\\FuncCall\\FunctionFirstClassCallableRector",
+    "Rector\\TypeDeclaration\\Rector\\ClassMethod\\ReturnNeverTypeRector",
     "Rector\\Php52\\Rector\\Property\\VarToPublicPropertyRector",
     "Rector\\Php53\\Rector\\Ternary\\TernaryToElvisRector",
     "Rector\\Php53\\Rector\\FuncCall\\DirNameFileConstantToDirConstantRector",
@@ -230,6 +245,9 @@ pub fn rule_short_name(class: &str) -> &str {
 }
 
 fn rule_since(class: &str) -> Option<PhpVersion> {
+    if let Some((_, (major, minor))) = UNVERSIONED_RULES.iter().find(|(c, _)| *c == class) {
+        return Some(PhpVersion::new(*major, *minor));
+    }
     let ns = class.split('\\').nth(1)?;
     let digits = ns.strip_prefix("Php")?;
     if digits.len() != 2 || !digits.bytes().all(|b| b.is_ascii_digit()) {
@@ -269,6 +287,18 @@ pub fn describe_rule(class: &str) -> AppliedRule {
         since: rule_since(class),
         fix,
     }
+}
+
+fn glob_literal(s: &str) -> String {
+    s.chars()
+        .map(|c| match c {
+            '[' => "[[]".to_string(),
+            ']' => "[]]".to_string(),
+            '*' => "[*]".to_string(),
+            '?' => "[?]".to_string(),
+            c => c.to_string(),
+        })
+        .collect()
 }
 
 fn php_str(s: &str) -> String {
@@ -340,7 +370,7 @@ pub fn build_config(
         let real = real.to_string_lossy().into_owned();
         bases.push(real.strip_prefix(r"\\?\").map(str::to_string).unwrap_or(real));
     }
-    let mut bases: Vec<String> = bases.iter().map(|b| b.replace('\\', "/").trim_end_matches('/').to_string()).collect();
+    let mut bases: Vec<String> = bases.iter().map(|b| glob_literal(b.replace('\\', "/").trim_end_matches('/'))).collect();
     bases.dedup();
     let mut skip: Vec<String> = bases
         .iter()
@@ -682,6 +712,7 @@ mod tests {
         assert!(cfg.contains("->withPhpSets(php81: true)"));
         assert!(cfg.contains("'/p/it\\'s'"));
         assert!(cfg.contains("StrContainsRector"));
+        assert!(cfg.contains("FunctionFirstClassCallableRector"), "modernizations outside PhpXY namespaces are skipped too");
         assert!(cfg.contains("'/p/it\\'s/storage/*'"));
         assert!(cfg.contains("'/p/it\\'s/*/vendor/*'"));
         assert!(!cfg.contains("'*/vendor/*'"));

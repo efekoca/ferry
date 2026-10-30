@@ -116,7 +116,12 @@ pub fn analyze_files(
 fn offset_base(tokens: &[Token], i: usize) -> bool {
     let tok = &tokens[i];
     match tok.kind {
-        TokenKind::Variable => true,
+        TokenKind::Variable => {
+            let declaration = i > 0
+                && tokens[i - 1].kind == TokenKind::Ident
+                && !EXPR_KEYWORDS.iter().any(|k| tokens[i - 1].is_ident_ci(k));
+            !declaration
+        }
         TokenKind::Ident => i > 0 && (tokens[i - 1].is_punct("->") || tokens[i - 1].is_punct("?->")),
         TokenKind::Punct if tok.text == "]" => {
             let mut depth = 0;
@@ -164,10 +169,24 @@ fn curly_offsets(tokens: &[Token]) -> Vec<(usize, Vec<(usize, usize)>)> {
     out
 }
 
-fn local_functions(tokens: &[Token]) -> std::collections::HashSet<String> {
+fn class_references(tokens: &[Token]) -> std::collections::HashSet<String> {
+    let before = ["new", "instanceof", "extends", "implements", "use", "catch"];
+    tokens
+        .iter()
+        .enumerate()
+        .filter(|&(i, t)| {
+            t.kind == TokenKind::Ident
+                && (i > 0 && (before.iter().any(|b| tokens[i - 1].is_ident_ci(b)) || tokens[i - 1].is_punct("(") && tokens.get(i + 1).is_some_and(|n| n.kind == TokenKind::Variable))
+                    || tokens.get(i + 1).is_some_and(|n| n.is_punct("::") || n.kind == TokenKind::Variable))
+        })
+        .map(|(_, t)| t.text.rsplit('\\').next().unwrap_or_default().to_ascii_lowercase())
+        .collect()
+}
+
+fn local_functions(tokens: &[Token], methods: &std::collections::HashSet<usize>) -> std::collections::HashSet<String> {
     let mut names = std::collections::HashSet::new();
     for i in 0..tokens.len() {
-        if tokens[i].is_ident_ci("function") && !is_method(tokens, i) {
+        if tokens[i].is_ident_ci("function") && !methods.contains(&i) {
             let name = tokens[i + 1..].iter().take(2).find(|t| !t.is_punct("&"));
             if let Some(t) = name.filter(|t| t.kind == TokenKind::Ident) {
                 names.insert(t.text.to_ascii_lowercase());
@@ -194,16 +213,20 @@ pub fn fix_legacy_syntax(src: &str) -> Option<(String, Vec<&'static str>)> {
     let tokens = tokenize(src);
     let mut edits: Vec<(usize, usize, &str)> = Vec::new();
     let mut applied = Vec::new();
+    let defined = defined_constants(&tokens);
+    let mut keys = bareword_keys(&tokens);
     for (_, pairs) in curly_offsets(&tokens) {
         for (open, close) in pairs {
             edits.push((tokens[open].start, tokens[open].end, "["));
             edits.push((tokens[close].start, tokens[close].end, "]"));
+            if close == open + 2 && is_bareword(&tokens[open + 1], &defined) {
+                keys.push(open + 1);
+            }
         }
     }
     if !edits.is_empty() {
         applied.push(CURLY_FIX);
     }
-    let keys = bareword_keys(&tokens);
     for &k in &keys {
         edits.push((tokens[k].start, tokens[k].start, "'"));
         edits.push((tokens[k].end, tokens[k].end, "'"));
@@ -244,17 +267,18 @@ pub fn analyze_source(file: &str, src: &str, target: PhpVersion) -> Vec<Finding>
     let tokens = lexed.tokens;
     let mut line_starts = vec![0];
     line_starts.extend(src.match_indices('\n').map(|(i, _)| i + 1));
+    let methods = method_tokens(&tokens);
     let mut ctx = Ctx {
         file,
         src,
         line_starts,
         target,
-        local_functions: local_functions(&tokens),
-        classes: tokens
-            .iter()
-            .filter(|t| t.kind == TokenKind::Ident)
-            .map(|t| t.text.rsplit('\\').next().unwrap_or_default().to_ascii_lowercase())
-            .collect(),
+        local_functions: local_functions(&tokens, &methods),
+        methods,
+        namespaced: tokens
+            .windows(2)
+            .any(|w| w[0].is_ident_ci("namespace") && (w[1].kind == TokenKind::Ident || w[1].is_punct("{"))),
+        classes: class_references(&tokens),
         out: Vec::new(),
     };
     for &(line, column) in &lexed.stray_hash_brackets {
@@ -274,6 +298,21 @@ pub fn analyze_source(file: &str, src: &str, target: PhpVersion) -> Vec<Finding>
     }
     for k in untyped_interface_methods(&tokens) {
         ctx.pattern(&patterns::RETURN_TYPE_WILL_CHANGE, &tokens[k], None);
+    }
+    for k in null_offsets(&tokens) {
+        ctx.pattern(&patterns::NULL_OFFSET, &tokens[k], None);
+    }
+    for k in case_semicolons(&tokens) {
+        ctx.pattern(&patterns::CASE_SEMICOLON, &tokens[k], None);
+    }
+    for k in concat_with_arithmetic(&tokens) {
+        ctx.pattern(&patterns::CONCAT_PRECEDENCE, &tokens[k], None);
+    }
+    for k in serializable_without_magic(&tokens) {
+        ctx.pattern(&patterns::SERIALIZABLE, &tokens[k], None);
+    }
+    for k in dynamic_properties(&tokens) {
+        ctx.pattern(&patterns::DYNAMIC_PROPERTY, &tokens[k], None);
     }
     let mut i = 0;
     while i < tokens.len() {
@@ -310,7 +349,19 @@ pub fn analyze_source(file: &str, src: &str, target: PhpVersion) -> Vec<Finding>
                 }
             }
             TokenKind::Variable if tok.text == "http_response_header" => {
-                ctx.pattern(&patterns::HTTP_RESPONSE_HEADER, tok, None);
+                let local = tokens.iter().enumerate().any(|(k, t)| {
+                    t.kind == TokenKind::Variable
+                        && t.text == "http_response_header"
+                        && (tokens.get(k + 1).is_some_and(|n| n.is_punct("=") || n.is_punct(",") || n.is_punct("]"))
+                            || inside_call(&tokens, k, "list"))
+                });
+                if !local {
+                    ctx.pattern(&patterns::HTTP_RESPONSE_HEADER, tok, None);
+                }
+            }
+            TokenKind::Variable if tok.text == "HTTP_RAW_POST_DATA" || tok.text == "php_errormsg" => {
+                let since = if tok.text == "php_errormsg" { PhpVersion::new(8, 0) } else { PhpVersion::new(7, 0) };
+                ctx.pattern_since(&patterns::REMOVED_VARIABLE, tok.line, tok.column, since);
             }
             TokenKind::Str { interpolates, .. } => {
                 if *interpolates {
@@ -340,7 +391,9 @@ struct Ctx<'a> {
     line_starts: Vec<usize>,
     target: PhpVersion,
     local_functions: std::collections::HashSet<String>,
+    methods: std::collections::HashSet<usize>,
     classes: std::collections::HashSet<String>,
+    namespaced: bool,
     out: Vec<Finding>,
 }
 
@@ -467,8 +520,9 @@ impl<'a> Ctx<'a> {
                     || b.is_punct(")")
                     || b.is_punct("]")
             });
-            if !paren_is_call {
-                let open = &tokens[i - 1];
+            let open = &tokens[i - 1];
+            let tight = |a: usize, b: usize| self.src.get(a..b).is_some_and(|gap| gap.bytes().all(|c| c == b' ' || c == b'\t'));
+            if !paren_is_call && tight(open.end, tok.start) && tight(tok.end, next.map_or(tok.end, |n| n.start)) {
                 match lower.as_str() {
                     "real" => return self.pattern(&patterns::REAL_CAST, open, None),
                     "unset" => return self.pattern(&patterns::UNSET_CAST, open, None),
@@ -490,7 +544,7 @@ impl<'a> Ctx<'a> {
             let is_type_decl = prev.is_some_and(|p| ["class", "interface", "trait", "enum"].iter().any(|k| p.is_ident_ci(k)));
             let reserved = if is_type_decl {
                 RESERVED_CLASS_NAMES.iter().find(|(n, _, _)| *n == lower).map(|&(_, a, b)| PhpVersion::new(a, b))
-            } else if is_function_decl && !is_method(tokens, decl_idx) {
+            } else if is_function_decl && !self.methods.contains(&decl_idx) {
                 match lower.as_str() {
                     "match" => Some(PhpVersion::new(8, 0)),
                     "fn" => Some(PhpVersion::new(7, 4)),
@@ -502,7 +556,7 @@ impl<'a> Ctx<'a> {
             if let Some(since) = reserved {
                 self.pattern_since(&patterns::RESERVED_NAME, tok.line, tok.column, since);
             }
-            if is_function_decl && lower == "__autoload" && !is_method(tokens, decl_idx) {
+            if is_function_decl && lower == "__autoload" && !self.namespaced && !self.methods.contains(&decl_idx) {
                 self.pattern(&patterns::AUTOLOAD, tok, None);
             }
             return;
@@ -536,10 +590,36 @@ impl<'a> Ctx<'a> {
                 "assert" if single(0).is_some_and(|t| matches!(t.kind, TokenKind::Str { .. })) => {
                     return self.pattern(&patterns::ASSERT_STRING, tok, None)
                 }
+                "implode" | "join"
+                    if args.len() == 2
+                        && single(1).is_some_and(|t| matches!(t.kind, TokenKind::Str { .. }))
+                        && !single(0).is_some_and(|t| matches!(t.kind, TokenKind::Str { .. })) =>
+                {
+                    return self.pattern(&patterns::IMPLODE_ORDER, tok, None)
+                }
+                "mb_check_encoding" if args.is_empty() => {
+                    return self.pattern_since(&patterns::EMPTY_CALL, tok.line, tok.column, PhpVersion::new(8, 1))
+                }
+                "readdir" | "closedir" | "rewinddir" if args.is_empty() => {
+                    return self.pattern_since(&patterns::EMPTY_CALL, tok.line, tok.column, PhpVersion::new(8, 5))
+                }
+                "session_set_save_handler" if args.len() > 2 => return self.pattern(&patterns::SESSION_HANDLER_ARGS, tok, None),
+                "array_key_exists" if single(0).is_some_and(|t| t.is_ident_ci("null")) => {
+                    return self.pattern(&patterns::NULL_OFFSET, tok, None)
+                }
+                "ini_set" | "ini_alter" => {
+                    if let Some(key) = single(0).filter(|t| matches!(t.kind, TokenKind::Str { .. })) {
+                        let name = key.text.get(1..key.text.len().saturating_sub(1)).unwrap_or_default().to_ascii_lowercase();
+                        if let Some(&(_, a, b)) = crate::rules::DEPRECATED_INI.iter().find(|(k, _, _)| *k == name) {
+                            self.pattern_since(&patterns::INI_SETTING, key.line, key.column, PhpVersion::new(a, b));
+                        }
+                    }
+                    return;
+                }
                 "fputcsv" | "fgetcsv" | "str_getcsv" => {
                     let needed = if lower == "str_getcsv" { 4 } else { 5 };
                     let has_escape = args.iter().any(|a| a.first().is_some_and(|t| t.is_ident_ci("escape")) && a.get(1).is_some_and(|t| t.is_punct(":")));
-                    if args.len() < needed && !has_escape && !spread && !(named && args.len() >= needed - 1) {
+                    if !has_escape && !spread && (named || args.len() < needed) {
                         self.pattern(&patterns::CSV_ESCAPE, tok, None);
                     }
                     return;
@@ -555,7 +635,7 @@ impl<'a> Ctx<'a> {
         if bare.bytes().any(|b| b.is_ascii_lowercase()) {
             return;
         }
-        if let Some(rule) = CONSTANTS.iter().find(|r| r.name == lower) {
+        if let Some(rule) = CONSTANTS.iter().find(|r| r.matches(&lower)) {
             if rule.id == "deprecated.e_user_error" && !inside_call(tokens, i, "trigger_error") && !inside_call(tokens, i, "user_error") {
                 return;
             }
@@ -611,7 +691,9 @@ impl<'a> Ctx<'a> {
         let inner = text.get(1..text.len().saturating_sub(1)).unwrap_or_default();
         let deprecated = ["html-entities", "html", "base64", "uuencode", "qprint", "quoted-printable"];
         if deprecated.iter().any(|e| inner.eq_ignore_ascii_case(e))
-            && enclosing_call(tokens, i).is_some_and(|f| f.to_ascii_lowercase().starts_with("mb_"))
+            && argument_position(tokens, i).is_some_and(|(f, n)| {
+                MB_ENCODING_ARGS.iter().any(|(name, slots)| f.eq_ignore_ascii_case(name) && slots.contains(&n))
+            })
         {
             self.pattern(&patterns::MB_ENCODING, &tokens[i], None);
         }
@@ -716,34 +798,36 @@ impl<'a> Ctx<'a> {
     }
 }
 
-fn is_method(tokens: &[Token], fn_idx: usize) -> bool {
+fn method_tokens(tokens: &[Token]) -> std::collections::HashSet<usize> {
     let modifiers = ["public", "protected", "private", "static", "abstract", "final"];
-    if fn_idx > 0 {
-        let prev = &tokens[fn_idx - 1];
-        if modifiers.iter().any(|m| prev.is_ident_ci(m)) {
-            return true;
-        }
-    }
-    let mut depth: isize = 0;
-    for k in (0..fn_idx).rev() {
-        let t = &tokens[k];
-        if t.is_punct("}") {
-            depth += 1;
+    let mut methods = std::collections::HashSet::new();
+    let mut stack: Vec<bool> = Vec::new();
+    let mut parens = 0usize;
+    let mut pending: Option<usize> = None;
+    for (k, t) in tokens.iter().enumerate() {
+        if t.is_punct("(") {
+            parens += 1;
+        } else if t.is_punct(")") {
+            parens = parens.saturating_sub(1);
+        } else if t.is_punct(";") && pending == Some(parens) {
+            pending = None;
+        } else if ["class", "trait", "interface", "enum"].iter().any(|c| t.is_ident_ci(c)) && !(k > 0 && tokens[k - 1].is_punct("::")) {
+            pending = Some(parens);
         } else if t.is_punct("{") {
-            if depth == 0 {
-                let header = tokens[..k]
-                    .iter()
-                    .rposition(|b| b.is_punct(";") || b.is_punct("{") || b.is_punct("}"))
-                    .map_or(0, |p| p + 1);
-                return (header..k).any(|h| {
-                    ["class", "trait", "interface", "enum"].iter().any(|c| tokens[h].is_ident_ci(c))
-                        && !(h > 0 && tokens[h - 1].is_punct("::"))
-                });
+            stack.push(pending == Some(parens));
+            if pending == Some(parens) {
+                pending = None;
             }
-            depth -= 1;
+        } else if t.is_punct("}") {
+            stack.pop();
+        } else if t.is_ident_ci("function") {
+            let modified = k > 0 && modifiers.iter().any(|m| tokens[k - 1].is_ident_ci(m));
+            if modified || stack.last() == Some(&true) {
+                methods.insert(k);
+            }
         }
     }
-    false
+    methods
 }
 
 fn inside_call(tokens: &[Token], i: usize, func: &str) -> bool {
@@ -764,6 +848,41 @@ fn enclosing_call(tokens: &[Token], i: usize) -> Option<&str> {
                 return (k > 0 && tokens[k - 1].kind == TokenKind::Ident).then(|| tokens[k - 1].text.trim_start_matches('\\'));
             }
             depth -= 1;
+        }
+    }
+    None
+}
+
+const MB_ENCODING_ARGS: [(&str, &[usize]); 34] = [
+    ("mb_convert_encoding", &[1, 2]), ("mb_check_encoding", &[1]), ("mb_strlen", &[1]), ("mb_substr", &[3]),
+    ("mb_strcut", &[3]), ("mb_strtolower", &[1]), ("mb_strtoupper", &[1]), ("mb_convert_case", &[2]),
+    ("mb_internal_encoding", &[0]), ("mb_strpos", &[3]), ("mb_stripos", &[3]), ("mb_strrpos", &[3]),
+    ("mb_strripos", &[3]), ("mb_strstr", &[3]), ("mb_stristr", &[3]), ("mb_strrchr", &[3]), ("mb_strrichr", &[3]),
+    ("mb_substr_count", &[2]), ("mb_strwidth", &[1]), ("mb_strimwidth", &[4]), ("mb_detect_encoding", &[1]),
+    ("mb_encode_numericentity", &[2]), ("mb_decode_numericentity", &[2]), ("mb_preferred_mime_name", &[0]),
+    ("mb_regex_encoding", &[0]), ("mb_http_output", &[0]), ("mb_str_split", &[2]), ("mb_ord", &[1]), ("mb_chr", &[1]),
+    ("mb_scrub", &[1]), ("mb_convert_variables", &[0, 1]), ("mb_encode_mimeheader", &[1]), ("mb_str_pad", &[4]),
+    ("mb_trim", &[2]),
+];
+
+fn argument_position(tokens: &[Token], i: usize) -> Option<(&str, usize)> {
+    let mut depth: isize = 0;
+    let mut commas = 0;
+    for k in (0..i).rev() {
+        let t = &tokens[k];
+        if t.is_punct(";") || t.is_punct("{") || t.is_punct("}") {
+            return None;
+        }
+        if t.is_punct(")") || t.is_punct("]") {
+            depth += 1;
+        } else if t.is_punct("(") || t.is_punct("[") {
+            if depth == 0 {
+                return (t.is_punct("(") && k > 0 && tokens[k - 1].kind == TokenKind::Ident)
+                    .then(|| (tokens[k - 1].text.trim_start_matches('\\'), commas));
+            }
+            depth -= 1;
+        } else if depth == 0 && t.is_punct(",") {
+            commas += 1;
         }
     }
     None
@@ -830,7 +949,10 @@ fn nested_ternaries(tokens: &[Token]) -> Vec<usize> {
             continue;
         }
         let level = stack.last_mut().unwrap();
-        if t.is_punct(";") || t.is_punct(",") || t.is_punct("=>") || t.kind == TokenKind::CloseTag {
+        let keyword = t.kind == TokenKind::Ident
+            && ["and", "or", "xor", "return", "echo", "print", "case", "yield", "throw"].iter().any(|k| t.is_ident_ci(k));
+        let label = t.is_punct(":") && level.open == 0 && !tokens[k - 1].is_punct("?");
+        if t.is_punct(";") || t.is_punct(",") || t.is_punct("=>") || t.kind == TokenKind::CloseTag || keyword || label {
             *level = TernaryLevel::default();
         } else if t.is_punct("?") && k > 0 && expression_end(&tokens[k - 1]) {
             let short = tokens.get(k + 1).is_some_and(|n| n.is_punct(":"));
@@ -905,10 +1027,21 @@ const TENTATIVE: [(&str, &[&str]); 5] = [
     ("jsonserializable", &["jsonserialize"]),
 ];
 
+fn refers_to_global(tokens: &[Token], name: &Token) -> bool {
+    if name.text.starts_with('\\') {
+        return true;
+    }
+    let short = name.text.to_ascii_lowercase();
+    let namespaced = tokens.windows(2).any(|w| w[0].is_ident_ci("namespace") && w[1].kind == TokenKind::Ident);
+    let declared_here = tokens.windows(2).any(|w| w[0].is_ident_ci("interface") && w[1].text.eq_ignore_ascii_case(&short));
+    let imported = tokens.windows(2).any(|w| w[0].is_ident_ci("use") && w[1].text.trim_start_matches('\\').eq_ignore_ascii_case(&short));
+    !declared_here && (!namespaced || imported)
+}
+
 fn untyped_interface_methods(tokens: &[Token]) -> Vec<usize> {
     let mut out = Vec::new();
     for i in 0..tokens.len() {
-        if !tokens[i].is_ident_ci("class") || i > 0 && tokens[i - 1].is_punct("::") {
+        if !(tokens[i].is_ident_ci("class") || tokens[i].is_ident_ci("enum")) || i > 0 && tokens[i - 1].is_punct("::") {
             continue;
         }
         let Some(open) = (i + 1..tokens.len()).find(|&k| tokens[k].is_punct("{") || tokens[k].is_punct(";")) else { continue };
@@ -918,7 +1051,7 @@ fn untyped_interface_methods(tokens: &[Token]) -> Vec<usize> {
         let Some(imp) = (i + 1..open).find(|&k| tokens[k].is_ident_ci("implements")) else { continue };
         let methods: Vec<&str> = tokens[imp + 1..open]
             .iter()
-            .filter(|t| t.kind == TokenKind::Ident)
+            .filter(|t| t.kind == TokenKind::Ident && refers_to_global(tokens, t))
             .filter_map(|t| {
                 let name = t.text.rsplit('\\').next().unwrap_or_default().to_ascii_lowercase();
                 TENTATIVE.iter().find(|(n, _)| *n == name).map(|(_, m)| *m)
@@ -967,16 +1100,291 @@ fn untyped_interface_methods(tokens: &[Token]) -> Vec<usize> {
     out
 }
 
-fn bareword_keys(tokens: &[Token]) -> Vec<usize> {
+fn null_offsets(tokens: &[Token]) -> Vec<usize> {
     (2..tokens.len().saturating_sub(1))
         .filter(|&i| {
-            let t = &tokens[i];
-            t.kind == TokenKind::Ident
-                && tokens[i - 1].is_punct("[")
+            tokens[i].is_ident_ci("null") && tokens[i - 1].is_punct("[") && tokens[i + 1].is_punct("]") && offset_base(tokens, i - 2)
+        })
+        .collect()
+}
+
+fn block_owner(tokens: &[Token], open: usize) -> Option<&Token> {
+    if open == 0 || !tokens[open - 1].is_punct(")") {
+        return None;
+    }
+    let mut depth = 0;
+    let start = (0..open).rev().find(|&k| {
+        if tokens[k].is_punct(")") {
+            depth += 1;
+        } else if tokens[k].is_punct("(") {
+            depth -= 1;
+        }
+        depth == 0
+    })?;
+    start.checked_sub(1).map(|k| &tokens[k])
+}
+
+fn case_semicolons(tokens: &[Token]) -> Vec<usize> {
+    let mut out = Vec::new();
+    for i in 0..tokens.len() {
+        if !tokens[i].is_ident_ci("case") {
+            continue;
+        }
+        let mut depth = 0;
+        let open = (0..i).rev().find(|&k| {
+            if tokens[k].is_punct("}") {
+                depth += 1;
+            } else if tokens[k].is_punct("{") {
+                if depth == 0 {
+                    return true;
+                }
+                depth -= 1;
+            }
+            false
+        });
+        if !open.and_then(|o| block_owner(tokens, o)).is_some_and(|t| t.is_ident_ci("switch")) {
+            continue;
+        }
+        let mut d = 0usize;
+        for t in &tokens[i + 1..] {
+            if t.is_punct("(") || t.is_punct("[") || t.is_punct("{") {
+                d += 1;
+            } else if t.is_punct(")") || t.is_punct("]") || t.is_punct("}") {
+                if d == 0 {
+                    break;
+                }
+                d -= 1;
+            } else if d == 0 && (t.is_punct(":") || t.is_punct("?")) {
+                break;
+            } else if d == 0 && t.is_punct(";") {
+                out.push(i);
+                break;
+            }
+        }
+    }
+    out
+}
+
+fn concat_with_arithmetic(tokens: &[Token]) -> Vec<usize> {
+    let resets = [
+        ";", ",", "=>", "=", "?", ":", "??", "&&", "||", "==", "===", "!=", "!==", "<>", "<", ">", "<=", ">=", "<=>",
+        "and", "or", "xor", "??=", "**=", "<<=", ">>=",
+    ];
+    let mut out = Vec::new();
+    let mut stack = vec![(false, false, None::<usize>)];
+    for (k, t) in tokens.iter().enumerate() {
+        if t.is_punct("(") || t.is_punct("[") || t.is_punct("{") || t.is_punct("#[") {
+            stack.push((false, false, None));
+            continue;
+        }
+        if t.is_punct(")") || t.is_punct("]") || t.is_punct("}") {
+            if stack.len() > 1 {
+                stack.pop();
+            }
+            continue;
+        }
+        let level = stack.last_mut().unwrap();
+        let binary = k > 0 && expression_end(&tokens[k - 1]);
+        let compound = tokens.get(k + 1).is_some_and(|n| n.is_punct("=") && n.start == t.end);
+        if t.kind == TokenKind::CloseTag
+            || (t.kind == TokenKind::Punct && resets.contains(&t.text.as_str()))
+            || (t.kind == TokenKind::Ident && ["and", "or", "xor", "return", "echo", "print"].iter().any(|r| t.is_ident_ci(r)))
+            || compound
+        {
+            *level = (false, false, None);
+        } else if t.is_punct(".") && binary {
+            level.0 = true;
+            level.2.get_or_insert(k);
+        } else if (t.is_punct("+") || t.is_punct("-")) && binary && level.0 {
+            level.1 = true;
+        }
+        if level.0 && level.1 {
+            out.push(level.2.unwrap());
+            *level = (false, false, None);
+        }
+    }
+    out
+}
+
+fn class_bodies(tokens: &[Token]) -> Vec<(usize, usize, usize)> {
+    let mut out = Vec::new();
+    for i in 0..tokens.len() {
+        if !tokens[i].is_ident_ci("class") || i > 0 && (tokens[i - 1].is_punct("::") || tokens[i - 1].is_ident_ci("new")) {
+            continue;
+        }
+        let Some(open) = (i + 1..tokens.len()).find(|&k| tokens[k].is_punct("{") || tokens[k].is_punct(";")) else { continue };
+        if !tokens[open].is_punct("{") {
+            continue;
+        }
+        let mut depth = 0;
+        let close = (open..tokens.len()).find(|&k| {
+            if tokens[k].is_punct("{") {
+                depth += 1;
+            } else if tokens[k].is_punct("}") {
+                depth -= 1;
+            }
+            depth == 0
+        });
+        if let Some(close) = close {
+            out.push((i, open, close));
+        }
+    }
+    out
+}
+
+fn declares_method(tokens: &[Token], open: usize, close: usize, name: &str) -> bool {
+    (open..close).any(|k| tokens[k].is_ident_ci("function") && tokens.get(k + 1).is_some_and(|t| t.is_ident_ci(name)))
+}
+
+fn serializable_without_magic(tokens: &[Token]) -> Vec<usize> {
+    class_bodies(tokens)
+        .into_iter()
+        .filter(|&(i, open, close)| {
+            let implements = tokens[i..open].iter().any(|t| t.text.trim_start_matches('\\').eq_ignore_ascii_case("Serializable"));
+            let extends = tokens[i..open].iter().any(|t| t.is_ident_ci("extends"))
+                || i > 0 && tokens[i - 1].is_ident_ci("abstract");
+            implements && !extends && !declares_method(tokens, open, close, "__serialize")
+        })
+        .filter_map(|(i, _, _)| tokens.get(i + 1).filter(|t| t.kind == TokenKind::Ident).map(|_| i + 1))
+        .collect()
+}
+
+fn dynamic_properties(tokens: &[Token]) -> Vec<usize> {
+    let mut out = Vec::new();
+    for (i, open, close) in class_bodies(tokens) {
+        let header = &tokens[i..open];
+        if header.iter().any(|t| t.is_ident_ci("extends")) || declares_method(tokens, open, close, "__set") {
+            continue;
+        }
+        let attr_start = (0..i).rev().find(|&k| tokens[k].is_punct(";") || tokens[k].is_punct("}") || tokens[k].is_punct("{")).unwrap_or(0);
+        if tokens[attr_start..i].iter().any(|t| t.text.trim_start_matches('\\').eq_ignore_ascii_case("AllowDynamicProperties")) {
+            continue;
+        }
+        let mut declared = std::collections::HashSet::new();
+        let mut depth = 0;
+        let mut uses_trait = false;
+        let modifiers = ["public", "protected", "private", "readonly", "var"];
+        for k in open..close {
+            let t = &tokens[k];
+            if t.is_punct("{") || t.is_punct("(") {
+                depth += 1;
+            } else if t.is_punct("}") || t.is_punct(")") {
+                depth -= 1;
+            } else if depth == 1 && t.is_ident_ci("use") {
+                uses_trait = true;
+            } else if t.kind == TokenKind::Variable {
+                let promoted = depth == 2
+                    && (0..k)
+                        .rev()
+                        .take_while(|&j| !tokens[j].is_punct("(") && !tokens[j].is_punct(","))
+                        .any(|j| modifiers.iter().any(|m| tokens[j].is_ident_ci(m)));
+                if depth == 1 || promoted {
+                    declared.insert(t.text.to_ascii_lowercase());
+                }
+            }
+        }
+        if uses_trait {
+            continue;
+        }
+        let nested: Vec<(usize, usize)> = (open..close)
+            .filter(|&k| tokens[k].is_ident_ci("class") && k > 0 && tokens[k - 1].is_ident_ci("new"))
+            .filter_map(|k| {
+                let body = (k..close).find(|&j| tokens[j].is_punct("{"))?;
+                let mut d = 0;
+                let end = (body..close).find(|&j| {
+                    if tokens[j].is_punct("{") {
+                        d += 1;
+                    } else if tokens[j].is_punct("}") {
+                        d -= 1;
+                    }
+                    d == 0
+                })?;
+                Some((body, end))
+            })
+            .collect();
+        let mut seen = std::collections::HashSet::new();
+        for k in open..close.saturating_sub(2) {
+            if !(tokens[k].kind == TokenKind::Variable && tokens[k].text == "this" && tokens[k + 1].is_punct("->")) {
+                continue;
+            }
+            if nested.iter().any(|&(a, b)| k > a && k < b) {
+                continue;
+            }
+            let name = &tokens[k + 2];
+            if name.kind != TokenKind::Ident || declared.contains(&name.text.to_ascii_lowercase()) {
+                continue;
+            }
+            let mut j = k + 3;
+            while tokens.get(j).is_some_and(|t| t.is_punct("[")) {
+                let mut d = 0;
+                match (j..close).find(|&m| {
+                    if tokens[m].is_punct("[") {
+                        d += 1;
+                    } else if tokens[m].is_punct("]") {
+                        d -= 1;
+                    }
+                    d == 0
+                }) {
+                    Some(end) => j = end + 1,
+                    None => break,
+                }
+            }
+            let Some(next) = tokens.get(j) else { continue };
+            let assigns = next.is_punct("=")
+                || next.is_punct("??=")
+                || (["." , "+", "-", "*", "/", "%", "|", "&", "^"].iter().any(|op| next.is_punct(op))
+                    && tokens.get(j + 1).is_some_and(|n| n.is_punct("=") && n.start == next.end));
+            if assigns && seen.insert(name.text.to_ascii_lowercase()) {
+                out.push(k + 2);
+            }
+        }
+    }
+    out
+}
+
+fn defined_constants(tokens: &[Token]) -> std::collections::HashSet<String> {
+    let mut names = std::collections::HashSet::new();
+    for (i, t) in tokens.iter().enumerate() {
+        if t.is_ident_ci("const") {
+            let mut j = i + 1;
+            while let Some(n) = tokens.get(j).filter(|n| n.kind == TokenKind::Ident) {
+                if tokens.get(j + 1).is_some_and(|x| x.is_punct("=")) {
+                    names.insert(n.text.clone());
+                    break;
+                }
+                if tokens.get(j + 1).is_some_and(|x| x.is_ident_ci("as")) {
+                    j += 2;
+                    continue;
+                }
+                names.insert(n.text.rsplit('\\').next().unwrap_or_default().to_string());
+                j += 1;
+            }
+        }
+        if t.is_ident_ci("define") && tokens.get(i + 1).is_some_and(|n| n.is_punct("(")) {
+            if let Some(name) = tokens.get(i + 2).filter(|n| matches!(n.kind, TokenKind::Str { .. })) {
+                names.insert(name.text.get(1..name.text.len().saturating_sub(1)).unwrap_or_default().to_string());
+            }
+        }
+    }
+    names
+}
+
+fn is_bareword(t: &Token, defined: &std::collections::HashSet<String>) -> bool {
+    t.kind == TokenKind::Ident
+        && !t.text.contains('\\')
+        && t.text.bytes().any(|b| b.is_ascii_lowercase())
+        && !["true", "false", "null"].iter().any(|k| t.is_ident_ci(k))
+        && !(t.text.starts_with("__") && t.text.ends_with("__"))
+        && !defined.contains(&t.text)
+}
+
+fn bareword_keys(tokens: &[Token]) -> Vec<usize> {
+    let defined = defined_constants(tokens);
+    (2..tokens.len().saturating_sub(1))
+        .filter(|&i| {
+            tokens[i - 1].is_punct("[")
                 && tokens[i + 1].is_punct("]")
-                && !t.text.contains('\\')
-                && t.text.bytes().any(|b| b.is_ascii_lowercase())
-                && !["true", "false", "null"].iter().any(|k| t.is_ident_ci(k))
+                && is_bareword(&tokens[i], &defined)
                 && offset_base(tokens, i - 2)
         })
         .collect()
@@ -1099,6 +1507,101 @@ mod tests {
         assert_eq!(names.len(), 3, "{names:?}");
         assert_eq!(count("<?php echo $http_response_header[0];", "deprecated.http_response_header"), 0, "8.5 only");
         assert_eq!(at("<?php echo $http_response_header[0];", (8, 5))[0].0, "deprecated.http_response_header");
+    }
+
+    fn count85(src: &str, id: &str) -> usize {
+        at(src, (8, 5)).iter().filter(|(r, _)| r == id).count()
+    }
+
+    #[test]
+    fn more_call_and_constant_rules() {
+        assert_eq!(count85("<?php implode($items, ', '); implode(', ', $items); join($a, '-'); implode($a);", "removed.implode_order"), 2);
+        assert_eq!(count85("<?php mb_check_encoding(); mb_check_encoding($s); readdir(); readdir($h);", "deprecated.implicit_argument"), 2);
+        assert_eq!(count85("<?php session_set_save_handler('o', 'c', 'r', 'w', 'd', 'g'); session_set_save_handler($h, true);", "deprecated.session_set_save_handler"), 1);
+        assert_eq!(count85("<?php ini_set('session.sid_length', 32); ini_get('mbstring.func_overload'); ini_set('mbstring.func_overload', 0);", "deprecated.ini_setting"), 2);
+        assert_eq!(count85("<?php $a[null] = 1; array_key_exists(null, $a); $b = [null]; $c[0];", "deprecated.null_offset"), 2);
+        assert_eq!(count85("<?php pg_numrows($r); pg_num_rows($r); pg_query($c, $q);", "deprecated.pg_alias"), 1);
+        assert_eq!(count85("<?php $x = ASSERT_ACTIVE; $y = ASSERT_QUIET_EVAL; $z = MHASH_MD5; $w = FILE_BINARY;", "deprecated.assert_constants"), 1);
+        assert_eq!(count85("<?php $y = ASSERT_QUIET_EVAL;", "removed.assert_quiet_eval"), 1);
+        assert_eq!(count85("<?php echo $php_errormsg; echo $HTTP_RAW_POST_DATA; echo $errormsg;", "removed.magic_variable"), 2);
+    }
+
+    #[test]
+    fn case_semicolons_only_in_switch() {
+        let id = "deprecated.case_semicolon";
+        assert_eq!(count85("<?php switch ($a) { case 1; echo 1; break; case 2: break; case Foo::BAR; default: }", id), 2);
+        assert_eq!(count85("<?php enum Suit { case Hearts; case Spades; }", id), 0);
+        assert_eq!(count85("<?php switch ($a) { case $b ? 1 : 2: break; }", id), 0);
+    }
+
+    #[test]
+    fn concat_before_arithmetic_changes_meaning() {
+        let id = "behavior.concat_precedence";
+        assert_eq!(count85("<?php echo 'Sum: ' . $a + $b;", id), 1);
+        assert_eq!(count85("<?php echo 'Sum: ' . ($a + $b); $x = $a - 1 . 'x'; $y = 'a' . -1; $s .= $a + 1;", id), 0);
+        assert_eq!(count85("<?php $u = $base . '/page/' . $n - 1;", id), 1);
+        assert_eq!(count85("<?php f('a' . $b, $c + 1); $d = $e == 'x' . $f ? $g + 1 : 0;", id), 0);
+    }
+
+    #[test]
+    fn dynamic_properties_in_simple_classes() {
+        let id = "deprecated.dynamic_property";
+        let src = "<?php class A {\n public $declared;\n public function __construct(private $promoted, $plain) { $this->declared = 1; $this->promoted = 2; $this->extra = 3; $this->extra = 4; $this->list[] = 5; $this->total += 1; $x = $this->read; }\n}";
+        let found: Vec<_> = analyze_source("a.php", src, PhpVersion::new(8, 2)).into_iter().filter(|f| f.rule_id == id).map(|f| f.snippet).collect();
+        assert_eq!(found.len(), 3, "{found:?}");
+        assert_eq!(count85("<?php class B extends A { function f() { $this->x = 1; } }", id), 0);
+        assert_eq!(count85("<?php #[\\AllowDynamicProperties]\nclass C { function f() { $this->x = 1; } }", id), 0);
+        assert_eq!(count85("<?php class D { use T; function f() { $this->x = 1; } }", id), 0);
+        assert_eq!(count85("<?php class E { function __set($n, $v) {} function f() { $this->x = 1; } }", id), 0);
+        assert_eq!(count85("<?php class F { var $x; function f() { $this->x = 1; } }", id), 0);
+        assert_eq!(count85("<?php class G { function f() { return new class(1) extends V { private $a; function __construct($a) { $this->a = $a; } }; } }", id), 0);
+    }
+
+    #[test]
+    fn serializable_needs_magic_methods() {
+        let id = "deprecated.serializable";
+        assert_eq!(count85("<?php class A implements \\Serializable { function serialize() {} function unserialize($d) {} }", id), 1);
+        assert_eq!(count85("<?php class B implements Serializable { function __serialize(): array { return []; } function __unserialize(array $d): void {} function serialize() {} function unserialize($d) {} }", id), 0);
+    }
+
+    #[test]
+    fn corpus_false_positives_stay_fixed() {
+        let hooks = "<?php class U { public string $name { get => $this->name; } public function __construct(public int $n { set => $value; }) {} }\ninterface I { public string $title { get; } }";
+        assert!(!rule_ids(hooks).iter().any(|r| r == "removed.curly_offset"));
+        assert_eq!(fix_legacy_syntax(hooks), None);
+
+        let keys = "<?php const key = 'k'; define('lower', 1); use const Foo\\bar; echo $a[__line__], $a[key], $a[lower], $a[bar], $a[name];";
+        assert_eq!(fix_legacy_syntax(keys).unwrap().0, keys.replace("$a[name]", "$a['name']"));
+        assert_eq!(fix_legacy_syntax("<?php echo $a{id};").unwrap().0, "<?php echo $a['id'];");
+
+        assert!(rule_ids("<?php function f(#[Attr] (A&B)|null $x = null) { return mysql_query($x); }")
+            .iter()
+            .eq(["removed.mysql"].iter()));
+        assert_eq!(count85("<?php $x = $a ? 1 : 2 and $b ? 3 : 4; switch ($x) { case $a ? 1 : 2: return $b ? 3 : 4; }", "removed.nested_ternary"), 0);
+        assert!(rule_ids("<?php namespace Foo; function __autoload($c) {}").is_empty());
+        assert_eq!(count85("<?php mb_stripos($ct, 'html'); mb_strlen($s, 'BASE64');", "deprecated.mb_encoding"), 1);
+        assert!(at("<?php $r = $res->fetch_assoc(MYSQLI_ASSOC); $redis->ping(); $user->refresh();", (8, 5)).iter().all(|(r, _)| r != "deprecated.mysqli_method"));
+        assert_eq!(count85("<?php function f(mysqli $db) { $db->ping(); }", "deprecated.mysqli_method"), 1);
+        assert_eq!(count85("<?php [$body, $http_response_header] = fetch($u); echo $http_response_header[0];", "deprecated.http_response_header"), 0);
+        assert_eq!(count85("<?php list($body, $http_response_header) = fetch($u); echo $http_response_header[0];", "deprecated.http_response_header"), 0);
+        assert_eq!(count85("<?php abstract class N implements \\Serializable {}", "deprecated.serializable"), 0);
+        assert_eq!(count85("<?php namespace App; interface Countable { function count(); } class C implements Countable { function count() { return 1; } }", "deprecated.tentative_return_type"), 0);
+        assert_eq!(count85("<?php namespace App; class C implements \\Countable { function count() { return 1; } }", "deprecated.tentative_return_type"), 1);
+        assert_eq!(count85("<?php enum E implements JsonSerializable { case A; public function jsonSerialize() { return 1; } }", "deprecated.tentative_return_type"), 1);
+        assert_eq!(count85("<?php fgetcsv($f, length: 0, separator: ','); fgetcsv($f, escape: '');", "deprecated.csv_escape"), 1);
+        assert!(rule_ids("<?php const REAL = 1.0; $x = (\nREAL\n);").iter().all(|r| r != "removed.real_cast"));
+        assert_eq!(count85("<?php new class(function () {}) { function __autoload($c) {} }; each($x);", "removed.each"), 1);
+    }
+
+    #[test]
+    fn many_functions_stay_linear() {
+        let mut src = String::from("<?php\n");
+        for n in 0..20_000 {
+            src.push_str(&format!("function f{n}($a) {{ return $a; }}\n"));
+        }
+        let started = std::time::Instant::now();
+        analyze_source("big.php", &src, PhpVersion::new(8, 5));
+        assert!(started.elapsed() < std::time::Duration::from_secs(1), "{:?}", started.elapsed());
     }
 
     #[test]

@@ -180,11 +180,18 @@ pub fn require_supported_php(php: &Path) -> Result<(), ToolError> {
 }
 
 pub fn php_version(php: &Path) -> Option<String> {
-    let out = command(php).args(["-r", "echo PHP_VERSION;"]).output().ok()?;
-    out.status
-        .success()
-        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
-        .filter(|v| !v.is_empty())
+    let out = command(php)
+        .args(["-d", "display_startup_errors=0", "-d", "display_errors=stderr", "-r", "echo PHP_VERSION;"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(str::trim)
+        .rfind(|l| !l.is_empty())
+        .map(str::to_string)
 }
 
 pub fn find_composer() -> Option<PathBuf> {
@@ -279,7 +286,7 @@ pub fn detect(tools_dir: &Path, php_override: Option<&Path>) -> ToolchainStatus 
 
 const INSTALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10 * 60);
 
-pub fn install_rector(tools_dir: &Path, php_override: Option<&Path>) -> Result<(), ToolError> {
+pub fn install_rector(tools_dir: &Path, php_override: Option<&Path>, cancel: &std::sync::atomic::AtomicBool) -> Result<(), ToolError> {
     let php = find_php(php_override).ok_or(ToolError::PhpMissing)?;
     require_supported_php(&php)?;
     let composer = find_composer().ok_or(ToolError::ComposerMissing)?;
@@ -295,9 +302,15 @@ pub fn install_rector(tools_dir: &Path, php_override: Option<&Path>) -> Result<(
     std::fs::write(&manifest, json).map_err(|e| ToolError::Failed(e.to_string()))?;
     let mut cmd = php_tool_command(&php, &composer);
     cmd.args(["update", "--no-interaction", "--no-progress", "--no-ansi", "--working-dir"]).arg(tools_dir);
-    let out = crate::rector::run_cancellable(cmd, Path::new("composer"), &std::sync::atomic::AtomicBool::new(false), INSTALL_TIMEOUT)
+    let out = crate::rector::run_cancellable(cmd, Path::new("composer"), cancel, INSTALL_TIMEOUT)
         .map_err(|e| match e {
             crate::rector::RectorError::Tool(t) => t,
+            crate::rector::RectorError::TimedOut(minutes) => ToolError::Failed(crate::t!(
+                "Composer {minutes} dakikada bitmediği için durduruldu. İnternet bağlantınızı kontrol edip yeniden deneyin.",
+                "Composer was stopped because it didn't finish in {minutes} minutes. Check your internet connection and try again."
+            )),
+            crate::rector::RectorError::Cancelled => ToolError::Failed(crate::t!("Kurulum durduruldu.", "The installation was stopped.")),
+            crate::rector::RectorError::Io(_, e) => ToolError::Failed(crate::i18n::io_error(&e)),
             other => ToolError::Failed(other.to_string()),
         })?;
     if !out.status.success() {

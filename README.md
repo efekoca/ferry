@@ -180,7 +180,7 @@ Everything runs on your computer:
   - Resources such as curl, GD and XML handles are now objects, so `is_resource()` checks fail.
   - PDO MySQL and SQLite return real integers and floats, so `=== "1"` comparisons fail.
   - Passing `null` through a variable to a built-in function is deprecated.
-  - Dynamic properties are deprecated.
+  - Dynamic properties are deprecated. Ferry finds them only in classes that don't extend another class or use a trait, because a parent could declare the property.
   - Missing `#[\ReturnTypeWillChange]` on `ArrayAccess`, `Iterator` and similar methods is deprecated.
   - Required extensions such as imap or mcrypt may be missing on the new server.
 - **Method calls:** Ferry can't know an object's class without running the code, so a method call such as `$db->ping()` is only flagged when the same file mentions the class (`mysqli`, `Reflection…`, `SplObjectStorage`). Static calls and class constants like `PDO::MYSQL_ATTR_INIT_COMMAND` are always checked.

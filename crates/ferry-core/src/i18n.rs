@@ -87,6 +87,9 @@ macro_rules! t {
 
 pub fn io_error(e: &std::io::Error) -> String {
     use std::io::ErrorKind::*;
+    if cfg!(windows) && matches!(e.raw_os_error(), Some(32 | 33)) {
+        return Text::new("dosya başka bir program tarafından kullanılıyor", "the file is in use by another program").get(lang()).to_string();
+    }
     let text = match e.kind() {
         NotFound => Text::new("dosya ya da klasör bulunamadı", "file or folder not found"),
         PermissionDenied => Text::new("erişim izni yok", "permission denied"),

@@ -99,7 +99,7 @@ fn rector_sees_the_same_files_as_the_scanner() {
     };
     let php = toolchain::find_php(None).expect("php gerekli");
     let dir = tempfile::tempdir().unwrap();
-    let root = dir.path().join("vendor/acme/app");
+    let root = dir.path().join("vendor/[acme] app");
     let nullable = "<?php\nfunction f(Foo $a = null) {}\n";
     for file in ["variables.php", "src/x.inc", "src/m.module", "src/t.phtml", "web/core.install", "var/cache/c.php", "lib/vendor/v.php"] {
         let path = root.join(file);

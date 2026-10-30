@@ -180,7 +180,7 @@ Her şey kendi bilgisayarınızda çalışır:
   - curl, GD ve XML gibi resource'lar artık nesne, bu yüzden `is_resource()` kontrolleri bozulur.
   - PDO MySQL ve SQLite artık gerçek sayı döndürür, bu yüzden `=== "1"` karşılaştırmaları bozulur.
   - Yerleşik fonksiyonlara değişken üzerinden `null` vermek kullanımdan kalktı.
-  - Dinamik property'ler kullanımdan kalktı.
+  - Dinamik property'ler kullanımdan kalktı. Ferry bunları yalnızca başka bir sınıftan türemeyen ve trait kullanmayan sınıflarda bulur, çünkü property üst sınıfta tanımlanmış olabilir.
   - `ArrayAccess`, `Iterator` ve benzeri arayüzlerin metotlarında `#[\ReturnTypeWillChange]` eksikse uyarı verilir.
   - imap ya da mcrypt gibi gerekli eklentiler yeni sunucuda kurulu olmayabilir.
 - **Metot çağrıları:** Ferry kodu çalıştırmadan bir nesnenin sınıfını bilemez. Bu yüzden `$db->ping()` gibi bir metot çağrısı yalnızca aynı dosyada sınıfın adı geçiyorsa (`mysqli`, `Reflection…`, `SplObjectStorage`) işaretlenir. Statik çağrılar ve `PDO::MYSQL_ATTR_INIT_COMMAND` gibi sınıf sabitleri her zaman kontrol edilir.

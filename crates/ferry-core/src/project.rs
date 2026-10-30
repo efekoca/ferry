@@ -28,8 +28,8 @@ pub struct ProjectInfo {
     pub excluded_dirs: Vec<String>,
 }
 
-pub(crate) const PHP_EXTENSIONS: [&str; 14] = [
-    "php", "phtml", "inc", "module", "php3", "php4", "php5", "php7", "phpt", "install", "theme", "profile", "engine", "ctp",
+pub(crate) const PHP_EXTENSIONS: [&str; 13] = [
+    "php", "phtml", "inc", "module", "php3", "php4", "php5", "php7", "install", "theme", "profile", "engine", "ctp",
 ];
 
 const ALWAYS_SKIP: [&str; 8] = [

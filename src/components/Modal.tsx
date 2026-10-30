@@ -75,8 +75,9 @@ export function ConfirmDialog({
   const { t } = useI18n();
   const titleId = useId();
   const confirmRef = useRef<HTMLButtonElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
-  useModal(open, dialogRef, confirmRef, () => {
+  useModal(open, dialogRef, tone === "danger" ? cancelRef : confirmRef, () => {
     if (!loading) onCancel();
   });
 
@@ -92,7 +93,7 @@ export function ConfirmDialog({
           <div className="muted">{children}</div>
         </div>
         <div className="modal__footer">
-          <Button variant="ghost" onClick={onCancel} disabled={loading}>
+          <Button ref={cancelRef} variant="ghost" onClick={onCancel} disabled={loading}>
             {cancelLabel ?? t.common.cancel}
           </Button>
           <Button
