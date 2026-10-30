@@ -347,6 +347,16 @@ pub const FUNCTIONS: &[SymbolRule] = &[
         "Has done nothing since PHP 8.1 and is deprecated in 8.5.")),
     rule!("deprecated.imagedestroy", "imagedestroy", D, (8, 5), REMOVE_CALL, A, NOOP_SINCE_80),
     rule!("deprecated.xml_parser_free", "xml_parser_free", D, (8, 5), REMOVE_CALL, A, NOOP_SINCE_80),
+    rule!("deprecated.openssl_x509_free", "openssl_x509_free", D, (8, 0), REMOVE_CALL, M, NOOP_SINCE_80),
+    rule!("deprecated.openssl_pkey_free", "openssl_pkey_free", D, (8, 0), REMOVE_CALL, M, NOOP_SINCE_80),
+    rule!("deprecated.openssl_free_key", "openssl_free_key", D, (8, 0), REMOVE_CALL, M, NOOP_SINCE_80),
+    rule!("deprecated.shmop_close", "shmop_close", D, (8, 0), REMOVE_CALL, M, NOOP_SINCE_80),
+    rule!("deprecated.intlcal_set", "intlcal_set", D, (8, 4), tx("IntlCalendar::setDate() ya da setDateTime()", "IntlCalendar::setDate() or setDateTime()"), M, Text::new(
+        "intlcal_set() 8.4'te kullanımdan kalktı.",
+        "intlcal_set() is deprecated in 8.4.")),
+    rule!("deprecated.intlgregcal_create_instance", "intlgregcal_create_instance", D, (8, 4), tx("IntlGregorianCalendar::createFromDate() ya da createFromDateTime()", "IntlGregorianCalendar::createFromDate() or createFromDateTime()"), M, Text::new(
+        "intlgregcal_create_instance() 8.4'te kullanımdan kalktı.",
+        "intlgregcal_create_instance() is deprecated in 8.4.")),
     rule!("removed.mbregex_encoding", "mbregex_encoding", R, (8, 0), code("mb_regex_encoding"), A, REMOVED_ALIAS),
     rule!("deprecated.pg_alias", "pg_*", D, (8, 0), tx("pg_ fonksiyonunun yeni adı", "the new pg_ function name"), A, Text::new(
         "Eski pgsql takma adları 8.0'da kullanımdan kalktı; alt çizgili yeni adlarını kullanın.",
@@ -1208,7 +1218,7 @@ pub mod patterns {
         severity: Severity::Deprecated,
         since: (8, 1),
         replacement: tx("'' ya da uygun bir değer", "'' or a suitable value"),
-        fix: FixKind::Likely,
+        fix: FixKind::Manual,
         note: Text::new(
             "Dahili fonksiyonların nullable olmayan parametrelerine null vermek 8.1'de kullanımdan kalktı ve PHP 9'da TypeError olacak.",
             "Passing null to non-nullable parameters of built-in functions is deprecated in 8.1 and will be a TypeError in PHP 9.",
