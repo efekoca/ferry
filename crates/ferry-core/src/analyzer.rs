@@ -1,6 +1,6 @@
 use crate::i18n::{Localized, Text};
 use crate::lexer::{lex, tokenize, Token, TokenKind};
-use crate::rules::{patterns, FixKind, PatternRule, Severity, SymbolRule, CONSTANTS, FUNCTIONS};
+use crate::rules::{patterns, FixKind, MemberKind, PatternRule, Severity, SymbolRule, CONSTANTS, FUNCTIONS, MEMBERS};
 use crate::version::PhpVersion;
 use serde::Serialize;
 use std::path::{Component, Path, PathBuf};
@@ -250,6 +250,11 @@ pub fn analyze_source(file: &str, src: &str, target: PhpVersion) -> Vec<Finding>
         line_starts,
         target,
         local_functions: local_functions(&tokens),
+        classes: tokens
+            .iter()
+            .filter(|t| t.kind == TokenKind::Ident)
+            .map(|t| t.text.rsplit('\\').next().unwrap_or_default().to_ascii_lowercase())
+            .collect(),
         out: Vec::new(),
     };
     for &(line, column) in &lexed.stray_hash_brackets {
@@ -266,6 +271,9 @@ pub fn analyze_source(file: &str, src: &str, target: PhpVersion) -> Vec<Finding>
     }
     for k in bareword_keys(&tokens) {
         ctx.pattern(&patterns::BAREWORD_KEY, &tokens[k], None);
+    }
+    for k in untyped_interface_methods(&tokens) {
+        ctx.pattern(&patterns::RETURN_TYPE_WILL_CHANGE, &tokens[k], None);
     }
     let mut i = 0;
     while i < tokens.len() {
@@ -301,6 +309,9 @@ pub fn analyze_source(file: &str, src: &str, target: PhpVersion) -> Vec<Finding>
                     ctx.dollar_brace(tok);
                 }
             }
+            TokenKind::Variable if tok.text == "http_response_header" => {
+                ctx.pattern(&patterns::HTTP_RESPONSE_HEADER, tok, None);
+            }
             TokenKind::Str { interpolates, .. } => {
                 if *interpolates {
                     ctx.dollar_brace(tok);
@@ -329,6 +340,7 @@ struct Ctx<'a> {
     line_starts: Vec<usize>,
     target: PhpVersion,
     local_functions: std::collections::HashSet<String>,
+    classes: std::collections::HashSet<String>,
     out: Vec<Finding>,
 }
 
@@ -469,6 +481,7 @@ impl<'a> Ctx<'a> {
         }
 
         if is_member {
+            self.member(tokens, i);
             return;
         }
 
@@ -548,6 +561,49 @@ impl<'a> Ctx<'a> {
             }
             self.symbol(rule, tok, false);
         }
+    }
+
+    fn member(&mut self, tokens: &[Token], i: usize) {
+        let tok = &tokens[i];
+        let lower = tok.text.to_ascii_lowercase();
+        let is_call = tokens.get(i + 1).is_some_and(|n| n.is_punct("("));
+        let (kind, class) = if tokens[i - 1].is_punct("::") {
+            let Some(class) = i.checked_sub(2).map(|k| &tokens[k]).filter(|t| t.kind == TokenKind::Ident) else { return };
+            let name = class.text.rsplit('\\').next().unwrap_or_default();
+            (if is_call { MemberKind::StaticCall } else { MemberKind::Constant }, Some(name))
+        } else if is_call {
+            (MemberKind::Method, None)
+        } else {
+            return;
+        };
+        let Some(m) = MEMBERS.iter().find(|m| {
+            m.kind == kind
+                && m.rule.matches(&lower)
+                && match class {
+                    Some(c) => c.to_ascii_lowercase().starts_with(m.class),
+                    None => self.classes.iter().any(|c| c.starts_with(m.class)),
+                }
+        }) else {
+            return;
+        };
+        if !self.applies(m.rule.since()) {
+            return;
+        }
+        let title = match (kind, class) {
+            (MemberKind::Method, _) => format!("->{}()", tok.text),
+            (MemberKind::StaticCall, Some(c)) => format!("{c}::{}()", tok.text),
+            (_, c) => format!("{}::{}", c.unwrap_or_default(), tok.text),
+        };
+        let hit = Hit {
+            rule_id: m.rule.id,
+            title: Localized::same(title),
+            message: m.rule.note,
+            since: m.rule.since(),
+            severity: m.rule.severity(),
+            fix: m.rule.fix,
+            replacement: m.rule.replacement,
+        };
+        self.push(hit, tok.line, tok.column);
     }
 
     fn mb_encoding(&mut self, tokens: &[Token], i: usize) {
@@ -841,6 +897,76 @@ fn php4_constructors(tokens: &[Token]) -> Vec<usize> {
     out
 }
 
+const TENTATIVE: [(&str, &[&str]); 5] = [
+    ("arrayaccess", &["offsetexists", "offsetget", "offsetset", "offsetunset"]),
+    ("iterator", &["current", "key", "next", "rewind", "valid"]),
+    ("iteratoraggregate", &["getiterator"]),
+    ("countable", &["count"]),
+    ("jsonserializable", &["jsonserialize"]),
+];
+
+fn untyped_interface_methods(tokens: &[Token]) -> Vec<usize> {
+    let mut out = Vec::new();
+    for i in 0..tokens.len() {
+        if !tokens[i].is_ident_ci("class") || i > 0 && tokens[i - 1].is_punct("::") {
+            continue;
+        }
+        let Some(open) = (i + 1..tokens.len()).find(|&k| tokens[k].is_punct("{") || tokens[k].is_punct(";")) else { continue };
+        if !tokens[open].is_punct("{") {
+            continue;
+        }
+        let Some(imp) = (i + 1..open).find(|&k| tokens[k].is_ident_ci("implements")) else { continue };
+        let methods: Vec<&str> = tokens[imp + 1..open]
+            .iter()
+            .filter(|t| t.kind == TokenKind::Ident)
+            .filter_map(|t| {
+                let name = t.text.rsplit('\\').next().unwrap_or_default().to_ascii_lowercase();
+                TENTATIVE.iter().find(|(n, _)| *n == name).map(|(_, m)| *m)
+            })
+            .flatten()
+            .copied()
+            .collect();
+        if methods.is_empty() {
+            continue;
+        }
+        let mut depth = 0;
+        for k in open..tokens.len() {
+            if tokens[k].is_punct("{") {
+                depth += 1;
+            } else if tokens[k].is_punct("}") {
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+            } else if depth == 1 && tokens[k].is_ident_ci("function") {
+                let Some(name) = tokens.get(k + 1).filter(|t| t.kind == TokenKind::Ident) else { continue };
+                if !methods.contains(&name.text.to_ascii_lowercase().as_str()) {
+                    continue;
+                }
+                let mut d = 0;
+                let close = (k + 2..tokens.len()).find(|&j| {
+                    if tokens[j].is_punct("(") {
+                        d += 1;
+                    } else if tokens[j].is_punct(")") {
+                        d -= 1;
+                    }
+                    d == 0
+                });
+                let typed = close.is_some_and(|c| tokens.get(c + 1).is_some_and(|t| t.is_punct(":")));
+                let start = (0..k)
+                    .rev()
+                    .find(|&j| tokens[j].is_punct(";") || tokens[j].is_punct("{") || tokens[j].is_punct("}"))
+                    .unwrap_or(0);
+                let marked = tokens[start..k].iter().any(|t| t.text.trim_start_matches('\\').eq_ignore_ascii_case("ReturnTypeWillChange"));
+                if !typed && !marked {
+                    out.push(k + 1);
+                }
+            }
+        }
+    }
+    out
+}
+
 fn bareword_keys(tokens: &[Token]) -> Vec<usize> {
     (2..tokens.len().saturating_sub(1))
         .filter(|&i| {
@@ -943,6 +1069,36 @@ mod tests {
         let f = analyze_source("a.php", "<?php class Object {} class Foo {} function match() {} class M { function match() {} }", PhpVersion::new(8, 4));
         let reserved: Vec<_> = f.iter().filter(|f| f.rule_id == "removed.reserved_name").map(|f| f.since.to_string()).collect();
         assert_eq!(reserved, ["7.2", "8.0"]);
+    }
+
+    fn at(src: &str, target: (u32, u32)) -> Vec<(String, String)> {
+        analyze_source("a.php", src, PhpVersion::new(target.0, target.1))
+            .into_iter()
+            .map(|f| (f.rule_id, f.title.get(crate::i18n::Lang::En).to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn method_calls_and_class_constants() {
+        let src = "<?php\n$db = new mysqli('h'); $db->ping(); $r = new \\ReflectionProperty($o, 'x'); $r->setAccessible(true);\n$s = new SplObjectStorage(); $s->attach($o);\nReflectionClass::export('A'); $pdo->setAttribute(PDO::MYSQL_ATTR_INIT_COMMAND, 'x'); $x = PDO::FETCH_SERIALIZE;";
+        let hits = at(src, (8, 5));
+        let titles: Vec<&str> = hits.iter().map(|(_, t)| t.as_str()).collect();
+        assert_eq!(titles, ["->ping()", "->setAccessible()", "->attach()", "ReflectionClass::export()", "PDO::MYSQL_ATTR_INIT_COMMAND", "PDO::FETCH_SERIALIZE"]);
+        assert!(at("<?php $client->ping(); $set->attach($x); $q->refresh();", (8, 5)).is_empty(), "no hint, no finding");
+        assert!(at("<?php $r = new ReflectionMethod('A', 'b'); $r->setAccessible(true);", (8, 4)).is_empty(), "below the target");
+    }
+
+    #[test]
+    fn interface_methods_need_return_types() {
+        let src = "<?php class C implements \\Countable, ArrayAccess, JsonSerializable {\n public function count() { return 0; }\n public function offsetGet($o): mixed { return 1; }\n #[\\ReturnTypeWillChange]\n public function offsetSet($o, $v) {}\n public function offsetExists($o) { return true; }\n public function jsonSerialize() { return []; }\n public function other() {}\n}";
+        let names: Vec<String> = analyze_source("a.php", src, PhpVersion::new(8, 1))
+            .into_iter()
+            .filter(|f| f.rule_id == "deprecated.tentative_return_type")
+            .map(|f| f.snippet)
+            .collect();
+        assert_eq!(names.len(), 3, "{names:?}");
+        assert_eq!(count("<?php echo $http_response_header[0];", "deprecated.http_response_header"), 0, "8.5 only");
+        assert_eq!(at("<?php echo $http_response_header[0];", (8, 5))[0].0, "deprecated.http_response_header");
     }
 
     #[test]

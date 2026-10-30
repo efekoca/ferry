@@ -259,6 +259,57 @@ impl PatternRule {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemberKind {
+    Method,
+    StaticCall,
+    Constant,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct MemberRule {
+    pub kind: MemberKind,
+    pub class: &'static str,
+    pub rule: SymbolRule,
+}
+
+const fn member(kind: MemberKind, class: &'static str, rule: SymbolRule) -> MemberRule {
+    MemberRule { kind, class, rule }
+}
+
+use MemberKind::{Constant as K, Method as Mt, StaticCall as St};
+
+pub const MEMBERS: &[MemberRule] = &[
+    member(Mt, "mysqli", rule!("deprecated.mysqli_method", "ping", D, (8, 4), None, M, Text::new(
+        "mysqli::ping() kullanımdan kalktı; kopan bağlantı artık kendiliğinden yeniden kurulmuyor.",
+        "mysqli::ping() is deprecated; dropped connections are no longer reconnected automatically."))),
+    member(Mt, "mysqli", rule!("deprecated.mysqli_method", "kill", D, (8, 4), tx("KILL CONNECTION sorgusu", "a KILL CONNECTION query"), M, DEPRECATED_FN)),
+    member(Mt, "mysqli", rule!("deprecated.mysqli_method", "refresh", D, (8, 4), tx("FLUSH sorguları", "FLUSH queries"), M, DEPRECATED_FN)),
+    member(Mt, "reflection", rule!("deprecated.set_accessible", "setaccessible", D, (8, 5), REMOVE_CALL, A, Text::new(
+        "setAccessible() PHP 8.1'den beri hiçbir şey yapmıyor ve 8.5'te kullanımdan kalktı; çağrı silinebilir.",
+        "setAccessible() has done nothing since PHP 8.1 and is deprecated in 8.5; the call can be removed."))),
+    member(Mt, "splobjectstorage", rule!("deprecated.spl_object_storage", "attach", D, (8, 5), code("offsetSet()"), A, DEPRECATED_FN)),
+    member(Mt, "splobjectstorage", rule!("deprecated.spl_object_storage", "detach", D, (8, 5), code("offsetUnset()"), A, DEPRECATED_FN)),
+    member(Mt, "splobjectstorage", rule!("deprecated.spl_object_storage", "contains", D, (8, 5), code("offsetExists()"), A, DEPRECATED_FN)),
+    member(St, "reflection", rule!("removed.reflection_export", "export", R, (8, 0), tx("(string) new ReflectionX(...)", "(string) new ReflectionX(...)"), M, Text::new(
+        "Reflection*::export() PHP 8.0'da kaldırıldı; nesneyi metne çevirip yazdırın.",
+        "Reflection*::export() was removed in PHP 8.0; cast the object to a string and print it instead."))),
+    member(K, "pdo", rule!("deprecated.pdo_driver_constant", "mysql_attr_*", D, (8, 5), code("Pdo\\Mysql::ATTR_*"), A, PDO_DRIVER)),
+    member(K, "pdo", rule!("deprecated.pdo_driver_constant", "pgsql_*", D, (8, 5), code("Pdo\\Pgsql::*"), A, PDO_DRIVER)),
+    member(K, "pdo", rule!("deprecated.pdo_driver_constant", "sqlite_*", D, (8, 5), code("Pdo\\Sqlite::*"), A, PDO_DRIVER)),
+    member(K, "pdo", rule!("deprecated.pdo_driver_constant", "odbc_*", D, (8, 5), code("Pdo\\Odbc::*"), A, PDO_DRIVER)),
+    member(K, "pdo", rule!("deprecated.pdo_driver_constant", "dblib_*", D, (8, 5), code("Pdo\\Dblib::*"), A, PDO_DRIVER)),
+    member(K, "pdo", rule!("deprecated.pdo_driver_constant", "fb_*", D, (8, 5), code("Pdo\\Firebird::*"), A, PDO_DRIVER)),
+    member(K, "pdo", rule!("deprecated.pdo_fetch_serialize", "fetch_serialize", D, (8, 1), None, M, Text::new(
+        "PDO::FETCH_SERIALIZE, Serializable arayüzüne dayandığı için 8.1'de kullanımdan kalktı.",
+        "PDO::FETCH_SERIALIZE relies on the Serializable interface and is deprecated in 8.1."))),
+];
+
+const PDO_DRIVER: Text = Text::new(
+    "PDO'nun sürücüye özel sabitleri 8.5'te kullanımdan kalktı; sürücünün kendi sınıfındaki sabiti kullanın.",
+    "PDO's driver-specific constants are deprecated in 8.5; use the constant on the driver's own class.",
+);
+
 pub mod patterns {
     use super::*;
 
@@ -506,6 +557,30 @@ pub mod patterns {
         note: Text::new(
             "HTML-ENTITIES, BASE64, UUENCODE ve QPrint kodlamaları mbstring'de 8.2'de kullanımdan kalktı.",
             "The HTML-ENTITIES, BASE64, UUENCODE and QPrint encodings are deprecated in mbstring as of 8.2.",
+        ),
+    };
+    pub const RETURN_TYPE_WILL_CHANGE: PatternRule = PatternRule {
+        id: "deprecated.tentative_return_type",
+        title: Text::new("Dönüş tipi eksik arayüz metodu", "Interface method without a return type"),
+        severity: Severity::Deprecated,
+        since: (8, 1),
+        replacement: code("#[\\ReturnTypeWillChange]"),
+        fix: FixKind::Manual,
+        note: Text::new(
+            "ArrayAccess, Iterator, Countable gibi yerleşik arayüzlerin metotları PHP 8.1'den itibaren dönüş tipi bekliyor. Dönüş tipini yazın ya da #[\\ReturnTypeWillChange] ekleyin.",
+            "Since PHP 8.1, methods of built-in interfaces such as ArrayAccess, Iterator and Countable expect a return type. Add the return type or #[\\ReturnTypeWillChange].",
+        ),
+    };
+    pub const HTTP_RESPONSE_HEADER: PatternRule = PatternRule {
+        id: "deprecated.http_response_header",
+        title: Text::new("$http_response_header", "$http_response_header"),
+        severity: Severity::Deprecated,
+        since: (8, 5),
+        replacement: code("http_get_last_response_headers()"),
+        fix: FixKind::Manual,
+        note: Text::new(
+            "Kendiliğinden oluşan $http_response_header değişkeni 8.5'te kullanımdan kalktı.",
+            "The magic $http_response_header variable is deprecated in 8.5.",
         ),
     };
     pub const RESERVED_NAME: PatternRule = PatternRule {

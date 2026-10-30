@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use ferry_core::deps::{self, DependencyStatus};
 use ferry_core::project::{self, Framework};
-use ferry_core::rules::{patterns, CONSTANTS, FUNCTIONS};
+use ferry_core::rules::{patterns, CONSTANTS, FUNCTIONS, MEMBERS};
 use ferry_core::{analyzer, report, PhpVersion};
 
 fn demo(name: &str) -> PathBuf {
@@ -47,11 +47,14 @@ fn kuzey_magaza_triggers_every_rule() {
         patterns::CSV_ESCAPE.id,
         patterns::MB_ENCODING.id,
         patterns::RESERVED_NAME.id,
+        patterns::RETURN_TYPE_WILL_CHANGE.id,
+        patterns::HTTP_RESPONSE_HEADER.id,
     ];
     let missing: Vec<&str> = FUNCTIONS
         .iter()
         .chain(CONSTANTS)
         .map(|r| r.id)
+        .chain(MEMBERS.iter().map(|m| m.rule.id))
         .chain(pattern_ids)
         .filter(|id| !found.contains(id))
         .collect();
