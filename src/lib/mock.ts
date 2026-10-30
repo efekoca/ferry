@@ -139,6 +139,7 @@ const DEPS: Omit<DependencyReport, "target" | "rootStatus"> = {
   hasLockFile: true,
   packages: [
     { name: "phpmailer/phpmailer", version: "v5.2.28", phpConstraint: ">=5.0.0 <8.0", status: "incompatible", dev: false },
+    { name: "illuminate/database", version: "v8.83.27", phpConstraint: "^7.3|^8.0", status: "incompatible", dev: false, note: L("Bu sürüm resmi olarak en fazla PHP 8.1'i destekliyor.", "This version officially supports PHP up to 8.1.") },
     { name: "guzzlehttp/guzzle", version: "6.5.8", phpConstraint: "^7.2.5 || ^8.0", status: "compatible", dev: false },
     { name: "monolog/monolog", version: "1.27.1", phpConstraint: ">=5.3.0", status: "compatible", dev: false },
     { name: "tecnickcom/tcpdf", version: "6.2.26", phpConstraint: null, status: "unknown", dev: false },

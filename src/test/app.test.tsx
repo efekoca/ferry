@@ -245,6 +245,15 @@ describe("Ferry app", () => {
     expect(within(dialog).getByRole("button", { name: "Vazgeç" })).toHaveFocus();
   });
 
+  it("explains packages whose real PHP limit is lower than their constraint", async () => {
+    const user = setup();
+    await openAndScan(user);
+    await user.click(nav(/Bağımlılıklar/));
+    const row = (await screen.findByText("illuminate/database")).closest("tr")!;
+    expect(within(row).getByText("Bu sürüm resmi olarak en fazla PHP 8.1'i destekliyor.")).toBeInTheDocument();
+    expect(within(row).getByText("Uyumsuz")).toBeInTheDocument();
+  });
+
   it("supports keyboard selection in the version picker", async () => {
     const user = setup();
     await user.click(await screen.findByRole("button", { name: "Proje klasörü seçin" }));

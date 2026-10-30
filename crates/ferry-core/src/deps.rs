@@ -1,3 +1,4 @@
+use crate::i18n::Localized;
 use crate::version::{constraint_allows, PhpVersion};
 use serde::Serialize;
 use std::path::Path;
@@ -18,6 +19,7 @@ pub struct Dependency {
     pub php_constraint: Option<String>,
     pub status: DependencyStatus,
     pub dev: bool,
+    pub note: Option<Localized>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -67,13 +69,33 @@ pub fn check(root: &Path, target: PhpVersion) -> DependencyReport {
                     .pointer("/require/php")
                     .and_then(|v| v.as_str())
                     .map(str::to_string);
-                let status = status_for(php_constraint.as_deref(), target);
+                let mut status = status_for(php_constraint.as_deref(), target);
+                let mut note = None;
+                if let Some(limit) = crate::framework::package_limit(&name, &version).filter(|l| target > l.max) {
+                    let (max, t) = (limit.max.to_string(), target.to_string());
+                    if limit.official {
+                        status = DependencyStatus::Incompatible;
+                        note = Some(Localized {
+                            tr: format!("Bu sürüm resmi olarak en fazla PHP {max}'i destekliyor."),
+                            en: format!("This version officially supports PHP up to {max}."),
+                        });
+                    } else {
+                        if status == DependencyStatus::Compatible {
+                            status = DependencyStatus::Unknown;
+                        }
+                        note = Some(Localized {
+                            tr: format!("Bu sürümün bakımı PHP {t} çıkmadan bitti; bu sürümle hiç test edilmedi."),
+                            en: format!("This version stopped receiving fixes before PHP {t} came out and was never tested on it."),
+                        });
+                    }
+                }
                 packages.push(Dependency {
                     name,
                     version,
                     php_constraint,
                     status,
                     dev,
+                    note,
                 });
             }
         }
@@ -131,6 +153,32 @@ mod tests {
                 ("good/lib", DependencyStatus::Compatible, false),
             ]
         );
+    }
+
+    #[test]
+    fn known_framework_limits_beat_loose_constraints() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("composer.lock"),
+            r#"{
+              "packages": [
+                {"name": "laravel/framework", "version": "v9.52.16", "require": {"php": "^8.0.2"}},
+                {"name": "illuminate/support", "version": "v11.30.0", "require": {"php": "^8.2"}},
+                {"name": "symfony/http-kernel", "version": "v5.4.40", "require": {"php": ">=7.2.5"}},
+                {"name": "symfony/console", "version": "v5.4.40", "require": {"php": ">=7.2.5"}}
+              ]
+            }"#,
+        )
+        .unwrap();
+        let r = check(dir.path(), "8.5".parse().unwrap());
+        let row = |n: &str| r.packages.iter().find(|p| p.name == n).unwrap();
+        assert_eq!(row("laravel/framework").status, DependencyStatus::Incompatible);
+        assert!(row("laravel/framework").note.as_ref().unwrap().en.contains("up to 8.2"));
+        assert_eq!(row("illuminate/support").status, DependencyStatus::Incompatible);
+        assert_eq!(row("symfony/http-kernel").status, DependencyStatus::Unknown);
+        assert!(row("symfony/console").note.is_none(), "only core packages carry the Symfony limit");
+        let ok = check(dir.path(), "8.2".parse().unwrap());
+        assert!(ok.packages.iter().find(|p| p.name == "laravel/framework").unwrap().note.is_none());
     }
 
     #[test]

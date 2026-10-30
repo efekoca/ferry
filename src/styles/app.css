@@ -2303,3 +2303,9 @@ html[data-platform="macos"] .sidebar {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
 }
+
+.dep-note {
+  margin-top: 2px;
+  font-size: var(--text-sm);
+  color: var(--text-2);
+}

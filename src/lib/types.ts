@@ -72,6 +72,7 @@ export interface Dependency {
   phpConstraint: string | null;
   status: DependencyStatus;
   dev: boolean;
+  note?: Localized | null;
 }
 
 export interface DependencyReport {

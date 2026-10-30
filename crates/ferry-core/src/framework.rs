@@ -62,6 +62,29 @@ const SYMFONY_MAINTAINED_UNTIL: [(Version, Option<Version>); 18] = [
     ((9, 0), None),
 ];
 
+pub(crate) struct PackageLimit {
+    pub max: PhpVersion,
+    pub official: bool,
+}
+
+pub(crate) fn package_limit(name: &str, version: &str) -> Option<PackageLimit> {
+    let current = version_parts(version)?;
+    let laravel = matches!(name, "laravel/framework" | "laravel/lumen-framework") || name.starts_with("illuminate/");
+    let (max, official) = if laravel {
+        (LARAVEL_MAX_PHP.iter().find(|(m, _)| *m == current.0.max(5))?.1, true)
+    } else if matches!(name, "drupal/core" | "drupal/core-recommended") {
+        (table_lookup(&DRUPAL_MAX_PHP, current)?, true)
+    } else if matches!(name, "symfony/framework-bundle" | "symfony/http-kernel" | "symfony/symfony") {
+        (table_lookup(&SYMFONY_MAINTAINED_UNTIL, current)??, false)
+    } else {
+        return None;
+    };
+    Some(PackageLimit {
+        max: PhpVersion::new(max.0, max.1),
+        official,
+    })
+}
+
 pub fn check(root: &Path, framework: Framework, target: PhpVersion) -> Vec<Finding> {
     match framework {
         Framework::Laravel => laravel(root, target).into_iter().collect(),

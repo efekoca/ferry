@@ -1,6 +1,12 @@
 (async () => {
   const invoke = window.__TAURI_INTERNALS__.invoke;
-  const emit = (m) => invoke("plugin:event|emit", { event: "e2e://log", payload: String(m) });
+  let lastLabel = "start";
+  const emit = (m) => {
+    lastLabel = String(m).slice(0, 80);
+    console.warn("E2E " + lastLabel);
+    return invoke("plugin:event|emit", { event: "e2e://log", payload: String(m) });
+  };
+  setInterval(() => console.warn("E2E alive after: " + lastLabel), 10000);
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const until = async (fn, what, ms = 30000) => {
     const start = Date.now();
@@ -182,12 +188,11 @@
       await click("Geri yükle", confirm);
       await until(() => seen.slice(before).includes("Geri yüklendi"), "restored toast", 30000);
 
-      await click("Yedeği sil", $$("tbody tr")[0]).catch(async () => {
-        const del = $$("tbody tr")[0].querySelector('button[aria-label="Yedeği sil"]');
-        check(del, "delete button");
-        del.click();
-      });
+      emit("  deleting snapshot");
+      (await until(() => $('tbody tr button[aria-label="Yedeği sil"]'), "delete button")).click();
+      emit("  confirming delete");
       await click("Sil", await dialog());
+      emit("  waiting for empty history");
       await until(() => text().includes("Henüz bir değişiklik uygulanmadı"), "history empty after delete");
     },
 

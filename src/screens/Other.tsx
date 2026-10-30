@@ -53,7 +53,7 @@ function DepBadge({ status }: { status: DependencyStatus }) {
 }
 
 export function Dependencies() {
-  const { t } = useI18n();
+  const { t, loc } = useI18n();
   const { deps, scan, runScan, scanning, target } = useStore();
   const [showDev, setShowDev] = useState(true);
 
@@ -148,7 +148,10 @@ export function Dependencies() {
                         <span className="mono selectable">{p.name}</span> {p.dev && <Badge>dev</Badge>}
                       </td>
                       <td className="mono subtle">{p.version}</td>
-                      <td className="mono">{p.phpConstraint ?? <span className="subtle">{t.deps.unspecified}</span>}</td>
+                      <td>
+                        <span className="mono">{p.phpConstraint ?? <span className="subtle">{t.deps.unspecified}</span>}</span>
+                        {p.note && <div className="dep-note">{loc(p.note)}</div>}
+                      </td>
                       <td>
                         <DepBadge status={p.status} />
                       </td>

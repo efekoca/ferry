@@ -98,7 +98,10 @@ fn laravel_api_is_nearly_ready() {
     assert!(report::summarize(&result.findings).score >= 80);
     let deps = deps::check(&demo("laravel-api"), PhpVersion::new(8, 5));
     assert_eq!(deps.root_status, DependencyStatus::Compatible);
-    assert!(deps.packages.iter().all(|p| p.status == DependencyStatus::Compatible));
+    let framework = deps.packages.iter().find(|p| p.name == "laravel/framework").unwrap();
+    assert_eq!(framework.status, DependencyStatus::Incompatible, "Laravel 10 stops at PHP 8.3");
+    assert!(framework.note.is_some());
+    assert!(deps.packages.iter().filter(|p| p.name != "laravel/framework").all(|p| p.status == DependencyStatus::Compatible));
 }
 
 #[test]

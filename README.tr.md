@@ -80,7 +80,9 @@ Ferry, Rector'ın tek başına çözemediği durumları da ele alır. Örneğin 
 
 **Bağımlılıklar** sayfası, kilitli her paketi `composer.lock`'ta bildirdiği PHP gereksinimine göre hedef sürümle karşılaştırır. Projenin `composer.json`'daki kendi PHP kısıtı da kontrol edilir.
 
-![PHP 8.4 ile uyumsuz iki paket, projenin PHP kısıtı ve her paketin sürümü, PHP gereksinimi ve durumunu gösteren Bağımlılıklar sayfası](assets/readme/dependencies-tr.webp)
+`^8.0` gibi bir gereksinim, paketin en yeni PHP'de çalıştığı anlamına gelmeyebilir. Laravel (`laravel/framework`, `illuminate/*`), Drupal çekirdeği ve Symfony'nin çekirdek paketleri için Ferry, framework'ün yayımladığı destek aralığını da kullanır ve farkı gereksinimin altında açıklar.
+
+![PHP 8.4 ile uyumsuz üç paket, projenin PHP kısıtı ve her paketin sürümü, PHP gereksinimi ve durumunu gösteren Bağımlılıklar sayfası](assets/readme/dependencies-tr.webp)
 
 Her paket **Uyumlu**, **Uyumsuz** ya da **Belirsiz** (paket bir PHP gereksinimi bildirmiyorsa) olarak işaretlenir. Geliştirme paketleri etiketlidir; **Sadece üretim** seçeneği onları gizler.
 

@@ -80,7 +80,9 @@ Ferry handles cases Rector cannot on its own. For example, a file that uses `$st
 
 The **Dependencies** page checks every locked package against the target version, using the PHP requirement each package declares in `composer.lock`. The project's own PHP constraint in `composer.json` is checked too.
 
-![Dependencies page with two incompatible packages for PHP 8.4, the project's PHP constraint, and each package's version, PHP requirement and status](assets/readme/dependencies-en.webp)
+A declared requirement like `^8.0` doesn't always mean the package works on the newest PHP. For Laravel (`laravel/framework`, `illuminate/*`), Drupal core, and Symfony's core packages, Ferry also uses the framework's published support range and explains the difference under the requirement.
+
+![Dependencies page with three incompatible packages for PHP 8.4, the project's PHP constraint, and each package's version, PHP requirement and status](assets/readme/dependencies-en.webp)
 
 Each package is marked **Compatible**, **Incompatible**, or **Unknown** (when the package declares no PHP requirement). Development packages are labeled, and **Production only** hides them.
 
