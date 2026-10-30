@@ -86,6 +86,8 @@ jobs:
           echo "FERRY_TEST_TOOLS=$RUNNER_TEMP/tools" >> "$GITHUB_ENV"
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace --no-fail-fast
+      - name: Native e2e
+        run: pnpm e2e:native
 
   macos:
     if: startsWith(github.ref, 'refs/tags/v') || inputs.macos || inputs.bundle
