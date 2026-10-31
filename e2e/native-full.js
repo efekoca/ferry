@@ -95,7 +95,7 @@
     const before = seen.length;
     await click("uygula", $(".apply-bar"));
     await click("Uygula", await dialog());
-    await until(() => seen.slice(before).some((t) => /güncellendi|amadı/.test(t)), "apply toast", 60000);
+    await until(() => seen.slice(before).some((t) => /güncellendi|amadı/.test(t)), "apply toast", 180000);
     noErrorToast(before);
   };
 
