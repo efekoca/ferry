@@ -168,10 +168,11 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
       const dark = theme === "dark" || (theme === "system" && !!media?.matches);
       document.documentElement.dataset.theme = dark ? "dark" : "light";
     };
+    api?.setWindowTheme(theme === "system" ? null : theme).catch(() => {});
     apply();
     media?.addEventListener?.("change", apply);
     return () => media?.removeEventListener?.("change", apply);
-  }, [theme]);
+  }, [theme, api]);
 
   const setTheme = useCallback((next: Theme) => {
     setThemeState(next);

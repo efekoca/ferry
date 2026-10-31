@@ -215,6 +215,21 @@ describe("Ferry app", () => {
     expect(alert.closest("[role=alert]")).toHaveTextContent("includes/helpers.php — Parse error on line 3");
   });
 
+  it("applies the chosen theme to the native window too", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    const themes: (string | null)[] = [];
+    api.setWindowTheme = async (theme) => {
+      themes.push(theme);
+    };
+    render(<App api={api} />);
+    await user.click(await screen.findByRole("button", { name: /Ayarlar/ }));
+    await user.click(await screen.findByRole("radio", { name: /Açık/ }));
+    await user.click(screen.getByRole("radio", { name: /Koyu/ }));
+    await user.click(screen.getByRole("radio", { name: /Sistem/ }));
+    await waitFor(() => expect(themes).toEqual([null, "light", "dark", null]));
+  });
+
   it("switches the whole interface to English and remembers it", async () => {
     const user = setup();
     await user.click(await screen.findByRole("button", { name: /Ayarlar/ }));
