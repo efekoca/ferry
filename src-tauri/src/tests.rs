@@ -271,3 +271,15 @@ fn cancelling_one_project_leaves_other_previews_running() {
     h.ok("cancel_rector_preview", json!({}));
     assert!(b.load(Ordering::Relaxed));
 }
+
+#[test]
+fn missing_folders_are_shown_with_native_separators() {
+    let missing = std::env::temp_dir().join("ferry-missing").to_string_lossy().into_owned() + "/sub/dir";
+    let shown = normalize_path(missing.clone());
+    if cfg!(windows) {
+        assert!(!shown.contains('/'), "{shown}");
+        assert!(shown.ends_with(r"\sub\dir"), "{shown}");
+    } else {
+        assert_eq!(shown, missing);
+    }
+}
