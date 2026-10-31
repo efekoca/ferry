@@ -22,6 +22,13 @@ pub struct ProjectIndex {
     pub framework: Option<crate::project::Framework>,
     functions: HashSet<String>,
     types: HashMap<String, Vec<TypeInfo>>,
+    interfaces: HashMap<String, Vec<InterfaceInfo>>,
+}
+
+#[derive(Debug, Clone)]
+struct InterfaceInfo {
+    parents: Vec<String>,
+    declares_methods: bool,
 }
 
 impl ProjectIndex {
@@ -63,6 +70,41 @@ impl ProjectIndex {
         for decl in type_decls(tokens) {
             let name = decl.name;
             self.types.entry(name).or_default().push(decl.decl.info);
+        }
+        for i in 0..tokens.len() {
+            if !tokens[i].is_ident_ci("interface") || i > 0 && tokens[i - 1].is_punct("::") {
+                continue;
+            }
+            let Some(name) = tokens.get(i + 1).filter(|n| n.kind == TokenKind::Ident) else { continue };
+            let Some(open) = (i + 1..tokens.len()).find(|&k| tokens[k].is_punct("{") || tokens[k].is_punct(";")) else { continue };
+            if !tokens[open].is_punct("{") {
+                continue;
+            }
+            let parents = tokens[i + 2..open]
+                .iter()
+                .filter(|t| t.kind == TokenKind::Ident && !t.is_ident_ci("extends"))
+                .map(|t| short(&t.text))
+                .collect();
+            let mut depth = 0usize;
+            let declares_methods = tokens[open..]
+                .iter()
+                .take_while(|t| {
+                    if t.is_punct("{") {
+                        depth += 1;
+                    } else if t.is_punct("}") {
+                        depth -= 1;
+                    }
+                    depth > 0
+                })
+                .any(|t| t.is_ident_ci("function"));
+            self.interfaces.entry(short(&name.text)).or_default().push(InterfaceInfo { parents, declares_methods });
+        }
+    }
+
+    pub(crate) fn marker_interface_parents(&self, name: &str) -> Option<&[String]> {
+        match self.interfaces.get(name).map(Vec::as_slice) {
+            Some([only]) if !only.declares_methods => Some(&only.parents),
+            _ => None,
         }
     }
 
