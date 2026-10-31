@@ -4,11 +4,11 @@
 
 **Find what breaks when your PHP project moves to a new version, and fix it safely.**
 
-A desktop app for macOS and Windows that scans your PHP code, shows what will break on the version you are moving to, and applies Rector's fixes only after you approve them, with a backup before every change. No account, no cloud, no telemetry.
+A desktop app for macOS, Windows and Linux that scans your PHP code, shows what will break on the version you are moving to, and applies Rector's fixes only after you approve them, with a backup before every change. No account, no cloud, no telemetry.
 
-[![Download for macOS and Windows](https://img.shields.io/badge/Download-macOS%20%C2%B7%20Windows-2156d9?style=for-the-badge)](../../releases/latest)
+[![Download for macOS, Windows and Linux](https://img.shields.io/badge/Download-macOS%20%C2%B7%20Windows%20%C2%B7%20Linux-2156d9?style=for-the-badge)](../../releases/latest)
 
-![macOS 11+](https://img.shields.io/badge/macOS-11%2B-000000?style=flat-square&logo=apple&logoColor=white) ![Windows 10 | 11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?style=flat-square&logo=windows&logoColor=white) ![PHP 7.0 to 8.5](https://img.shields.io/badge/PHP-7.0%20%E2%86%92%208.5-777BB4?style=flat-square&logo=php&logoColor=white) [![License: MIT](https://img.shields.io/badge/license-MIT-64748b?style=flat-square)](LICENSE)
+![macOS 11+](https://img.shields.io/badge/macOS-11%2B-000000?style=flat-square&logo=apple&logoColor=white) ![Windows 10 | 11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?style=flat-square&logo=windows&logoColor=white) ![Linux](https://img.shields.io/badge/Linux-deb%20%7C%20AppImage-FCC624?style=flat-square&logo=linux&logoColor=black) ![PHP 7.0 to 8.5](https://img.shields.io/badge/PHP-7.0%20%E2%86%92%208.5-777BB4?style=flat-square&logo=php&logoColor=white) [![License: MIT](https://img.shields.io/badge/license-MIT-64748b?style=flat-square)](LICENSE)
 
 [Features](#features) · [Install](#install) · [Privacy](#privacy) · [How it works](#how-it-works) · [Build from source](#build-from-source) · [Türkçe](README.tr.md)
 
@@ -157,11 +157,20 @@ Windows 10 and 11.
 
 **Uninstall.** Use Windows Settings → Apps. Backups and settings stay in `%APPDATA%\io.github.efekoca.ferry` until you delete that folder.
 
+### Linux
+
+Any recent 64-bit distribution with WebKitGTK 4.1, such as Ubuntu 22.04, Debian 12 or Fedora 39 and newer.
+
+- **Debian and Ubuntu:** install `Ferry_x.y.z_amd64.deb` with `sudo apt install ./Ferry_x.y.z_amd64.deb`, which also pulls in WebKitGTK.
+- **Other distributions:** make `Ferry_x.y.z_amd64.AppImage` executable (`chmod +x`) and run it. It needs WebKitGTK 4.1 and FUSE 2 from your package manager.
+
+**Uninstall.** Remove the package (`sudo apt remove ferry`) or delete the AppImage. Backups and settings stay in `~/.local/share/io.github.efekoca.ferry` until you delete that folder.
+
 ### Automatic fixes
 
 The scan and the dependency check work right away. Automatic fixes also need:
 
-- **PHP 7.4 or newer** on the computer (it doesn't have to be the version your project uses). Ferry finds the PHP on your `PATH`, and also looks in the usual places for Homebrew, Herd, and MAMP on macOS, and XAMPP, Laragon, and Scoop on Windows. You can also choose the executable under **Settings**.
+- **PHP 7.4 or newer** on the computer (it doesn't have to be the version your project uses). Ferry finds the PHP on your `PATH`, and also looks in the usual places for Homebrew, Herd, and MAMP on macOS, XAMPP, Laragon, and Scoop on Windows, and Snap, Linuxbrew, phpenv, asdf, and phpbrew on Linux. You can also choose the executable under **Settings**.
 - **Composer.** Ferry uses it once to install Rector into its own folder; your project's `composer.json` is never touched.
 
 When something is missing, the **Fixes** page says what and offers **Install Rector**.
@@ -172,7 +181,7 @@ When something is missing, the **Fixes** page says what and offers **Install Rec
 
 - **Read:** the PHP files, `composer.json`, and `composer.lock` in the project folder you choose.
 - **Written:** only the files you apply changes to. Every other file stays untouched.
-- **Stored:** backups of the files before each apply (all of them, or only the newest if you set a limit), a record of what was applied, Rector's cache, and your settings, in the app's data folder: `~/Library/Application Support/io.github.efekoca.ferry` on macOS and `%APPDATA%\io.github.efekoca.ferry` on Windows.
+- **Stored:** backups of the files before each apply (all of them, or only the newest if you set a limit), a record of what was applied, Rector's cache, and your settings, in the app's data folder: `~/Library/Application Support/io.github.efekoca.ferry` on macOS `%APPDATA%\io.github.efekoca.ferry` on Windows, and `~/.local/share/io.github.efekoca.ferry` on Linux.
 - **Project code:** scanning never runs your code. Calculating fixes runs Rector in the project folder, and Rector loads the project's `vendor/autoload.php`, so files listed under Composer's `autoload.files` are executed. Only calculate fixes for projects you trust.
 - **Network:** Ferry itself makes no network requests. When you choose **Install Rector**, Composer downloads Rector from Packagist.
 
@@ -202,11 +211,10 @@ Everything runs on your computer:
 - **Encodings:** automatic fixes skip files that are not UTF-8 (for example, Windows-1254 or Latin-1), so they are never corrupted. Convert them to UTF-8 to have them fixed.
 - **Manual fixes:** findings such as `mysql_*` need code to be rewritten, and Ferry shows what to use instead but doesn't rewrite them for you.
 - **Restore:** it puts back the files as they were before the apply, so edits you made to them afterwards are replaced. Ferry lists those files and asks before restoring.
-- **Linux:** not supported yet.
 
 ## Build from source
 
-Requirements: Rust (stable), Node 22, and pnpm, plus PHP 7.4+ and Composer for the Rector tests. On Windows you also need Visual Studio Build Tools (C++), and on macOS the Xcode Command Line Tools.
+Requirements: Rust (stable), Node 22, and pnpm, plus PHP 7.4+ and Composer for the Rector tests. On Windows you also need Visual Studio Build Tools (C++), on macOS the Xcode Command Line Tools, and on Linux WebKitGTK 4.1 and its build dependencies (on Ubuntu: `libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev`).
 
 ```bash
 pnpm install
@@ -232,7 +240,7 @@ To run the tests against real Rector, point `FERRY_TEST_TOOLS` to a folder where
 | `src` | React and TypeScript interface (design system in [docs/DESIGN.md](docs/DESIGN.md)) |
 | `demo` | sample projects for trying the app and for the tests |
 
-CI checks formatting and runs the interface and engine tests (including real Rector) on Linux and Windows for every pull request and push to `main`, and builds the macOS and Windows installers for `v*` tags.
+CI checks formatting and runs the interface and engine tests (including real Rector) on Linux and Windows for every pull request and push to `main`, drives the real app with the native e2e on both, and builds the macOS, Windows and Linux packages for `v*` tags.
 
 Bug reports and pull requests are welcome.
 

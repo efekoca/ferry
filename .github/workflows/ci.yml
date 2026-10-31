@@ -121,8 +121,6 @@ jobs:
       - run: cargo test --workspace --no-fail-fast
       - name: Native e2e
         run: xvfb-run -a pnpm e2e:native
-      - name: Bundle check
-        run: pnpm tauri build --bundles deb,appimage
 
   macos:
     if: startsWith(github.ref, 'refs/tags/v') || inputs.macos || inputs.bundle
