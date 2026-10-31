@@ -1302,6 +1302,7 @@ pub(crate) struct ParamShape {
     pub variadic: bool,
     pub optional: bool,
     pub ty: Vec<String>,
+    pub ty_at: Vec<usize>,
     pub name: String,
 }
 
@@ -1323,11 +1324,13 @@ pub(crate) fn param_shapes(tokens: &[Token], open: usize, close: usize) -> Vec<P
             continue;
         }
         let param = &tokens[start..k];
+        let start_of_param = start;
         start = k + 1;
         let Some(var) = param.iter().position(|t| t.kind == TokenKind::Variable) else { continue };
         let mut ty = Vec::new();
+        let mut ty_at = Vec::new();
         let mut attr = 0;
-        for t in &param[..var] {
+        for (j, t) in param[..var].iter().enumerate() {
             if t.is_punct("#[") || attr > 0 && t.is_punct("[") {
                 attr += 1;
             } else if attr > 0 && t.is_punct("]") {
@@ -1336,6 +1339,7 @@ pub(crate) fn param_shapes(tokens: &[Token], open: usize, close: usize) -> Vec<P
                 let name = t.text.trim_start_matches('\\').to_ascii_lowercase();
                 if !["public", "protected", "private", "readonly"].contains(&name.as_str()) {
                     ty.push(name);
+                    ty_at.push(start_of_param + j);
                 }
             } else if attr == 0 && t.is_punct("?") {
                 ty.push("null".into());
@@ -1350,6 +1354,7 @@ pub(crate) fn param_shapes(tokens: &[Token], open: usize, close: usize) -> Vec<P
             variadic: param[..var].iter().any(|t| t.is_punct("...")),
             optional: param.get(var + 1).is_some_and(|t| t.is_punct("=")),
             ty,
+            ty_at,
             name: param[var].text.clone(),
         });
     }
@@ -1448,6 +1453,61 @@ fn user_parent_fits(
     fits(child, is_static, child_return, &shape)
 }
 
+fn class_name(t: &str) -> bool {
+    !SCALAR_TYPES.contains(&t) && !["mixed", "object", "self", "static", "parent", "never"].contains(&t)
+}
+
+fn is_subtype(a: &str, b: &str, index: &crate::index::ProjectIndex) -> Option<bool> {
+    if a == b {
+        return Some(true);
+    }
+    index.supertypes(b)?;
+    let mut queue = vec![a.to_string()];
+    let mut seen = std::collections::HashSet::new();
+    let mut unknown = false;
+    while let Some(node) = queue.pop() {
+        if node == b {
+            return Some(true);
+        }
+        if !seen.insert(node.clone()) || seen.len() > 64 {
+            continue;
+        }
+        match index.supertypes(&node) {
+            Some(parents) => queue.extend(parents),
+            None => unknown = true,
+        }
+    }
+    (!unknown).then_some(false)
+}
+
+fn class_mismatch(
+    child: &[ParamShape],
+    child_fqns: &[Vec<String>],
+    child_return: &[String],
+    parent: &crate::index::MethodSig,
+    index: &crate::index::ProjectIndex,
+) -> bool {
+    let open = ["mixed", "object", "iterable", "callable"];
+    let narrowed = child.iter().zip(child_fqns).zip(&parent.param_fqns).any(|((shape, c), p)| {
+        if shape.variadic || c.is_empty() || c.iter().any(|t| open.contains(&t.as_str())) {
+            return false;
+        }
+        let cs: Vec<&String> = c.iter().filter(|t| class_name(t)).collect();
+        p.iter()
+            .filter(|t| class_name(t) && !c.contains(t))
+            .any(|p| !cs.is_empty() && cs.iter().all(|c| is_subtype(p, c, index) == Some(false)))
+    });
+    let p = &parent.return_fqns;
+    let widened = !p.iter().any(|t| open.contains(&t.as_str()) || ["self", "static", "parent"].contains(&t.as_str())) && {
+        let ps: Vec<&String> = p.iter().filter(|t| class_name(t)).collect();
+        child_return
+            .iter()
+            .filter(|t| class_name(t) && !p.contains(t))
+            .any(|c| !ps.is_empty() && ps.iter().all(|p| is_subtype(c, p, index) == Some(false)))
+    };
+    narrowed || widened
+}
+
 fn user_declaration(
     fqn: &str,
     method: &str,
@@ -1503,6 +1563,16 @@ fn inherited_builtins(name: &str, method: &str, index: &crate::index::ProjectInd
     for parent in class.parent.iter().chain(&class.interfaces) {
         inherited_builtins(parent, method, index, depth + 1, out);
     }
+}
+
+pub(crate) fn return_type_at(tokens: &[Token], close: usize) -> Vec<usize> {
+    if !tokens.get(close + 1).is_some_and(|t| t.is_punct(":")) {
+        return Vec::new();
+    }
+    (close + 2..tokens.len())
+        .take_while(|&k| !tokens[k].is_punct("{") && !tokens[k].is_punct(";"))
+        .filter(|&k| tokens[k].kind == TokenKind::Ident)
+        .collect()
 }
 
 pub(crate) fn return_type(tokens: &[Token], close: usize) -> Option<Vec<String>> {
@@ -1628,8 +1698,14 @@ fn builtin_overrides(tokens: &[Token], index: &crate::index::ProjectIndex) -> Ve
                     (0..k).rev().find(|&j| tokens[j].is_punct(";") || tokens[j].is_punct("{") || tokens[j].is_punct("}")).unwrap_or(0);
                 let is_static = tokens[start..k].iter().any(|t| t.is_ident_ci("static"));
                 if let Some((parent_name, sig)) = user_fqns.iter().find_map(|u| user_declaration(u, &lower, index, 0)) {
+                    let shapes = param_shapes(tokens, popen, close);
+                    let child_fqns: Vec<Vec<String>> =
+                        shapes.iter().map(|p| p.ty_at.iter().map(|&j| crate::index::resolve_type(tokens, j, &names)).collect()).collect();
+                    let child_return_fqns: Vec<String> =
+                        return_type_at(tokens, close).into_iter().map(|j| crate::index::resolve_type(tokens, j, &names)).collect();
                     if (lower != "__construct" || sig.is_abstract)
-                        && !user_parent_fits(&param_shapes(tokens, popen, close), is_static, child_return.as_deref(), &lower, &sig)
+                        && (!user_parent_fits(&shapes, is_static, child_return.as_deref(), &lower, &sig)
+                            || class_mismatch(&shapes, &child_fqns, &child_return_fqns, &sig, index))
                     {
                         out.push(BuiltinOverride { name: name_at, parent: name_at, problem: Override::UserIncompatible(parent_name, sig) });
                         continue;
@@ -2361,6 +2437,25 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
         ];
         for src in fatal {
             assert_eq!(count85(&format!("<?php {src}"), id), 1, "{src}");
+        }
+        let classes = [
+            ("class A { function f(A $a) {} } class B extends A { function f(B $a) {} }", 1),
+            ("interface I {} class X implements I {} class A { function f(I $a) {} } class B extends A { function f(X $a) {} }", 1),
+            ("class X {} class Y {} class A { function f(X $a) {} } class B extends A { function f(Y $a) {} }", 1),
+            ("class X {} class Y {} class A { function f(X|Y $a) {} } class B extends A { function f(X $a) {} }", 1),
+            ("class X {} class Y {} class A { function f(): X {} } class B extends A { function f(): Y {} }", 1),
+            ("class A { function f(): B {} } class B extends A { function f(): A {} }", 1),
+            ("class A { function f(B $a) {} } class B extends A { function f(A $a) {} }", 0),
+            ("class A { function f(): A {} } class B extends A { function f(): B {} }", 0),
+            ("interface I {} interface J extends I {} class A { function f(J $a) {} } class B extends A { function f(I $a) {} }", 0),
+            ("class X {} class Y {} class A { function f(X $a) {} } class B extends A { function f(X|Y $a) {} }", 0),
+            ("class X {} class A { function f(X $a) {} } class B extends A { function f(object $a) {} }", 0),
+            ("class X extends Exception {} class A { function f(X $a) {} } class B extends A { function f(Exception $a) {} }", 0),
+            ("class X extends Vendor\\Base {} class Y {} class A { function f(X $a) {} } class B extends A { function f(Y $a) {} }", 0),
+            ("namespace Lib { class X {} } namespace App { use Lib\\X as Y; class A { function f(Y $a) {} } class B extends A { function f(\\Lib\\X $a) {} } }", 0),
+        ];
+        for (src, n) in classes {
+            assert_eq!(count85(&format!("<?php {src}"), id), n, "{src}");
         }
         let fine = [
             "class A { function f($a) {} } class B extends A { function f($a, $b = 1) {} }",
