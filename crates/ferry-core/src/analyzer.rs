@@ -310,7 +310,7 @@ pub fn analyze_source_in(file: &str, src: &str, target: PhpVersion, index: &crat
     for k in bareword_keys(&tokens) {
         ctx.pattern(&patterns::BAREWORD_KEY, &tokens[k], None);
     }
-    for over in builtin_overrides(&tokens) {
+    for over in builtin_overrides(&tokens, index) {
         match over.problem {
             Override::MissingTentativeType => ctx.pattern(&patterns::RETURN_TYPE_WILL_CHANGE, &tokens[over.name], None),
             Override::Incompatible(signature) => ctx.incompatible_override(&tokens[over.name], &tokens[over.parent], signature),
@@ -1350,6 +1350,8 @@ fn accepts(child: &[String], parent: &str) -> bool {
     if child.is_empty() || child.iter().any(|t| t == "mixed") {
         return true;
     }
+    let parent = parent.to_ascii_lowercase();
+    let parent = parent.as_str();
     if parent.is_empty() || parent == "mixed" {
         return false;
     }
@@ -1361,21 +1363,72 @@ fn accepts(child: &[String], parent: &str) -> bool {
     })
 }
 
-fn compatible(child: &[ParamShape], is_static: bool, has_return: bool, parent: &crate::builtin::Method) -> bool {
-    let &(name, parent_static, required, params, variadic, returns, _) = parent;
-    let returns = if name == "__tostring" { "" } else { returns };
+fn covariant(child: &[String], parent: &str) -> bool {
+    if parent.is_empty() || child.iter().any(|c| c.starts_with('(')) {
+        return true;
+    }
+    let parent = parent.to_ascii_lowercase();
+    let p: Vec<&str> = parent.split('|').collect();
+    if p.contains(&"mixed") {
+        return child != ["void"];
+    }
+    let class_like = |t: &str| !SCALAR_TYPES.contains(&t) && !["mixed", "object", "never", "static", "self"].contains(&t);
+    child.iter().all(|c| {
+        let c = c.as_str();
+        p.contains(&c)
+            || c == "never"
+            || (c == "true" || c == "false") && p.contains(&"bool")
+            || c == "array" && p.contains(&"iterable")
+            || (c == "static" || c == "self") && p.iter().any(|t| *t == "static" || *t == "self" || *t == "object" || class_like(t))
+            || class_like(c) && p.iter().any(|t| *t == "object" || *t == "iterable" || *t == "callable" || class_like(t))
+    })
+}
+
+fn compatible(child: &[ParamShape], is_static: bool, child_return: Option<&[String]>, parent: &crate::builtin::Method) -> bool {
+    let &(name, parent_static, required, params, variadic, returns, tentative) = parent;
+    let has_return = child_return.is_some();
+    let returns = if tentative || name == "__tostring" && !has_return { "" } else { returns };
     let child_variadic = child.iter().any(|p| p.variadic);
     let fixed: Vec<&ParamShape> = child.iter().filter(|p| !p.variadic).collect();
     let child_required = fixed.iter().rposition(|p| !p.optional).map_or(0, |i| i + 1);
     is_static == parent_static
-        && (!returns.is_empty() && has_return || returns.is_empty())
+        && (returns.is_empty() || has_return && child_return.is_some_and(|r| covariant(r, returns)))
         && child_required <= required
         && (!variadic || child_variadic)
         && (child_variadic || fixed.len() >= params.len())
         && fixed.iter().zip(params.iter()).all(|(c, &(by_ref, ty))| c.by_ref == by_ref && accepts(&c.ty, ty))
 }
 
-fn builtin_overrides(tokens: &[Token]) -> Vec<BuiltinOverride> {
+fn builtin_ancestors(name: &str, index: &crate::index::ProjectIndex, depth: usize, out: &mut Vec<String>) {
+    if crate::builtin::CLASSES.binary_search_by(|(c, _, _)| (*c).cmp(name)).is_ok() {
+        out.push(name.to_string());
+    } else if depth < 8 {
+        for parent in index.marker_interface_parents(name).unwrap_or_default() {
+            builtin_ancestors(parent, index, depth + 1, out);
+        }
+    }
+}
+
+fn return_type(tokens: &[Token], close: usize) -> Option<Vec<String>> {
+    if !tokens.get(close + 1)?.is_punct(":") {
+        return None;
+    }
+    let mut out = Vec::new();
+    for t in &tokens[close + 2..] {
+        if t.is_punct("{") || t.is_punct(";") {
+            break;
+        } else if t.is_punct("(") {
+            out.push("(".to_string());
+        } else if t.is_punct("?") {
+            out.push("null".to_string());
+        } else if t.kind == TokenKind::Ident {
+            out.push(t.text.trim_start_matches('\\').to_ascii_lowercase());
+        }
+    }
+    Some(out)
+}
+
+fn builtin_overrides(tokens: &[Token], index: &crate::index::ProjectIndex) -> Vec<BuiltinOverride> {
     let mut out = Vec::new();
     for i in 0..tokens.len() {
         if !(tokens[i].is_ident_ci("class") || tokens[i].is_ident_ci("enum")) || i > 0 && tokens[i - 1].is_punct("::") {
@@ -1388,10 +1441,23 @@ fn builtin_overrides(tokens: &[Token]) -> Vec<BuiltinOverride> {
         let Some(clause) = (i + 1..open).find(|&k| tokens[k].is_ident_ci("implements") || tokens[k].is_ident_ci("extends")) else {
             continue;
         };
-        let parents: Vec<(usize, String)> = (clause + 1..open)
-            .filter(|&k| tokens[k].kind == TokenKind::Ident && !tokens[k].is_ident_ci("implements") && refers_to_global(tokens, &tokens[k]))
-            .map(|k| (k, tokens[k].text.trim_start_matches('\\').to_ascii_lowercase()))
-            .collect();
+        let mut parents: Vec<(usize, String)> = Vec::new();
+        for k in clause + 1..open {
+            let t = &tokens[k];
+            if t.kind != TokenKind::Ident || t.is_ident_ci("implements") {
+                continue;
+            }
+            let full = t.text.trim_start_matches('\\').to_ascii_lowercase();
+            if refers_to_global(tokens, t) && crate::builtin::CLASSES.binary_search_by(|(c, _, _)| (*c).cmp(full.as_str())).is_ok() {
+                parents.push((k, full));
+                continue;
+            }
+            let mut found = Vec::new();
+            for parent in index.marker_interface_parents(full.rsplit('\\').next().unwrap_or_default()).unwrap_or_default() {
+                builtin_ancestors(parent, index, 1, &mut found);
+            }
+            parents.extend(found.into_iter().map(|b| (k, b)));
+        }
         if parents.iter().all(|(_, p)| crate::builtin::CLASSES.binary_search_by(|(c, _, _)| (*c).cmp(p.as_str())).is_err()) {
             continue;
         }
@@ -1426,14 +1492,15 @@ fn builtin_overrides(tokens: &[Token]) -> Vec<BuiltinOverride> {
                 }) else {
                     continue;
                 };
-                let has_return = tokens.get(close + 1).is_some_and(|t| t.is_punct(":"));
+                let child_return = return_type(tokens, close);
                 let start =
                     (0..k).rev().find(|&j| tokens[j].is_punct(";") || tokens[j].is_punct("{") || tokens[j].is_punct("}")).unwrap_or(0);
                 let is_static = tokens[start..k].iter().any(|t| t.is_ident_ci("static"));
                 let marked = tokens[start..k].iter().any(|t| t.text.trim_start_matches('\\').eq_ignore_ascii_case("ReturnTypeWillChange"));
-                if !compatible(&param_shapes(tokens, popen, close), is_static, has_return, method) {
+                let tentative_mismatch = method.6 && child_return.as_deref().is_none_or(|r| !covariant(r, method.5));
+                if !compatible(&param_shapes(tokens, popen, close), is_static, child_return.as_deref(), method) {
                     out.push(BuiltinOverride { name: name_at, parent, problem: Override::Incompatible(method) });
-                } else if method.6 && !has_return && !marked {
+                } else if tentative_mismatch && !marked {
                     out.push(BuiltinOverride { name: name_at, parent, problem: Override::MissingTentativeType });
                 }
             }
@@ -2040,7 +2107,63 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
         let found = analyze_source("t.php", "<?php class Db extends PDO { function query($sql, array $p = []) {} }", PhpVersion::new(8, 1));
         let f = found.iter().find(|f| f.rule_id == id).unwrap();
         assert_eq!(f.title.en, "PDO::query()");
-        assert_eq!(f.replacement.as_ref().unwrap().en, "function query(string $p1, int|null $p2 = …, ...$p3)");
+        assert_eq!(f.replacement.as_ref().unwrap().en, "function query(string $p1, int|null $p2 = …, ...$p3): PDOStatement|false");
+    }
+
+    #[test]
+    fn return_types_must_fit_built_in_ones() {
+        let dep = "deprecated.tentative_return_type";
+        let fatal = "removed.incompatible_override";
+        let iterator = |valid: &str, next: &str| {
+            format!("<?php class A implements Iterator {{ function current(): mixed {{}} function key(): mixed {{}} function next(): {next} {{}} function rewind(): void {{}} function valid(): {valid} {{}} }}")
+        };
+        for src in [
+            "<?php class A extends DateTime { public function modify(string $m): DateTime|false {} }".to_string(),
+            "<?php class A implements Countable { public function count(): string {} }".into(),
+            "<?php class A implements Countable { public function count(): float {} }".into(),
+            "<?php class A implements IteratorAggregate { public function getIterator(): array {} }".into(),
+            "<?php class A implements IteratorAggregate { public function getIterator(): iterable {} }".into(),
+            "<?php class A implements JsonSerializable { public function jsonSerialize(): void {} }".into(),
+            "<?php class A extends DateTimeZone { public function getName(): ?string {} }".into(),
+            "<?php class A extends ArrayIterator { public function getArrayCopy(): iterable {} }".into(),
+            iterator("bool", "int"),
+            iterator("int", "void"),
+        ] {
+            assert_eq!(count85(&src, dep), 1, "{src}");
+        }
+        for src in [
+            "<?php class A implements IteratorAggregate { public function getIterator(): ArrayIterator {} }".to_string(),
+            "<?php class A implements IteratorAggregate { public function getIterator(): Generator {} }".into(),
+            "<?php class A implements JsonSerializable { public function jsonSerialize(): never {} }".into(),
+            "<?php class A extends ArrayIterator { public function current(): int {} }".into(),
+            "<?php class A extends Exception implements JsonSerializable { function jsonSerialize(): static {} }".into(),
+            "<?php class A extends DateTime { public function getTimezone(): DateTimeZone|false {} }".into(),
+            "<?php class A implements Stringable { function __toString() { return ''; } }".into(),
+            iterator("bool", "void"),
+            iterator("true", "void"),
+        ] {
+            assert_eq!(count85(&src, dep) + count85(&src, fatal), 0, "{src}");
+        }
+        assert_eq!(count85("<?php class A implements Stringable { function __toString(): int {} }", fatal), 1);
+    }
+
+    #[test]
+    fn built_in_interfaces_inherited_through_marker_interfaces() {
+        let id = "deprecated.tentative_return_type";
+        assert_eq!(count85("<?php interface I extends Countable {} class A implements I { public function count() { return 0; } }", id), 1);
+        assert_eq!(count85("<?php namespace App; interface I extends \\Countable {} class A implements I { function count() {} }", id), 1);
+        assert_eq!(
+            count85("<?php interface I extends Countable {} interface J extends I {} class A implements J { function count() {} }", id),
+            1
+        );
+        assert_eq!(
+            count85(
+                "<?php interface I extends Countable { public function count(): int; } class A implements I { function count() {} }",
+                id
+            ),
+            0
+        );
+        assert_eq!(count85("<?php interface I {} class A implements I { function count() {} }", id), 0);
     }
 
     #[test]
