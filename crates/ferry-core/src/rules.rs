@@ -1123,6 +1123,18 @@ pub mod patterns {
             "This method overrides a built-in class or interface method, but its signature doesn't match the PHP 8 one: the parameter count, types, by-reference passing, static modifier or return type differ. PHP throws a fatal error when it loads the class. Make the signature compatible with the one below.",
         ),
     };
+    pub const INCOMPATIBLE_USER_OVERRIDE: PatternRule = PatternRule {
+        id: "removed.incompatible_user_override",
+        title: Text::new("Üst sınıfla uyumsuz imza", "Signature incompatible with the parent method"),
+        severity: Severity::Breaking,
+        since: (8, 0),
+        replacement: None,
+        fix: FixKind::Manual,
+        note: Text::new(
+            "Bu metot projedeki bir üst sınıfın, trait'in ya da arayüzün metodunu eziyor ama imzası onunla uyumlu değil: parametre sayısı, tipleri, referansla geçiş, static olması ya da dönüş tipi farklı. PHP 7 bunu yalnızca uyarıyla geçiyordu, PHP 8 sınıfı yüklerken ölümcül hata verir. İmzayı aşağıdakine uyacak şekilde düzenleyin.",
+            "This method overrides a method of a parent class, trait or interface in the project, but its signature doesn't match it: the parameter count, types, by-reference passing, static modifier or return type differ. PHP 7 only raised a warning, PHP 8 throws a fatal error when it loads the class. Make the signature compatible with the one below.",
+        ),
+    };
     pub const HTTP_RESPONSE_HEADER: PatternRule = PatternRule {
         id: "deprecated.http_response_header",
         title: Text::new("$http_response_header", "$http_response_header"),
