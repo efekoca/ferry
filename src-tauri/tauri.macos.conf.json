@@ -21,7 +21,8 @@
             "sidebar"
           ],
           "state": "followsWindowActiveState"
-        }
+        },
+        "zoomHotkeysEnabled": true
       }
     ]
   }
