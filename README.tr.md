@@ -4,11 +4,11 @@
 
 **PHP projenizi yeni sürüme taşırken nelerin bozulacağını önceden görün, güvenle düzeltin.**
 
-Ferry, macOS ve Windows'ta çalışan bir masaüstü uygulamasıdır. PHP kodunuzu tarar, geçmek istediğiniz sürümde nelerin bozulacağını gösterir ve Rector'ın önerdiği düzeltmeleri yalnızca siz onayladıktan sonra uygular. Her değişiklikten önce yedek alır. Hesap açmanız gerekmez; kodunuz bulutta değil, kendi bilgisayarınızda kalır.
+Ferry, macOS, Windows ve Linux'ta çalışan bir masaüstü uygulamasıdır. PHP kodunuzu tarar, geçmek istediğiniz sürümde nelerin bozulacağını gösterir ve Rector'ın önerdiği düzeltmeleri yalnızca siz onayladıktan sonra uygular. Her değişiklikten önce yedek alır. Hesap açmanız gerekmez; kodunuz bulutta değil, kendi bilgisayarınızda kalır.
 
-[![macOS ve Windows için indir](https://img.shields.io/badge/%C4%B0ndir-macOS%20%C2%B7%20Windows-2156d9?style=for-the-badge)](../../releases/latest)
+[![macOS, Windows ve Linux için indir](https://img.shields.io/badge/%C4%B0ndir-macOS%20%C2%B7%20Windows%20%C2%B7%20Linux-2156d9?style=for-the-badge)](../../releases/latest)
 
-![macOS 11+](https://img.shields.io/badge/macOS-11%2B-000000?style=flat-square&logo=apple&logoColor=white) ![Windows 10 | 11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?style=flat-square&logo=windows&logoColor=white) ![PHP 7.0 → 8.5](https://img.shields.io/badge/PHP-7.0%20%E2%86%92%208.5-777BB4?style=flat-square&logo=php&logoColor=white) [![Lisans: MIT](https://img.shields.io/badge/lisans-MIT-64748b?style=flat-square)](LICENSE)
+![macOS 11+](https://img.shields.io/badge/macOS-11%2B-000000?style=flat-square&logo=apple&logoColor=white) ![Windows 10 | 11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?style=flat-square&logo=windows&logoColor=white) ![Linux](https://img.shields.io/badge/Linux-deb%20%7C%20AppImage-FCC624?style=flat-square&logo=linux&logoColor=black) ![PHP 7.0 → 8.5](https://img.shields.io/badge/PHP-7.0%20%E2%86%92%208.5-777BB4?style=flat-square&logo=php&logoColor=white) [![Lisans: MIT](https://img.shields.io/badge/lisans-MIT-64748b?style=flat-square)](LICENSE)
 
 [Özellikler](#özellikler) · [Kurulum](#kurulum) · [Gizlilik](#gizlilik) · [Nasıl çalışır](#nasıl-çalışır) · [Kaynaktan derleme](#kaynaktan-derleme) · [English](README.md)
 
@@ -157,11 +157,20 @@ Windows 10 ve 11.
 
 **Kaldırma.** Windows Ayarları → Uygulamalar bölümünü kullanın. Yedekler ve ayarlar, siz silene kadar `%APPDATA%\io.github.efekoca.ferry` klasöründe kalır.
 
+### Linux
+
+WebKitGTK 4.1 bulunan güncel bir 64 bit dağıtım; örneğin Ubuntu 22.04, Debian 12 ya da Fedora 39 ve üstü.
+
+- **Debian ve Ubuntu:** `Ferry_x.y.z_amd64.deb` dosyasını `sudo apt install ./Ferry_x.y.z_amd64.deb` ile kurun; WebKitGTK da birlikte kurulur.
+- **Diğer dağıtımlar:** `Ferry_x.y.z_amd64.AppImage` dosyasını çalıştırılabilir yapın (`chmod +x`) ve açın. Paket yöneticinizden WebKitGTK 4.1 ve FUSE 2 kurulu olmalıdır.
+
+**Kaldırma.** Paketi kaldırın (`sudo apt remove ferry`) ya da AppImage dosyasını silin. Yedekler ve ayarlar, siz silene kadar `~/.local/share/io.github.efekoca.ferry` klasöründe kalır.
+
 ### Otomatik düzeltmeler
 
 Tarama ve bağımlılık kontrolü hemen çalışır. Otomatik düzeltmeler için ayrıca şunlar gerekir:
 
-- Bilgisayarda **PHP 7.4 ya da üstü** (projenizin kullandığı sürüm olması gerekmez). Ferry, `PATH`'inizdeki PHP'yi bulur; ayrıca macOS'ta Homebrew, Herd ve MAMP'ın, Windows'ta XAMPP, Laragon ve Scoop'un olağan konumlarına da bakar. Kullanılacak PHP'yi **Ayarlar**'dan kendiniz de seçebilirsiniz.
+- Bilgisayarda **PHP 7.4 ya da üstü** (projenizin kullandığı sürüm olması gerekmez). Ferry, `PATH`'inizdeki PHP'yi bulur; ayrıca macOS'ta Homebrew, Herd ve MAMP'ın, Windows'ta XAMPP, Laragon ve Scoop'un, Linux'ta Snap, Linuxbrew, phpenv, asdf ve phpbrew'in olağan konumlarına da bakar. Kullanılacak PHP'yi **Ayarlar**'dan kendiniz de seçebilirsiniz.
 - **Composer.** Ferry onu yalnızca bir kez, Rector'ı kendi klasörüne kurmak için kullanır; projenizin `composer.json` dosyasına hiç dokunulmaz.
 
 Eksik bir şey olduğunda **Düzeltmeler** sayfası neyin eksik olduğunu söyler ve **Rector'ı kur** seçeneğini sunar.
@@ -172,7 +181,7 @@ Eksik bir şey olduğunda **Düzeltmeler** sayfası neyin eksik olduğunu söyle
 
 - **Okunanlar:** seçtiğiniz proje klasöründeki PHP dosyaları, `composer.json` ve `composer.lock`.
 - **Yazılanlar:** yalnızca değişiklik uyguladığınız dosyalar. Diğer dosyalara dokunulmaz.
-- **Saklananlar:** her uygulamadan önceki dosya yedekleri (hepsi ya da bir sınır koyduysanız yalnızca en yenileri), neyin uygulandığının kaydı, Rector'ın önbelleği ve ayarlarınız. Hepsi uygulamanın veri klasöründe durur: macOS'ta `~/Library/Application Support/io.github.efekoca.ferry`, Windows'ta `%APPDATA%\io.github.efekoca.ferry`.
+- **Saklananlar:** her uygulamadan önceki dosya yedekleri (hepsi ya da bir sınır koyduysanız yalnızca en yenileri), neyin uygulandığının kaydı, Rector'ın önbelleği ve ayarlarınız. Hepsi uygulamanın veri klasöründe durur: macOS'ta `~/Library/Application Support/io.github.efekoca.ferry`, Windows'ta `%APPDATA%\io.github.efekoca.ferry`, Linux'ta `~/.local/share/io.github.efekoca.ferry`.
 - **Proje kodu:** Tarama kodunuzu hiçbir zaman çalıştırmaz. Düzeltmeleri hesaplarken Rector proje klasöründe çalışır ve projenin `vendor/autoload.php` dosyasını yükler; bu yüzden Composer'ın `autoload.files` listesindeki dosyalar çalıştırılır. Düzeltmeleri yalnızca güvendiğiniz projeler için hesaplayın.
 - **Ağ:** Ferry'nin kendisi hiçbir ağ isteği yapmaz. **Rector'ı kur**'u seçtiğinizde Composer, Rector'ı Packagist'ten indirir.
 
@@ -202,11 +211,10 @@ Her şey kendi bilgisayarınızda çalışır:
 - **Karakter kodlaması:** Otomatik düzeltmeler UTF-8 olmayan dosyaları (örneğin Windows-1254 ya da Latin-1) bozulmasın diye atlar. Düzeltilmeleri için önce UTF-8'e dönüştürün.
 - **Elle yapılan düzeltmeler:** `mysql_*` gibi bulgular kodun yeniden yazılmasını gerektirir. Ferry yerine ne kullanmanız gerektiğini gösterir ama bu kodu sizin yerinize yazmaz.
 - **Geri yükleme:** Dosyaları uygulamadan önceki hallerine getirdiği için sonradan yaptığınız düzenlemelerin üzerine yazılır. Ferry bu dosyaları listeler ve geri yüklemeden önce size sorar.
-- **Linux:** Henüz desteklenmiyor.
 
 ## Kaynaktan derleme
 
-Gereksinimler: Rust (stable), Node 22 ve pnpm; Rector testleri için ayrıca PHP 7.4+ ve Composer. Windows'ta Visual Studio Build Tools (C++), macOS'ta Xcode Command Line Tools da gerekir.
+Gereksinimler: Rust (stable), Node 22 ve pnpm; Rector testleri için ayrıca PHP 7.4+ ve Composer. Windows'ta Visual Studio Build Tools (C++), macOS'ta Xcode Command Line Tools, Linux'ta WebKitGTK 4.1 ve derleme bağımlılıkları (Ubuntu'da: `libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev`) da gerekir.
 
 ```bash
 pnpm install
@@ -232,7 +240,7 @@ Testleri gerçek Rector'la çalıştırmak için `FERRY_TEST_TOOLS` değişkenin
 | `src` | React ve TypeScript arayüzü (tasarım sistemi: [docs/DESIGN.md](docs/DESIGN.md)) |
 | `demo` | Uygulamayı denemek ve testler için örnek projeler |
 
-CI, her pull request'te ve `main`'e yapılan her push'ta biçimi kontrol eder, arayüz ve motor testlerini (gerçek Rector dahil) Linux ve Windows'ta çalıştırır; `v*` etiketlerinde macOS ve Windows kurulum dosyalarını oluşturur.
+CI, her pull request'te ve `main`'e yapılan her push'ta biçimi kontrol eder, arayüz ve motor testlerini (gerçek Rector dahil) Linux ve Windows'ta çalıştırır, ikisinde de gerçek uygulamayı native e2e ile test eder; `v*` etiketlerinde macOS, Windows ve Linux paketlerini oluşturur.
 
 Hata bildirimlerinizi, pull request'lerinizi ve geri bildirimlerinizi almaktan mutluluk duyarım.
 
