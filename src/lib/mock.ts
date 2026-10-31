@@ -269,5 +269,6 @@ export function mockApi(opts: { delay?: number; scale?: number } = {}): Api {
       settings = s;
     },
     setLanguage: async () => {},
+    setWindowTheme: async () => {},
   };
 }

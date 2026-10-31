@@ -36,6 +36,7 @@ export interface Api {
   revealPath(path: string): Promise<void>;
   getSettings(): Promise<Settings>;
   setLanguage(lang: Lang): Promise<void>;
+  setWindowTheme(theme: "light" | "dark" | null): Promise<void>;
   saveSettings(settings: Settings): Promise<void>;
 }
 
@@ -47,6 +48,7 @@ async function tauriApi(): Promise<Api> {
   const { listen } = await import("@tauri-apps/api/event");
   const dialog = await import("@tauri-apps/plugin-dialog");
   const opener = await import("@tauri-apps/plugin-opener");
+  const { getCurrentWindow } = await import("@tauri-apps/api/window");
 
   const single = (v: string | string[] | null) => (Array.isArray(v) ? v[0] ?? null : v);
 
@@ -74,6 +76,7 @@ async function tauriApi(): Promise<Api> {
     getSettings: () => invoke("get_settings"),
     saveSettings: (settings) => invoke("save_settings", { settings }),
     setLanguage: (language) => invoke("set_language", { language }),
+    setWindowTheme: (theme) => getCurrentWindow().setTheme(theme),
   };
 }
 
