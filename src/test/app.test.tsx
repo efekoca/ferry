@@ -87,6 +87,22 @@ describe("Ferry app", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("8.3.36 ya da daha yeni");
   });
 
+  it("flags a vulnerable local PHP in the sidebar and links to Settings", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    const status = await api.toolchainStatus();
+    api.toolchainStatus = async () => ({ ...status, php: { path: "/usr/bin/php", version: "8.1.34" } });
+    render(<App api={api} />);
+    await user.click(await screen.findByRole("button", { name: "PHP 8.1.34 güvenlik açığı içeriyor" }));
+    expect(await screen.findByRole("heading", { name: "Ayarlar" })).toBeInTheDocument();
+  });
+
+  it("shows the usual tool versions when the local PHP is patched", async () => {
+    setup();
+    expect(await screen.findByText("PHP 8.4.27 · Rector 2.8.3")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /güvenlik açığı/ })).not.toBeInTheDocument();
+  });
+
   it("asks before discarding a computed fix preview when the target changes", async () => {
     const user = setup();
     await openAndScan(user);
