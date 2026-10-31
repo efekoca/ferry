@@ -292,8 +292,11 @@ pub fn analyze_source_in(file: &str, src: &str, target: PhpVersion, index: &crat
     for k in bareword_keys(&tokens) {
         ctx.pattern(&patterns::BAREWORD_KEY, &tokens[k], None);
     }
-    for k in untyped_interface_methods(&tokens) {
-        ctx.pattern(&patterns::RETURN_TYPE_WILL_CHANGE, &tokens[k], None);
+    for over in builtin_overrides(&tokens) {
+        match over.problem {
+            Override::MissingTentativeType => ctx.pattern(&patterns::RETURN_TYPE_WILL_CHANGE, &tokens[over.name], None),
+            Override::Incompatible(signature) => ctx.incompatible_override(&tokens[over.name], &tokens[over.parent], signature),
+        }
     }
     for k in null_offsets(&tokens) {
         ctx.pattern(&patterns::NULL_OFFSET, &tokens[k], None);
@@ -376,7 +379,7 @@ struct Hit<'r> {
     since: PhpVersion,
     severity: Severity,
     fix: FixKind,
-    replacement: Option<Text>,
+    replacement: Option<Localized>,
 }
 
 struct Ctx<'a> {
@@ -449,7 +452,7 @@ impl<'a> Ctx<'a> {
             since: hit.since,
             severity: hit.severity,
             fix: hit.fix,
-            replacement: hit.replacement.map(Into::into),
+            replacement: hit.replacement,
             snippet: self.snippet(line),
         });
     }
@@ -467,7 +470,7 @@ impl<'a> Ctx<'a> {
             since: rule.since(),
             severity: rule.severity(),
             fix: rule.fix,
-            replacement: rule.replacement,
+            replacement: rule.replacement.map(Into::into),
         };
         self.push(hit, tok.line, tok.column);
     }
@@ -481,6 +484,38 @@ impl<'a> Ctx<'a> {
         self.pattern_since(rule, line, column, rule.since());
     }
 
+    fn incompatible_override(&mut self, name: &Token, parent: &Token, method: &crate::builtin::Method) {
+        let rule = &patterns::INCOMPATIBLE_OVERRIDE;
+        if !self.applies(rule.since()) {
+            return;
+        }
+        let &(_, is_static, required, params, variadic, returns, _) = method;
+        let mut args: Vec<String> = params
+            .iter()
+            .enumerate()
+            .map(|(i, &(by_ref, ty))| {
+                let ty = if ty.is_empty() { "mixed" } else { ty };
+                format!("{ty} {}$p{}{}", if by_ref { "&" } else { "" }, i + 1, if i >= required { " = …" } else { "" })
+            })
+            .collect();
+        if variadic {
+            args.push(format!("...$p{}", params.len() + 1));
+        }
+        let ret = if returns.is_empty() { String::new() } else { format!(": {returns}") };
+        let signature = format!("{}function {}({}){ret}", if is_static { "static " } else { "" }, name.text, args.join(", "));
+        let parent = parent.text.trim_start_matches('\\');
+        let hit = Hit {
+            rule_id: rule.id,
+            title: Localized::same(format!("{parent}::{}()", name.text)),
+            message: rule.note,
+            since: rule.since(),
+            severity: rule.severity,
+            fix: rule.fix,
+            replacement: Some(Localized::same(signature)),
+        };
+        self.push(hit, name.line, name.column);
+    }
+
     fn pattern_since(&mut self, rule: &PatternRule, line: usize, column: usize, since: PhpVersion) {
         if !self.applies(since) {
             return;
@@ -492,7 +527,7 @@ impl<'a> Ctx<'a> {
             since,
             severity: rule.severity,
             fix: rule.fix,
-            replacement: rule.replacement,
+            replacement: rule.replacement.map(Into::into),
         };
         self.push(hit, line, column);
     }
@@ -692,7 +727,7 @@ impl<'a> Ctx<'a> {
                         since: crate::rules::LARAVEL_INPUT.since(),
                         severity: crate::rules::LARAVEL_INPUT.severity(),
                         fix: FixKind::Manual,
-                        replacement: crate::rules::LARAVEL_INPUT.replacement,
+                        replacement: crate::rules::LARAVEL_INPUT.replacement.map(Into::into),
                     };
                     self.push(hit, tok.line, tok.column);
                 }
@@ -735,7 +770,7 @@ impl<'a> Ctx<'a> {
             since: m.rule.since(),
             severity: m.rule.severity(),
             fix: m.rule.fix,
-            replacement: m.rule.replacement,
+            replacement: m.rule.replacement.map(Into::into),
         };
         self.push(hit, tok.line, tok.column);
     }
@@ -766,7 +801,7 @@ impl<'a> Ctx<'a> {
             since: rule.since(),
             severity: rule.severity(),
             fix: FixKind::Manual,
-            replacement: rule.replacement,
+            replacement: rule.replacement.map(Into::into),
         };
         self.push(hit, arg.line, arg.column);
     }
@@ -1206,13 +1241,175 @@ fn php4_constructors(tokens: &[Token]) -> Vec<usize> {
     out
 }
 
-fn tentative_methods(class: &str, out: &mut Vec<&'static str>) {
-    let Ok(i) = crate::tentative::TENTATIVE.binary_search_by(|(name, _, _)| (*name).cmp(class)) else { return };
-    let (_, parents, own) = crate::tentative::TENTATIVE[i];
-    out.extend_from_slice(own);
-    for parent in parents {
-        tentative_methods(parent, out);
+fn builtin_method(class: &str, name: &str) -> Option<&'static crate::builtin::Method> {
+    let i = crate::builtin::CLASSES.binary_search_by(|(c, _, _)| (*c).cmp(class)).ok()?;
+    let (_, parents, methods) = &crate::builtin::CLASSES[i];
+    if let Ok(m) = methods.binary_search_by(|m| m.0.cmp(name)) {
+        return Some(&methods[m]);
     }
+    parents.iter().find_map(|p| builtin_method(p, name))
+}
+
+enum Override {
+    MissingTentativeType,
+    Incompatible(&'static crate::builtin::Method),
+}
+
+struct BuiltinOverride {
+    name: usize,
+    parent: usize,
+    problem: Override,
+}
+
+struct ParamShape {
+    by_ref: bool,
+    variadic: bool,
+    optional: bool,
+    ty: Vec<String>,
+}
+
+fn param_shapes(tokens: &[Token], open: usize, close: usize) -> Vec<ParamShape> {
+    let mut out = Vec::new();
+    let mut depth = 0;
+    let mut start = open + 1;
+    for k in open + 1..=close {
+        let t = &tokens[k];
+        if k < close && (t.is_punct("(") || t.is_punct("[") || t.is_punct("#[")) {
+            depth += 1;
+            continue;
+        }
+        if k < close && (t.is_punct(")") || t.is_punct("]")) {
+            depth -= 1;
+            continue;
+        }
+        if !(k == close || depth == 0 && t.is_punct(",")) {
+            continue;
+        }
+        let param = &tokens[start..k];
+        start = k + 1;
+        let Some(var) = param.iter().position(|t| t.kind == TokenKind::Variable) else { continue };
+        let mut ty = Vec::new();
+        let mut attr = 0;
+        for t in &param[..var] {
+            if t.is_punct("#[") || attr > 0 && t.is_punct("[") {
+                attr += 1;
+            } else if attr > 0 && t.is_punct("]") {
+                attr -= 1;
+            } else if attr == 0 && t.kind == TokenKind::Ident {
+                let name = t.text.trim_start_matches('\\').to_ascii_lowercase();
+                if !["public", "protected", "private", "readonly"].contains(&name.as_str()) {
+                    ty.push(name);
+                }
+            } else if attr == 0 && t.is_punct("?") {
+                ty.push("null".into());
+            }
+        }
+        out.push(ParamShape {
+            by_ref: param[..var].iter().rev().take_while(|t| t.is_punct("&") || t.is_punct("...")).any(|t| t.is_punct("&")),
+            variadic: param[..var].iter().any(|t| t.is_punct("...")),
+            optional: param.get(var + 1).is_some_and(|t| t.is_punct("=")),
+            ty,
+        });
+    }
+    out
+}
+
+const SCALAR_TYPES: [&str; 11] = ["int", "float", "string", "bool", "array", "null", "callable", "iterable", "false", "true", "void"];
+
+fn accepts(child: &[String], parent: &str) -> bool {
+    if child.is_empty() || child.iter().any(|t| t == "mixed") {
+        return true;
+    }
+    if parent.is_empty() || parent == "mixed" {
+        return false;
+    }
+    parent.split('|').all(|p| {
+        child.iter().any(|c| c == p)
+            || p == "array" && child.iter().any(|c| c == "iterable")
+            || (p == "true" || p == "false") && child.iter().any(|c| c == "bool")
+            || !SCALAR_TYPES.contains(&p) && child.iter().any(|c| c == "object" || !SCALAR_TYPES.contains(&c.as_str()))
+    })
+}
+
+fn compatible(child: &[ParamShape], is_static: bool, has_return: bool, parent: &crate::builtin::Method) -> bool {
+    let &(name, parent_static, required, params, variadic, returns, _) = parent;
+    let returns = if name == "__tostring" { "" } else { returns };
+    let child_variadic = child.iter().any(|p| p.variadic);
+    let fixed: Vec<&ParamShape> = child.iter().filter(|p| !p.variadic).collect();
+    let child_required = fixed.iter().rposition(|p| !p.optional).map_or(0, |i| i + 1);
+    is_static == parent_static
+        && (!returns.is_empty() && has_return || returns.is_empty())
+        && child_required <= required
+        && (!variadic || child_variadic)
+        && (child_variadic || fixed.len() >= params.len())
+        && fixed.iter().zip(params.iter()).all(|(c, &(by_ref, ty))| c.by_ref == by_ref && accepts(&c.ty, ty))
+}
+
+fn builtin_overrides(tokens: &[Token]) -> Vec<BuiltinOverride> {
+    let mut out = Vec::new();
+    for i in 0..tokens.len() {
+        if !(tokens[i].is_ident_ci("class") || tokens[i].is_ident_ci("enum")) || i > 0 && tokens[i - 1].is_punct("::") {
+            continue;
+        }
+        let Some(open) = (i + 1..tokens.len()).find(|&k| tokens[k].is_punct("{") || tokens[k].is_punct(";")) else { continue };
+        if !tokens[open].is_punct("{") {
+            continue;
+        }
+        let Some(clause) = (i + 1..open).find(|&k| tokens[k].is_ident_ci("implements") || tokens[k].is_ident_ci("extends")) else {
+            continue;
+        };
+        let parents: Vec<(usize, String)> = (clause + 1..open)
+            .filter(|&k| tokens[k].kind == TokenKind::Ident && !tokens[k].is_ident_ci("implements") && refers_to_global(tokens, &tokens[k]))
+            .map(|k| (k, tokens[k].text.trim_start_matches('\\').to_ascii_lowercase()))
+            .collect();
+        if parents.iter().all(|(_, p)| crate::builtin::CLASSES.binary_search_by(|(c, _, _)| (*c).cmp(p.as_str())).is_err()) {
+            continue;
+        }
+        let mut depth = 0;
+        for k in open..tokens.len() {
+            if tokens[k].is_punct("{") {
+                depth += 1;
+            } else if tokens[k].is_punct("}") {
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+            } else if depth == 1 && tokens[k].is_ident_ci("function") {
+                let name_at = if tokens.get(k + 1).is_some_and(|t| t.is_punct("&")) { k + 2 } else { k + 1 };
+                let Some(name) = tokens.get(name_at).filter(|t| t.kind == TokenKind::Ident) else { continue };
+                let lower = name.text.to_ascii_lowercase();
+                if lower == "__construct" {
+                    continue;
+                }
+                let Some((parent, method)) = parents.iter().find_map(|(at, p)| builtin_method(p, &lower).map(|m| (*at, m))) else {
+                    continue;
+                };
+                let Some(popen) = tokens.get(name_at + 1).filter(|t| t.is_punct("(")).map(|_| name_at + 1) else { continue };
+                let mut d = 0;
+                let Some(close) = (popen..tokens.len()).find(|&j| {
+                    if tokens[j].is_punct("(") {
+                        d += 1;
+                    } else if tokens[j].is_punct(")") {
+                        d -= 1;
+                    }
+                    d == 0
+                }) else {
+                    continue;
+                };
+                let has_return = tokens.get(close + 1).is_some_and(|t| t.is_punct(":"));
+                let start =
+                    (0..k).rev().find(|&j| tokens[j].is_punct(";") || tokens[j].is_punct("{") || tokens[j].is_punct("}")).unwrap_or(0);
+                let is_static = tokens[start..k].iter().any(|t| t.is_ident_ci("static"));
+                let marked = tokens[start..k].iter().any(|t| t.text.trim_start_matches('\\').eq_ignore_ascii_case("ReturnTypeWillChange"));
+                if !compatible(&param_shapes(tokens, popen, close), is_static, has_return, method) {
+                    out.push(BuiltinOverride { name: name_at, parent, problem: Override::Incompatible(method) });
+                } else if method.6 && !has_return && !marked {
+                    out.push(BuiltinOverride { name: name_at, parent, problem: Override::MissingTentativeType });
+                }
+            }
+        }
+    }
+    out
 }
 
 fn refers_to_global(tokens: &[Token], name: &Token) -> bool {
@@ -1226,64 +1423,6 @@ fn refers_to_global(tokens: &[Token], name: &Token) -> bool {
         .any(|w| ["interface", "class", "trait", "enum"].iter().any(|k| w[0].is_ident_ci(k)) && w[1].text.eq_ignore_ascii_case(&short));
     let imported = tokens.windows(2).any(|w| w[0].is_ident_ci("use") && w[1].text.trim_start_matches('\\').eq_ignore_ascii_case(&short));
     !declared_here && (!namespaced || imported)
-}
-
-fn untyped_interface_methods(tokens: &[Token]) -> Vec<usize> {
-    let mut out = Vec::new();
-    for i in 0..tokens.len() {
-        if !(tokens[i].is_ident_ci("class") || tokens[i].is_ident_ci("enum")) || i > 0 && tokens[i - 1].is_punct("::") {
-            continue;
-        }
-        let Some(open) = (i + 1..tokens.len()).find(|&k| tokens[k].is_punct("{") || tokens[k].is_punct(";")) else { continue };
-        if !tokens[open].is_punct("{") {
-            continue;
-        }
-        let Some(clause) = (i + 1..open).find(|&k| tokens[k].is_ident_ci("implements") || tokens[k].is_ident_ci("extends")) else {
-            continue;
-        };
-        let mut methods: Vec<&str> = Vec::new();
-        for t in &tokens[clause + 1..open] {
-            if t.kind == TokenKind::Ident && !t.is_ident_ci("implements") && refers_to_global(tokens, t) {
-                tentative_methods(&t.text.trim_start_matches('\\').to_ascii_lowercase(), &mut methods);
-            }
-        }
-        if methods.is_empty() {
-            continue;
-        }
-        let mut depth = 0;
-        for k in open..tokens.len() {
-            if tokens[k].is_punct("{") {
-                depth += 1;
-            } else if tokens[k].is_punct("}") {
-                depth -= 1;
-                if depth == 0 {
-                    break;
-                }
-            } else if depth == 1 && tokens[k].is_ident_ci("function") {
-                let Some(name) = tokens.get(k + 1).filter(|t| t.kind == TokenKind::Ident) else { continue };
-                if !methods.contains(&name.text.to_ascii_lowercase().as_str()) {
-                    continue;
-                }
-                let mut d = 0;
-                let close = (k + 2..tokens.len()).find(|&j| {
-                    if tokens[j].is_punct("(") {
-                        d += 1;
-                    } else if tokens[j].is_punct(")") {
-                        d -= 1;
-                    }
-                    d == 0
-                });
-                let typed = close.is_some_and(|c| tokens.get(c + 1).is_some_and(|t| t.is_punct(":")));
-                let start =
-                    (0..k).rev().find(|&j| tokens[j].is_punct(";") || tokens[j].is_punct("{") || tokens[j].is_punct("}")).unwrap_or(0);
-                let marked = tokens[start..k].iter().any(|t| t.text.trim_start_matches('\\').eq_ignore_ascii_case("ReturnTypeWillChange"));
-                if !typed && !marked {
-                    out.push(k + 1);
-                }
-            }
-        }
-    }
-    out
 }
 
 fn null_offsets(tokens: &[Token]) -> Vec<usize> {
@@ -1701,6 +1840,47 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
         assert!(lines_of(src, "8.0", id).is_empty());
         assert_eq!(count85("<?php namespace App; class PDO {} class Db extends PDO { function commit() {} }", id), 0);
         assert_eq!(count85("<?php namespace App; use PDO; class Db extends PDO { function commit() {} }", id), 1);
+    }
+
+    #[test]
+    fn overrides_incompatible_with_built_in_signatures() {
+        let id = "removed.incompatible_override";
+        let fatal = [
+            "class A extends PDO { public function query($query, array $args = array(), $options = array()) {} }",
+            "class A extends DateTime { public function createFromFormat($f, $t, $tz = null) {} }",
+            "class A extends DateTime { public function format() {} }",
+            "class A extends PDO { public function getAttribute(string $a) {} }",
+            "class A extends SplObjectStorage { public function attach(object $o) {} }",
+            "class A extends ArrayObject { public function append(&$v) {} }",
+            "class A extends ArrayIterator { public function seek(string $p) {} }",
+            "class A extends ArrayIterator { public function uasort($c, $extra) {} }",
+            "namespace App; class A extends \\PDO { public function query($q) {} }",
+            "namespace App; use PDO; class A extends PDO { public function exec($s, $x) {} }",
+            "class A extends ArrayIterator { #[\\ReturnTypeWillChange] public function offsetGet(string $k) {} }",
+            "class A implements SessionHandlerInterface { function read(&$id) {} }",
+        ];
+        for src in fatal {
+            assert_eq!(count85(&format!("<?php {src}"), id), 1, "{src}");
+        }
+        let fine = [
+            "class A extends ArrayIterator { function offsetSet($k, $v): void {} }",
+            "class A implements Stringable { function __toString() { return ''; } }",
+            "class A extends PDO { public function prepare($q, array $o = array()) {} }",
+            "class A extends PDO { public function query(string $query, ?int $fetchMode = null, mixed ...$fetchModeArgs) {} }",
+            "class A extends SplObjectStorage { public function attach($o, $inf = null) {} }",
+            "class A extends ArrayIterator { public function seek(int|string $p) {} }",
+            "class A extends ArrayIterator { public function offsetSet($k, $v, ...$rest) {} }",
+            "class A extends ArrayIterator { public function offsetSet(#[SensitiveParameter] $k, $v = null) {} }",
+            "class A extends Exception { public function __construct($m) {} }",
+            "namespace App; class PDO {} class A extends PDO { public function query($q) {} }",
+        ];
+        for src in fine {
+            assert_eq!(count85(&format!("<?php {src}"), id), 0, "{src}");
+        }
+        let found = analyze_source("t.php", "<?php class Db extends PDO { function query($sql, array $p = []) {} }", PhpVersion::new(8, 1));
+        let f = found.iter().find(|f| f.rule_id == id).unwrap();
+        assert_eq!(f.title.en, "PDO::query()");
+        assert_eq!(f.replacement.as_ref().unwrap().en, "function query(string $p1, int|null $p2 = …, ...$p3)");
     }
 
     #[test]
