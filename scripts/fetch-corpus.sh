@@ -13,4 +13,9 @@ clone joomla/joomla-cms 3.6.0 joomla
 clone OpenMage/magento-mirror 1.9.3.10 magento
 clone PrestaShop/PrestaShop 1.6.1.24 prestashop
 clone laravel/framework v5.4.0 laravel
+clone symfony/symfony v3.4.0 symfony
+clone cakephp/cakephp 2.10.0 cakephp
+clone yiisoft/yii2 2.0.15 yii2
+clone wikimedia/mediawiki 1.31.0 mediawiki
+clone moodle/moodle v3.5.0 moodle
 echo "Corpus ready in $dest"
