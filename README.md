@@ -31,7 +31,7 @@ A desktop app for macOS, Windows and Linux that scans your PHP code, shows what 
 
 ### A readiness score for your target version
 
-Pick the version you are moving to (PHP 8.1 to 8.5) and Ferry scans every PHP file in seconds. The **Overview** shows:
+Pick the version you are moving to (PHP 8.2 to 8.5) and Ferry scans every PHP file in seconds. The **Overview** shows:
 
 - the project's platform (WordPress, Laravel, Symfony, Drupal, or plain PHP), its number of PHP files, and its current PHP version from `composer.json`
 - a readiness score from 0 to 100, and how many issues fall into each fix type
@@ -130,7 +130,9 @@ For WordPress, Laravel, Drupal, and Symfony, Ferry also checks the framework its
 
 `vendor` and `node_modules` are always skipped. Files larger than 2 MB are skipped and listed in the scan results, so nothing is left out silently.
 
-Target versions: **PHP 8.1, 8.2, 8.3, 8.4, and 8.5**. The scan covers changes from PHP 7.0 onward, so projects on PHP 5.6 and 7.x are covered too.
+Target versions: **PHP 8.2, 8.3, 8.4, and 8.5**. The scan covers changes from PHP 7.0 onward, so projects on PHP 5.6 and 7.x are covered too.
+
+PHP 8.1 can't be selected as a target. [CVE-2026-109618 and CVE-2026-109619](https://www.cisa.gov/news-events/alerts/2026/10/21/critical-vulnerabilities-php-require-immediate-patching), disclosed in October 2026 and exploited in the wild, allow unauthenticated remote code execution on PHP 5.4 through 8.5.11. 8.1 reached [end of life](https://www.php.net/eol.php) on 31 December 2025 and won't get the fix. Servers should run at least 8.2.35, 8.3.36, 8.4.27, or 8.5.12; **Settings** warns when the PHP on your computer is older than the fixed release for its branch.
 
 ## Install
 

@@ -15,6 +15,7 @@ import type {
   ToolchainStatus,
 } from "./types";
 import { TARGETS } from "./types";
+import { isBlockedTarget } from "./security";
 import { useToast } from "../components/Toast";
 import { useI18n } from "../i18n";
 
@@ -137,7 +138,7 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
   const [recent, setRecent] = useState<RecentProject[]>(readRecent);
   const [project, setProject] = useState<ProjectInfo | null>(null);
   const [opening, setOpening] = useState(false);
-  const [target, setTargetState] = useState<Target>(() => readStorage<Target>(TARGET_KEY, "8.4", (v) => TARGETS.includes(v as Target)));
+  const [target, setTargetState] = useState<Target>(() => readStorage<Target>(TARGET_KEY, "8.4", (v) => TARGETS.includes(v as Target) && !isBlockedTarget(v as string)));
   const [scan, setScan] = useState<ScanResult | null>(null);
   const [scanning, setScanning] = useState(false);
   const [progress, setProgress] = useState<ScanProgress | null>(null);
