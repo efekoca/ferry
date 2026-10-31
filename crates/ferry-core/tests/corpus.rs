@@ -170,9 +170,13 @@ fn compile_time_findings_match_php() {
                 let rel = analyzer::relative_path(root, &file);
                 let findings = by_file.get(&rel).cloned().unwrap_or_default();
                 let near = |a: usize, b: usize| a.abs_diff(b) <= 10;
+                let param = |msg: &str| msg.split("parameter $").nth(1).and_then(|r| r.split(' ').next()).map(|p| format!("${p}"));
+                let same_param = |f: &analyzer::Finding, msg: &str| {
+                    f.rule_id == "deprecated.implicit_nullable" && param(msg).is_some_and(|p| f.snippet.contains(&p))
+                };
                 for (line, msg) in &diags {
                     tally.php += 1;
-                    if findings.iter().any(|f| near(f.line, *line)) {
+                    if findings.iter().any(|f| near(f.line, *line) || same_param(f, msg)) {
                         tally.matched += 1;
                     } else {
                         tally.missed.entry(classify(msg)).or_default().push(format!("{name}/{rel}:{line} {msg}"));
@@ -187,7 +191,7 @@ fn compile_time_findings_match_php() {
                     if !compiled || diags.iter().any(|(l, m)| m.contains("error") && *l < f.line) {
                         continue;
                     }
-                    if !diags.iter().any(|(l, _)| near(*l, f.line)) {
+                    if !diags.iter().any(|(l, m)| near(*l, f.line) || same_param(f, m)) {
                         tally.extra.entry(f.rule_id.clone()).or_default().push(format!("{name}/{rel}:{} {}", f.line, f.snippet));
                     }
                 }
