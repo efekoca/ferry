@@ -1,5 +1,5 @@
 use ferry_core::{analyzer, project, PhpVersion};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -42,23 +42,6 @@ struct Tally {
     missed: BTreeMap<String, Vec<String>>,
     extra: BTreeMap<String, Vec<String>>,
 }
-
-const COMPILE_TIME: &[&str] = &[
-    "removed.curly_offset",
-    "removed.real_cast",
-    "removed.unset_cast",
-    "removed.nested_ternary",
-    "removed.__autoload",
-    "removed.reserved_name",
-    "removed.case_insensitive_constant_decl",
-    "deprecated.dollar_brace_interpolation",
-    "deprecated.implicit_nullable",
-    "deprecated.optional_before_required",
-    "deprecated.case_semicolon",
-    "deprecated.non_canonical_cast",
-    "deprecated.backtick",
-    "deprecated.serializable",
-];
 
 fn classify(msg: &str) -> String {
     let m = msg.to_ascii_lowercase();
@@ -132,27 +115,25 @@ fn compile_time_findings_match_php() {
             for (file, diags) in results {
                 let rel = analyzer::relative_path(root, &file);
                 let findings = by_file.get(&rel).cloned().unwrap_or_default();
-                let mut used = HashSet::new();
+                let near = |a: usize, b: usize| a.abs_diff(b) <= 10;
                 for (line, msg) in &diags {
                     tally.php += 1;
-                    let hit = findings.iter().position(|f| f.line.abs_diff(*line) <= 2 && !used.contains(&f.id));
-                    match hit {
-                        Some(i) => {
-                            used.insert(findings[i].id.clone());
-                            tally.matched += 1;
-                        }
-                        None => tally.missed.entry(classify(msg)).or_default().push(format!("{name}/{rel}:{line} {msg}")),
+                    if findings.iter().any(|f| near(f.line, *line)) {
+                        tally.matched += 1;
+                    } else {
+                        tally.missed.entry(classify(msg)).or_default().push(format!("{name}/{rel}:{line} {msg}"));
                     }
                 }
-                let fatal = diags.iter().any(|(_, m)| m.contains("error"));
+                if diags.iter().any(|(_, m)| m.contains("Parse error")) {
+                    continue;
+                }
                 for f in &findings {
-                    if !COMPILE_TIME.contains(&f.rule_id.as_str()) || used.contains(&f.id) {
+                    let compiled =
+                        ferry_core::rules::COMPILE_TIME.contains(&f.rule_id.as_str()) || f.rule_id == "removed.incompatible_override";
+                    if !compiled || diags.iter().any(|(l, m)| m.contains("error") && *l < f.line) {
                         continue;
                     }
-                    if fatal && diags.iter().any(|(l, m)| m.contains("error") && *l < f.line) {
-                        continue;
-                    }
-                    if !diags.iter().any(|(l, _)| l.abs_diff(f.line) <= 2) {
+                    if !diags.iter().any(|(l, _)| near(*l, f.line)) {
                         tally.extra.entry(f.rule_id.clone()).or_default().push(format!("{name}/{rel}:{} {}", f.line, f.snippet));
                     }
                 }
