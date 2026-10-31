@@ -18,25 +18,23 @@ export function Logo({ className = "brand__mark" }: { className?: string }) {
   return (
     <svg className={className} viewBox="100 100 824 824" aria-hidden>
       <defs>
-        <linearGradient id="ferry-logo-bg" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="#3D7BF0" />
-          <stop offset="0.55" stopColor="#1F4BB8" />
-          <stop offset="1" stopColor="#13286E" />
+        <linearGradient id="ferry-logo-bg" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#1B1A3A" />
+          <stop offset="1" stopColor="#121128" />
         </linearGradient>
       </defs>
-      <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#ferry-logo-bg)" />
-      <g fill="#fff" stroke="#fff" strokeWidth="22" strokeLinejoin="round">
-        <path d="M528 262 L684 512 H528 Z" />
-        <path d="M496 342 L404 512 H496 Z" fill="#CFE0FF" stroke="#CFE0FF" />
-        <path d="M296 566 H728 Q714 618 668 664 H356 Q310 618 296 566 Z" />
-      </g>
       <path
-        d="M262 760 q41.6 -34 83.2 0 t83.2 0 t83.2 0 t83.2 0 t83.2 0 t83.2 0"
-        fill="none"
-        stroke="#9CC3FF"
-        strokeWidth="38"
-        strokeLinecap="round"
+        d="M381.78,100 L642.22,100 C723.36,100 763.93,100 807.6,113.81 C855.28,131.16 892.84,168.72 910.19,216.4 C924,260.07 924,300.64 924,381.78 L924,642.22 C924,723.36 924,763.93 910.19,807.6 C892.84,855.28 855.28,892.84 807.6,910.19 C763.93,924 723.36,924 642.22,924 L381.78,924 C300.64,924 260.07,924 216.4,910.19 C168.72,892.84 131.16,855.28 113.81,807.6 C100,763.93 100,723.36 100,642.22 L100,381.78 C100,300.64 100,260.07 113.81,216.4 C131.16,168.72 168.72,131.16 216.4,113.81 C260.07,100 300.64,100 381.78,100 Z"
+        fill="url(#ferry-logo-bg)"
+        stroke="#fff"
+        strokeOpacity="0.12"
+        strokeWidth="8"
       />
+      <g transform="translate(100 100) scale(0.80469)">
+        <path d="M466,318 C387,372 301,500 289,628 Q287,648 307,648 L452,648 Q466,648 466,634 Z" fill="#8C90E6" />
+        <path d="M500,176 C603,250 719,430 735,628 Q737,648 717,648 L514,648 Q500,648 500,634 Z" fill="#F4EFE6" />
+        <path d="M250,700 Q512,744 774,700 C736,782 628,814 512,814 C396,814 288,782 250,700 Z" fill="#F4EFE6" />
+      </g>
     </svg>
   );
 }
