@@ -360,7 +360,9 @@ pub fn analyze_source_in(file: &str, src: &str, target: PhpVersion, index: &crat
         ctx.pattern(&patterns::UNSET_THIS, &tokens[k], None);
     }
     for (k, since) in builtin_results_by_ref(&tokens) {
-        ctx.pattern_since(&patterns::BUILTIN_RESULT_BY_REF, tokens[k].line, tokens[k].column, since);
+        let args = if tokens.get(k + 3).is_some_and(|t| t.is_punct(")")) { "()" } else { "(…)" };
+        let fixed = format!("${} = {}{args}", tokens[k - 2].text, tokens[k + 1].text.trim_start_matches('\\'));
+        ctx.pattern_replaced(&patterns::BUILTIN_RESULT_BY_REF, &tokens[k], since, fixed);
     }
     for k in stray_breaks(&tokens) {
         ctx.pattern(&patterns::BREAK_OUTSIDE_LOOP, &tokens[k], None);
@@ -576,6 +578,22 @@ impl<'a> Ctx<'a> {
             replacement: rule.replacement.map(Into::into),
         };
         self.push(hit, line, column);
+    }
+
+    fn pattern_replaced(&mut self, rule: &PatternRule, tok: &Token, since: PhpVersion, replacement: String) {
+        if !self.applies(since) {
+            return;
+        }
+        let hit = Hit {
+            rule_id: rule.id,
+            title: rule.title.into(),
+            message: rule.note,
+            since,
+            severity: rule.severity,
+            fix: rule.fix,
+            replacement: Some(Localized::same(replacement)),
+        };
+        self.push(hit, tok.line, tok.column);
     }
 
     fn ident(&mut self, tokens: &[Token], i: usize) {
@@ -2321,6 +2339,10 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
         let sprintf = "<?php function g($a) { $s = &sprintf('%s-%d', $a, $a); }";
         assert_eq!(at(sprintf, (8, 4)).iter().filter(|(r, _)| r == id).count(), 1);
         assert_eq!(at(sprintf, (8, 3)).iter().filter(|(r, _)| r == id).count(), 0);
+        let found =
+            analyze_source("t.php", "<?php function g($s) { $args = &func_get_args(); $n = &\\strlen($s); }", PhpVersion::new(8, 4));
+        let fixes: Vec<String> = found.iter().filter(|f| f.rule_id == id).map(|f| f.replacement.as_ref().unwrap().en.clone()).collect();
+        assert_eq!(fixes, ["$args = func_get_args()", "$n = strlen(…)"]);
         let (fixed, applied) = fix_legacy_syntax("<?php function g() { $args = & func_get_args(); $v = &end($a); }").unwrap();
         assert_eq!(fixed, "<?php function g() { $args = func_get_args(); $v = &end($a); }");
         assert_eq!(applied, [BUILTIN_BY_REF_FIX]);

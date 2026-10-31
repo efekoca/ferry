@@ -1093,7 +1093,7 @@ pub mod patterns {
         title: Text::new("Yerleşik fonksiyon sonucu referansla atanıyor", "Built-in function result assigned by reference"),
         severity: Severity::Breaking,
         since: (7, 0),
-        replacement: code("= func_get_args()"),
+        replacement: None,
         fix: FixKind::Auto,
         note: Text::new(
             "func_get_args(), strlen(), count() gibi fonksiyonları PHP derleme sırasında özel olarak işler; sonuçlarını referansla atamak ölümcül hataya yol açar ve dosya hiç çalışmaz. Sonuç zaten yeni bir değer olduğu için & işaretini silmek yeterli.",
