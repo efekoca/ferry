@@ -74,6 +74,7 @@ export function ConfirmDialog({
 }) {
   const { t } = useI18n();
   const titleId = useId();
+  const bodyId = useId();
   const confirmRef = useRef<HTMLButtonElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -84,13 +85,15 @@ export function ConfirmDialog({
   if (!open) return null;
   return (
     <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && !loading && onCancel()}>
-      <div ref={dialogRef} className="modal" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+      <div ref={dialogRef} className="modal" role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={bodyId}>
         <div className="modal__body">
           <div className={`modal__icon ${tone === "danger" ? "modal__icon--danger" : ""}`} aria-hidden>
             {icon}
           </div>
           <h2 id={titleId}>{title}</h2>
-          <div className="muted">{children}</div>
+          <div className="muted" id={bodyId}>
+            {children}
+          </div>
         </div>
         <div className="modal__footer">
           <Button ref={cancelRef} variant="ghost" onClick={onCancel} disabled={loading}>

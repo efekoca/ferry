@@ -99,7 +99,7 @@ export function Welcome() {
             return (
               <div key={f.title} className="card feature">
                 <Icon size={18} className="feature__icon" />
-                <h3>{f.title}</h3>
+                <h2>{f.title}</h2>
                 <p>{f.text}</p>
               </div>
             );
