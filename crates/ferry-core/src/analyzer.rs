@@ -313,7 +313,27 @@ pub fn analyze_source_in(file: &str, src: &str, target: PhpVersion, index: &crat
     for over in builtin_overrides(&tokens, index) {
         match over.problem {
             Override::MissingTentativeType => ctx.pattern(&patterns::RETURN_TYPE_WILL_CHANGE, &tokens[over.name], None),
-            Override::Incompatible(signature) => ctx.incompatible_override(&tokens[over.name], &tokens[over.parent], signature),
+            Override::Incompatible(method) => {
+                let &(_, is_static, required, params, variadic, returns, _) = method;
+                let params: Vec<(bool, String, String)> = params
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &(r, t))| (r, if t.is_empty() { "mixed".to_string() } else { t.to_string() }, format!("p{}", i + 1)))
+                    .collect();
+                let variadic = variadic.then(|| format!("p{}", params.len() + 1));
+                let signature = render_signature(&tokens[over.name].text, is_static, required, &params, variadic, returns);
+                let parent = tokens[over.parent].text.trim_start_matches('\\');
+                ctx.incompatible_override(&patterns::INCOMPATIBLE_OVERRIDE, &tokens[over.name], parent, signature);
+            }
+            Override::UserIncompatible(parent, sig) => {
+                let fixed: Vec<&ParamShape> = sig.params.iter().filter(|p| !p.variadic).collect();
+                let params: Vec<(bool, String, String)> = fixed.iter().map(|p| (p.by_ref, display_type(&p.ty), p.name.clone())).collect();
+                let required = fixed.iter().rposition(|p| !p.optional).map_or(0, |i| i + 1);
+                let returns = sig.returns.as_deref().map(display_type).unwrap_or_default();
+                let variadic = sig.params.iter().find(|p| p.variadic).map(|p| p.name.clone());
+                let signature = render_signature(&tokens[over.name].text, sig.is_static, required, &params, variadic, &returns);
+                ctx.incompatible_override(&patterns::INCOMPATIBLE_USER_OVERRIDE, &tokens[over.name], &parent, signature);
+            }
         }
     }
     for k in null_offsets(&tokens) {
@@ -514,26 +534,10 @@ impl<'a> Ctx<'a> {
         self.pattern_since(rule, line, column, rule.since());
     }
 
-    fn incompatible_override(&mut self, name: &Token, parent: &Token, method: &crate::builtin::Method) {
-        let rule = &patterns::INCOMPATIBLE_OVERRIDE;
+    fn incompatible_override(&mut self, rule: &PatternRule, name: &Token, parent: &str, signature: String) {
         if !self.applies(rule.since()) {
             return;
         }
-        let &(_, is_static, required, params, variadic, returns, _) = method;
-        let mut args: Vec<String> = params
-            .iter()
-            .enumerate()
-            .map(|(i, &(by_ref, ty))| {
-                let ty = if ty.is_empty() { "mixed" } else { ty };
-                format!("{ty} {}$p{}{}", if by_ref { "&" } else { "" }, i + 1, if i >= required { " = …" } else { "" })
-            })
-            .collect();
-        if variadic {
-            args.push(format!("...$p{}", params.len() + 1));
-        }
-        let ret = if returns.is_empty() { String::new() } else { format!(": {returns}") };
-        let signature = format!("{}function {}({}){ret}", if is_static { "static " } else { "" }, name.text, args.join(", "));
-        let parent = parent.text.trim_start_matches('\\');
         let hit = Hit {
             rule_id: rule.id,
             title: Localized::same(format!("{parent}::{}()", name.text)),
@@ -1283,6 +1287,7 @@ fn builtin_method(class: &str, name: &str) -> Option<&'static crate::builtin::Me
 enum Override {
     MissingTentativeType,
     Incompatible(&'static crate::builtin::Method),
+    UserIncompatible(String, crate::index::MethodSig),
 }
 
 struct BuiltinOverride {
@@ -1291,14 +1296,16 @@ struct BuiltinOverride {
     problem: Override,
 }
 
-struct ParamShape {
-    by_ref: bool,
-    variadic: bool,
-    optional: bool,
-    ty: Vec<String>,
+#[derive(Debug, Clone)]
+pub(crate) struct ParamShape {
+    pub by_ref: bool,
+    pub variadic: bool,
+    pub optional: bool,
+    pub ty: Vec<String>,
+    pub name: String,
 }
 
-fn param_shapes(tokens: &[Token], open: usize, close: usize) -> Vec<ParamShape> {
+pub(crate) fn param_shapes(tokens: &[Token], open: usize, close: usize) -> Vec<ParamShape> {
     let mut out = Vec::new();
     let mut depth = 0;
     let mut start = open + 1;
@@ -1334,11 +1341,16 @@ fn param_shapes(tokens: &[Token], open: usize, close: usize) -> Vec<ParamShape> 
                 ty.push("null".into());
             }
         }
+        let null_default = param.get(var + 1).is_some_and(|t| t.is_punct("=")) && param.get(var + 2).is_some_and(|t| t.is_ident_ci("null"));
+        if null_default && !ty.is_empty() && !ty.iter().any(|t| t == "null" || t == "mixed") {
+            ty.push("null".into());
+        }
         out.push(ParamShape {
             by_ref: param[..var].iter().rev().take_while(|t| t.is_punct("&") || t.is_punct("...")).any(|t| t.is_punct("&")),
             variadic: param[..var].iter().any(|t| t.is_punct("...")),
             optional: param.get(var + 1).is_some_and(|t| t.is_punct("=")),
             ty,
+            name: param[var].text.clone(),
         });
     }
     out
@@ -1380,14 +1392,30 @@ fn covariant(child: &[String], parent: &str) -> bool {
             || (c == "true" || c == "false") && p.contains(&"bool")
             || c == "array" && p.contains(&"iterable")
             || (c == "static" || c == "self") && p.iter().any(|t| *t == "static" || *t == "self" || *t == "object" || class_like(t))
-            || class_like(c) && p.iter().any(|t| *t == "object" || *t == "iterable" || *t == "callable" || class_like(t))
+            || class_like(c) && p.iter().any(|t| *t == "object" || *t == "iterable" || *t == "callable" || *t == "self" || class_like(t))
     })
 }
 
 fn compatible(child: &[ParamShape], is_static: bool, child_return: Option<&[String]>, parent: &crate::builtin::Method) -> bool {
     let &(name, parent_static, required, params, variadic, returns, tentative) = parent;
+    let params: Vec<(bool, String)> = params.iter().map(|&(by_ref, ty)| (by_ref, ty.to_string())).collect();
+    let returns = if tentative { "" } else { returns };
+    fits(child, is_static, child_return, &ParentShape { name, is_static: parent_static, required, params: &params, variadic, returns })
+}
+
+struct ParentShape<'a> {
+    name: &'a str,
+    is_static: bool,
+    required: usize,
+    params: &'a [(bool, String)],
+    variadic: bool,
+    returns: &'a str,
+}
+
+fn fits(child: &[ParamShape], is_static: bool, child_return: Option<&[String]>, parent: &ParentShape) -> bool {
+    let &ParentShape { name, is_static: parent_static, required, params, variadic, returns } = parent;
     let has_return = child_return.is_some();
-    let returns = if tentative || name == "__tostring" && !has_return { "" } else { returns };
+    let returns = if name == "__tostring" && !has_return { "" } else { returns };
     let child_variadic = child.iter().any(|p| p.variadic);
     let fixed: Vec<&ParamShape> = child.iter().filter(|p| !p.variadic).collect();
     let child_required = fixed.iter().rposition(|p| !p.optional).map_or(0, |i| i + 1);
@@ -1396,7 +1424,55 @@ fn compatible(child: &[ParamShape], is_static: bool, child_return: Option<&[Stri
         && child_required <= required
         && (!variadic || child_variadic)
         && (child_variadic || fixed.len() >= params.len())
-        && fixed.iter().zip(params.iter()).all(|(c, &(by_ref, ty))| c.by_ref == by_ref && accepts(&c.ty, ty))
+        && fixed.iter().zip(params.iter()).all(|(c, (by_ref, ty))| c.by_ref == *by_ref && accepts(&c.ty, ty))
+}
+
+fn user_parent_fits(
+    child: &[ParamShape],
+    is_static: bool,
+    child_return: Option<&[String]>,
+    name: &str,
+    parent: &crate::index::MethodSig,
+) -> bool {
+    let fixed: Vec<&ParamShape> = parent.params.iter().filter(|p| !p.variadic).collect();
+    let params: Vec<(bool, String)> = fixed.iter().map(|p| (p.by_ref, p.ty.join("|"))).collect();
+    let returns = parent.returns.as_ref().map(|r| r.join("|")).unwrap_or_default();
+    let shape = ParentShape {
+        name,
+        is_static: parent.is_static,
+        required: fixed.iter().rposition(|p| !p.optional).map_or(0, |i| i + 1),
+        params: &params,
+        variadic: parent.params.iter().any(|p| p.variadic),
+        returns: &returns,
+    };
+    fits(child, is_static, child_return, &shape)
+}
+
+fn user_declaration(
+    fqn: &str,
+    method: &str,
+    index: &crate::index::ProjectIndex,
+    depth: usize,
+) -> Option<(String, crate::index::MethodSig)> {
+    if depth > 8 {
+        return None;
+    }
+    if let Some(class) = index.type_by_fqn(fqn).filter(|t| !t.is_trait) {
+        if let Some(sig) = class.signatures.get(method) {
+            return (!sig.is_private).then(|| (class.name.clone(), sig.clone()));
+        }
+        for t in &class.trait_fqns {
+            if let Some((name, sig)) = index.type_by_fqn(t).and_then(|t| t.signatures.get(method).map(|s| (t.name.clone(), s.clone()))) {
+                return Some((name, sig));
+            }
+        }
+        return class.parent_fqn.iter().chain(&class.related_fqns).find_map(|p| user_declaration(p, method, index, depth + 1));
+    }
+    let (name, signatures, parents) = index.interface_by_fqn(fqn)?;
+    if let Some(sig) = signatures.get(method) {
+        return Some((name.to_string(), sig.clone()));
+    }
+    parents.iter().find_map(|p| user_declaration(p, method, index, depth + 1))
 }
 
 fn builtin_ancestors(name: &str, index: &crate::index::ProjectIndex, depth: usize, out: &mut Vec<String>) {
@@ -1429,7 +1505,7 @@ fn inherited_builtins(name: &str, method: &str, index: &crate::index::ProjectInd
     }
 }
 
-fn return_type(tokens: &[Token], close: usize) -> Option<Vec<String>> {
+pub(crate) fn return_type(tokens: &[Token], close: usize) -> Option<Vec<String>> {
     if !tokens.get(close + 1)?.is_punct(":") {
         return None;
     }
@@ -1448,8 +1524,39 @@ fn return_type(tokens: &[Token], close: usize) -> Option<Vec<String>> {
     Some(out)
 }
 
+fn display_type(ty: &[String]) -> String {
+    match ty {
+        [one, null] | [null, one] if null == "null" && one != "null" => format!("?{one}"),
+        _ => ty.join("|"),
+    }
+}
+
+fn render_signature(
+    name: &str,
+    is_static: bool,
+    required: usize,
+    params: &[(bool, String, String)],
+    variadic: Option<String>,
+    returns: &str,
+) -> String {
+    let mut args: Vec<String> = params
+        .iter()
+        .enumerate()
+        .map(|(i, (by_ref, ty, var))| {
+            let ty = if ty.is_empty() { String::new() } else { format!("{ty} ") };
+            format!("{ty}{}${var}{}", if *by_ref { "&" } else { "" }, if i >= required { " = …" } else { "" })
+        })
+        .collect();
+    if let Some(var) = variadic {
+        args.push(format!("...${var}"));
+    }
+    let ret = if returns.is_empty() { String::new() } else { format!(": {returns}") };
+    format!("{}function {name}({}){ret}", if is_static { "static " } else { "" }, args.join(", "))
+}
+
 fn builtin_overrides(tokens: &[Token], index: &crate::index::ProjectIndex) -> Vec<BuiltinOverride> {
     let mut out = Vec::new();
+    let names = crate::index::Names::new(tokens);
     for i in 0..tokens.len() {
         if !(tokens[i].is_ident_ci("class") || tokens[i].is_ident_ci("enum")) || i > 0 && tokens[i - 1].is_punct("::") {
             continue;
@@ -1463,6 +1570,7 @@ fn builtin_overrides(tokens: &[Token], index: &crate::index::ProjectIndex) -> Ve
         };
         let mut parents: Vec<(usize, String)> = Vec::new();
         let mut user_parents: Vec<(usize, String)> = Vec::new();
+        let mut user_fqns: Vec<String> = Vec::new();
         for k in clause + 1..open {
             let t = &tokens[k];
             if t.kind != TokenKind::Ident || t.is_ident_ci("implements") {
@@ -1478,12 +1586,16 @@ fn builtin_overrides(tokens: &[Token], index: &crate::index::ProjectIndex) -> Ve
             for parent in index.marker_interface_parents(&short).unwrap_or_default() {
                 builtin_ancestors(parent, index, 1, &mut found);
             }
+            let fqn = names.resolve(k, &t.text);
+            if index.type_by_fqn(&fqn).is_some() || index.interface_by_fqn(&fqn).is_some() {
+                user_fqns.push(fqn);
+            }
             if index.class(&short).is_some() {
                 user_parents.push((k, short));
             }
             parents.extend(found.into_iter().map(|b| (k, b)));
         }
-        if parents.is_empty() && user_parents.is_empty() {
+        if parents.is_empty() && user_parents.is_empty() && user_fqns.is_empty() {
             continue;
         }
         let mut depth = 0;
@@ -1499,20 +1611,6 @@ fn builtin_overrides(tokens: &[Token], index: &crate::index::ProjectIndex) -> Ve
                 let name_at = if tokens.get(k + 1).is_some_and(|t| t.is_punct("&")) { k + 2 } else { k + 1 };
                 let Some(name) = tokens.get(name_at).filter(|t| t.kind == TokenKind::Ident) else { continue };
                 let lower = name.text.to_ascii_lowercase();
-                if lower == "__construct" {
-                    continue;
-                }
-                let inherited = || {
-                    user_parents.iter().find_map(|(at, u)| {
-                        let mut found = Vec::new();
-                        inherited_builtins(u, &lower, index, 0, &mut found);
-                        found.iter().find_map(|b| builtin_method(b, &lower)).map(|m| (*at, m))
-                    })
-                };
-                let direct = parents.iter().find_map(|(at, p)| builtin_method(p, &lower).map(|m| (*at, m)));
-                let Some((parent, method)) = direct.or_else(inherited) else {
-                    continue;
-                };
                 let Some(popen) = tokens.get(name_at + 1).filter(|t| t.is_punct("(")).map(|_| name_at + 1) else { continue };
                 let mut d = 0;
                 let Some(close) = (popen..tokens.len()).find(|&j| {
@@ -1529,6 +1627,28 @@ fn builtin_overrides(tokens: &[Token], index: &crate::index::ProjectIndex) -> Ve
                 let start =
                     (0..k).rev().find(|&j| tokens[j].is_punct(";") || tokens[j].is_punct("{") || tokens[j].is_punct("}")).unwrap_or(0);
                 let is_static = tokens[start..k].iter().any(|t| t.is_ident_ci("static"));
+                if let Some((parent_name, sig)) = user_fqns.iter().find_map(|u| user_declaration(u, &lower, index, 0)) {
+                    if (lower != "__construct" || sig.is_abstract)
+                        && !user_parent_fits(&param_shapes(tokens, popen, close), is_static, child_return.as_deref(), &lower, &sig)
+                    {
+                        out.push(BuiltinOverride { name: name_at, parent: name_at, problem: Override::UserIncompatible(parent_name, sig) });
+                        continue;
+                    }
+                }
+                if lower == "__construct" {
+                    continue;
+                }
+                let inherited = || {
+                    user_parents.iter().find_map(|(at, u)| {
+                        let mut found = Vec::new();
+                        inherited_builtins(u, &lower, index, 0, &mut found);
+                        found.iter().find_map(|b| builtin_method(b, &lower)).map(|m| (*at, m))
+                    })
+                };
+                let direct = parents.iter().find_map(|(at, p)| builtin_method(p, &lower).map(|m| (*at, m)));
+                let Some((parent, method)) = direct.or_else(inherited) else {
+                    continue;
+                };
                 let marked = tokens[start..k].iter().any(|t| t.text.trim_start_matches('\\').eq_ignore_ascii_case("ReturnTypeWillChange"));
                 let tentative_mismatch = method.6 && child_return.as_deref().is_none_or(|r| !covariant(r, method.5));
                 if !compatible(&param_shapes(tokens, popen, close), is_static, child_return.as_deref(), method) {
@@ -2197,6 +2317,7 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
             0
         );
         assert_eq!(count85("<?php interface I {} class A implements I { function count() {} }", id), 0);
+        assert_eq!(count85("<?php interface I { function count(); } class A implements I, Countable { function count() {} }", id), 1);
     }
 
     #[test]
@@ -2218,6 +2339,53 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
         for (src, id, n) in cases {
             assert_eq!(count85(&format!("<?php {src}"), id), n, "{src}");
         }
+    }
+
+    #[test]
+    fn overrides_incompatible_with_project_signatures() {
+        let id = "removed.incompatible_user_override";
+        let fatal = [
+            "class A { function f($a) {} } class B extends A { function f() {} }",
+            "class A { function f($a = 1) {} } class B extends A { function f($a) {} }",
+            "class A { function f($a) {} } class B extends A { function f(array $a) {} }",
+            "class A { function f(&$a) {} } class B extends A { function f($a) {} }",
+            "class A { static function f() {} } class B extends A { function f() {} }",
+            "class A { function f(): int {} } class B extends A { function f() {} }",
+            "class A { function f(): int {} } class B extends A { function f(): ?int {} }",
+            "class A { function f(?int $a) {} } class B extends A { function f(int $a) {} }",
+            "abstract class A { abstract function __construct($a); } class B extends A { function __construct() {} }",
+            "interface I { function f($a); } interface J extends I {} class B implements J { function f() {} }",
+            "trait T { function f($a) {} } class A { use T; } class B extends A { function f() {} }",
+            "class A { function f($a) {} } class M extends A { function f($a, $b = 2) {} } class B extends M { function f($a) {} }",
+            "namespace Lib { class Base { function f($a) {} } } namespace App { use Lib\\Base as P; class B extends P { function f() {} } }",
+        ];
+        for src in fatal {
+            assert_eq!(count85(&format!("<?php {src}"), id), 1, "{src}");
+        }
+        let fine = [
+            "class A { function f($a) {} } class B extends A { function f($a, $b = 1) {} }",
+            "class A { function f(array $a) {} } class B extends A { function f($a) {} }",
+            "class A { function f() {} } class B extends A { function f(): int {} }",
+            "class A { function f(): ?int {} } class B extends A { function f(): int {} }",
+            "class A { private function f($a) {} } class B extends A { function f() {} }",
+            "class A { function __construct($a) {} } class B extends A { function __construct() {} }",
+            "class A { function f(): self {} } class B extends A { function f(): B {} }",
+            "class A { function f(?int $a) {} } class B extends A { function f(int $a = null) {} }",
+            "class A { function f($a) {} } class B extends A { function f(...$a) {} }",
+            "namespace Lib { class Base { function f($a) {} } } namespace App { class Base {} class B extends Base { function f() {} } }",
+            "namespace App; use Vendor\\TestCase; class TestCase { function f($a) {} } class B extends TestCase { function f() {} }",
+        ];
+        for src in fine {
+            assert_eq!(count85(&format!("<?php {src}"), id), 0, "{src}");
+        }
+        let found = analyze_source(
+            "t.php",
+            "<?php class A { function f(?int $a, &$b = []) {} } class B extends A { function f() {} }",
+            PhpVersion::new(8, 1),
+        );
+        let f = found.iter().find(|f| f.rule_id == id).unwrap();
+        assert_eq!(f.title.en, "A::f()");
+        assert_eq!(f.replacement.as_ref().unwrap().en, "function f(?int $a, &$b = …)");
     }
 
     #[test]

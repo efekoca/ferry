@@ -10,6 +10,15 @@ class Order extends Model
         $this->note = $note;
     }
 
+    public function fill(array $data, $recalculate)
+    {
+        parent::fill($data);
+        if ($recalculate) {
+            $this->total = $this->total();
+        }
+        return $this;
+    }
+
     public function total()
     {
         $sum = (real) 0;
