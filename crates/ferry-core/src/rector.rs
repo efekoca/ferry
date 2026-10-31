@@ -152,6 +152,8 @@ const RULE_TITLES: &[(&str, Text)] = &[
     ("NullToStrictStringFuncCallArgRector", Text::new("Metin parametrelerine null gitmesin", "Stop passing null to string params")),
     ("CurlyToSquareBracketArrayStringRector", Text::same("$x{0} → $x[0]")),
     ("QuoteBarewordKeys", Text::same("$row[id] → $row['id']")),
+    ("AssignNewWithoutReference", Text::same("= &new → = new")),
+    ("DefaultColonAfterSwitch", Text::same("default; → default:")),
     (
         "ParenthesizeNestedTernaryRector",
         Text::new("İç içe ternary paranteze alınır (eski davranış korunur)", "Parenthesize nested ternaries (keeps the old behaviour)"),

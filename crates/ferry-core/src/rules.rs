@@ -157,6 +157,25 @@ pub const PG_ALIASES: [(&str, &str); 24] = [
     ("pg_setclientencoding", "pg_set_client_encoding"),
 ];
 
+pub const COMPILE_TIME: &[&str] = &[
+    "removed.curly_offset",
+    "removed.real_cast",
+    "removed.unset_cast",
+    "removed.nested_ternary",
+    "removed.hash_bracket_comment",
+    "removed.__autoload",
+    "removed.reserved_name",
+    "removed.assign_new_by_ref",
+    "removed.unset_this",
+    "removed.break_outside_loop",
+    "deprecated.dollar_brace_interpolation",
+    "deprecated.implicit_nullable",
+    "deprecated.optional_before_required",
+    "deprecated.case_semicolon",
+    "deprecated.non_canonical_cast",
+    "deprecated.backtick",
+];
+
 pub const NULL_STRING_ARGS: &[(&str, &[usize])] = &[
     ("strlen", &[0]),
     ("trim", &[0]),
@@ -1054,6 +1073,42 @@ pub mod patterns {
         note: Text::new(
             "ArrayAccess, Iterator, Countable ya da PDO gibi yerleşik sınıf ve arayüzlerin metotları PHP 8.1'den itibaren dönüş tipi bekliyor. Dönüş tipini yazın ya da #[\\ReturnTypeWillChange] ekleyin.",
             "Since PHP 8.1, methods of built-in classes and interfaces such as ArrayAccess, Iterator, Countable or PDO expect a return type. Add the return type or #[\\ReturnTypeWillChange].",
+        ),
+    };
+    pub const ASSIGN_NEW_BY_REF: PatternRule = PatternRule {
+        id: "removed.assign_new_by_ref",
+        title: Text::new("= &new", "= &new"),
+        severity: Severity::Breaking,
+        since: (7, 0),
+        replacement: code("= new"),
+        fix: FixKind::Auto,
+        note: Text::new(
+            "new ile oluşturulan nesneyi referansla atamak PHP 7.0'da kaldırıldı ve ayrıştırma hatası verir. Nesneler zaten referans gibi davrandığı için & işaretini silmek yeterli.",
+            "Assigning the result of new by reference was removed in PHP 7.0 and is a parse error. Objects already behave like references, so dropping the & is enough.",
+        ),
+    };
+    pub const UNSET_THIS: PatternRule = PatternRule {
+        id: "removed.unset_this",
+        title: Text::new("unset($this)", "unset($this)"),
+        severity: Severity::Breaking,
+        since: (7, 1),
+        replacement: tx("çağrıyı silin", "remove the call"),
+        fix: FixKind::Manual,
+        note: Text::new(
+            "$this'i unset etmek PHP 7.1'den beri ölümcül hata verir ve dosya derlenmez.",
+            "Unsetting $this has been a fatal error since PHP 7.1, so the file doesn't compile.",
+        ),
+    };
+    pub const BREAK_OUTSIDE_LOOP: PatternRule = PatternRule {
+        id: "removed.break_outside_loop",
+        title: Text::new("Döngü dışında break/continue", "break/continue outside a loop"),
+        severity: Severity::Breaking,
+        since: (7, 0),
+        replacement: tx("return ya da koşul", "return or a condition"),
+        fix: FixKind::Manual,
+        note: Text::new(
+            "Döngü ya da switch dışındaki break ve continue PHP 7.0'dan beri ölümcül hata verir ve dosya derlenmez.",
+            "break and continue outside a loop or switch have been a fatal error since PHP 7.0, so the file doesn't compile.",
         ),
     };
     pub const INCOMPATIBLE_OVERRIDE: PatternRule = PatternRule {

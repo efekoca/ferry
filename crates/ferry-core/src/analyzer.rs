@@ -198,6 +198,8 @@ fn local_functions(tokens: &[Token], methods: &std::collections::HashSet<usize>)
 
 pub const CURLY_FIX: &str = "Rector\\Php74\\Rector\\ArrayDimFetch\\CurlyToSquareBracketArrayStringRector";
 pub const BAREWORD_FIX: &str = "Ferry\\QuoteBarewordKeys";
+pub const NEW_BY_REF_FIX: &str = "Ferry\\Php70\\AssignNewWithoutReference";
+pub const DEFAULT_COLON_FIX: &str = "Ferry\\Php85\\DefaultColonAfterSwitch";
 
 pub fn fix_legacy_syntax(src: &str) -> Option<(String, Vec<&'static str>)> {
     let tokens = tokenize(src);
@@ -223,6 +225,22 @@ pub fn fix_legacy_syntax(src: &str) -> Option<(String, Vec<&'static str>)> {
     }
     if !keys.is_empty() {
         applied.push(BAREWORD_FIX);
+    }
+    let by_ref: Vec<usize> = (1..tokens.len().saturating_sub(1))
+        .filter(|&k| tokens[k].is_punct("&") && tokens[k - 1].is_punct("=") && tokens[k + 1].is_ident_ci("new"))
+        .collect();
+    for &k in &by_ref {
+        edits.push((tokens[k].start, tokens[k].end, ""));
+    }
+    if !by_ref.is_empty() {
+        applied.push(NEW_BY_REF_FIX);
+    }
+    let defaults: Vec<usize> = case_semicolons(&tokens).into_iter().filter(|&k| tokens[k].is_ident_ci("default")).collect();
+    for &k in &defaults {
+        edits.push((tokens[k + 1].start, tokens[k + 1].end, ":"));
+    }
+    if !defaults.is_empty() {
+        applied.push(DEFAULT_COLON_FIX);
     }
     if edits.is_empty() {
         return None;
@@ -303,6 +321,17 @@ pub fn analyze_source_in(file: &str, src: &str, target: PhpVersion, index: &crat
     }
     for k in case_semicolons(&tokens) {
         ctx.pattern(&patterns::CASE_SEMICOLON, &tokens[k], None);
+    }
+    for k in 1..tokens.len().saturating_sub(1) {
+        if tokens[k].is_punct("&") && tokens[k - 1].is_punct("=") && tokens[k + 1].is_ident_ci("new") {
+            ctx.pattern(&patterns::ASSIGN_NEW_BY_REF, &tokens[k], None);
+        }
+    }
+    for k in unset_this(&tokens) {
+        ctx.pattern(&patterns::UNSET_THIS, &tokens[k], None);
+    }
+    for k in stray_breaks(&tokens) {
+        ctx.pattern(&patterns::BREAK_OUTSIDE_LOOP, &tokens[k], None);
     }
     for k in concat_with_arithmetic(&tokens) {
         ctx.pattern(&patterns::CONCAT_PRECEDENCE, &tokens[k], None);
@@ -438,7 +467,8 @@ impl<'a> Ctx<'a> {
     }
 
     fn push(&mut self, hit: Hit<'_>, line: usize, column: usize) {
-        if self.dead.iter().any(|&(start, end)| (line, column) >= start && (line, column) <= end) {
+        let compiled = crate::rules::COMPILE_TIME.contains(&hit.rule_id);
+        if !compiled && self.dead.iter().any(|&(start, end)| (line, column) >= start && (line, column) <= end) {
             return;
         }
         self.out.push(Finding {
@@ -1452,7 +1482,8 @@ fn block_owner(tokens: &[Token], open: usize) -> Option<&Token> {
 fn case_semicolons(tokens: &[Token]) -> Vec<usize> {
     let mut out = Vec::new();
     for i in 0..tokens.len() {
-        if !tokens[i].is_ident_ci("case") {
+        let default = tokens[i].is_ident_ci("default") && tokens.get(i + 1).is_some_and(|t| t.is_punct(";"));
+        if !tokens[i].is_ident_ci("case") && !default || i > 0 && (tokens[i - 1].is_punct("->") || tokens[i - 1].is_punct("::")) {
             continue;
         }
         let mut depth = 0;
@@ -1485,6 +1516,72 @@ fn case_semicolons(tokens: &[Token]) -> Vec<usize> {
                 out.push(i);
                 break;
             }
+        }
+    }
+    out
+}
+
+fn unset_this(tokens: &[Token]) -> Vec<usize> {
+    (0..tokens.len())
+        .filter(|&i| tokens[i].is_ident_ci("unset") && tokens.get(i + 1).is_some_and(|t| t.is_punct("(")))
+        .filter(|&i| !(i > 0 && (tokens[i - 1].is_punct("->") || tokens[i - 1].is_punct("::") || tokens[i - 1].is_ident_ci("function"))))
+        .filter(|&i| call_args(tokens, i + 1).iter().any(|a| a.len() == 1 && a[0].kind == TokenKind::Variable && a[0].text == "this"))
+        .collect()
+}
+
+const LOOP_KEYWORDS: [&str; 5] = ["for", "foreach", "while", "do", "switch"];
+const PASS_THROUGH_BLOCKS: [&str; 9] = ["if", "elseif", "else", "try", "catch", "finally", "declare", "case", "default"];
+
+fn stray_breaks(tokens: &[Token]) -> Vec<usize> {
+    let alternative = tokens.iter().any(|t| ["endwhile", "endfor", "endforeach", "endswitch"].iter().any(|k| t.is_ident_ci(k)));
+    if alternative {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for i in 0..tokens.len() {
+        if !(tokens[i].is_ident_ci("break") || tokens[i].is_ident_ci("continue")) {
+            continue;
+        }
+        if i > 0 && (tokens[i - 1].is_punct("->") || tokens[i - 1].is_punct("::") || tokens[i - 1].is_punct("$")) {
+            continue;
+        }
+        if !tokens.get(i + 1).is_some_and(|t| t.is_punct(";") || t.kind == TokenKind::Number || t.kind == TokenKind::CloseTag) {
+            continue;
+        }
+        let mut depth = 0usize;
+        let mut verdict = None;
+        for k in (0..i).rev() {
+            let t = &tokens[k];
+            if depth == 0 && LOOP_KEYWORDS.iter().any(|w| t.is_ident_ci(w)) {
+                verdict = Some(false);
+                break;
+            }
+            if t.is_punct("}") {
+                depth += 1;
+            } else if t.is_punct("{") {
+                if depth > 0 {
+                    depth -= 1;
+                    continue;
+                }
+                let owner = block_owner(tokens, k).or_else(|| k.checked_sub(1).map(|j| &tokens[j]));
+                if owner.is_some_and(|o| LOOP_KEYWORDS.iter().any(|w| o.is_ident_ci(w))) {
+                    verdict = Some(false);
+                    break;
+                }
+                if owner.is_some_and(|o| PASS_THROUGH_BLOCKS.iter().any(|w| o.is_ident_ci(w))) {
+                    continue;
+                }
+                let statement = (0..k)
+                    .rev()
+                    .find(|&j| tokens[j].is_punct(";") || tokens[j].is_punct("{") || tokens[j].is_punct("}"))
+                    .map_or(0, |j| j + 1);
+                let function = tokens[statement..k].iter().any(|t| t.is_ident_ci("function"));
+                verdict = Some(function);
+                break;
+            }
+        }
+        if verdict.unwrap_or(true) {
+            out.push(i);
         }
     }
     out
@@ -1840,6 +1937,69 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
         assert!(lines_of(src, "8.0", id).is_empty());
         assert_eq!(count85("<?php namespace App; class PDO {} class Db extends PDO { function commit() {} }", id), 0);
         assert_eq!(count85("<?php namespace App; use PDO; class Db extends PDO { function commit() {} }", id), 1);
+    }
+
+    #[test]
+    fn compile_time_problems_in_version_guarded_code() {
+        let src = "<?php\nif (version_compare(PHP_VERSION, '5.3.0', '<')) {\n    $c = $name{0};\n    srand((double) microtime());\n    mysql_connect();\n}\n";
+        let ids: Vec<String> = at(src, (8, 5)).into_iter().map(|(id, _)| id).collect();
+        assert_eq!(
+            ids,
+            ["removed.curly_offset", "deprecated.non_canonical_cast"],
+            "runtime findings stay skipped, compile-time ones don't"
+        );
+    }
+
+    #[test]
+    fn default_with_a_semicolon() {
+        let id = "deprecated.case_semicolon";
+        assert_eq!(count85("<?php switch ($a) { case 1: break; default; echo 1; }", id), 1);
+        assert_eq!(count85("<?php $x = match ($a) { default => 1 }; $o->default; Foo::default;", id), 0);
+    }
+
+    #[test]
+    fn assign_new_by_reference_and_unset_this() {
+        assert_eq!(count85("<?php $a = &new Foo; $b =& new Bar(); $c = new Baz; $d = &$e;", "removed.assign_new_by_ref"), 2);
+        assert_eq!(count85("<?php unset($this); unset($a, $this); unset($this->x); $o->unset($this);", "removed.unset_this"), 2);
+    }
+
+    #[test]
+    fn legacy_syntax_prefix_handles_new_by_reference_and_default() {
+        let src = "<?php\n$a = &new Foo;\n$b =& new Bar();\n$c = &$d;\nswitch ($x) { case 1: break; default; echo 1; }\n";
+        let (fixed, applied) = fix_legacy_syntax(src).unwrap();
+        assert_eq!(fixed, "<?php\n$a = new Foo;\n$b = new Bar();\n$c = &$d;\nswitch ($x) { case 1: break; default: echo 1; }\n");
+        assert_eq!(applied, [NEW_BY_REF_FIX, DEFAULT_COLON_FIX]);
+        let rule = crate::rector::describe_rule(NEW_BY_REF_FIX);
+        assert_eq!((rule.title.en.as_str(), rule.since), ("= &new → = new", Some(PhpVersion::new(7, 0))));
+    }
+
+    #[test]
+    fn break_outside_a_loop() {
+        let id = "removed.break_outside_loop";
+        let stray = [
+            "<?php function f($r) { if ($r) { throw new E(); break; } }",
+            "<?php class A { function m() { try { x(); } catch (E $e) { continue; } } }",
+            "<?php $f = function () use ($x) { if ($x) { break; } };",
+            "<?php foreach ($a as $b) { $f = function () { break; }; }",
+            "<?php if ($x) { break; }",
+        ];
+        for src in stray {
+            assert_eq!(count85(src, id), 1, "{src}");
+        }
+        let fine = [
+            "<?php foreach ($a as $b) { if ($b) { break; } }",
+            "<?php while (true) break;",
+            "<?php switch ($a) { case 1: if ($b) { break; } default: break; }",
+            "<?php do { if ($x) { continue; } } while ($y);",
+            "<?php for ($i = 0; $i < 3; $i++) { try { x(); } catch (E $e) { continue 1; } }",
+            "<?php foreach ($a as $b): if ($b) { break; } endforeach;",
+            "<?php function f($a) { foreach ($a as $b) { switch ($b) { case 1: break 2; } } }",
+            "<?php while ($x) { ?><p><?php break; ?></p><?php }",
+            "<?php $o->break(); Foo::continue();",
+        ];
+        for src in fine {
+            assert_eq!(count85(src, id), 0, "{src}");
+        }
     }
 
     #[test]
