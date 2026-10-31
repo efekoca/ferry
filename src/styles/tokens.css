@@ -7,9 +7,10 @@
   --surface-3: #e9e9ee;
   --border: #e3e3e8;
   --border-strong: #d0d0d8;
+  --border-input: #84848f;
   --text: #16161d;
   --text-2: #585866;
-  --text-3: #696976;
+  --text-3: #646471;
 
   --accent: #2156d9;
   --accent-hover: #1a47bd;
@@ -100,6 +101,7 @@
   --surface-3: #24242b;
   --border: #26262e;
   --border-strong: #34343e;
+  --border-input: #70707e;
   --text: #ececf1;
   --text-2: #a3a3b0;
   --text-3: #8a8a97;

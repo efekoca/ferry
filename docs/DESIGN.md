@@ -13,8 +13,9 @@ ve risklere gider; süslemeye değil.
 3. **Doğal his.** macOS'ta saydam kenar çubuğu ve gömülü başlık çubuğu, Windows'ta yerel
    pencere çerçevesi. Sistem yazı tipleri, sistem tema tercihi.
 4. **Yoğun ama ferah.** 13px taban yazı boyutu (masaüstü standardı), 4px boşluk ızgarası.
-5. **Erişilebilir.** Metin kontrastı en az 4.5:1, her etkileşim klavyeyle yapılabilir,
-   odak halkası her zaman görünür.
+5. **Erişilebilir.** WCAG 2.1 AA: metin kontrastı en az 4.5:1, kontrol kenarları ve durum
+   göstergeleri en az 3:1, her etkileşim klavyeyle yapılabilir, odak halkası her zaman
+   görünür. `src/test/a11y.test.tsx` her ekranı axe ile denetler.
 
 ## Tokenlar
 
@@ -30,10 +31,11 @@ Tüm tokenlar `src/styles/tokens.css` içinde CSS değişkeni olarak tanımlıd�
 | `--surface-2` | `#F1F1F4` | `#1C1C22` | İç içe yüzey, hover |
 | `--surface-3` | `#E9E9EE` | `#24242B` | Basılı, seçili satır |
 | `--border` | `#E3E3E8` | `#26262E` | Varsayılan çizgi |
-| `--border-strong` | `#D0D0D8` | `#34343E` | Girdi kenarı |
+| `--border-strong` | `#D0D0D8` | `#34343E` | Belirgin ayırıcı, seçenek kartı |
+| `--border-input` | `#84848F` | `#70707E` | Girdi, onay kutusu ve seçili segment kenarı (zemine karşı en az 3:1) |
 | `--text` | `#16161D` | `#ECECF1` | Birincil metin |
 | `--text-2` | `#585866` | `#A3A3B0` | İkincil metin |
-| `--text-3` | `#8B8B98` | `#6F6F7C` | İpucu, devre dışı |
+| `--text-3` | `#646471` | `#8A8A97` | İpucu, devre dışı (her yüzeyde en az 4.5:1) |
 
 ### Renk — marka
 
@@ -186,6 +188,14 @@ kadar kalır. `role="status"` (hata için `role="alert"`).
 
 ## Kalıplar
 
+- **Odak halkası:** `outline` ile çizilir (2px `--accent`, 2px boşluk), böylece bileşenlerin
+  kendi `box-shadow`'u onu ezemez. Kenarları kırpılan kapsayıcılardaki satırlarda boşluk
+  içeri (`-2px`) alınır.
+- **Uzun listeler:** tek sekme durağı (roving tabindex), içinde ok tuşları, Home/End. Liste
+  ilk 300 öğeyi çizer, "Daha fazla göster" ya da klavyeyle sona gelindiğinde büyür.
+- **Dar görünüm ve yakınlaştırma:** ⌘/Ctrl + ile yakınlaştırma açıktır. 1000px altında
+  bölünmüş ekranlar alt alta dizilir; 760px altında kenar çubuğu simgelere iner, etiketler
+  görsel olarak gizlenir ama erişilebilir ad olarak kalır.
 - **Sayfa düzeni:** 52px başlık şeridi (sayfa adı + sağda eylemler), altında kaydırılabilir
   içerik, iç boşluk `--space-6`, en fazla 1180px genişlik.
 - **Liste + ayrıntı:** sol listede seçim, sağda ayrıntı paneli (bulgular, değişiklikler).
