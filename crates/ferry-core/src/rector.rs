@@ -154,6 +154,7 @@ const RULE_TITLES: &[(&str, Text)] = &[
     ("QuoteBarewordKeys", Text::same("$row[id] → $row['id']")),
     ("AssignNewWithoutReference", Text::same("= &new → = new")),
     ("DefaultColonAfterSwitch", Text::same("default; → default:")),
+    ("AssignBuiltinResultWithoutReference", Text::same("= &func_get_args() → = func_get_args()")),
     (
         "ParenthesizeNestedTernaryRector",
         Text::new("İç içe ternary paranteze alınır (eski davranış korunur)", "Parenthesize nested ternaries (keeps the old behaviour)"),
