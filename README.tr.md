@@ -119,14 +119,18 @@ Ferry her uygulamadan önce değiştireceği dosyaları yedekler. **Geçmiş** s
 | **WordPress** | `wp-config.php`, `wp-config-sample.php` ya da `wp-includes` klasörü | `wp-admin`, `wp-includes` (çekirdek); temalarınız ve eklentileriniz taranır |
 | **Laravel** | `artisan` dosyası ya da `composer.json`'da `laravel/framework` | `storage`, `bootstrap/cache` |
 | **Symfony** | `composer.json`'da `symfony/framework-bundle` ya da `bin/console` | `var` |
-| **Drupal** | `composer.json`'da `drupal/core` ya da `core/lib/Drupal.php` (`web/`, `docroot/`, `html/` veya `public/` altında da) | Drupal çekirdeği, `sites/default/files` |
+| **Drupal** | `composer.json`'da `drupal/core`, `core/lib/Drupal.php` (`web/`, `docroot/`, `html/` veya `public/` altında da) ya da Drupal 7'nin `includes/bootstrap.inc` dosyası | Drupal çekirdeği, `sites/default/files` |
+| **Magento** | `app/Mage.php` (Magento 1), `bin/magento` ya da `composer.json`'da bir `magento/product-*` paketi | `generated`, `var`, `pub/static`, `setup`, `dev`; Magento 1'de `app/code/core` ve `lib` |
+| **PrestaShop** | `config/settings.inc.php`, `app/AppKernel.php` ya da `classes/PrestaShopAutoload.php` | `classes`, `controllers`, `src`, `app` gibi çekirdek klasörleri; `modules`, `override` ve `themes` taranır |
 | **Düz PHP** | PHP dosyası içeren her klasör | — |
 
-WordPress, Laravel, Drupal ve Symfony projelerinde Ferry framework'ün kendisini de kontrol eder:
+WordPress, Laravel, Drupal, Magento, PrestaShop ve Symfony projelerinde Ferry platformun kendisini de kontrol eder:
 
 - **WordPress:** `wp-includes/version.php`'deki çekirdek sürümü, hedef PHP sürümünü destekleyen en eski WordPress sürümüyle karşılaştırılır (örneğin PHP 8.4 için en az WordPress 6.7 gerekir).
 - **Laravel:** `composer.lock`'taki `laravel/framework` sürümü Laravel'in desteklediği PHP aralığıyla karşılaştırılır. Ayrıca Laravel 6'nın kaldırdığı `str_*` ve `array_*` yardımcıları ile `Input` facade'ı işaretlenir; PHP 8 en az Laravel 6.20 gerektirdiği için `laravel/helpers` kurulu değilse bunlar da bozulur.
-- **Drupal:** Çekirdek sürümü Drupal'ın PHP gereksinimleriyle karşılaştırılır (örneğin PHP 8.5 için en az Drupal 11.3 gerekir).
+- **Drupal:** Çekirdek sürümü Drupal'ın PHP gereksinimleriyle karşılaştırılır (örneğin PHP 8.5 için en az Drupal 11.3 gerekir). Drupal 7 de kontrol edilir: PHP 8.2 için en az 7.94, PHP 8.3 için en az 7.103 gerekir; hiçbir Drupal 7 sürümü PHP 8.4'te çalışmaz.
+- **Magento:** Magento 2'nin `composer.lock`'taki sürümü Adobe'nin sistem gereksinimleriyle karşılaştırılır (örneğin PHP 8.4 için en az 2.4.8 gerekir). Magento 1 PHP 8'i hiç desteklemediği için, proje OpenMage LTS kullanmıyorsa işaretlenir.
+- **PrestaShop:** Çekirdek sürümü PrestaShop'un gereksinimleriyle karşılaştırılır: 1.6 ve 1.7 PHP 8'i desteklemez, 8.0–8.2 en fazla PHP 8.1'i, 9.x en fazla PHP 8.5'i destekler.
 - **Symfony:** Symfony en yüksek PHP sürümünü yayımlamadığı için, bakımı hedef PHP sürümü çıkmadan biten bir sürüm **Riskli** olarak işaretlenir.
 
 `vendor` ve `node_modules` her zaman atlanır. 2 MB'tan büyük dosyalar atlanır ve tarama sonuçlarında listelenir; hiçbir dosya sessizce dışarıda kalmaz.

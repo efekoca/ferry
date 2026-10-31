@@ -51,6 +51,8 @@ export const FRAMEWORK_LABEL = {
   laravel: "Laravel",
   symfony: "Symfony",
   drupal: "Drupal",
+  magento: "Magento",
+  prestashop: "PrestaShop",
   generic: "PHP",
 } as const;
 
