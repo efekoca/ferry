@@ -42,7 +42,11 @@
     }
   }).observe(document.body, { childList: true, subtree: true });
   window.addEventListener("error", (e) => emit(`  JSERROR ${e.message}`));
-  window.addEventListener("unhandledrejection", (e) => emit(`  REJECTION ${e.reason?.message ?? e.reason}`));
+  let leaving = false;
+  window.addEventListener("pagehide", () => (leaving = true));
+  window.addEventListener("unhandledrejection", (e) => {
+    if (!leaving) emit(`  REJECTION ${e.reason?.message ?? e.reason}`);
+  });
   const origError = console.error;
   console.error = (...a) => {
     emit(`  CONSOLE ${a.map(String).join(" ").slice(0, 300)}`);
@@ -65,6 +69,7 @@
 
   const stage = Number(sessionStorage.getItem("ferry.e2e.stage") ?? "-1");
   const next = () => {
+    leaving = true;
     const wanted = ["kuzey", "kuzey", "laravel", "wp", "wp", "unicode", "odd", "empty", "missing", "missing"][stage + 1];
     if (wanted) {
       const now = Date.now();
@@ -367,6 +372,7 @@
 
   if (stage < 0) {
     sessionStorage.setItem("ferry.e2e.stage", "0");
+    leaving = true;
     location.reload();
     return;
   }
