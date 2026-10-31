@@ -58,7 +58,6 @@ jobs:
           cargo test -p ferry-core
 
   windows:
-    needs: checks
     runs-on: windows-latest
     timeout-minutes: 40
     steps:
