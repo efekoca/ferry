@@ -167,6 +167,7 @@ pub const COMPILE_TIME: &[&str] = &[
     "removed.reserved_name",
     "removed.assign_new_by_ref",
     "removed.unset_this",
+    "removed.globals_write",
     "removed.break_outside_loop",
     "deprecated.dollar_brace_interpolation",
     "deprecated.implicit_nullable",
@@ -1085,6 +1086,18 @@ pub mod patterns {
         note: Text::new(
             "new ile oluşturulan nesneyi referansla atamak PHP 7.0'da kaldırıldı ve ayrıştırma hatası verir. Nesneler zaten referans gibi davrandığı için & işaretini silmek yeterli.",
             "Assigning the result of new by reference was removed in PHP 7.0 and is a parse error. Objects already behave like references, so dropping the & is enough.",
+        ),
+    };
+    pub const GLOBALS_WRITE: PatternRule = PatternRule {
+        id: "removed.globals_write",
+        title: Text::new("$GLOBALS dizisinin tamamına yazılıyor", "Writing to the whole $GLOBALS array"),
+        severity: Severity::Breaking,
+        since: (8, 1),
+        replacement: code("$GLOBALS['name'] = $value"),
+        fix: FixKind::Manual,
+        note: Text::new(
+            "PHP 8.1'den itibaren $GLOBALS dizisinin tamamına değer atamak, onu unset etmek, referansını almak ya da sonuna eleman eklemek derleme hatası verir ve dosya hiç çalışmaz. Tek tek değişkenleri $GLOBALS['ad'] = $deger biçiminde değiştirin ya da $GLOBALS'ın bir kopyasıyla çalışın.",
+            "Since PHP 8.1, assigning to the whole $GLOBALS array, unsetting it, taking a reference to it or appending to it is a compile-time error and the file never runs. Change single variables with $GLOBALS['name'] = $value, or work on a copy of $GLOBALS.",
         ),
     };
     pub const UNSET_THIS: PatternRule = PatternRule {
