@@ -155,3 +155,64 @@ fn compile_time_findings_match_php() {
         }
     }
 }
+
+#[test]
+#[ignore = "needs CORPUS"]
+fn scan_speed() {
+    let corpus = PathBuf::from(std::env::var_os("CORPUS").expect("set CORPUS to a folder of PHP projects"));
+    let mut projects: Vec<PathBuf> = std::fs::read_dir(&corpus).unwrap().flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect();
+    projects.sort();
+    for root in projects {
+        let started = std::time::Instant::now();
+        let info = project::inspect(&root).unwrap();
+        let files = project::collect_php_files(&root, &info.excluded_dirs);
+        let walked = started.elapsed();
+        let started = std::time::Instant::now();
+        let result = analyzer::analyze_files(&root, &files, "8.4".parse().unwrap(), |_, _, _| {});
+        let scanned = started.elapsed();
+        let lines: usize = result.lines_scanned;
+        println!(
+            "SPEED {:<12} files={:>5} lines={:>8} findings={:>6} walk={:>5}ms scan={:>6}ms ({:.0} files/s)",
+            root.file_name().unwrap().to_string_lossy(),
+            files.len(),
+            lines,
+            result.findings.len(),
+            walked.as_millis(),
+            scanned.as_millis(),
+            files.len() as f64 / scanned.as_secs_f64()
+        );
+    }
+}
+
+#[test]
+#[ignore = "needs CORPUS and FERRY_TEST_TOOLS"]
+fn preview_speed() {
+    let corpus = PathBuf::from(std::env::var_os("CORPUS").expect("set CORPUS"));
+    let tools = PathBuf::from(std::env::var_os("FERRY_TEST_TOOLS").expect("set FERRY_TEST_TOOLS"));
+    let php = ferry_core::toolchain::find_php(None).expect("php");
+    for name in std::env::var("PREVIEW_PROJECTS").unwrap_or_default().split(',').filter(|s| !s.is_empty()) {
+        let root = corpus.join(name);
+        let info = project::inspect(&root).unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let started = std::time::Instant::now();
+        let preview = ferry_core::rector::preview(
+            &php,
+            &ferry_core::toolchain::rector_entry(&tools),
+            &root,
+            "8.4".parse().unwrap(),
+            ferry_core::rector::RectorMode::Compat,
+            &info.excluded_dirs,
+            work.path(),
+            &std::sync::atomic::AtomicBool::new(false),
+        );
+        match preview {
+            Ok(p) => println!(
+                "PREVIEW {name}: {} changed files, {} errors, {:.1}s",
+                p.changes.len(),
+                p.errors.len(),
+                started.elapsed().as_secs_f64()
+            ),
+            Err(e) => println!("PREVIEW {name}: failed after {:.1}s: {e}", started.elapsed().as_secs_f64()),
+        }
+    }
+}
