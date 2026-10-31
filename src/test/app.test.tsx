@@ -111,6 +111,25 @@ describe("Ferry app", () => {
     expect(within(detail).getByText(/admin\/settings-page.php:88/)).toBeInTheDocument();
   });
 
+  it("renders long finding lists in pages and extends them on demand", async () => {
+    const user = userEvent.setup();
+    render(<App api={mockApi({ delay: 0, scale: 40 })} />);
+    await openAndScan(user);
+    await user.click(nav(/Bulgular/));
+    const list = await screen.findByRole("listbox", { name: "Bulgu listesi" });
+    expect(within(list).getAllByRole("option")).toHaveLength(300);
+    expect(screen.getByText("840 bulgu")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "300 bulgu daha göster (540 kaldı)" }));
+    expect(within(list).getAllByRole("option")).toHaveLength(600);
+
+    const options = within(list).getAllByRole("option");
+    await user.click(options[599]);
+    await user.keyboard("{ArrowDown}");
+    await waitFor(() => expect(within(list).getAllByRole("option")).toHaveLength(840));
+    expect(within(list).getAllByRole("option")[600]).toHaveAttribute("aria-selected", "true");
+    expect(screen.queryByRole("button", { name: /daha göster/ })).not.toBeInTheDocument();
+  });
+
   it("previews, applies and restores changes", async () => {
     const user = setup();
     await openAndScan(user);

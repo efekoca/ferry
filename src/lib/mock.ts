@@ -148,7 +148,7 @@ const DEPS: Omit<DependencyReport, "target" | "rootStatus"> = {
   ],
 };
 
-export function mockApi(opts: { delay?: number } = {}): Api {
+export function mockApi(opts: { delay?: number; scale?: number } = {}): Api {
   const delay = opts.delay ?? 450;
   const listeners = new Set<(p: ScanProgress) => void>();
   let settings: Settings = { phpPath: null, snapshotLimit: null };
@@ -196,11 +196,13 @@ export function mockApi(opts: { delay?: number } = {}): Api {
         listeners.forEach((l) => l({ run, done, total, file: i < steps ? `includes/file-${done}.php` : "" }));
         await sleep(delay / steps);
       }
-      const findings: Finding[] = SEEDS.filter((s) => versionLte(s.since, target) && !(fixed.has(s.file) && s.fix !== "manual")).map((s) => ({
-        ...s,
-        column: 9,
-        id: `${s.file}:${s.line}:9:${s.ruleId}`,
-      }));
+      const seeds = SEEDS.filter((s) => versionLte(s.since, target) && !(fixed.has(s.file) && s.fix !== "manual"));
+      const findings: Finding[] = Array.from({ length: opts.scale ?? 1 }, (_, copy) =>
+        seeds.map((s) => {
+          const file = copy ? s.file.replace(/\.php$/, `-${copy}.php`) : s.file;
+          return { ...s, file, column: 9, id: `${file}:${s.line}:9:${s.ruleId}` };
+        }),
+      ).flat();
       return { target, filesScanned: total, linesScanned: 18432, findings, errors: [], durationMs: 184, summary: summarize(findings) };
     },
     onScanProgress: async (handler) => {

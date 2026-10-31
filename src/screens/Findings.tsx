@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useDeferredValue, useEffect, useMemo, useState, type ReactNode } from "react";
 import { ArrowRight, CircleCheck, ClipboardList, FileCode2, FolderSearch, Info, Lightbulb, Search, Sparkles, X } from "lucide-react";
 import { PageHeader } from "../components/Shell";
 import { useToast } from "../components/Toast";
@@ -8,6 +8,8 @@ import { errorMessage } from "../lib/api";
 import { commonTitle, joinPath } from "../lib/labels";
 import { NO_FILTER, useStore, type FindingsFilter } from "../lib/store";
 import type { Finding, FixKind, Severity } from "../lib/types";
+
+const PAGE = 300;
 
 const FIX_TONE = { auto: "success", likely: "info", manual: "warn" } as const;
 const FIX_ICON: Record<FixKind, ReactNode> = {
@@ -35,7 +37,11 @@ export function Findings() {
   const toast = useToast();
 
   const findings = useMemo(() => scan?.findings ?? [], [scan]);
-  const visible = useMemo(() => filterFindings(findings, filter), [findings, filter]);
+  const deferredFilter = useDeferredValue(filter);
+  const visible = useMemo(() => filterFindings(findings, deferredFilter), [findings, deferredFilter]);
+  const [limit, setLimit] = useState({ for: visible, count: PAGE });
+  const shown = limit.for === visible ? limit.count : PAGE;
+  const showMore = (count: number) => setLimit({ for: visible, count });
   const update = (patch: Partial<FindingsFilter>) => setFindingsFilter({ ...filter, ...patch });
   const filtered = filter.fix || filter.severity || filter.rule || filter.query;
   const ruleTitle = useMemo(() => {
@@ -44,9 +50,13 @@ export function Findings() {
   }, [findings, filter.rule, loc]);
   const groups = useMemo(() => {
     const map = new Map<string, Finding[]>();
-    for (const f of visible) map.set(f.file, [...(map.get(f.file) ?? []), f]);
+    for (const f of visible.slice(0, shown)) {
+      const list = map.get(f.file);
+      if (list) list.push(f);
+      else map.set(f.file, [f]);
+    }
     return [...map.entries()];
-  }, [visible]);
+  }, [visible, shown]);
   const selected = visible.find((f) => f.id === selectedId) ?? visible[0] ?? null;
 
   useEffect(() => {
@@ -56,13 +66,15 @@ export function Findings() {
       if (!visible.length) return;
       e.preventDefault();
       const i = selected ? visible.indexOf(selected) : -1;
-      const next = visible[Math.max(0, Math.min(visible.length - 1, i + (e.key === "ArrowDown" ? 1 : -1)))];
+      const j = Math.max(0, Math.min(visible.length - 1, i + (e.key === "ArrowDown" ? 1 : -1)));
+      const next = visible[j];
+      if (j >= shown) showMore(shown + PAGE);
       setSelectedId(next.id);
-      document.getElementById(`finding-${next.id}`)?.scrollIntoView({ block: "nearest" });
+      requestAnimationFrame(() => document.getElementById(`finding-${next.id}`)?.scrollIntoView({ block: "nearest" }));
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [visible, selected]);
+  });
 
   if (!scan) {
     return (
@@ -149,41 +161,50 @@ export function Findings() {
                 {t.findings.noMatchText}
               </EmptyState>
             ) : (
-              <div role="listbox" aria-label={t.findings.list} className="finding-list">
-                {groups.map(([file, items]) => (
-                  <section key={file} className="file-group" role="group" aria-label={file}>
-                    <header className="file-group__header">
-                      <FileCode2 size={14} />
-                      <span className="file-group__name" title={file}>
-                        {file}
-                      </span>
-                      <span>{items.length}</span>
-                    </header>
-                    {items.map((f) => (
-                      <button
-                        key={f.id}
-                        id={`finding-${f.id}`}
-                        role="option"
-                        aria-selected={selected?.id === f.id}
-                        className="finding"
-                        onClick={() => setSelectedId(f.id)}
-                      >
-                        <span className="finding__line">
-                          <SeverityIcon severity={f.severity} />
-                          {f.line}
+              <>
+                <div role="listbox" aria-label={t.findings.list} className="finding-list">
+                  {groups.map(([file, items]) => (
+                    <section key={file} className="file-group" role="group" aria-label={file}>
+                      <header className="file-group__header">
+                        <FileCode2 size={14} />
+                        <span className="file-group__name" title={file}>
+                          {file}
                         </span>
-                        <span className="finding__main">
-                          <div className="finding__title">{loc(f.title)}</div>
-                          <div className="finding__snippet">{f.snippet}</div>
-                        </span>
-                        <span className="finding__badges">
-                          <RiskBadge fix={f.fix} />
-                        </span>
-                      </button>
-                    ))}
-                  </section>
-                ))}
-              </div>
+                        <span>{items.length}</span>
+                      </header>
+                      {items.map((f) => (
+                        <button
+                          key={f.id}
+                          id={`finding-${f.id}`}
+                          role="option"
+                          aria-selected={selected?.id === f.id}
+                          className="finding"
+                          onClick={() => setSelectedId(f.id)}
+                        >
+                          <span className="finding__line">
+                            <SeverityIcon severity={f.severity} />
+                            {f.line}
+                          </span>
+                          <span className="finding__main">
+                            <div className="finding__title">{loc(f.title)}</div>
+                            <div className="finding__snippet">{f.snippet}</div>
+                          </span>
+                          <span className="finding__badges">
+                            <RiskBadge fix={f.fix} />
+                          </span>
+                        </button>
+                      ))}
+                    </section>
+                  ))}
+                </div>
+                {visible.length > shown && (
+                  <div className="finding-more">
+                    <Button variant="secondary" onClick={() => showMore(shown + PAGE)}>
+                      {t.findings.showMore(Math.min(PAGE, visible.length - shown), visible.length - shown)}
+                    </Button>
+                  </div>
+                )}
+              </>
             )}
           </div>
 

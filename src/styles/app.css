@@ -1507,6 +1507,12 @@ button.metric {
   padding-bottom: var(--space-6);
 }
 
+.finding-more {
+  display: flex;
+  justify-content: center;
+  margin: calc(var(--space-2) * -1) var(--space-6) var(--space-6);
+}
+
 .chip {
   display: inline-flex;
   flex: none;
