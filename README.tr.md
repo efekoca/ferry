@@ -66,6 +66,7 @@ Ferry'nin kendi PHP sözcük çözümleyicisi ve kural seti vardır; kodu PHP'ni
 - `"${var}"` yerleştirmesi, örtük nullable parametreler, `utf8_encode()`, `FILTER_SANITIZE_STRING` ve `E_STRICT` gibi kullanımdan kalkanlar
 - zorunlu bir parametreden önce gelen isteğe bağlı parametre, yerleşik metin fonksiyonlarına doğrudan verilen `null` ve `"self::method"` biçimindeki callable'lar gibi parametre ve çağrı kalıpları
 - yerleşik bir sınıfın ya da arayüzün metodunu PHP 8'in kabul etmediği bir imzayla ezen ve sınıfın hiç yüklenmemesine yol açan metotlar; örneğin Drupal 7'nin bir `PDO` alt sınıfındaki `query($query, array $args = array(), $options = array())` metodu
+- projedeki bir üst sınıfın, trait'in ya da arayüzün metodunu PHP 8'in kabul etmediği bir imzayla ezen metotlar; örneğin phpBB 3.2'nin üst sınıfta isteğe bağlı olan parametreyi zorunlu yapan `create_insert_array($user, $pre_create_data)` metodu. PHP 7 bunu yalnızca uyarıyla geçiyordu
 - `PDO::query()` ya da `Iterator::current()` gibi yerleşik bir sınıfın ya da arayüzün metodunu dönüş tipi olmadan ezen ve PHP 8.1'den itibaren `#[\ReturnTypeWillChange]` isteyen metotlar
 - `eval()`, `extract()` ve değişken değişkenler gibi elle kontrol edilmesi gereken kodlar
 
