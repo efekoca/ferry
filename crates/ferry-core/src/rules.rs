@@ -169,6 +169,7 @@ pub const COMPILE_TIME: &[&str] = &[
     "removed.unset_this",
     "removed.globals_write",
     "removed.reserved_alias",
+    "removed.builtin_result_by_ref",
     "removed.break_outside_loop",
     "deprecated.dollar_brace_interpolation",
     "deprecated.implicit_nullable",
@@ -1111,6 +1112,18 @@ pub mod patterns {
         note: Text::new(
             "PHP 8.1'den itibaren $GLOBALS dizisinin tamamına değer atamak, onu unset etmek, referansını almak ya da sonuna eleman eklemek derleme hatası verir ve dosya hiç çalışmaz. Tek tek değişkenleri $GLOBALS['ad'] = $deger biçiminde değiştirin ya da $GLOBALS'ın bir kopyasıyla çalışın.",
             "Since PHP 8.1, assigning to the whole $GLOBALS array, unsetting it, taking a reference to it or appending to it is a compile-time error and the file never runs. Change single variables with $GLOBALS['name'] = $value, or work on a copy of $GLOBALS.",
+        ),
+    };
+    pub const BUILTIN_RESULT_BY_REF: PatternRule = PatternRule {
+        id: "removed.builtin_result_by_ref",
+        title: Text::new("Yerleşik fonksiyon sonucu referansla atanıyor", "Built-in function result assigned by reference"),
+        severity: Severity::Breaking,
+        since: (7, 0),
+        replacement: None,
+        fix: FixKind::Auto,
+        note: Text::new(
+            "func_get_args(), strlen(), count() gibi fonksiyonları PHP derleme sırasında özel olarak işler; sonuçlarını referansla atamak ölümcül hataya yol açar ve dosya hiç çalışmaz. Sonuç zaten yeni bir değer olduğu için & işaretini silmek yeterli.",
+            "PHP compiles functions such as func_get_args(), strlen() and count() specially, so assigning their result by reference is a fatal error and the file never runs. The result is a fresh value anyway, so dropping the & is enough.",
         ),
     };
     pub const UNSET_THIS: PatternRule = PatternRule {

@@ -200,6 +200,7 @@ pub const CURLY_FIX: &str = "Rector\\Php74\\Rector\\ArrayDimFetch\\CurlyToSquare
 pub const BAREWORD_FIX: &str = "Ferry\\QuoteBarewordKeys";
 pub const NEW_BY_REF_FIX: &str = "Ferry\\Php70\\AssignNewWithoutReference";
 pub const DEFAULT_COLON_FIX: &str = "Ferry\\Php85\\DefaultColonAfterSwitch";
+pub const BUILTIN_BY_REF_FIX: &str = "Ferry\\Php70\\AssignBuiltinResultWithoutReference";
 
 pub fn fix_legacy_syntax(src: &str) -> Option<(String, Vec<&'static str>)> {
     let tokens = tokenize(src);
@@ -234,6 +235,14 @@ pub fn fix_legacy_syntax(src: &str) -> Option<(String, Vec<&'static str>)> {
     }
     if !by_ref.is_empty() {
         applied.push(NEW_BY_REF_FIX);
+    }
+    let builtin_refs = builtin_results_by_ref(&tokens);
+    for &(k, _) in &builtin_refs {
+        let end = if tokens[k].start > tokens[k - 1].end { tokens[k + 1].start } else { tokens[k].end };
+        edits.push((tokens[k].start, end, ""));
+    }
+    if !builtin_refs.is_empty() {
+        applied.push(BUILTIN_BY_REF_FIX);
     }
     let defaults: Vec<usize> = case_semicolons(&tokens).into_iter().filter(|&k| tokens[k].is_ident_ci("default")).collect();
     for &k in &defaults {
@@ -355,6 +364,11 @@ pub fn analyze_source_in(file: &str, src: &str, target: PhpVersion, index: &crat
     }
     for (k, since, fixed) in reserved_aliases(&tokens) {
         ctx.pattern_replaced(&patterns::RESERVED_ALIAS, &tokens[k], since, fixed);
+    }
+    for (k, since) in builtin_results_by_ref(&tokens) {
+        let args = if tokens.get(k + 3).is_some_and(|t| t.is_punct(")")) { "()" } else { "(…)" };
+        let fixed = format!("${} = {}{args}", tokens[k - 2].text, tokens[k + 1].text.trim_start_matches('\\'));
+        ctx.pattern_replaced(&patterns::BUILTIN_RESULT_BY_REF, &tokens[k], since, fixed);
     }
     for k in stray_breaks(&tokens) {
         ctx.pattern(&patterns::BREAK_OUTSIDE_LOOP, &tokens[k], None);
@@ -1856,6 +1870,99 @@ fn reserved_aliases(tokens: &[Token]) -> Vec<(usize, PhpVersion, String)> {
     out
 }
 
+const BUILTIN_RESULT_ONE_ARG: &[&str] = &[
+    "strlen",
+    "is_null",
+    "is_bool",
+    "is_int",
+    "is_integer",
+    "is_long",
+    "is_float",
+    "is_double",
+    "is_string",
+    "is_array",
+    "is_object",
+    "is_resource",
+    "is_scalar",
+    "boolval",
+    "intval",
+    "floatval",
+    "doubleval",
+    "strval",
+    "defined",
+    "count",
+    "sizeof",
+    "gettype",
+];
+
+fn compiled_sprintf(format: &Token, args: usize) -> bool {
+    let quoted = matches!(format.kind, TokenKind::Str { backtick: false, .. }) && format.text.len() >= 2;
+    if !quoted || format.text.starts_with('"') && format.text.contains('$') {
+        return false;
+    }
+    let body = &format.text[1..format.text.len() - 1];
+    let mut chars = body.chars();
+    let mut placeholders = 0;
+    while let Some(c) = chars.next() {
+        if c == '%' {
+            match chars.next() {
+                Some('s' | 'd') => placeholders += 1,
+                Some('%') => {}
+                _ => return false,
+            }
+        }
+    }
+    placeholders + 1 == args
+}
+
+fn builtin_results_by_ref(tokens: &[Token]) -> Vec<(usize, PhpVersion)> {
+    let spaces = crate::index::namespaces(tokens);
+    let mut out = Vec::new();
+    for k in 2..tokens.len().saturating_sub(2) {
+        if !(tokens[k].is_punct("&") && tokens[k - 1].is_punct("=") && tokens[k - 2].kind == TokenKind::Variable) {
+            continue;
+        }
+        if k >= 3
+            && (tokens[k - 3].is_punct("->")
+                || tokens[k - 3].is_punct("?->")
+                || tokens[k - 3].is_punct("::")
+                || tokens[k - 3].is_punct("$"))
+        {
+            continue;
+        }
+        let name = &tokens[k + 1];
+        if name.kind != TokenKind::Ident || !tokens[k + 2].is_punct("(") {
+            continue;
+        }
+        let rooted = name.text.starts_with('\\');
+        let bare = name.text.trim_start_matches('\\').to_ascii_lowercase();
+        if bare.contains('\\') || !rooted && !crate::index::namespace_at(&spaces, k).is_empty() {
+            continue;
+        }
+        let args = call_args(tokens, k + 2);
+        let plain = args
+            .iter()
+            .all(|a| !a.iter().any(|t| t.is_punct("...")) && !(a.len() >= 2 && a[0].kind == TokenKind::Ident && a[1].is_punct(":")));
+        if !plain {
+            continue;
+        }
+        let n = args.len();
+        let since = match bare.as_str() {
+            b if BUILTIN_RESULT_ONE_ARG.contains(&b) && n == 1 => PhpVersion::new(7, 0),
+            "func_num_args" | "func_get_args" | "get_called_class" if n == 0 => PhpVersion::new(7, 0),
+            "get_class" if n <= 1 => PhpVersion::new(7, 0),
+            "array_key_exists" if n == 2 => PhpVersion::new(7, 0),
+            "array_slice" if n == 2 && args[0].len() == 3 && args[0][0].is_ident_ci("func_get_args") && args[0][1].is_punct("(") => {
+                PhpVersion::new(7, 0)
+            }
+            "sprintf" if n >= 1 && args[0].len() == 1 && compiled_sprintf(&args[0][0], n) => PhpVersion::new(8, 4),
+            _ => continue,
+        };
+        out.push((k, since));
+    }
+    out
+}
+
 fn unset_this(tokens: &[Token]) -> Vec<usize> {
     (0..tokens.len())
         .filter(|&i| tokens[i].is_ident_ci("unset") && tokens.get(i + 1).is_some_and(|t| t.is_punct("(")))
@@ -2356,6 +2463,48 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
         let found = analyze_source("t.php", "<?php namespace A; use yii\\base\\Object; use B\\C as object;", PhpVersion::new(8, 4));
         let fixes: Vec<String> = found.iter().filter(|f| f.rule_id == id).map(|f| f.replacement.as_ref().unwrap().en.clone()).collect();
         assert_eq!(fixes, ["yii\\base\\Object as BaseObject", "B\\C as BaseObject"]);
+    }
+
+    #[test]
+    fn built_in_results_assigned_by_reference() {
+        let id = "removed.builtin_result_by_ref";
+        let fatal = [
+            "function g() { $args = & func_get_args(); }",
+            "function g($s) { $n =& STRLEN ($s); }",
+            "function g($a) { $n = &count($a); }",
+            "function g($o) { $c = &get_class(); }",
+            "function g($a) { $e = &array_key_exists(1, $a); }",
+            "function g() { $rest = &array_slice(func_get_args(), 1); }",
+            "namespace A; function g($s) { $n = &\\strlen($s); }",
+        ];
+        for src in fatal {
+            assert_eq!(count85(&format!("<?php {src}"), id), 1, "{src}");
+        }
+        let fine = [
+            "function g($a) { $n = &count($a, 1); }",
+            "function g($a) { $v = &end($a); }",
+            "function g($a) { $r = &array_slice($a, 1); }",
+            "function g($a) { $n = &strlen(...$a); }",
+            "function g($s) { $a[] = &strlen($s); }",
+            "function g($s) { $o->p = &strlen($s); }",
+            "function g($s) { $n = &$this->strlen($s); }",
+            "namespace A; function g($s) { $n = &strlen($s); }",
+            "function g($a) { $s = &sprintf(\"%.2f\", $a); }",
+            "function g($a) { $s = &sprintf(\"%s\", $a, $a); }",
+        ];
+        for src in fine {
+            assert_eq!(count85(&format!("<?php {src}"), id), 0, "{src}");
+        }
+        let sprintf = "<?php function g($a) { $s = &sprintf('%s-%d', $a, $a); }";
+        assert_eq!(at(sprintf, (8, 4)).iter().filter(|(r, _)| r == id).count(), 1);
+        assert_eq!(at(sprintf, (8, 3)).iter().filter(|(r, _)| r == id).count(), 0);
+        let found =
+            analyze_source("t.php", "<?php function g($s) { $args = &func_get_args(); $n = &\\strlen($s); }", PhpVersion::new(8, 4));
+        let fixes: Vec<String> = found.iter().filter(|f| f.rule_id == id).map(|f| f.replacement.as_ref().unwrap().en.clone()).collect();
+        assert_eq!(fixes, ["$args = func_get_args()", "$n = strlen(…)"]);
+        let (fixed, applied) = fix_legacy_syntax("<?php function g() { $args = & func_get_args(); $v = &end($a); }").unwrap();
+        assert_eq!(fixed, "<?php function g() { $args = func_get_args(); $v = &end($a); }");
+        assert_eq!(applied, [BUILTIN_BY_REF_FIX]);
     }
 
     #[test]
