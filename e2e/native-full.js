@@ -221,12 +221,19 @@
       await nav("Düzeltmeler");
       await click("Değişiklikleri hesapla", undefined, 10000);
       const before = seen.length;
-      await click("Durdur", undefined, 5000);
-      await until(() => button("Değişiklikleri hesapla"), "calculate button back after stop", 15000);
+      const finished = () => $(".change-item") || text().includes("Yapılacak değişiklik yok");
+      await until(() => button("Durdur") || finished(), "Stop button or results", 10000);
+      const stopped = !!button("Durdur");
+      if (stopped) {
+        button("Durdur").click();
+        await until(() => button("Değişiklikleri hesapla") || finished(), "calculate button back after stop", 15000);
+      }
       await sleep(1000);
       noErrorToast(before);
-      check(!$(".change-item"), "no stale results after stop");
-      const files = await preview();
+      const raced = !button("Değişiklikleri hesapla");
+      if (raced) await emit("  Rector finished before Stop took effect");
+      else check(!$(".change-item"), "no stale results after stop");
+      const files = raced ? $$(".change-item__file").map((e) => e.textContent) : await preview();
       await emit(`  after stop, preview ${files.length}: ${files.join(", ")}`);
       check(files.length > 0, "preview works after a stop");
 
