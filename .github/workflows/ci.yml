@@ -138,10 +138,21 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          tools: composer
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
+      - name: Install Rector
+        run: |
+          mkdir -p "$RUNNER_TEMP/tools"
+          composer require rector/rector --working-dir "$RUNNER_TEMP/tools" --no-interaction --no-progress
+          echo "FERRY_TEST_TOOLS=$RUNNER_TEMP/tools" >> "$GITHUB_ENV"
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace --no-fail-fast
+      - name: Native e2e
+        run: pnpm e2e:native
 
   bundle:
     if: startsWith(github.ref, 'refs/tags/v') || inputs.bundle
