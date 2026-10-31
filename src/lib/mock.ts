@@ -161,7 +161,7 @@ export function mockApi(opts: { delay?: number; scale?: number } = {}): Api {
   ];
 
   const toolchain = (): ToolchainStatus => ({
-    php: { path: "/opt/homebrew/bin/php", version: "8.4.14" },
+    php: { path: "/opt/homebrew/bin/php", version: "8.4.27" },
     composer: { path: "/opt/homebrew/bin/composer", version: "2.8.12" },
     rector: { path: "~/Library/Application Support/io.github.efekoca.ferry/tools/vendor/rector/rector/bin/rector", version: "2.8.3" },
     docker: { path: "/usr/local/bin/docker", version: "Docker version 28.4.0" },

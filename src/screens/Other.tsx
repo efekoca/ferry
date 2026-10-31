@@ -18,11 +18,13 @@ import {
   RotateCcw,
   Sun,
   Trash2,
+  ShieldAlert,
 } from "lucide-react";
 import { DiffViewer } from "../components/DiffViewer";
 import { ConfirmDialog, Sheet } from "../components/Modal";
 import { PageHeader } from "../components/Shell";
 import { Badge, Button, Callout, Card, CommandLine, EmptyState, RiskBadge, RuleChips, Segmented } from "../components/ui";
+import { PHP2SHELL_CVES, isVulnerable, patchedFor } from "../lib/security";
 import { useToast } from "../components/Toast";
 import { LANGS, useI18n, type Lang } from "../i18n";
 import { errorMessage } from "../lib/api";
@@ -544,6 +546,7 @@ export function SettingsScreen() {
   type LimitValue = (typeof limits)[number]["value"];
   const limitValue = (settings.snapshotLimit === null ? "none" : String(settings.snapshotLimit)) as LimitValue;
 
+  const phpVersion = toolchain?.php?.version ?? null;
   const tools = [
     { name: "PHP", info: toolchain?.php, required: true },
     { name: "Composer", info: toolchain?.composer, required: false },
@@ -587,7 +590,10 @@ export function SettingsScreen() {
             <div className="card__list">
               {tools.map((tool) => (
                 <div key={tool.name} className="tool">
-                  <span className={`dot ${tool.info ? "dot--ok" : tool.required ? "dot--error" : "dot--warn"}`} aria-hidden />
+                  <span
+                    className={`dot ${tool.info ? (tool.name === "PHP" && phpVersion && isVulnerable(phpVersion) ? "dot--error" : "dot--ok") : tool.required ? "dot--error" : "dot--warn"}`}
+                    aria-hidden
+                  />
                   <span className="tool__name">{tool.name}</span>
                   <span className="tool__path selectable" title={tool.info?.path}>
                     {tool.info ? tool.info.path : t.settings.notFound}
@@ -611,6 +617,13 @@ export function SettingsScreen() {
                 </div>
               ))}
             </div>
+            {phpVersion && isVulnerable(phpVersion) && (
+              <div className="tool-warning">
+                <Callout tone="danger" icon={<ShieldAlert size={15} aria-hidden />}>
+                  {t.settings.vulnerablePhp(phpVersion, PHP2SHELL_CVES, patchedFor(phpVersion))}
+                </Callout>
+              </div>
+            )}
           </Card>
 
           <Card title={t.settings.backups} bodyClassName="">

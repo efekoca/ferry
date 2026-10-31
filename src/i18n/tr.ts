@@ -83,6 +83,8 @@ export const tr = {
     constraint: "Composer kısıtı",
     targetTitle: "Hangi sürüme geçiyorsunuz?",
     targetLabel: "Hedef PHP sürümü",
+    blockedTarget: (blocked: string, cves: string, patched: string[]) =>
+      `PHP ${blocked} seçilemez: Ekim 2026'da duyurulan ve saldırılarda kullanılan ${cves} açıkları kimlik doğrulaması olmadan sunucuda kod çalıştırmaya izin veriyor. ${blocked} desteği 31 Aralık 2025'te bittiği için bu açığın düzeltmesini almayacak. Hangi sürümü seçerseniz seçin, sunucunuzda en az ${patched.join(", ")} çalıştığından emin olun.`,
     currentHint: (v: string) => `composer.json'a göre şu an PHP ${v} kullanıyorsunuz.`,
     currentUnknown: "Şu anki sürüm composer.json'dan anlaşılamadı.",
     skipped: (dirs: string) => ` ${dirs} ve vendor klasörleri taranmaz.`,
@@ -280,6 +282,8 @@ export const tr = {
     tools: "Araçlar",
     recheck: "Yeniden kontrol et",
     notFound: "Bulunamadı",
+    vulnerablePhp: (version: string, cves: string, patched: string) =>
+      `Bu bilgisayardaki PHP ${version}, kimlik doğrulaması olmadan kod çalıştırmaya izin veren ${cves} açıklarından etkileniyor. Bu açık için bilinen bir geçici önlem yok; PHP'yi ${patched} ya da daha yeni bir sürüme güncelleyin.`,
     choose: "Seç",
     auto: "Otomatik",
     install: "Kur",
