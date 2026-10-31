@@ -9,6 +9,9 @@ const args = new Set(process.argv.slice(2));
 const script = join(root, "e2e", args.has("--smoke") ? "native-smoke.js" : "native-full.js");
 const timeoutMs = 20 * 60 * 1000;
 
+const syntax = spawnSync(process.execPath, ["--check", script], { stdio: "inherit" });
+if (syntax.status !== 0) process.exit(1);
+
 const work = mkdtempSync(join(tmpdir(), "ferry-e2e-"));
 const demo = join(work, "demo");
 const fixtures = join(work, "fixtures");
@@ -54,7 +57,7 @@ async function devServerUp() {
 
 let dev = null;
 if (!(await devServerUp())) {
-  dev = spawn("pnpm", ["dev"], { cwd: root, stdio: "ignore", shell: process.platform === "win32" });
+  dev = spawn("pnpm", ["dev"], { cwd: root, stdio: "ignore", shell: process.platform === "win32", detached: process.platform !== "win32" });
   for (let i = 0; i < 60 && !(await devServerUp()); i++) await new Promise((r) => setTimeout(r, 500));
 }
 
@@ -84,9 +87,15 @@ const app = spawn(exe, [], {
 
 const results = { pass: [], fail: [], errors: [] };
 let buffer = "";
+const stopDev = () => {
+  if (!dev) return;
+  if (process.platform === "win32") spawnSync("taskkill", ["/pid", String(dev.pid), "/T", "/F"], { stdio: "ignore" });
+  else process.kill(-dev.pid, "SIGTERM");
+  dev = null;
+};
 const finish = (code) => {
   app.kill();
-  dev?.kill();
+  stopDev();
   console.log(`\nPASS ${results.pass.length}: ${results.pass.join(", ")}`);
   if (results.fail.length) console.log(`FAIL ${results.fail.length}:\n  ${results.fail.join("\n  ")}`);
   if (results.errors.length) console.log(`JS errors:\n  ${results.errors.join("\n  ")}`);
