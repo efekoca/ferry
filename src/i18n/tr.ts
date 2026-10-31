@@ -154,6 +154,7 @@ export const tr = {
     noMatch: "Eşleşen bulgu yok",
     noMatchText: "Başka filtreler deneyin ya da aramayı temizleyin.",
     clearFilters: "Filtreleri temizle",
+    showMore: (next: number, left: number) => `${next} bulgu daha göster (${left} kaldı)`,
     removeRule: (rule: string) => `${rule} filtresini kaldır`,
     showing: (n: number, total: number) => (n === total ? `${total} bulgu` : `${n} / ${total} bulgu`),
     list: "Bulgu listesi",
