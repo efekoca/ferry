@@ -98,9 +98,15 @@ fn extra_dirs() -> Vec<PathBuf> {
             dirs.push(h.join("AppData\\Roaming\\Composer\\vendor\\bin"));
         }
     } else {
-        dirs.extend(["/usr/local/bin", "/usr/bin"].map(PathBuf::from));
+        dirs.extend(["/usr/local/bin", "/usr/bin", "/snap/bin", "/home/linuxbrew/.linuxbrew/bin"].map(PathBuf::from));
         if let Some(h) = &h {
+            dirs.push(h.join(".local/bin"));
             dirs.push(h.join(".config/composer/vendor/bin"));
+            dirs.push(h.join(".composer/vendor/bin"));
+            dirs.push(h.join(".phpenv/shims"));
+            dirs.push(h.join(".asdf/shims"));
+            dirs.push(h.join(".linuxbrew/bin"));
+            dirs.extend(expand_glob(&h.join(".phpbrew/php"), "php", "bin"));
         }
     }
     dirs
@@ -382,6 +388,20 @@ mod tests {
         assert!(matches!(require_supported_php(&php), Err(ToolError::PhpTooOld(v)) if v == "7.2.34"));
         std::fs::write(&php, "#!/bin/sh\necho 8.1.0\n").unwrap();
         assert!(require_supported_php(&php).is_ok());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_searches_common_php_install_locations() {
+        let dirs = extra_dirs();
+        for d in ["/usr/local/bin", "/snap/bin", "/home/linuxbrew/.linuxbrew/bin"] {
+            assert!(dirs.contains(&PathBuf::from(d)), "{d}");
+        }
+        if let Some(h) = home() {
+            for d in [".local/bin", ".config/composer/vendor/bin", ".phpenv/shims", ".asdf/shims"] {
+                assert!(dirs.contains(&h.join(d)), "{d}");
+            }
+        }
     }
 
     #[test]
