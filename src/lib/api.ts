@@ -80,7 +80,8 @@ async function tauriApi(): Promise<Api> {
 let instance: Promise<Api> | null = null;
 
 export function getApi(): Promise<Api> {
-  instance ??= isTauri() ? tauriApi() : Promise.resolve(mockApi());
+  const scale = Number(new URLSearchParams(window.location.search).get("mockScale")) || 1;
+  instance ??= isTauri() ? tauriApi() : Promise.resolve(mockApi({ scale }));
   return instance;
 }
 
