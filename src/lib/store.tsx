@@ -381,8 +381,8 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
         } else {
           toast.push({ tone: "success", title: t.toast.applied(result.written.length), description: t.toast.appliedText });
         }
-        await refreshSnapshots();
-        if (scan && rootRef.current === root) await runScan();
+        void refreshSnapshots();
+        if (scan && rootRef.current === root) void runScan();
         return true;
       } catch (e) {
         if (rootRef.current === root) fail(t.toast.applyFailed, e);
@@ -403,12 +403,13 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
         if (rootRef.current !== root) return;
         setPreview(null);
         toast.push({ tone: "success", title: t.toast.restored, description: t.toast.restoredText(files.length) });
-        if (scan) await runScan();
+        void refreshSnapshots();
+        if (scan) void runScan();
       } catch (e) {
         fail(t.toast.restoreFailed, e);
       }
     },
-    [api, project, toast, scan, runScan, fail, t],
+    [api, project, toast, refreshSnapshots, scan, runScan, fail, t],
   );
 
   const deleteSnapshot = useCallback(
