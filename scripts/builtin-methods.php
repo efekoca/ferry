@@ -2,7 +2,7 @@
 // Regenerates crates/ferry-core/src/builtin.rs from this PHP's reflection data:
 // php scripts/builtin-methods.php > crates/ferry-core/src/builtin.rs
 
-$extensions = ['Core', 'SPL', 'date', 'PDO', 'json', 'standard', 'session', 'dom', 'SimpleXML', 'xmlreader', 'mysqli', 'zip', 'sqlite3', 'random'];
+$extensions = ['Core', 'SPL', 'date', 'PDO', 'json', 'Reflection', 'standard', 'session', 'dom', 'SimpleXML', 'xmlreader', 'mysqli', 'zip', 'sqlite3', 'random'];
 
 $type = function (?ReflectionType $t): string {
     if ($t === null) {

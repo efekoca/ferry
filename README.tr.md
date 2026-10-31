@@ -62,7 +62,7 @@ Bir bulguyu seçtiğinizde şunları görürsünüz:
 Ferry'nin kendi PHP sözcük çözümleyicisi ve kural seti vardır; kodu PHP'nin okuduğu gibi okur. `$db->each()` gibi metot çağrıları, kendi namespace'inizdeki fonksiyonlar, metinlerin ve yorumların içindekiler kaldırılmış fonksiyon sanılmaz. Kurallar şunları kapsar:
 
 - `mysql_*`, `ereg*`, `each()`, `create_function()` ve `money_format()` gibi kaldırılan eklenti ve fonksiyonlar
-- `$str{0}`, `(real)` ve `(unset)` dönüşümleri ve PHP 8'in attribute olarak okuduğu PHP 7 `#[` yorumları gibi artık ayrıştırılamayan yazımlar
+- `$str{0}`, `(real)` ve `(unset)` dönüşümleri, `$obj = &new Foo`, `unset($this)`, döngü dışındaki `break` ve PHP 8'in attribute olarak okuduğu PHP 7 `#[` yorumları gibi artık ayrıştırılamayan ya da derlenemeyen yazımlar
 - `"${var}"` yerleştirmesi, örtük nullable parametreler, `utf8_encode()`, `FILTER_SANITIZE_STRING` ve `E_STRICT` gibi kullanımdan kalkanlar
 - zorunlu bir parametreden önce gelen isteğe bağlı parametre, yerleşik metin fonksiyonlarına doğrudan verilen `null` ve `"self::method"` biçimindeki callable'lar gibi parametre ve çağrı kalıpları
 - yerleşik bir sınıfın ya da arayüzün metodunu PHP 8'in kabul etmediği bir imzayla ezen ve sınıfın hiç yüklenmemesine yol açan metotlar; örneğin Drupal 7'nin bir `PDO` alt sınıfındaki `query($query, array $args = array(), $options = array())` metodu
@@ -80,7 +80,7 @@ Ferry'nin kendi PHP sözcük çözümleyicisi ve kural seti vardır; kodu PHP'ni
 - İstediğiniz dosyaları seçip **Uygula**'ya basın. **Gözden geçir** olarak işaretlenen dosyalarda önce kontrol etmeniz için bir not bulunur.
 - Uyguladıktan sonra Ferry değişen dosyaları `php -l` ile kontrol eder; bir değişiklik dosyayı ayrıştırılamaz hâle getirdiyse sizi uyarır, böylece **Geçmiş**'ten hemen geri alabilirsiniz.
 
-Ferry, Rector'ın tek başına çözemediği durumları da ele alır. Örneğin `$str{0}` yazımı içeren bir dosyayı Rector tamamen atlar. Ferry bu yazımları önce `$str[0]` olarak düzeltir, böylece dosyanın geri kalanı da düzeltilir.
+Ferry, Rector'ın tek başına çözemediği durumları da ele alır. Örneğin `$str{0}` yazımı içeren bir dosyayı Rector tamamen atlar. Ferry bu yazımları önce `$str[0]` olarak düzeltir, aynısını `= &new` ve `default;` için de yapar; böylece dosyanın geri kalanı da düzeltilir.
 
 ### Geçişi engelleyen bağımlılıklar
 
@@ -188,7 +188,7 @@ Her şey kendi bilgisayarınızda çalışır:
 
 ## Bilinen sınırlamalar
 
-- **Statik analiz:** Tarama kodu çalıştırmadan okur. Bu yüzden çalışma anındaki değerlere bağlı davranışlar (örneğin adı bir metinden gelen fonksiyon çağrıları) her zaman bulunamaz. Bu tür durumlar mümkün olduğunda **Riskli** olarak işaretlenir. Yalnızca eski sürümlerde çalışan kod atlanır: `if (PHP_VERSION_ID < 80100)` ya da `version_compare(PHP_VERSION, '8.0', '<')` bloklarının içi, sürüm kontrolü yapan bir ternary'nin ya da `&&`'nin hiç çalışmayacak tarafı, `if (PHP_VERSION_ID >= 80000) { return …; }` sonrasındaki kod ve `if (function_exists('mysql_connect'))` gibi bloklar. Kaldırılmış bir adla kendi tanımladığınız fonksiyonlar da raporlanmaz; örneğin bir `each()` polyfill'i ya da Composer ile yüklenen bir `mysql_*` uyumluluk katmanı.
+- **Statik analiz:** Tarama kodu çalıştırmadan okur. Bu yüzden çalışma anındaki değerlere bağlı davranışlar (örneğin adı bir metinden gelen fonksiyon çağrıları) her zaman bulunamaz. Bu tür durumlar mümkün olduğunda **Riskli** olarak işaretlenir. Yalnızca eski sürümlerde çalışan kod atlanır: `if (PHP_VERSION_ID < 80100)` ya da `version_compare(PHP_VERSION, '8.0', '<')` bloklarının içi, sürüm kontrolü yapan bir ternary'nin ya da `&&`'nin hiç çalışmayacak tarafı, `if (PHP_VERSION_ID >= 80000) { return …; }` sonrasındaki kod ve `if (function_exists('mysql_connect'))` gibi bloklar. PHP'nin derlerken reddettiği ya da kullanımdan kalkmış saydığı `$str{0}` ya da `(double)` gibi yazımlar ise bu bloklarda da bildirilir, çünkü PHP o dal hiç çalışmasa bile dosyanın tamamını derler. Kaldırılmış bir adla kendi tanımladığınız fonksiyonlar da raporlanmaz; örneğin bir `each()` polyfill'i ya da Composer ile yüklenen bir `mysql_*` uyumluluk katmanı.
 - **Davranış değişiklikleri:** Bazı değişiklikler ancak kod çalışınca ortaya çıkar, bu yüzden hiçbir statik araç bunları bulamaz. Uygulamanızı yeni sürümde çalıştırarak test edin:
   - `0 == "foo"` artık `false` döner; bu `in_array()`, `array_search()` ve `switch`'i de etkiler.
   - Sayı olmayan metinlerle yapılan aritmetik işlemler `TypeError` fırlatır.
@@ -219,7 +219,7 @@ pnpm tauri build          # kurulum dosyaları → target/release/bundle/
 
 Testleri gerçek Rector'la çalıştırmak için `FERRY_TEST_TOOLS` değişkenini Rector'ın kurulu olduğu klasöre yönlendirin: `FERRY_TEST_TOOLS=/yol/tools cargo test --workspace`.
 
-`scripts/fetch-corpus.sh` WordPress, Drupal, CodeIgniter ve phpBB'nin eski sürümlerini indirir; `CORPUS=<klasör> CORPUS_PHP=$(which php) cargo test -p ferry-core --test corpus -- --ignored --nocapture` tarayıcının bulduklarını o PHP'nin kendisinin bu projeler için bildirdikleriyle karşılaştırır.
+`scripts/fetch-corpus.sh` WordPress, Drupal, CodeIgniter, phpBB, Joomla, Magento, PrestaShop ve Laravel'in eski sürümlerini indirir; `CORPUS=<klasör> CORPUS_PHP=$(which php) cargo test -p ferry-core --test corpus -- --ignored --nocapture` tarayıcının bulduklarını o PHP'nin kendisinin bu projeler için bildirdikleriyle karşılaştırır.
 
 `pnpm e2e:native`, uygulamanın debug sürümünü demo projeler ve Unicode yol, symlink döngüsü ya da boş proje gibi uç durumlar üzerinde baştan sona çalıştırır ve her senaryonun sonucunu bildirir.
 
