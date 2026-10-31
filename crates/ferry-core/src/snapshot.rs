@@ -77,7 +77,45 @@ fn safe_relative(rel: &str) -> Result<PathBuf, SnapshotError> {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Usage {
+    pub snapshots: usize,
+    pub projects: usize,
+    pub bytes: u64,
+}
+
+fn dir_size(dir: &Path) -> u64 {
+    walkdir::WalkDir::new(dir).into_iter().flatten().filter_map(|e| e.metadata().ok()).filter(|m| m.is_file()).map(|m| m.len()).sum()
+}
+
 impl SnapshotStore {
+    pub fn usage(&self) -> Usage {
+        let mut usage = Usage::default();
+        let Ok(projects) = std::fs::read_dir(&self.base) else { return usage };
+        for project in projects.flatten().filter(|e| e.path().is_dir()) {
+            let count = std::fs::read_dir(project.path())
+                .map(|entries| entries.flatten().filter(|e| e.path().join("manifest.json").is_file()).count())
+                .unwrap_or(0);
+            if count > 0 {
+                usage.projects += 1;
+                usage.snapshots += count;
+            }
+            usage.bytes += dir_size(&project.path());
+        }
+        usage
+    }
+
+    pub fn delete_all(&self) -> Result<(), SnapshotError> {
+        if !self.base.exists() {
+            return Ok(());
+        }
+        let trash = self.base.with_file_name(format!(".trash-snapshots-{}", std::process::id()));
+        std::fs::rename(&self.base, &trash).map_err(io_err(&self.base))?;
+        let _ = std::fs::remove_dir_all(&trash);
+        Ok(())
+    }
+
     pub fn new(base: impl Into<PathBuf>) -> Self {
         Self { base: base.into() }
     }
@@ -267,6 +305,29 @@ impl SnapshotStore {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn usage_counts_every_project_and_delete_all_clears_them() {
+        let store_dir = tempfile::tempdir().unwrap();
+        let store = SnapshotStore::new(store_dir.path().join("snapshots"));
+        assert_eq!(store.usage(), Usage::default());
+        let (one, two) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        fs::write(one.path().join("a.php"), "12345").unwrap();
+        fs::write(two.path().join("b.php"), "1234567890").unwrap();
+        store.create(one.path(), &["a.php".into()], "x").unwrap();
+        store.create(one.path(), &["a.php".into()], "y").unwrap();
+        store.create(two.path(), &["b.php".into()], "z").unwrap();
+        let usage = store.usage();
+        assert_eq!((usage.snapshots, usage.projects), (3, 2));
+        assert!(usage.bytes >= 20, "{usage:?}");
+
+        store.delete_all().unwrap();
+        assert_eq!(store.usage(), Usage::default());
+        assert!(store.list(one.path()).unwrap().is_empty());
+        store.delete_all().unwrap();
+        store.create(one.path(), &["a.php".into()], "again").unwrap();
+        assert_eq!(store.usage().snapshots, 1);
+    }
 
     #[test]
     fn prune_keeps_the_newest_snapshots() {

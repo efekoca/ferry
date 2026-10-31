@@ -10,6 +10,17 @@ export function formatDuration(ms: number, locale: string): string {
   return locale.startsWith("tr") ? `${s} sn` : `${s} s`;
 }
 
+export function formatBytes(bytes: number, locale: string): string {
+  const units = ["byte", "kilobyte", "megabyte", "gigabyte"] as const;
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  return new Intl.NumberFormat(locale, { style: "unit", unit: units[unit], unitDisplay: "short", maximumFractionDigits: unit ? 1 : 0 }).format(value);
+}
+
 export function formatRelative(ts: number, t: Dict, now = Date.now()): string {
   const min = Math.round(Math.max(0, now - ts) / 60000);
   if (min < 1) return t.time.justNow;

@@ -283,3 +283,17 @@ fn missing_folders_are_shown_with_native_separators() {
         assert_eq!(shown, missing);
     }
 }
+
+#[test]
+fn backup_usage_and_delete_all_over_ipc() {
+    let h = harness();
+    assert_eq!(h.ok("snapshot_usage", json!({})), json!({ "snapshots": 0, "projects": 0, "bytes": 0 }));
+    let root = PathBuf::from(normalize_path(h.root.clone()));
+    h._app.state::<AppState>().snapshots().create(&root, &["src/Greeter.php".into()], "x").unwrap();
+    let usage = h.ok("snapshot_usage", json!({}));
+    assert_eq!((usage["snapshots"].as_u64(), usage["projects"].as_u64()), (Some(1), Some(1)));
+    assert!(usage["bytes"].as_u64().unwrap() > 0);
+    h.ok("delete_all_snapshots", json!({}));
+    assert_eq!(h.ok("snapshot_usage", json!({}))["snapshots"], 0);
+    assert_eq!(h.ok("list_snapshots", json!({ "path": h.root })), json!([]));
+}
