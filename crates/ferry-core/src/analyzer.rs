@@ -1409,6 +1409,26 @@ fn builtin_ancestors(name: &str, index: &crate::index::ProjectIndex, depth: usiz
     }
 }
 
+fn inherited_builtins(name: &str, method: &str, index: &crate::index::ProjectIndex, depth: usize, out: &mut Vec<String>) {
+    if depth > 8 {
+        return;
+    }
+    let Some(class) = index.class(name) else {
+        if crate::builtin::CLASSES.binary_search_by(|(c, _, _)| (*c).cmp(name)).is_ok() {
+            out.push(name.to_string());
+        } else {
+            builtin_ancestors(name, index, depth, out);
+        }
+        return;
+    };
+    if class.methods.contains(method) || class.traits.iter().any(|t| index.class_or_trait(t).is_none_or(|t| t.methods.contains(method))) {
+        return;
+    }
+    for parent in class.parent.iter().chain(&class.interfaces) {
+        inherited_builtins(parent, method, index, depth + 1, out);
+    }
+}
+
 fn return_type(tokens: &[Token], close: usize) -> Option<Vec<String>> {
     if !tokens.get(close + 1)?.is_punct(":") {
         return None;
@@ -1442,6 +1462,7 @@ fn builtin_overrides(tokens: &[Token], index: &crate::index::ProjectIndex) -> Ve
             continue;
         };
         let mut parents: Vec<(usize, String)> = Vec::new();
+        let mut user_parents: Vec<(usize, String)> = Vec::new();
         for k in clause + 1..open {
             let t = &tokens[k];
             if t.kind != TokenKind::Ident || t.is_ident_ci("implements") {
@@ -1452,13 +1473,17 @@ fn builtin_overrides(tokens: &[Token], index: &crate::index::ProjectIndex) -> Ve
                 parents.push((k, full));
                 continue;
             }
+            let short = full.rsplit('\\').next().unwrap_or_default().to_string();
             let mut found = Vec::new();
-            for parent in index.marker_interface_parents(full.rsplit('\\').next().unwrap_or_default()).unwrap_or_default() {
+            for parent in index.marker_interface_parents(&short).unwrap_or_default() {
                 builtin_ancestors(parent, index, 1, &mut found);
+            }
+            if index.class(&short).is_some() {
+                user_parents.push((k, short));
             }
             parents.extend(found.into_iter().map(|b| (k, b)));
         }
-        if parents.iter().all(|(_, p)| crate::builtin::CLASSES.binary_search_by(|(c, _, _)| (*c).cmp(p.as_str())).is_err()) {
+        if parents.is_empty() && user_parents.is_empty() {
             continue;
         }
         let mut depth = 0;
@@ -1477,7 +1502,15 @@ fn builtin_overrides(tokens: &[Token], index: &crate::index::ProjectIndex) -> Ve
                 if lower == "__construct" {
                     continue;
                 }
-                let Some((parent, method)) = parents.iter().find_map(|(at, p)| builtin_method(p, &lower).map(|m| (*at, m))) else {
+                let inherited = || {
+                    user_parents.iter().find_map(|(at, u)| {
+                        let mut found = Vec::new();
+                        inherited_builtins(u, &lower, index, 0, &mut found);
+                        found.iter().find_map(|b| builtin_method(b, &lower)).map(|m| (*at, m))
+                    })
+                };
+                let direct = parents.iter().find_map(|(at, p)| builtin_method(p, &lower).map(|m| (*at, m)));
+                let Some((parent, method)) = direct.or_else(inherited) else {
                     continue;
                 };
                 let Some(popen) = tokens.get(name_at + 1).filter(|t| t.is_punct("(")).map(|_| name_at + 1) else { continue };
@@ -2164,6 +2197,27 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
             0
         );
         assert_eq!(count85("<?php interface I {} class A implements I { function count() {} }", id), 0);
+    }
+
+    #[test]
+    fn built_in_methods_inherited_through_project_classes() {
+        let fatal = "removed.incompatible_override";
+        let dep = "deprecated.tentative_return_type";
+        let cases: [(&str, &str, usize); 10] = [
+            ("class A extends PDO {} class B extends A { public function query($q, array $a = []) {} }", fatal, 1),
+            ("class A extends DateTime {} class B extends A { public function format() {} }", fatal, 1),
+            ("class A extends ArrayObject {} class B extends A { function offsetGet(string $k) {} }", fatal, 1),
+            ("class A extends PDO {} class B extends A {} class C extends B { public function exec($s, $x) {} }", fatal, 1),
+            ("class A extends SimpleXMLElement {} class B extends A { public function getChildren($source) {} }", fatal, 1),
+            ("abstract class A implements Countable {} class B extends A { public function count() { return 0; } }", dep, 1),
+            ("interface I extends Countable {} abstract class A implements I {} class B extends A { function count() {} }", dep, 1),
+            ("class A extends PDO { public function query($q, ...$args) {} } class B extends A { public function query($q, array $a = []) {} }", fatal, 0),
+            ("trait T { public function count(): int { return 0; } } class A implements Countable { use T; } class B extends A { function count() { return 0; } }", fatal, 0),
+            ("namespace App; class PDO {} class A extends PDO {} class B extends A { public function query($q) {} }", fatal, 0),
+        ];
+        for (src, id, n) in cases {
+            assert_eq!(count85(&format!("<?php {src}"), id), n, "{src}");
+        }
     }
 
     #[test]
