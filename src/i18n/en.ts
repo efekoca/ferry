@@ -155,6 +155,7 @@ export const en: Dict = {
     noMatch: "No matching findings",
     noMatchText: "Try other filters or clear the search.",
     clearFilters: "Clear filters",
+    showMore: (next, left) => `Show ${next} more (${left} left)`,
     removeRule: (rule) => `Remove the ${rule} filter`,
     showing: (n, total) => (n === total ? `${total} findings` : `${n} of ${total} findings`),
     list: "Finding list",

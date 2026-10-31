@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import {
   Bot,
   ClipboardList,
@@ -145,6 +145,9 @@ export function Sidebar() {
 }
 
 export function PageHeader({ title, subtitle, actions }: { title: string; subtitle?: string; actions?: ReactNode }) {
+  useEffect(() => {
+    document.title = `${title} · Ferry`;
+  }, [title]);
   return (
     <header className="page-header" data-tauri-drag-region>
       <div className="page-header__title">
