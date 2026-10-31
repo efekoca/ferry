@@ -85,6 +85,8 @@ export const en: Dict = {
     constraint: "Composer constraint",
     targetTitle: "Which version are you moving to?",
     targetLabel: "Target PHP version",
+    blockedTarget: (blocked: string, cves: string, patched: string[]) =>
+      `PHP ${blocked} can't be selected: ${cves}, disclosed in October 2026 and exploited in the wild, let attackers run code on the server without authentication. ${blocked} reached end of life on 31 December 2025 and won't get the fix. Whichever version you pick, make sure your server runs at least ${patched.join(", ")}.`,
     currentHint: (v) => `composer.json says you're on PHP ${v}.`,
     currentUnknown: "Couldn't tell the current version from composer.json.",
     skipped: (dirs) => ` ${dirs} and vendor are skipped.`,
@@ -280,6 +282,8 @@ export const en: Dict = {
     tools: "Tools",
     recheck: "Check again",
     notFound: "Not found",
+    vulnerablePhp: (version: string, cves: string, patched: string) =>
+      `PHP ${version} on this computer is affected by ${cves}, which let attackers run code without authentication. There's no known workaround; update PHP to ${patched} or later.`,
     choose: "Choose",
     auto: "Auto",
     install: "Install",

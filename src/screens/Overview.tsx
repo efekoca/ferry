@@ -13,6 +13,7 @@ import {
   ShieldCheck,
   Sparkles,
   Wrench,
+  ShieldAlert,
 } from "lucide-react";
 import { ConfirmDialog } from "../components/Modal";
 import { PageHeader } from "../components/Shell";
@@ -21,6 +22,7 @@ import { Badge, Button, Callout, Card, Progress, RiskBadge, Segmented } from "..
 import { useI18n } from "../i18n";
 import { commonTitle, dependencyBlockers, FRAMEWORK_LABEL, formatDuration, formatNumber, scoreHeadline, scoreTone } from "../lib/labels";
 import { useStore } from "../lib/store";
+import { BLOCKED_TARGETS, PATCHED, PHP2SHELL_CVES, isBlockedTarget } from "../lib/security";
 import { TARGETS, type Finding, type FixKind, type Target } from "../lib/types";
 
 function topRules(findings: Finding[], loc: (f: Finding) => string) {
@@ -107,7 +109,9 @@ export function Overview() {
                 value={target}
                 onChange={chooseTarget}
                 disabled={scanning}
-                options={TARGETS.map((v) => ({ value: v, label: v }))}
+                options={TARGETS.map((v) =>
+                  isBlockedTarget(v) ? { value: v, label: v, disabled: true, describedBy: "target-blocked" } : { value: v, label: v },
+                )}
               />
               {!scan && (
                 <Button variant="primary" size="lg" icon={<Play size={16} />} onClick={() => runScan()} loading={scanning}>
@@ -115,6 +119,10 @@ export function Overview() {
                 </Button>
               )}
             </div>
+            <p className="target__note" id="target-blocked">
+              <ShieldAlert size={14} aria-hidden />
+              <span>{t.overview.blockedTarget(BLOCKED_TARGETS.join(", "), PHP2SHELL_CVES, Object.values(PATCHED))}</span>
+            </p>
           </Card>
 
           {scanning && (

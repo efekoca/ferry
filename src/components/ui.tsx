@@ -120,7 +120,7 @@ export function Segmented<T extends string>({
   size = "md",
   disabled = false,
 }: {
-  options: readonly { value: T; label: ReactNode }[];
+  options: readonly { value: T; label: ReactNode; disabled?: boolean; describedBy?: string }[];
   value: T;
   onChange: (v: T) => void;
   label: string;
@@ -129,8 +129,12 @@ export function Segmented<T extends string>({
 }) {
   const move = (group: HTMLElement, dir: 1 | -1) => {
     if (disabled) return;
-    const i = options.findIndex((o) => o.value === value);
-    const j = (i + dir + options.length) % options.length;
+    let j = options.findIndex((o) => o.value === value);
+    for (let step = 0; step < options.length; step++) {
+      j = (j + dir + options.length) % options.length;
+      if (!options[j].disabled) break;
+    }
+    if (options[j].value === value) return;
     onChange(options[j].value);
     group.querySelectorAll<HTMLButtonElement>('[role="radio"]')[j]?.focus();
   };
@@ -151,7 +155,8 @@ export function Segmented<T extends string>({
           role="radio"
           aria-checked={o.value === value}
           tabIndex={o.value === value ? 0 : -1}
-          disabled={disabled}
+          disabled={disabled || o.disabled}
+          aria-describedby={o.describedBy}
           onClick={() => onChange(o.value)}
         >
           {o.label}

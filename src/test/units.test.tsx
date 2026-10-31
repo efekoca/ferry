@@ -6,6 +6,7 @@ import { DICTS } from "../i18n";
 import { commonTitle, dependencyBlockers, formatBytes, formatDuration, formatRelative, joinPath, scoreHeadline, scoreTone } from "../lib/labels";
 import { NO_FILTER, type FindingsFilter } from "../lib/store";
 import { filterFindings } from "../screens/Findings";
+import { isVulnerable, patchedFor } from "../lib/security";
 import type { FileDiff, Finding } from "../lib/types";
 
 const { tr, en } = DICTS;
@@ -132,6 +133,15 @@ describe("helpers", () => {
   it("keeps the platform separator of the project root", () => {
     expect(joinPath("/Users/demo/site/", "src/a.php")).toBe("/Users/demo/site/src/a.php");
     expect(joinPath("C:\\xampp\\htdocs\\site", "src/a.php")).toBe("C:\\xampp\\htdocs\\site\\src\\a.php");
+  });
+});
+
+describe("isVulnerable", () => {
+  it("flags every branch below its patched release and every unsupported branch", () => {
+    for (const v of ["5.4.45", "7.4.33", "8.0.30", "8.1.34", "8.2.34", "8.3.35", "8.4.26", "8.5.11", "8.4.0"]) expect(isVulnerable(v), v).toBe(true);
+    for (const v of ["8.2.35", "8.3.36", "8.4.27", "8.5.12", "8.5.13-dev", "8.6.0", "5.3.29", "unknown"]) expect(isVulnerable(v), v).toBe(false);
+    expect(patchedFor("8.3.1")).toBe("8.3.36");
+    expect(patchedFor("7.4.33")).toBe("8.4.27");
   });
 });
 

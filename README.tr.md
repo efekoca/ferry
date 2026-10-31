@@ -31,7 +31,7 @@ Ferry, macOS, Windows ve Linux'ta çalışan bir masaüstü uygulamasıdır. PHP
 
 ### Hedef sürümünüz için hazırlık puanı
 
-Geçmek istediğiniz sürümü seçin (PHP 8.1 ile 8.5 arası); Ferry tüm PHP dosyalarını saniyeler içinde tarar. **Genel bakış** ekranında şunları görürsünüz:
+Geçmek istediğiniz sürümü seçin (PHP 8.2 ile 8.5 arası); Ferry tüm PHP dosyalarını saniyeler içinde tarar. **Genel bakış** ekranında şunları görürsünüz:
 
 - projenin platformu (WordPress, Laravel, Symfony, Drupal ya da düz PHP), PHP dosyası sayısı ve `composer.json`'a göre şu anki PHP sürümü
 - 0 ile 100 arasında bir hazırlık puanı ve her düzeltme türüne düşen sorun sayısı
@@ -130,7 +130,9 @@ WordPress, Laravel, Drupal ve Symfony projelerinde Ferry framework'ün kendisini
 
 `vendor` ve `node_modules` her zaman atlanır. 2 MB'tan büyük dosyalar atlanır ve tarama sonuçlarında listelenir; hiçbir dosya sessizce dışarıda kalmaz.
 
-Hedef sürümler: **PHP 8.1, 8.2, 8.3, 8.4 ve 8.5**. Tarama PHP 7.0'dan bu yana yapılan değişiklikleri kapsadığı için PHP 5.6 ve 7.x projeleri de desteklenir.
+Hedef sürümler: **PHP 8.2, 8.3, 8.4 ve 8.5**. Tarama PHP 7.0'dan bu yana yapılan değişiklikleri kapsadığı için PHP 5.6 ve 7.x projeleri de desteklenir.
+
+PHP 8.1 hedef olarak seçilemez. Ekim 2026'da duyurulan ve saldırılarda kullanılan [CVE-2026-109618 ve CVE-2026-109619](https://www.cisa.gov/news-events/alerts/2026/10/21/critical-vulnerabilities-php-require-immediate-patching) açıkları, PHP 5.4'ten 8.5.11'e kadar tüm sürümlerde kimlik doğrulaması olmadan uzaktan kod çalıştırmaya izin veriyor. 8.1'in [desteği](https://www.php.net/eol.php) 31 Aralık 2025'te bittiği için düzeltme almayacak. Sunucularda en az 8.2.35, 8.3.36, 8.4.27 ya da 8.5.12 çalışmalı; bilgisayarınızdaki PHP kendi dalının düzeltilmiş sürümünden eskiyse **Ayarlar** sizi uyarır.
 
 ## Kurulum
 

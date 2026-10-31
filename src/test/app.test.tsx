@@ -49,10 +49,42 @@ describe("Ferry app", () => {
   it("rescans when the target changes after a scan", async () => {
     const user = setup();
     await openAndScan(user);
-    await user.click(screen.getByRole("radio", { name: "8.1" }));
-    expect(await screen.findByText("PHP 8.1", { selector: ".score__meta .badge" })).toBeInTheDocument();
+    await user.click(screen.getByRole("radio", { name: "8.3" }));
+    expect(await screen.findByText("PHP 8.3", { selector: ".score__meta .badge" })).toBeInTheDocument();
     expect(screen.queryByText("PHP 8.4", { selector: ".score__meta .badge" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Taramayı başlat/ })).not.toBeInTheDocument();
+  });
+
+  it("keeps PHP 8.1 out of reach and explains why", async () => {
+    const user = setup();
+    await openAndScan(user);
+    const blocked = screen.getByRole("radio", { name: "8.1" });
+    expect(blocked).toBeDisabled();
+    expect(blocked).toHaveAccessibleDescription(/CVE-2026-109618.*8\.2\.35, 8\.3\.36, 8\.4\.27, 8\.5\.12/);
+    await user.click(screen.getByRole("radio", { name: "8.2" }));
+    await screen.findByText("PHP 8.2", { selector: ".score__meta .badge" });
+    screen.getByRole("radio", { name: "8.2" }).focus();
+    await user.keyboard("{ArrowLeft}");
+    expect(await screen.findByText("PHP 8.5", { selector: ".score__meta .badge" })).toBeInTheDocument();
+    expect(blocked).toHaveAttribute("aria-checked", "false");
+  });
+
+  it("falls back to the default target when PHP 8.1 was stored", async () => {
+    localStorage.setItem("ferry.target", JSON.stringify("8.1"));
+    const user = setup();
+    await openAndScan(user);
+    expect(screen.getByRole("radio", { name: "8.4" })).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("warns when the local PHP is affected by the October 2026 vulnerabilities", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    const status = await api.toolchainStatus();
+    api.toolchainStatus = async () => ({ ...status, php: { path: "/usr/bin/php", version: "8.3.20" } });
+    render(<App api={api} />);
+    await user.click(await screen.findByRole("button", { name: /Ayarlar/ }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("PHP 8.3.20, kimlik doğrulaması olmadan kod çalıştırmaya izin veren");
+    expect(screen.getByRole("alert")).toHaveTextContent("8.3.36 ya da daha yeni");
   });
 
   it("asks before discarding a computed fix preview when the target changes", async () => {
@@ -62,13 +94,13 @@ describe("Ferry app", () => {
     await user.click(await screen.findByRole("button", { name: /Değişiklikleri hesapla/ }));
     await screen.findByRole("list", { name: "Dosyalar" });
     await user.click(nav(/Genel bakış/));
-    await user.click(screen.getByRole("radio", { name: "8.1" }));
-    const dialog = await screen.findByRole("dialog", { name: "PHP 8.1 hedefine geçilsin mi?" });
+    await user.click(screen.getByRole("radio", { name: "8.3" }));
+    const dialog = await screen.findByRole("dialog", { name: "PHP 8.3 hedefine geçilsin mi?" });
     await user.click(within(dialog).getByRole("button", { name: "Vazgeç" }));
     expect(screen.getByRole("radio", { name: "8.4" })).toHaveAttribute("aria-checked", "true");
-    await user.click(screen.getByRole("radio", { name: "8.1" }));
+    await user.click(screen.getByRole("radio", { name: "8.3" }));
     await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Hedefi değiştir" }));
-    expect(await screen.findByText("PHP 8.1", { selector: ".score__meta .badge" })).toBeInTheDocument();
+    expect(await screen.findByText("PHP 8.3", { selector: ".score__meta .badge" })).toBeInTheDocument();
     await user.click(nav(/Düzeltmeler/));
     expect(await screen.findByRole("button", { name: /Değişiklikleri hesapla/ })).toBeInTheDocument();
   });
@@ -294,7 +326,7 @@ describe("Ferry app", () => {
     await screen.findByRole("button", { name: /Durdur/ });
     const before = cancels;
     await user.click(nav(/Genel bakış/));
-    await user.click(screen.getByRole("radio", { name: "8.1" }));
+    await user.click(screen.getByRole("radio", { name: "8.3" }));
     expect(cancels).toBeGreaterThan(before);
   });
 
