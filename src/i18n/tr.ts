@@ -287,6 +287,14 @@ export const tr = {
     backups: "Yedekler",
     keep: "Saklanacak yedek",
     keepText: "Her projede yalnızca en yeni yedekler tutulur; eskiler bir sonraki uygulamada silinir.",
+    usage: "Disk kullanımı",
+    usageText: (snapshots: number, projects: number, size: string) => `${projects} projede ${snapshots} yedek, ${size}.`,
+    usageEmpty: "Henüz yedek yok.",
+    deleteAll: "Tüm yedekleri sil",
+    deleteAllTitle: "Tüm projelerin yedekleri silinsin mi?",
+    deleteAllText: (snapshots: number, size: string) =>
+      `${snapshots} yedek kalıcı olarak silinir ve ${size} yer açılır. Bu yedeklere dönmek artık mümkün olmaz.`,
+    deleteAllDone: "Tüm yedekler silindi",
     unlimited: "Sınırsız",
     footnote: (dir: string) =>
       `Araç klasörü: ${dir}. Ferry projenize yalnızca onayladığınız değişiklikleri yazar; tarama ve önizleme hiçbir dosyayı değiştirmez.`,

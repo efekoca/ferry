@@ -184,6 +184,22 @@ describe("Ferry app", () => {
     expect(within(group).getByRole("radio", { name: "30" })).toHaveAttribute("aria-checked", "true");
   });
 
+  it("shows backup disk usage and deletes every backup after confirming", async () => {
+    const user = setup();
+    await openAndScan(user);
+    await user.click(screen.getByRole("button", { name: /Ayarlar/ }));
+    expect(await screen.findByText(/1 projede \d+ yedek, [\d,.]+ (kB|KB)\./)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Tüm yedekleri sil" }));
+    const dialog = await screen.findByRole("dialog", { name: "Tüm projelerin yedekleri silinsin mi?" });
+    expect(within(dialog).getByRole("button", { name: "Vazgeç" })).toHaveFocus();
+    await user.click(within(dialog).getByRole("button", { name: "Sil" }));
+    expect(await screen.findByText("Tüm yedekler silindi")).toBeInTheDocument();
+    expect(await screen.findByText("Henüz yedek yok.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Tüm yedekleri sil" })).toBeDisabled();
+    await user.click(nav(/Geçmiş/));
+    expect(await screen.findByText("Henüz bir değişiklik uygulanmadı")).toBeInTheDocument();
+  });
+
   it("warns when the applied files fail php -l", async () => {
     const user = userEvent.setup();
     const api = mockApi({ delay: 0 });
