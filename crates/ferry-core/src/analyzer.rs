@@ -775,15 +775,20 @@ impl<'a> Ctx<'a> {
             }
             (if is_call { MemberKind::StaticCall } else { MemberKind::Constant }, Some(name))
         } else if is_call {
+            if i >= 2 && tokens[i - 2].kind == TokenKind::Variable && tokens[i - 2].text == "this" {
+                return;
+            }
             (MemberKind::Method, None)
         } else {
             return;
         };
+        let receiver = (i >= 2 && tokens[i - 2].kind == TokenKind::Variable).then(|| tokens[i - 2].text.as_str());
         let Some(m) = MEMBERS.iter().find(|m| {
             m.kind == kind
                 && m.rule.matches(&lower)
                 && match class {
                     Some(c) => c.to_ascii_lowercase().starts_with(m.class),
+                    None if m.class == "reflectionparameter" => receiver.is_some_and(|r| reflection_parameters(tokens).contains(r)),
                     None => self.classes.iter().any(|c| c.starts_with(m.class)),
                 }
         }) else {
@@ -1741,6 +1746,28 @@ fn case_semicolons(tokens: &[Token]) -> Vec<usize> {
     out
 }
 
+fn reflection_parameters(tokens: &[Token]) -> std::collections::HashSet<&str> {
+    let mut out = std::collections::HashSet::new();
+    for k in 0..tokens.len() {
+        let t = &tokens[k];
+        if t.kind != TokenKind::Variable {
+            continue;
+        }
+        let prev = k.checked_sub(1).map(|p| &tokens[p]);
+        let typed = prev.is_some_and(|p| p.text.trim_start_matches('\\').eq_ignore_ascii_case("ReflectionParameter"));
+        let looped = prev.is_some_and(|p| p.is_ident_ci("as"))
+            && (k.saturating_sub(8)..k).any(|j| tokens[j].is_ident_ci("getParameters"))
+            && tokens.get(k + 1).is_some_and(|n| n.is_punct(")"));
+        let created = tokens.get(k + 1).is_some_and(|n| n.is_punct("="))
+            && tokens.get(k + 2).is_some_and(|n| n.is_ident_ci("new"))
+            && tokens.get(k + 3).is_some_and(|n| n.text.trim_start_matches('\\').eq_ignore_ascii_case("ReflectionParameter"));
+        if typed || looped || created {
+            out.insert(t.text.as_str());
+        }
+    }
+    out
+}
+
 fn unset_this(tokens: &[Token]) -> Vec<usize> {
     (0..tokens.len())
         .filter(|&i| tokens[i].is_ident_ci("unset") && tokens.get(i + 1).is_some_and(|t| t.is_punct("(")))
@@ -2181,6 +2208,27 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
     fn assign_new_by_reference_and_unset_this() {
         assert_eq!(count85("<?php $a = &new Foo; $b =& new Bar(); $c = new Baz; $d = &$e;", "removed.assign_new_by_ref"), 2);
         assert_eq!(count85("<?php unset($this); unset($a, $this); unset($this->x); $o->unset($this);", "removed.unset_this"), 2);
+    }
+
+    #[test]
+    fn deprecated_extension_symbols_found_by_runtime_checks() {
+        let ids = |src: &str| at(src, (8, 5)).into_iter().map(|(id, _)| id).collect::<Vec<_>>();
+        assert_eq!(ids("<?php echo MYSQLI_NO_DATA, MYSQLI_IS_MARIADB, DOM_PHP_ERR;").len(), 3);
+        assert_eq!(ids("<?php echo NumberFormatter::TYPE_CURRENCY, ZipArchive::FL_RECOMPRESS, DateTimeInterface::RFC7231;").len(), 3);
+        assert_eq!(ids("<?php echo Pdo\\Pgsql::TRANSACTION_IDLE;"), ["deprecated.pgsql_transaction_constant"]);
+        let reflection = "deprecated.reflection_method";
+        for src in [
+            "<?php foreach ($m->getParameters() as $p) { $p->getClass(); }",
+            "<?php function f(ReflectionParameter $p) { return $p->isArray(); }",
+            "<?php $p = new ReflectionParameter([$a, 'b'], 0); $p->isCallable();",
+        ] {
+            assert_eq!(ids(src), [reflection], "{src}");
+        }
+        for src in ["<?php $r = new ReflectionClass($x); $definition->getClass();", "<?php use ReflectionParameter; $element->isArray();"] {
+            assert!(ids(src).is_empty(), "{src}");
+        }
+        assert_eq!(ids("<?php $db = new mysqli(); $db->init();"), ["deprecated.mysqli_method"]);
+        assert!(ids("<?php class Rs { function f() { $c = new mysqli(); $this->init(); } }").is_empty());
     }
 
     #[test]
