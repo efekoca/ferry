@@ -6,8 +6,10 @@ use std::path::{Path, PathBuf};
 pub struct TypeInfo {
     pub is_trait: bool,
     pub parent: Option<String>,
+    pub interfaces: Vec<String>,
     pub traits: Vec<String>,
     pub props: HashSet<String>,
+    pub methods: HashSet<String>,
     pub open: bool,
 }
 
@@ -99,6 +101,14 @@ impl ProjectIndex {
                 .any(|t| t.is_ident_ci("function"));
             self.interfaces.entry(short(&name.text)).or_default().push(InterfaceInfo { parents, declares_methods });
         }
+    }
+
+    pub(crate) fn class(&self, name: &str) -> Option<&TypeInfo> {
+        self.unique(name).filter(|t| !t.is_trait)
+    }
+
+    pub(crate) fn class_or_trait(&self, name: &str) -> Option<&TypeInfo> {
+        self.unique(name)
     }
 
     pub(crate) fn marker_interface_parents(&self, name: &str) -> Option<&[String]> {
@@ -225,7 +235,12 @@ fn type_decl(tokens: &[Token], kw: usize) -> Option<TypeDecl> {
     let mut open_class =
         tokens[attr_start..kw].iter().any(|t| t.text.trim_start_matches('\\').eq_ignore_ascii_case("AllowDynamicProperties"));
     let modifiers = ["public", "protected", "private", "readonly", "var"];
-    let mut info = TypeInfo { is_trait: tokens[kw].is_ident_ci("trait"), parent, ..TypeInfo::default() };
+    let interfaces = header
+        .iter()
+        .position(|t| t.is_ident_ci("implements"))
+        .map(|p| header[p + 1..].iter().filter(|t| t.kind == TokenKind::Ident).map(|t| short(&t.text)).collect())
+        .unwrap_or_default();
+    let mut info = TypeInfo { is_trait: tokens[kw].is_ident_ci("trait"), parent, interfaces, ..TypeInfo::default() };
     let mut depth = 0usize;
     let mut k = open;
     while k < close {
@@ -241,8 +256,12 @@ fn type_decl(tokens: &[Token], kw: usize) -> Option<TypeDecl> {
                 }
                 k += 1;
             }
-        } else if depth == 1 && t.is_ident_ci("function") && tokens.get(k + 1).is_some_and(|n| n.is_ident_ci("__set")) {
-            open_class = true;
+        } else if depth == 1 && t.is_ident_ci("function") {
+            let name = tokens[k + 1..].iter().find(|n| !n.is_punct("&"));
+            if let Some(name) = name.filter(|n| n.kind == TokenKind::Ident) {
+                open_class |= name.is_ident_ci("__set");
+                info.methods.insert(name.text.to_ascii_lowercase());
+            }
         } else if t.kind == TokenKind::Variable {
             let promoted = depth == 2
                 && (0..k)
