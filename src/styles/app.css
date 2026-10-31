@@ -59,9 +59,17 @@ code,
 }
 
 :focus-visible {
-  outline: 2px solid transparent;
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
-  box-shadow: var(--focus-ring);
+}
+
+.finding:focus-visible,
+.recent__item:focus-visible,
+.rule-row:focus-visible,
+.change-item__body:focus-visible,
+.review__file:focus-visible,
+.fix-tile:focus-visible {
+  outline-offset: -2px;
 }
 
 ::selection {
@@ -906,7 +914,7 @@ button.metric {
 .segmented button[aria-checked="true"] {
   background: var(--surface);
   color: var(--text);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1), inset 0 0 0 1px var(--border-input);
 }
 
 .segmented--lg button {
@@ -920,7 +928,7 @@ button.metric {
   height: 32px;
   width: 100%;
   padding: 0 var(--space-3);
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--border-input);
   border-radius: var(--radius-md);
   background: var(--surface);
   user-select: text;
@@ -963,7 +971,7 @@ button.metric {
   height: 16px;
   flex: none;
   margin: 0;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--border-input);
   border-radius: 4px;
   background: var(--surface);
   display: grid;
@@ -1241,7 +1249,7 @@ button.metric {
   margin-bottom: var(--space-2);
 }
 
-.feature h3 {
+.feature h2 {
   font-size: var(--text-md);
   font-weight: 600;
 }
@@ -1797,10 +1805,6 @@ button.metric {
   border-radius: var(--radius-sm);
 }
 
-.change-item__body:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
 
 .change-item__file {
   font-family: var(--font-mono);
@@ -2566,7 +2570,8 @@ button.metric {
 }
 
 .mode-card:has(input:focus-visible) {
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .mode-card:has(input:disabled) {
@@ -2605,5 +2610,76 @@ button.metric {
 @media (max-width: 760px) {
   .mode-cards {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 1000px) {
+  .split,
+  .split--changes {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(0, 45%);
+  }
+
+  .split--changes {
+    grid-template-rows: minmax(0, 38%) minmax(0, 1fr);
+  }
+
+  .pane--side {
+    border-left: 0;
+    border-top: 1px solid var(--border);
+  }
+
+  .split--changes .pane--side {
+    border-right: 0;
+    border-top: 0;
+    border-bottom: 1px solid var(--border);
+  }
+}
+
+@media (max-width: 760px) {
+  :root {
+    --sidebar-width: 60px;
+  }
+
+  .sidebar {
+    padding-inline: var(--space-1);
+  }
+
+  .brand {
+    justify-content: center;
+    padding-inline: 0;
+  }
+
+  .brand__name,
+  .nav__item > span:not(.nav__count),
+  .project-chip__text,
+  .status-line > span:not(.dot),
+  .nav__label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .nav__item,
+  .project-chip {
+    position: relative;
+    justify-content: center;
+    padding-inline: 0;
+  }
+
+  .nav__count {
+    position: absolute;
+    top: -2px;
+    right: 0;
+    min-width: 16px;
+    padding: 0 4px;
+    line-height: 14px;
+  }
+
+  .status-line {
+    justify-content: center;
   }
 }
