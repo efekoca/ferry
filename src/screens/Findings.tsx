@@ -61,16 +61,24 @@ export function Findings() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.key === "ArrowDown" || e.key === "ArrowUp")) return;
-      if ((e.target as HTMLElement)?.closest?.("input, textarea, select, .pane--side, [role=dialog]")) return;
+      const target = e.target as HTMLElement | null;
+      const inList = !!target?.closest?.("[role=listbox]");
+      const step = ({ ArrowDown: 1, ArrowUp: -1 } as Record<string, number>)[e.key];
+      const jump = inList ? ({ Home: -Infinity, End: Infinity } as Record<string, number>)[e.key] : undefined;
+      if (step === undefined && jump === undefined) return;
+      if (target?.closest?.("input, textarea, select, .pane--side, [role=dialog]")) return;
       if (!visible.length) return;
       e.preventDefault();
       const i = selected ? visible.indexOf(selected) : -1;
-      const j = Math.max(0, Math.min(visible.length - 1, i + (e.key === "ArrowDown" ? 1 : -1)));
+      const j = Math.max(0, Math.min(visible.length - 1, jump ?? i + step));
       const next = visible[j];
-      if (j >= shown) showMore(shown + PAGE);
+      if (j >= shown) showMore(Math.max(shown + PAGE, j + 1));
       setSelectedId(next.id);
-      requestAnimationFrame(() => document.getElementById(`finding-${next.id}`)?.scrollIntoView({ block: "nearest" }));
+      requestAnimationFrame(() => {
+        const el = document.getElementById(`finding-${next.id}`);
+        el?.scrollIntoView({ block: "nearest" });
+        if (inList) el?.focus();
+      });
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -178,6 +186,7 @@ export function Findings() {
                           id={`finding-${f.id}`}
                           role="option"
                           aria-selected={selected?.id === f.id}
+                          tabIndex={selected?.id === f.id ? 0 : -1}
                           className="finding"
                           onClick={() => setSelectedId(f.id)}
                         >

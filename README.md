@@ -108,7 +108,8 @@ Before every apply, Ferry backs up the files it is about to change. The **Histor
 - **Turkish and English** interface. The language also applies to exported reports.
 - **Light and dark** themes, or follow the system.
 - **Drag and drop** a project folder onto the window, or reopen a recent project from the start screen.
-- **Keyboard shortcuts:** **⌘O** opens a project, **⌘1** to **⌘5** switch between pages, and **⌘,** opens **Settings**. On Windows, use **Ctrl** instead of **⌘**.
+- **Keyboard shortcuts:** **⌘O** opens a project, **⌘1** to **⌘5** switch between pages, **⌘,** opens **Settings**, and **⌘+** / **⌘−** zoom the interface. On Windows and Linux, use **Ctrl** instead of **⌘**.
+- **Accessible:** everything works from the keyboard, focus is always visible, and the interface meets WCAG 2.1 AA contrast. At high zoom levels the layout stacks its panes and narrows the sidebar to icons.
 
 ## Supported projects
 
