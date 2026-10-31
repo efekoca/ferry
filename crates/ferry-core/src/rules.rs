@@ -167,6 +167,9 @@ pub const COMPILE_TIME: &[&str] = &[
     "removed.reserved_name",
     "removed.assign_new_by_ref",
     "removed.unset_this",
+    "removed.globals_write",
+    "removed.reserved_alias",
+    "removed.builtin_result_by_ref",
     "removed.break_outside_loop",
     "deprecated.dollar_brace_interpolation",
     "deprecated.implicit_nullable",
@@ -1240,6 +1243,42 @@ pub mod patterns {
             "Assigning the result of new by reference was removed in PHP 7.0 and is a parse error. Objects already behave like references, so dropping the & is enough.",
         ),
     };
+    pub const RESERVED_ALIAS: PatternRule = PatternRule {
+        id: "removed.reserved_alias",
+        title: Text::new("Ayrılmış ad takma ad olarak kullanılıyor", "Reserved name used as an import alias"),
+        severity: Severity::Breaking,
+        since: (7, 0),
+        replacement: None,
+        fix: FixKind::Manual,
+        note: Text::new(
+            "Bu use satırı sınıfı object, int ya da string gibi yeni PHP sürümlerinde ayrılmış bir adla içe aktarıyor. PHP dosyayı derlerken ölümcül hata verir. Sınıfa farklı bir takma ad verin ve dosyadaki kullanımlarını da bu adla değiştirin.",
+            "This use statement imports the class under a name that newer PHP versions reserve, such as object, int or string. PHP throws a fatal error when it compiles the file. Give the class a different alias and update its uses in the file.",
+        ),
+    };
+    pub const GLOBALS_WRITE: PatternRule = PatternRule {
+        id: "removed.globals_write",
+        title: Text::new("$GLOBALS dizisinin tamamına yazılıyor", "Writing to the whole $GLOBALS array"),
+        severity: Severity::Breaking,
+        since: (8, 1),
+        replacement: code("$GLOBALS['name'] = $value"),
+        fix: FixKind::Manual,
+        note: Text::new(
+            "PHP 8.1'den itibaren $GLOBALS dizisinin tamamına değer atamak, onu unset etmek, referansını almak ya da sonuna eleman eklemek derleme hatası verir ve dosya hiç çalışmaz. Tek tek değişkenleri $GLOBALS['ad'] = $deger biçiminde değiştirin ya da $GLOBALS'ın bir kopyasıyla çalışın.",
+            "Since PHP 8.1, assigning to the whole $GLOBALS array, unsetting it, taking a reference to it or appending to it is a compile-time error and the file never runs. Change single variables with $GLOBALS['name'] = $value, or work on a copy of $GLOBALS.",
+        ),
+    };
+    pub const BUILTIN_RESULT_BY_REF: PatternRule = PatternRule {
+        id: "removed.builtin_result_by_ref",
+        title: Text::new("Yerleşik fonksiyon sonucu referansla atanıyor", "Built-in function result assigned by reference"),
+        severity: Severity::Breaking,
+        since: (7, 0),
+        replacement: None,
+        fix: FixKind::Auto,
+        note: Text::new(
+            "func_get_args(), strlen(), count() gibi fonksiyonları PHP derleme sırasında özel olarak işler; sonuçlarını referansla atamak ölümcül hataya yol açar ve dosya hiç çalışmaz. Sonuç zaten yeni bir değer olduğu için & işaretini silmek yeterli.",
+            "PHP compiles functions such as func_get_args(), strlen() and count() specially, so assigning their result by reference is a fatal error and the file never runs. The result is a fresh value anyway, so dropping the & is enough.",
+        ),
+    };
     pub const UNSET_THIS: PatternRule = PatternRule {
         id: "removed.unset_this",
         title: Text::new("unset($this)", "unset($this)"),
@@ -1284,8 +1323,8 @@ pub mod patterns {
         replacement: None,
         fix: FixKind::Manual,
         note: Text::new(
-            "Bu metot projedeki bir üst sınıfın, trait'in ya da arayüzün metodunu eziyor ama imzası onunla uyumlu değil: parametre sayısı, tipleri, referansla geçiş, static olması ya da dönüş tipi farklı. PHP 7 bunu yalnızca uyarıyla geçiyordu, PHP 8 sınıfı yüklerken ölümcül hata verir. İmzayı aşağıdakine uyacak şekilde düzenleyin.",
-            "This method overrides a method of a parent class, trait or interface in the project, but its signature doesn't match it: the parameter count, types, by-reference passing, static modifier or return type differ. PHP 7 only raised a warning, PHP 8 throws a fatal error when it loads the class. Make the signature compatible with the one below.",
+            "Bu metot projedeki bir üst sınıfın, trait'in ya da arayüzün metodunu eziyor ama imzası onunla uyumlu değil: parametre sayısı, tipleri, referansla geçiş, static olması ya da dönüş tipi farklı. PHP 7 üst sınıf metotlarında bunu yalnızca uyarıyla geçiyordu (arayüz ve soyut metotlarda zaten hataydı); PHP 8 her durumda sınıfı yüklerken ölümcül hata verir. İmzayı aşağıdakine uyacak şekilde düzenleyin.",
+            "This method overrides a method of a parent class, trait or interface in the project, but its signature doesn't match it: the parameter count, types, by-reference passing, static modifier or return type differ. PHP 7 only warned for parent class methods (interface and abstract methods were already fatal); PHP 8 throws a fatal error in every case when it loads the class. Make the signature compatible with the one below.",
         ),
     };
     pub const HTTP_RESPONSE_HEADER: PatternRule = PatternRule {
