@@ -565,6 +565,44 @@ pub const CONSTANTS: &[SymbolRule] = &[
     ),
     rule!("deprecated.sunfuncs_ret", "sunfuncs_ret_*", D, (8, 4), code("date_sun_info()"), M, DEPRECATED_FN),
     rule!("deprecated.mysqli_refresh_constant", "mysqli_refresh_*", D, (8, 4), tx("FLUSH sorguları", "FLUSH queries"), M, DEPRECATED_FN),
+    rule!("deprecated.mysqli_no_data", "mysqli_no_data", D, (8, 1), REMOVE_USE, M, UNUSED_CONSTANT),
+    rule!("deprecated.mysqli_data_truncated", "mysqli_data_truncated", D, (8, 1), REMOVE_USE, M, UNUSED_CONSTANT),
+    rule!("deprecated.mysqli_server_query", "mysqli_server_query_*", D, (8, 1), REMOVE_USE, M, UNUSED_CONSTANT),
+    rule!("deprecated.mysqli_server_ps_out_params", "mysqli_server_ps_out_params", D, (8, 1), REMOVE_USE, M, UNUSED_CONSTANT),
+    rule!(
+        "deprecated.mysqli_is_mariadb",
+        "mysqli_is_mariadb",
+        D,
+        (8, 2),
+        None,
+        M,
+        Text::new(
+            "MYSQLI_IS_MARIADB 8.2'de kullanımdan kalktı; değeri her zaman false olduğu için güvenilir değil. Sunucu türünü SELECT VERSION() ile kontrol edin.",
+            "MYSQLI_IS_MARIADB is deprecated in 8.2; it's always false, so it can't be relied on. Check the server with SELECT VERSION()."
+        )
+    ),
+    rule!(
+        "deprecated.mysqli_store_result_copy_data",
+        "mysqli_store_result_copy_data",
+        D,
+        (8, 4),
+        REMOVE_USE,
+        M,
+        Text::new(
+            "MYSQLI_STORE_RESULT_COPY_DATA, mysqli_store_result()'ın kullanımdan kalkan mode parametresiyle birlikte 8.4'te kullanımdan kalktı.",
+            "MYSQLI_STORE_RESULT_COPY_DATA is deprecated in 8.4 together with the mode parameter of mysqli_store_result()."
+        )
+    ),
+    rule!(
+        "deprecated.u_multiple_decimal_seperators",
+        "u_multiple_decimal_seperators",
+        D,
+        (8, 3),
+        code("U_MULTIPLE_DECIMAL_SEPARATORS"),
+        M,
+        Text::new("Yazım hatalı bu sabit 8.3'te kullanımdan kalktı; doğru yazılmış adını kullanın.", "This misspelled constant is deprecated in 8.3; use the correctly spelled name.")
+    ),
+    rule!("deprecated.dom_php_err", "dom_php_err", D, (8, 4), None, M, DEPRECATED_FN),
     rule!(
         "deprecated.soap_functions_all",
         "soap_functions_all",
@@ -721,6 +759,108 @@ pub const MEMBERS: &[MemberRule] = &[
         ),
     ),
     member(K, "pdo", rule!("deprecated.pdo_driver_constant", "mysql_attr_*", D, (8, 5), code("Pdo\\Mysql::ATTR_*"), A, PDO_DRIVER)),
+    member(
+        K,
+        "pgsql",
+        rule!(
+            "deprecated.pgsql_transaction_constant",
+            "transaction_*",
+            D,
+            (8, 5),
+            code("pg_transaction_status()"),
+            M,
+            Text::new("Pdo\\Pgsql'in işlem durumu sabitleri 8.5'te kullanımdan kalktı.", "Pdo\\Pgsql's transaction state constants are deprecated in 8.5.")
+        ),
+    ),
+    member(
+        K,
+        "numberformatter",
+        rule!(
+            "deprecated.numberformatter_type_currency",
+            "type_currency",
+            D,
+            (8, 3),
+            code("NumberFormatter::formatCurrency()"),
+            M,
+            Text::new("NumberFormatter::TYPE_CURRENCY 8.3'te kullanımdan kalktı; formatCurrency() ve parseCurrency() kullanın.", "NumberFormatter::TYPE_CURRENCY is deprecated in 8.3; use formatCurrency() and parseCurrency().")
+        ),
+    ),
+    member(
+        K,
+        "ziparchive",
+        rule!(
+            "deprecated.zip_fl_recompress",
+            "fl_recompress",
+            D,
+            (8, 3),
+            REMOVE_USE,
+            M,
+            Text::new("ZipArchive::FL_RECOMPRESS 8.3'te kullanımdan kalktı; libzip'in yeni sürümlerinde kaldırılacak.", "ZipArchive::FL_RECOMPRESS is deprecated in 8.3 and will be removed in future libzip versions.")
+        ),
+    ),
+    member(
+        K,
+        "datetime",
+        rule!(
+            "deprecated.date_rfc7231",
+            "rfc7231",
+            D,
+            (8, 5),
+            tx("UTC'de 'D, d M Y H:i:s \\G\\M\\T' biçimi", "the 'D, d M Y H:i:s \\G\\M\\T' format in UTC"),
+            M,
+            Text::new(
+                "RFC7231 biçimi saat dilimini yok sayıp her zaman GMT yazdığı için 8.5'te kullanımdan kalktı. Tarihi UTC'ye çevirip biçimi kendiniz yazın.",
+                "The RFC7231 format ignores the time zone and always writes GMT, so it's deprecated in 8.5. Convert the date to UTC and spell out the format."
+            )
+        ),
+    ),
+    member(Mt, "datetime", rule!("deprecated.date_wakeup", "__wakeup", D, (8, 5), code("__unserialize()"), M, WAKEUP)),
+    member(Mt, "dateinterval", rule!("deprecated.date_wakeup", "__wakeup", D, (8, 5), code("__unserialize()"), M, WAKEUP)),
+    member(Mt, "dateperiod", rule!("deprecated.date_wakeup", "__wakeup", D, (8, 5), code("__unserialize()"), M, WAKEUP)),
+    member(Mt, "splfixedarray", rule!("deprecated.splfixedarray_wakeup", "__wakeup", D, (8, 4), code("__unserialize()"), M, WAKEUP)),
+    member(Mt, "splfileinfo", rule!("deprecated.splfileinfo_bad_state_ex", "_bad_state_ex", D, (8, 2), REMOVE_CALL, M, DEPRECATED_FN)),
+    member(
+        Mt,
+        "mysqli",
+        rule!(
+            "deprecated.mysqli_method",
+            "get_client_info",
+            D,
+            (8, 1),
+            code("mysqli_get_client_info()"),
+            M,
+            Text::new("mysqli::get_client_info() 8.1'de kullanımdan kalktı; argümansız mysqli_get_client_info() fonksiyonunu çağırın.", "mysqli::get_client_info() is deprecated in 8.1; call mysqli_get_client_info() without arguments.")
+        ),
+    ),
+    member(
+        Mt,
+        "mysqli",
+        rule!(
+            "deprecated.mysqli_method",
+            "init",
+            D,
+            (8, 1),
+            code("parent::__construct()"),
+            M,
+            Text::new("mysqli::init() 8.1'de kullanımdan kalktı; alt sınıflarda parent::init() yerine parent::__construct() çağırın.", "mysqli::init() is deprecated in 8.1; in subclasses call parent::__construct() instead of parent::init().")
+        ),
+    ),
+    member(
+        Mt,
+        "reflection",
+        rule!(
+            "deprecated.reflection_method",
+            "isdisabled",
+            D,
+            (8, 0),
+            REMOVE_CALL,
+            M,
+            Text::new("ReflectionFunction::isDisabled() 8.0'da kullanımdan kalktı; artık her zaman false döner.", "ReflectionFunction::isDisabled() is deprecated in 8.0; it always returns false now.")
+        ),
+    ),
+    member(Mt, "reflectionparameter", rule!("deprecated.reflection_method", "getclass", D, (8, 0), code("getType()"), M, REFLECTION_TYPE)),
+    member(Mt, "reflectionparameter", rule!("deprecated.reflection_method", "isarray", D, (8, 0), code("getType()"), M, REFLECTION_TYPE)),
+    member(Mt, "reflectionparameter", rule!("deprecated.reflection_method", "iscallable", D, (8, 0), code("getType()"), M, REFLECTION_TYPE)),
     member(K, "pdo", rule!("deprecated.pdo_driver_constant", "pgsql_*", D, (8, 5), code("Pdo\\Pgsql::*"), A, PDO_DRIVER)),
     member(K, "pdo", rule!("deprecated.pdo_driver_constant", "sqlite_*", D, (8, 5), code("Pdo\\Sqlite::*"), A, PDO_DRIVER)),
     member(K, "pdo", rule!("deprecated.pdo_driver_constant", "odbc_*", D, (8, 5), code("Pdo\\Odbc::*"), A, PDO_DRIVER)),
@@ -809,6 +949,19 @@ pub const LARAVEL_INPUT: SymbolRule = rule!(
     )
 );
 
+const UNUSED_CONSTANT: Text = Text::new(
+    "Bu sabit hiçbir yerde kullanılmadığı için 8.1'de kullanımdan kalktı; kullanımı silinebilir.",
+    "This constant was never used by PHP and is deprecated in 8.1; its use can be removed.",
+);
+const REMOVE_USE: Option<Text> = tx("kullanımı silin", "remove its use");
+const WAKEUP: Text = Text::new(
+    "Bu sınıfın __wakeup() metodu kullanımdan kalktı; serileştirme artık __unserialize() ile yapılıyor. Alt sınıfta parent::__wakeup() çağrısını kaldırın ya da __unserialize()'a taşıyın.",
+    "This class's __wakeup() method is deprecated; unserialization now goes through __unserialize(). In a subclass, drop the parent::__wakeup() call or move it to __unserialize().",
+);
+const REFLECTION_TYPE: Text = Text::new(
+    "Bu ReflectionParameter metodu 8.0'da kullanımdan kalktı; parametrenin tipini getType() ve ReflectionNamedType ile okuyun.",
+    "This ReflectionParameter method is deprecated in 8.0; read the parameter type with getType() and ReflectionNamedType.",
+);
 const PDO_DRIVER: Text = Text::new(
     "PDO'nun sürücüye özel sabitleri 8.5'te kullanımdan kalktı; sürücünün kendi sınıfındaki sabiti kullanın.",
     "PDO's driver-specific constants are deprecated in 8.5; use the constant on the driver's own class.",
