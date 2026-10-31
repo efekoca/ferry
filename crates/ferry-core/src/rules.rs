@@ -1065,14 +1065,14 @@ pub mod patterns {
     };
     pub const RETURN_TYPE_WILL_CHANGE: PatternRule = PatternRule {
         id: "deprecated.tentative_return_type",
-        title: Text::new("Dönüş tipi eksik yerleşik metot", "Built-in method without a return type"),
+        title: Text::new("Dönüş tipi eksik ya da uyumsuz yerleşik metot", "Built-in method with a missing or incompatible return type"),
         severity: Severity::Deprecated,
         since: (8, 1),
         replacement: code("#[\\ReturnTypeWillChange]"),
         fix: FixKind::Manual,
         note: Text::new(
-            "ArrayAccess, Iterator, Countable ya da PDO gibi yerleşik sınıf ve arayüzlerin metotları PHP 8.1'den itibaren dönüş tipi bekliyor. Dönüş tipini yazın ya da #[\\ReturnTypeWillChange] ekleyin.",
-            "Since PHP 8.1, methods of built-in classes and interfaces such as ArrayAccess, Iterator, Countable or PDO expect a return type. Add the return type or #[\\ReturnTypeWillChange].",
+            "ArrayAccess, Iterator, Countable ya da PDO gibi yerleşik sınıf ve arayüzlerin metotları PHP 8.1'den itibaren uyumlu bir dönüş tipi bekliyor. Yerleşik metodunkiyle uyumlu bir dönüş tipi yazın ya da #[\\ReturnTypeWillChange] ekleyin.",
+            "Since PHP 8.1, methods of built-in classes and interfaces such as ArrayAccess, Iterator, Countable or PDO expect a compatible return type. Declare one that fits the built-in method or add #[\\ReturnTypeWillChange].",
         ),
     };
     pub const ASSIGN_NEW_BY_REF: PatternRule = PatternRule {
