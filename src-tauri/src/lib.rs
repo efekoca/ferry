@@ -85,6 +85,7 @@ fn parse_target(target: &str) -> CmdResult<PhpVersion> {
 }
 
 fn normalize_path(path: String) -> String {
+    let path = if cfg!(windows) { path.replace('/', "\\") } else { path };
     let Ok(canonical) = std::fs::canonicalize(&path) else { return path };
     let text = canonical.to_string_lossy();
     let Some(rest) = text.strip_prefix(r"\\?\") else { return text.into_owned() };
