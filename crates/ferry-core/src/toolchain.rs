@@ -221,15 +221,28 @@ pub fn lint_source(php: &Path, src: &str) -> Option<String> {
 }
 
 pub fn new_syntax_errors<'a>(php: &Path, files: impl IntoIterator<Item = (&'a str, Option<&'a str>, &'a str)>) -> Vec<String> {
-    let mut errors = Vec::new();
-    for (rel, before, after) in files {
-        let Some(error) = lint_source(php, after) else { continue };
-        if before.is_some_and(|b| lint_source(php, b).is_some()) {
-            continue;
-        }
-        errors.push(format!("{rel} — {}", error.replace("Standard input code", rel)));
-    }
-    errors
+    let files: Vec<_> = files.into_iter().collect();
+    let workers = std::thread::available_parallelism().map_or(4, |n| n.get()).clamp(1, 8);
+    let chunk = files.len().div_ceil(workers).max(1);
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = files
+            .chunks(chunk)
+            .map(|part| {
+                scope.spawn(move || {
+                    part.iter()
+                        .filter_map(|&(rel, before, after)| {
+                            let error = lint_source(php, after)?;
+                            if before.is_some_and(|b| lint_source(php, b).is_some()) {
+                                return None;
+                            }
+                            Some(format!("{rel} — {}", error.replace("Standard input code", rel)))
+                        })
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        handles.into_iter().flat_map(|h| h.join().unwrap_or_default()).collect()
+    })
 }
 
 pub fn find_composer() -> Option<PathBuf> {
@@ -358,6 +371,10 @@ mod tests {
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert!(errors[0].starts_with("src/new.php — "), "{errors:?}");
         assert!(errors[0].contains("in src/new.php on line 2"), "{errors:?}");
+        let many: Vec<(String, &str)> = (0..20).map(|i| (format!("src/f{i:02}.php"), if i % 7 == 0 { broken } else { ok })).collect();
+        let errors = new_syntax_errors(&php, many.iter().map(|(rel, after)| (rel.as_str(), Some(ok), *after)));
+        let files: Vec<&str> = errors.iter().map(|e| e.split(" — ").next().unwrap()).collect();
+        assert_eq!(files, ["src/f00.php", "src/f07.php", "src/f14.php"], "results keep the input order");
     }
 
     #[cfg(unix)]
