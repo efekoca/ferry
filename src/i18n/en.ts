@@ -287,6 +287,15 @@ export const en: Dict = {
     backups: "Backups",
     keep: "Backups to keep",
     keepText: "Only the newest backups are kept for each project; older ones are removed on the next apply.",
+    usage: "Disk usage",
+    usageText: (snapshots, projects, size) =>
+      `${snapshots === 1 ? "1 backup" : `${snapshots} backups`} across ${projects === 1 ? "1 project" : `${projects} projects`}, ${size}.`,
+    usageEmpty: "No backups yet.",
+    deleteAll: "Delete all backups",
+    deleteAllTitle: "Delete the backups of every project?",
+    deleteAllText: (snapshots, size) =>
+      `${snapshots === 1 ? "1 backup is" : `${snapshots} backups are`} deleted for good, freeing ${size}. You won't be able to restore them.`,
+    deleteAllDone: "All backups deleted",
     unlimited: "Unlimited",
     footnote: (dir) =>
       `Tools folder: ${dir}. Ferry only writes changes you approve; scanning and previews never modify your files.`,

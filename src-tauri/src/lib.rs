@@ -453,6 +453,23 @@ async fn delete_snapshot(state: State<'_, AppState>, path: String, id: String) -
 }
 
 #[tauri::command]
+async fn snapshot_usage(state: State<'_, AppState>) -> CmdResult<ferry_core::snapshot::Usage> {
+    let store = state.snapshots();
+    blocking(move || Ok(store.usage())).await
+}
+
+#[tauri::command]
+async fn delete_all_snapshots(state: State<'_, AppState>) -> CmdResult<()> {
+    let store = state.snapshots();
+    let writes = state.writes.clone();
+    blocking(move || {
+        let _guard = writes.lock().unwrap_or_else(|e| e.into_inner());
+        store.delete_all().map_err(|e| e.to_string())
+    })
+    .await
+}
+
+#[tauri::command]
 async fn export_report(state: State<'_, AppState>, path: String, destination: String) -> CmdResult<()> {
     let path = normalize_path(path);
     let scan = state.scans.lock().unwrap().get(&path).cloned().ok_or_else(|| t!("Önce projeyi tarayın.", "Scan the project first."))?;
@@ -503,6 +520,8 @@ pub fn with_commands<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R
         delete_snapshot,
         snapshot_changes,
         snapshot_conflicts,
+        snapshot_usage,
+        delete_all_snapshots,
         cancel_rector_preview,
         export_report,
         get_settings,

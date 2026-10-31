@@ -257,6 +257,14 @@ export function mockApi(opts: { delay?: number; scale?: number } = {}): Api {
       return CHANGES.filter((c) => snap.files.some((f) => f.path === c.file));
     },
     snapshotConflicts: async () => [],
+    backupUsage: async () => ({
+      snapshots: snapshots.length,
+      projects: snapshots.length ? 1 : 0,
+      bytes: snapshots.reduce((sum, s) => sum + s.files.length * 6144, 0),
+    }),
+    deleteAllBackups: async () => {
+      snapshots = [];
+    },
     deleteSnapshot: async (_path, id) => {
       snapshots = snapshots.filter((s) => s.id !== id);
     },
