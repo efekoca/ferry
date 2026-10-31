@@ -26,6 +26,7 @@ pub(crate) struct MethodSig {
     pub is_abstract: bool,
     pub params: Vec<crate::analyzer::ParamShape>,
     pub returns: Option<Vec<String>>,
+    pub returns_shown: Option<Vec<String>>,
     pub param_fqns: Vec<Vec<String>>,
     pub return_fqns: Vec<String>,
 }
@@ -71,6 +72,7 @@ pub(crate) fn method_sig(tokens: &[Token], function: usize, close_body_scan: usi
         return_fqns: crate::analyzer::return_type_at(tokens, close).into_iter().map(|k| resolve_type(tokens, k, names)).collect(),
         params,
         returns: crate::analyzer::return_type(tokens, close),
+        returns_shown: crate::analyzer::return_type_shown(tokens, close),
     };
     Some((name.text.to_ascii_lowercase(), sig))
 }
@@ -323,6 +325,10 @@ impl Names {
             }
         }
         Names { spaces, uses }
+    }
+
+    pub(crate) fn declared(&self, at: usize, name: &str) -> String {
+        qualify(namespace_at(&self.spaces, at), name)
     }
 
     pub(crate) fn resolve(&self, at: usize, name: &str) -> String {

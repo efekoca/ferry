@@ -327,9 +327,10 @@ pub fn analyze_source_in(file: &str, src: &str, target: PhpVersion, index: &crat
             }
             Override::UserIncompatible(parent, sig) => {
                 let fixed: Vec<&ParamShape> = sig.params.iter().filter(|p| !p.variadic).collect();
-                let params: Vec<(bool, String, String)> = fixed.iter().map(|p| (p.by_ref, display_type(&p.ty), p.name.clone())).collect();
+                let params: Vec<(bool, String, String)> =
+                    fixed.iter().map(|p| (p.by_ref, display_type(&p.shown), p.name.clone())).collect();
                 let required = fixed.iter().rposition(|p| !p.optional).map_or(0, |i| i + 1);
-                let returns = sig.returns.as_deref().map(display_type).unwrap_or_default();
+                let returns = sig.returns_shown.as_deref().map(display_type).unwrap_or_default();
                 let variadic = sig.params.iter().find(|p| p.variadic).map(|p| p.name.clone());
                 let signature = render_signature(&tokens[over.name].text, sig.is_static, required, &params, variadic, &returns);
                 ctx.incompatible_override(&patterns::INCOMPATIBLE_USER_OVERRIDE, &tokens[over.name], &parent, signature);
@@ -1303,6 +1304,7 @@ pub(crate) struct ParamShape {
     pub optional: bool,
     pub ty: Vec<String>,
     pub ty_at: Vec<usize>,
+    pub shown: Vec<String>,
     pub name: String,
 }
 
@@ -1329,6 +1331,7 @@ pub(crate) fn param_shapes(tokens: &[Token], open: usize, close: usize) -> Vec<P
         let Some(var) = param.iter().position(|t| t.kind == TokenKind::Variable) else { continue };
         let mut ty = Vec::new();
         let mut ty_at = Vec::new();
+        let mut shown = Vec::new();
         let mut attr = 0;
         for (j, t) in param[..var].iter().enumerate() {
             if t.is_punct("#[") || attr > 0 && t.is_punct("[") {
@@ -1340,14 +1343,17 @@ pub(crate) fn param_shapes(tokens: &[Token], open: usize, close: usize) -> Vec<P
                 if !["public", "protected", "private", "readonly"].contains(&name.as_str()) {
                     ty.push(name);
                     ty_at.push(start_of_param + j);
+                    shown.push(t.text.trim_start_matches('\\').to_string());
                 }
             } else if attr == 0 && t.is_punct("?") {
                 ty.push("null".into());
+                shown.push("null".into());
             }
         }
         let null_default = param.get(var + 1).is_some_and(|t| t.is_punct("=")) && param.get(var + 2).is_some_and(|t| t.is_ident_ci("null"));
         if null_default && !ty.is_empty() && !ty.iter().any(|t| t == "null" || t == "mixed") {
             ty.push("null".into());
+            shown.push("null".into());
         }
         out.push(ParamShape {
             by_ref: param[..var].iter().rev().take_while(|t| t.is_punct("&") || t.is_punct("...")).any(|t| t.is_punct("&")),
@@ -1355,6 +1361,7 @@ pub(crate) fn param_shapes(tokens: &[Token], open: usize, close: usize) -> Vec<P
             optional: param.get(var + 1).is_some_and(|t| t.is_punct("=")),
             ty,
             ty_at,
+            shown,
             name: param[var].text.clone(),
         });
     }
@@ -1457,11 +1464,21 @@ fn class_name(t: &str) -> bool {
     !SCALAR_TYPES.contains(&t) && !["mixed", "object", "self", "static", "parent", "never"].contains(&t)
 }
 
+fn builtin_ancestry(name: &str) -> Option<Vec<String>> {
+    if ["stdclass", "traversable"].contains(&name) {
+        return Some(Vec::new());
+    }
+    let found = crate::builtin::CLASSES.binary_search_by(|(c, _, _)| (*c).cmp(name)).ok()?;
+    Some(crate::builtin::CLASSES[found].1.iter().map(|p| p.to_string()).collect())
+}
+
 fn is_subtype(a: &str, b: &str, index: &crate::index::ProjectIndex) -> Option<bool> {
     if a == b {
         return Some(true);
     }
-    index.supertypes(b)?;
+    if index.supertypes(b).is_none() && builtin_ancestry(b).is_none() {
+        return None;
+    }
     let mut queue = vec![a.to_string()];
     let mut seen = std::collections::HashSet::new();
     let mut unknown = false;
@@ -1472,9 +1489,14 @@ fn is_subtype(a: &str, b: &str, index: &crate::index::ProjectIndex) -> Option<bo
         if !seen.insert(node.clone()) || seen.len() > 64 {
             continue;
         }
-        match index.supertypes(&node) {
-            Some(parents) => queue.extend(parents),
-            None => unknown = true,
+        if let Some(parents) = index.supertypes(&node) {
+            queue.extend(parents);
+        } else if let Some(ancestors) = builtin_ancestry(&node) {
+            if ancestors.iter().any(|p| p == b) {
+                return Some(true);
+            }
+        } else {
+            unknown = true;
         }
     }
     (!unknown).then_some(false)
@@ -1576,6 +1598,14 @@ pub(crate) fn return_type_at(tokens: &[Token], close: usize) -> Vec<usize> {
 }
 
 pub(crate) fn return_type(tokens: &[Token], close: usize) -> Option<Vec<String>> {
+    return_type_as(tokens, close, |t| t.trim_start_matches('\\').to_ascii_lowercase())
+}
+
+pub(crate) fn return_type_shown(tokens: &[Token], close: usize) -> Option<Vec<String>> {
+    return_type_as(tokens, close, |t| t.trim_start_matches('\\').to_string())
+}
+
+fn return_type_as(tokens: &[Token], close: usize, name: impl Fn(&str) -> String) -> Option<Vec<String>> {
     if !tokens.get(close + 1)?.is_punct(":") {
         return None;
     }
@@ -1588,7 +1618,7 @@ pub(crate) fn return_type(tokens: &[Token], close: usize) -> Option<Vec<String>>
         } else if t.is_punct("?") {
             out.push("null".to_string());
         } else if t.kind == TokenKind::Ident {
-            out.push(t.text.trim_start_matches('\\').to_ascii_lowercase());
+            out.push(name(&t.text));
         }
     }
     Some(out)
@@ -1701,8 +1731,12 @@ fn builtin_overrides(tokens: &[Token], index: &crate::index::ProjectIndex) -> Ve
                     let shapes = param_shapes(tokens, popen, close);
                     let child_fqns: Vec<Vec<String>> =
                         shapes.iter().map(|p| p.ty_at.iter().map(|&j| crate::index::resolve_type(tokens, j, &names)).collect()).collect();
-                    let child_return_fqns: Vec<String> =
-                        return_type_at(tokens, close).into_iter().map(|j| crate::index::resolve_type(tokens, j, &names)).collect();
+                    let this_class = names.declared(i + 1, &tokens[i + 1].text);
+                    let child_return_fqns: Vec<String> = return_type_at(tokens, close)
+                        .into_iter()
+                        .map(|j| crate::index::resolve_type(tokens, j, &names))
+                        .map(|t| if t == "static" || t == "self" { this_class.clone() } else { t })
+                        .collect();
                     if (lower != "__construct" || sig.is_abstract)
                         && (!user_parent_fits(&shapes, is_static, child_return.as_deref(), &lower, &sig)
                             || class_mismatch(&shapes, &child_fqns, &child_return_fqns, &sig, index))
@@ -2451,6 +2485,14 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
             ("class X {} class Y {} class A { function f(X $a) {} } class B extends A { function f(X|Y $a) {} }", 0),
             ("class X {} class A { function f(X $a) {} } class B extends A { function f(object $a) {} }", 0),
             ("class X extends Exception {} class A { function f(X $a) {} } class B extends A { function f(Exception $a) {} }", 0),
+            ("class X {} class A { function f(X $a) {} } class B extends A { function f(Exception $a) {} }", 1),
+            ("class A { function f(Exception $a) {} } class B extends A { function f(RuntimeException $a) {} }", 1),
+            ("class A { function f(Exception $a) {} } class B extends A { function f(Throwable $a) {} }", 0),
+            ("class A { function f(): Exception {} } class B extends A { function f(): ArrayObject {} }", 1),
+            ("class A { function f(): Traversable {} } class B extends A { function f(): ArrayIterator {} }", 0),
+            ("class A { function f(stdClass $a) {} } class B extends A { function f(ArrayObject $a) {} }", 1),
+            ("class X {} class A { function f(): X {} } class B extends A { function f(): static {} }", 1),
+            ("class A { function f(): A {} } class B extends A { function f(): static {} }", 0),
             ("class X extends Vendor\\Base {} class Y {} class A { function f(X $a) {} } class B extends A { function f(Y $a) {} }", 0),
             ("namespace Lib { class X {} } namespace App { use Lib\\X as Y; class A { function f(Y $a) {} } class B extends A { function f(\\Lib\\X $a) {} } }", 0),
         ];
@@ -2481,6 +2523,13 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
         let f = found.iter().find(|f| f.rule_id == id).unwrap();
         assert_eq!(f.title.en, "A::f()");
         assert_eq!(f.replacement.as_ref().unwrap().en, "function f(?int $a, &$b = …)");
+        let found = analyze_source(
+            "t.php",
+            "<?php class A { function f(Zend_Acl $acl): ?Zend_Result {} } class B extends A { function f() {} }",
+            PhpVersion::new(8, 1),
+        );
+        let f = found.iter().find(|f| f.rule_id == id).unwrap();
+        assert_eq!(f.replacement.as_ref().unwrap().en, "function f(Zend_Acl $acl): ?Zend_Result");
     }
 
     #[test]
