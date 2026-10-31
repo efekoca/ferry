@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { DiffViewer, wordHighlight } from "../components/DiffViewer";
 import { ScoreRing } from "../components/ScoreRing";
 import { DICTS } from "../i18n";
-import { commonTitle, dependencyBlockers, formatDuration, formatRelative, joinPath, scoreHeadline, scoreTone } from "../lib/labels";
+import { commonTitle, dependencyBlockers, formatBytes, formatDuration, formatRelative, joinPath, scoreHeadline, scoreTone } from "../lib/labels";
 import { NO_FILTER, type FindingsFilter } from "../lib/store";
 import { filterFindings } from "../screens/Findings";
 import type { FileDiff, Finding } from "../lib/types";
@@ -132,5 +132,14 @@ describe("helpers", () => {
   it("keeps the platform separator of the project root", () => {
     expect(joinPath("/Users/demo/site/", "src/a.php")).toBe("/Users/demo/site/src/a.php");
     expect(joinPath("C:\\xampp\\htdocs\\site", "src/a.php")).toBe("C:\\xampp\\htdocs\\site\\src\\a.php");
+  });
+});
+
+describe("formatBytes", () => {
+  it("picks a readable unit", () => {
+    expect(formatBytes(512, "en-US")).toBe("512 byte");
+    expect(formatBytes(1536, "en-US")).toBe("1.5 kB");
+    expect(formatBytes(5 * 1024 * 1024, "en-US")).toBe("5 MB");
+    expect(formatBytes(3 * 1024 ** 3, "tr-TR")).toBe("3 GB");
   });
 });

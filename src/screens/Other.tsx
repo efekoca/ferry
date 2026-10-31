@@ -26,9 +26,9 @@ import { Badge, Button, Callout, Card, CommandLine, EmptyState, RiskBadge, RuleC
 import { useToast } from "../components/Toast";
 import { LANGS, useI18n, type Lang } from "../i18n";
 import { errorMessage } from "../lib/api";
-import { formatRelative } from "../lib/labels";
+import { formatBytes, formatRelative } from "../lib/labels";
 import { useStore, type Theme } from "../lib/store";
-import type { DependencyStatus, FileChange, Settings, Snapshot } from "../lib/types";
+import type { BackupUsage, DependencyStatus, FileChange, Settings, Snapshot } from "../lib/types";
 
 const DEP_TONE: Record<DependencyStatus, "danger" | "auto" | "neutral"> = {
   incompatible: "danger",
@@ -463,14 +463,35 @@ const withIcon = (icon: ReactElement, label: string) => (
 
 export function SettingsScreen() {
   const { t, lang, setLang } = useI18n();
-  const { theme, setTheme, toolchain, refreshToolchain, installRector, installingRector, api } = useStore();
+  const { theme, setTheme, toolchain, refreshToolchain, installRector, installingRector, api, refreshSnapshots } = useStore();
   const toast = useToast();
   const [checking, setChecking] = useState(false);
   const [settings, setSettings] = useState<Settings>({ phpPath: null, snapshotLimit: null });
+  const [usage, setUsage] = useState<BackupUsage | null>(null);
+  const [clearing, setClearing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     api?.getSettings().then(setSettings).catch(() => {});
+    api?.backupUsage().then(setUsage).catch(() => {});
   }, [api]);
+
+  const size = usage ? formatBytes(usage.bytes, t.locale) : "";
+  const deleteAll = async () => {
+    if (!api) return;
+    setDeleting(true);
+    try {
+      await api.deleteAllBackups();
+      toast.push({ tone: "success", title: t.settings.deleteAllDone });
+      setClearing(false);
+      void refreshSnapshots();
+    } catch (e) {
+      toast.push({ tone: "error", title: t.toast.deleteFailed, description: errorMessage(e, t.common.genericError) });
+    } finally {
+      setDeleting(false);
+      api.backupUsage().then(setUsage).catch(() => {});
+    }
+  };
 
   const save = async (next: Settings) => {
     if (!api) return false;
@@ -606,8 +627,32 @@ export function SettingsScreen() {
                   onChange={(v) => save({ ...settings, snapshotLimit: v === "none" ? null : Number(v) })}
                 />
               </div>
+              <div className="setting">
+                <div className="setting__text">
+                  <div className="setting__title">{t.settings.usage}</div>
+                  <div className="setting__desc">
+                    {usage && usage.snapshots > 0 ? t.settings.usageText(usage.snapshots, usage.projects, size) : t.settings.usageEmpty}
+                  </div>
+                </div>
+                <Button size="sm" variant="danger" icon={<Trash2 size={13} />} onClick={() => setClearing(true)} disabled={!usage?.snapshots}>
+                  {t.settings.deleteAll}
+                </Button>
+              </div>
             </div>
           </Card>
+
+          <ConfirmDialog
+            open={clearing}
+            tone="danger"
+            icon={<Trash2 size={20} />}
+            title={t.settings.deleteAllTitle}
+            confirmLabel={t.history.deleteConfirm}
+            loading={deleting}
+            onCancel={() => setClearing(false)}
+            onConfirm={deleteAll}
+          >
+            {t.settings.deleteAllText(usage?.snapshots ?? 0, size)}
+          </ConfirmDialog>
 
           {toolchain && (
             <p className="hint selectable">

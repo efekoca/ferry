@@ -1,5 +1,6 @@
 import type {
   ApplyResult,
+  BackupUsage,
   DependencyReport,
   FileChange,
   ProjectInfo,
@@ -32,6 +33,8 @@ export interface Api {
   deleteSnapshot(path: string, id: string): Promise<void>;
   snapshotChanges(path: string, id: string): Promise<FileChange[]>;
   snapshotConflicts(path: string, id: string): Promise<string[]>;
+  backupUsage(): Promise<BackupUsage>;
+  deleteAllBackups(): Promise<void>;
   exportReport(path: string, destination: string): Promise<void>;
   revealPath(path: string): Promise<void>;
   getSettings(): Promise<Settings>;
@@ -69,6 +72,8 @@ async function tauriApi(): Promise<Api> {
     deleteSnapshot: (path, id) => invoke("delete_snapshot", { path, id }),
     snapshotChanges: (path, id) => invoke("snapshot_changes", { path, id }),
     snapshotConflicts: (path, id) => invoke("snapshot_conflicts", { path, id }),
+    backupUsage: () => invoke("snapshot_usage"),
+    deleteAllBackups: () => invoke("delete_all_snapshots"),
     exportReport: (path, destination) => invoke("export_report", { path, destination }),
     revealPath: (path) => opener.revealItemInDir(path),
     getSettings: () => invoke("get_settings"),

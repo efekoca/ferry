@@ -154,6 +154,12 @@ export interface ApplyResult {
   lintErrors: string[];
 }
 
+export interface BackupUsage {
+  snapshots: number;
+  projects: number;
+  bytes: number;
+}
+
 export interface Settings {
   phpPath: string | null;
   snapshotLimit: number | null;
