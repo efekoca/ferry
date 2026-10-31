@@ -353,8 +353,8 @@ pub fn analyze_source_in(file: &str, src: &str, target: PhpVersion, index: &crat
     for k in globals_writes(&tokens) {
         ctx.pattern(&patterns::GLOBALS_WRITE, &tokens[k], None);
     }
-    for (k, since) in reserved_aliases(&tokens) {
-        ctx.pattern_since(&patterns::RESERVED_NAME, tokens[k].line, tokens[k].column, since);
+    for (k, since, fixed) in reserved_aliases(&tokens) {
+        ctx.pattern_replaced(&patterns::RESERVED_ALIAS, &tokens[k], since, fixed);
     }
     for k in stray_breaks(&tokens) {
         ctx.pattern(&patterns::BREAK_OUTSIDE_LOOP, &tokens[k], None);
@@ -570,6 +570,22 @@ impl<'a> Ctx<'a> {
             replacement: rule.replacement.map(Into::into),
         };
         self.push(hit, line, column);
+    }
+
+    fn pattern_replaced(&mut self, rule: &PatternRule, tok: &Token, since: PhpVersion, replacement: String) {
+        if !self.applies(since) {
+            return;
+        }
+        let hit = Hit {
+            rule_id: rule.id,
+            title: rule.title.into(),
+            message: rule.note,
+            since,
+            severity: rule.severity,
+            fix: rule.fix,
+            replacement: Some(Localized::same(replacement)),
+        };
+        self.push(hit, tok.line, tok.column);
     }
 
     fn ident(&mut self, tokens: &[Token], i: usize) {
@@ -1796,7 +1812,7 @@ fn globals_writes(tokens: &[Token]) -> Vec<usize> {
     out
 }
 
-fn reserved_aliases(tokens: &[Token]) -> Vec<(usize, PhpVersion)> {
+fn reserved_aliases(tokens: &[Token]) -> Vec<(usize, PhpVersion, String)> {
     let mut out = Vec::new();
     let mut stack: Vec<bool> = Vec::new();
     for i in 0..tokens.len() {
@@ -1823,14 +1839,17 @@ fn reserved_aliases(tokens: &[Token]) -> Vec<(usize, PhpVersion)> {
             }
             let idents: Vec<usize> = (part_start..k).filter(|&j| tokens[j].kind == TokenKind::Ident).collect();
             part_start = k + 1;
-            let alias = match idents.as_slice() {
-                [target] => *target,
-                [_, kw, alias] if tokens[*kw].is_ident_ci("as") => *alias,
+            let (target, alias) = match idents.as_slice() {
+                [target] => (*target, *target),
+                [target, kw, alias] if tokens[*kw].is_ident_ci("as") => (*target, *alias),
                 _ => continue,
             };
             let short = tokens[alias].text.rsplit('\\').next().unwrap_or_default().to_ascii_lowercase();
             if let Some(&(_, a, b)) = RESERVED_CLASS_NAMES.iter().find(|(n, _, _)| *n == short) {
-                out.push((alias, PhpVersion::new(a, b)));
+                let name = tokens[alias].text.rsplit('\\').next().unwrap_or_default();
+                let mut base = name.chars();
+                let renamed = base.next().map(|c| format!("Base{}{}", c.to_ascii_uppercase(), base.as_str())).unwrap_or_default();
+                out.push((alias, PhpVersion::new(a, b), format!("{} as {renamed}", tokens[target].text.trim_start_matches('\\'))));
             }
         }
     }
@@ -2313,7 +2332,7 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
 
     #[test]
     fn reserved_names_used_as_import_aliases() {
-        let id = "removed.reserved_name";
+        let id = "removed.reserved_alias";
         for src in [
             "namespace A; use B\\Object;",
             "use B\\Object;",
@@ -2334,6 +2353,9 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
         }
         assert_eq!(at("<?php use B\\Never;", (8, 0)).iter().filter(|(r, _)| r == id).count(), 0);
         assert_eq!(at("<?php use B\\Never;", (8, 1)).iter().filter(|(r, _)| r == id).count(), 1);
+        let found = analyze_source("t.php", "<?php namespace A; use yii\\base\\Object; use B\\C as object;", PhpVersion::new(8, 4));
+        let fixes: Vec<String> = found.iter().filter(|f| f.rule_id == id).map(|f| f.replacement.as_ref().unwrap().en.clone()).collect();
+        assert_eq!(fixes, ["yii\\base\\Object as BaseObject", "B\\C as BaseObject"]);
     }
 
     #[test]
