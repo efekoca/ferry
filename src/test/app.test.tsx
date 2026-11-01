@@ -231,6 +231,22 @@ describe("Ferry app", () => {
     await waitFor(() => expect(screen.getAllByRole("option")).toHaveLength(all));
   });
 
+  it("creates a server probe and compares its output", async () => {
+    const user = setup();
+    await openAndScan(user);
+    await user.click(nav(/Bağımlılıklar/));
+    await user.click(await screen.findByRole("button", { name: "Yoklama dosyası oluştur" }));
+    expect(await screen.findByText(/ferry-probe.php\?token=3f9c2a7be41d08c6a5e2f1b07d9c3e88/)).toBeInTheDocument();
+    const output = '{"ferryProbe":1,"php":"8.2.10","sapi":"fpm-fcgi","os":"Linux","server":"nginx","extensions":["core","curl","mysqli"],"ini":{"memory_limit":"256M","disable_functions":"exec"}}';
+    const box = screen.getByRole("textbox", { name: "Yoklama çıktısı" });
+    await user.click(box);
+    await user.paste(output);
+    const table = await screen.findByRole("table", { name: "Sunucu" });
+    expect(within(table).getByText("Hedef sürümün (PHP 8.4) altında")).toBeInTheDocument();
+    expect(within(table).getByText("imap")).toBeInTheDocument();
+    expect(within(table).getByText(/php_value satırları 500 hatası verir/)).toBeInTheDocument();
+  });
+
   it("saves the editor used to open findings", async () => {
     const user = userEvent.setup();
     const api = mockApi({ delay: 0 });

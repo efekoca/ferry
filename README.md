@@ -111,6 +111,8 @@ Each package is marked **Compatible**, **Incompatible**, or **Unknown** (when th
 
 **Find compatible versions** asks Packagist which release to move each blocking package to: the newest release of the first major version whose PHP requirement, and the framework's own support range where Ferry knows it, allows the target. It's the only feature that goes online, and only when you click it.
 
+**Server** checks the machine you're moving to. **Create probe file** saves a one-file `ferry-probe.php` that answers only with its random token. Upload it to the server's web folder, open `https://your-site/ferry-probe.php?token=…`, and paste the JSON it prints. Ferry compares it with the target: the server's PHP version (and whether it's a vulnerable release), the server API (PHP-FPM, where `php_value` in `.htaccess` breaks), extensions the code uses that the server lacks, `disable_functions` and `memory_limit`. Delete the file from the server afterwards.
+
 **PHP extensions** lists every extension the code uses, such as `mysqli`, `gd` or `intl`, with how often and where it's first used. It shows whether `composer.json` declares it as `ext-*` and whether the PHP on this computer has it. Extensions that left PHP, such as `imap` in 8.4, are marked. Ready-to-paste `ext-*` lines are offered for the ones `composer.json` doesn't declare, so Composer checks the new server for them.
 
 ### Undo anything from History

@@ -16,6 +16,7 @@ pub mod ignore;
 pub mod index;
 pub mod lexer;
 pub mod packagist;
+pub mod probe;
 pub mod project;
 pub mod rector;
 pub mod report;

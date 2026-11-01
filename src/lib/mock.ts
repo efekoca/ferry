@@ -225,6 +225,8 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
     pickProjectFolder: async () => MOCK_ROOT,
     pickSaveFile: async (name) => `/Users/demo/Desktop/${name}`,
     pickPhpBinary: async () => "/opt/homebrew/opt/php@8.4/bin/php",
+    pickProbeFile: async (name) => `/Users/demo/Desktop/${name}`,
+    writeProbe: async () => "3f9c2a7be41d08c6a5e2f1b07d9c3e88",
     pickLogFile: async () => "/var/log/php/php_errors.log",
     importRuntimeLog: async (_path, log) => {
       if (!lastScan) throw new Error("Scan the project first.");
