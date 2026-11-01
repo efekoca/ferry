@@ -49,6 +49,11 @@ export interface Summary {
   score: number;
 }
 
+export interface IgnoredFinding {
+  finding: Finding;
+  reason: string;
+}
+
 export interface ScanResult {
   target: string;
   filesScanned: number;
@@ -57,6 +62,7 @@ export interface ScanResult {
   errors: { file: string; message: string }[];
   durationMs: number;
   summary: Summary;
+  ignored: IgnoredFinding[];
 }
 
 export interface ScanProgress {
@@ -163,4 +169,5 @@ export interface BackupUsage {
 export interface Settings {
   phpPath: string | null;
   snapshotLimit: number | null;
+  editor: string | null;
 }

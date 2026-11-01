@@ -159,6 +159,40 @@ describe("Ferry app", () => {
     expect(within(detail).getByText(/admin\/settings-page.php:88/)).toBeInTheDocument();
   });
 
+  it("ignores a finding with a reason and brings it back", async () => {
+    const user = setup();
+    await openAndScan(user);
+    await user.click(nav(/Bulgular/));
+    const list = await screen.findByRole("listbox", { name: "Bulgu listesi" });
+    const all = within(list).getAllByRole("option").length;
+    await user.type(screen.getByRole("searchbox", { name: "Bulgularda ara" }), "strftime");
+    const detail = screen.getByRole("complementary", { name: "Bulgu ayrıntısı" });
+    await user.click(within(detail).getByRole("button", { name: "Yok say" }));
+    const dialog = await screen.findByRole("dialog", { name: "Bu bulgu yok sayılsın mı?" });
+    const confirm = within(dialog).getByRole("button", { name: "Yok say" });
+    expect(confirm).toBeDisabled();
+    await user.type(within(dialog).getByRole("textbox", { name: "Gerekçe" }), "Eski tema, kaldırılacak");
+    await user.click(confirm);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+
+    await user.clear(screen.getByRole("searchbox", { name: "Bulgularda ara" }));
+    await waitFor(() => expect(screen.getAllByRole("option")).toHaveLength(all - 1));
+    await user.click(screen.getByRole("button", { name: "Yok sayılanlar (1)" }));
+    expect(await screen.findByText("Eski tema, kaldırılacak")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Yeniden göster" }));
+    await waitFor(() => expect(screen.getAllByRole("option")).toHaveLength(all));
+    expect(screen.queryByRole("button", { name: /Yok sayılanlar/ })).not.toBeInTheDocument();
+  });
+
+  it("saves the editor used to open findings", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    render(<App api={api} />);
+    await user.click(await screen.findByRole("button", { name: /Ayarlar/ }));
+    await user.selectOptions(await screen.findByRole("combobox", { name: "Editör" }), "PhpStorm");
+    await waitFor(async () => expect((await api.getSettings()).editor).toBe("phpstorm"));
+  });
+
   it("renders long finding lists in pages and extends them on demand", async () => {
     const user = userEvent.setup();
     render(<App api={mockApi({ delay: 0, scale: 40 })} />);
@@ -223,12 +257,12 @@ describe("Ferry app", () => {
   it("keeps the PHP path when the backup limit changes", async () => {
     const user = userEvent.setup();
     const api = mockApi({ delay: 0 });
-    await api.saveSettings({ phpPath: "/opt/php", snapshotLimit: null });
+    await api.saveSettings({ phpPath: "/opt/php", snapshotLimit: null, editor: null });
     render(<App api={api} />);
     await user.click(await screen.findByRole("button", { name: /Ayarlar/ }));
     const group = await screen.findByRole("radiogroup", { name: "Saklanacak yedek" });
     await user.click(within(group).getByRole("radio", { name: "30" }));
-    await waitFor(async () => expect(await api.getSettings()).toEqual({ phpPath: "/opt/php", snapshotLimit: 30 }));
+    await waitFor(async () => expect(await api.getSettings()).toEqual({ phpPath: "/opt/php", snapshotLimit: 30, editor: null }));
     expect(within(group).getByRole("radio", { name: "30" })).toHaveAttribute("aria-checked", "true");
   });
 
