@@ -66,7 +66,7 @@ pub fn check(root: &Path, target: PhpVersion) -> DependencyReport {
                     if limit.official {
                         status = DependencyStatus::Incompatible;
                         note = Some(Localized {
-                            tr: format!("Bu sürüm resmi olarak en fazla PHP {max}'i destekliyor."),
+                            tr: format!("Bu sürüm resmi olarak en fazla PHP {} destekliyor.", crate::i18n::tr_accusative(&max.to_string())),
                             en: format!("This version officially supports PHP up to {max}."),
                         });
                     } else {
