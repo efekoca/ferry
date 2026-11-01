@@ -42,6 +42,8 @@ Her sayı bir kısayoldur: **Kritik**'e, **Elle düzelt**'e ya da en sık görü
 
 Bakımını sizin yapmadığınız framework kodu kendiliğinden atlanır: WordPress'te `wp-admin` ve `wp-includes`, Laravel'de `storage` ve `bootstrap/cache`, Symfony'de `var`, Drupal çekirdeği; her projede de `vendor` ve `node_modules`. Atlanan klasörler genel bakışta yazılıdır.
 
+**Hedefleri karşılaştır** projeyi PHP 8.2, 8.3, 8.4 ve 8.5 için aynı anda tarar; puanı, kritik, eskimiş ve elle düzeltilecek bulguları ve engelleyen paketleri yan yana gösterir. Böylece doğrudan 8.5'e geçmenin 8.3'te durmaktan ne kadar fazla iş çıkaracağını görürsünüz. **Bu hedefe geç** birini seçer.
+
 İkinci taramadan sonra **Son taramadan beri** kaç bulgunun çözüldüğünü, kaçının yeni olduğunu ve o hedef için her taramanın hazırlık puanını bir eğri olarak gösterir. Ferry her hedef için son 30 taramayı projede değil, kendi veri klasöründe tutar.
 
 **Rapor al** ile sonuçları bir Markdown dosyasına kaydedebilir, bir iş kaydına ekleyebilir ya da ekibinizle paylaşabilirsiniz.

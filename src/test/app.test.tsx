@@ -243,6 +243,17 @@ describe("Ferry app", () => {
     expect(await screen.findByText(/PHPUnit · PHP 8.4: 31 farklı mesaj/)).toBeInTheDocument();
   });
 
+  it("compares targets and switches to one", async () => {
+    const user = setup();
+    await openAndScan(user);
+    await user.click(screen.getByRole("button", { name: "Karşılaştır" }));
+    const table = await screen.findByRole("table", { name: "Hedefleri karşılaştır" });
+    expect(within(table).getAllByRole("row")).toHaveLength(5);
+    expect(within(table).getByText("Seçili")).toBeInTheDocument();
+    await user.click(within(table).getAllByRole("button", { name: "Bu hedefe geç" })[0]);
+    await waitFor(() => expect(screen.getByRole("radio", { name: "8.2" })).toHaveAttribute("aria-checked", "true"));
+  });
+
   it("saves the editor used to open findings", async () => {
     const user = userEvent.setup();
     const api = mockApi({ delay: 0 });
