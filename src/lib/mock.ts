@@ -146,6 +146,12 @@ const DEPS: Omit<DependencyReport, "target" | "rootStatus"> = {
     { name: "phpunit/phpunit", version: "7.5.20", phpConstraint: "^7.1", status: "incompatible", dev: true },
     { name: "symfony/polyfill-mbstring", version: "v1.31.0", phpConstraint: ">=7.2", status: "compatible", dev: false },
   ],
+  extensions: [
+    { name: "mysqli", uses: 14, file: "includes/class-db.php", line: 31, symbol: "mysqli_connect()", declared: false, removed: false, available: true },
+    { name: "gd", uses: 6, file: "includes/media.php", line: 12, symbol: "imagecreatetruecolor()", declared: false, removed: false, available: true },
+    { name: "imap", uses: 2, file: "includes/mailbox.php", line: 8, symbol: "imap_open()", declared: false, removed: true, available: false },
+    { name: "curl", uses: 3, file: "includes/http.php", line: 20, symbol: "curl_init()", declared: true, removed: false, available: true },
+  ],
 };
 
 export function mockApi(opts: { delay?: number; scale?: number } = {}): Api {
@@ -217,6 +223,11 @@ export function mockApi(opts: { delay?: number; scale?: number } = {}): Api {
     onScanProgress: async (handler) => {
       listeners.add(handler);
       return () => listeners.delete(handler);
+    },
+    findCompatibleVersions: async (_target, packages) => {
+      await sleep(delay / 3);
+      const known: Record<string, [string, boolean]> = { "phpmailer/phpmailer": ["v6.9.1", true], "illuminate/database": ["v10.0.0", true], "phpunit/phpunit": ["9.6.0", true] };
+      return packages.filter((p) => known[p.name]).map((p) => ({ name: p.name, version: known[p.name][0], majorChange: known[p.name][1] }));
     },
     checkDependencies: async (_path, target) => {
       await sleep(delay / 3);

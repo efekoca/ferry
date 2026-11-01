@@ -964,6 +964,25 @@ select.input {
   min-width: 180px;
 }
 
+.card__intro {
+  padding: var(--space-3) var(--space-4) 0;
+  font-size: var(--text-sm);
+}
+
+.card__intro:last-child {
+  padding-bottom: var(--space-4);
+}
+
+.table__num {
+  text-align: right;
+}
+
+.dep-lookup {
+  margin-top: var(--space-2);
+  gap: var(--space-3);
+  font-size: var(--text-sm);
+}
+
 .field {
   display: flex;
   flex-direction: column;
@@ -2751,4 +2770,8 @@ select.input {
 .segmented button:disabled {
   cursor: not-allowed;
   opacity: 0.45;
+}
+
+.dep-note .badge {
+  margin-left: var(--space-2);
 }
