@@ -10,6 +10,8 @@ pub enum Framework {
     Laravel,
     Symfony,
     Drupal,
+    Magento,
+    PrestaShop,
     Generic,
 }
 
@@ -42,11 +44,20 @@ pub fn detect_framework(root: &Path) -> Framework {
     if root.join("artisan").is_file() {
         return Framework::Laravel;
     }
+    if prestashop_root(root) {
+        return Framework::PrestaShop;
+    }
+    if root.join("app/Mage.php").is_file() || root.join("bin/magento").is_file() {
+        return Framework::Magento;
+    }
     let composer = std::fs::read_to_string(root.join("composer.json")).unwrap_or_default();
     if composer.contains("\"laravel/framework\"") {
         return Framework::Laravel;
     }
-    if composer.contains("\"drupal/core") || drupal_core_dirs(root).next().is_some() {
+    if composer.contains("\"magento/product-") || composer.contains("\"magento/magento2-base\"") {
+        return Framework::Magento;
+    }
+    if composer.contains("\"drupal/core") || drupal_core_dirs(root).next().is_some() || drupal7_root(root) {
         return Framework::Drupal;
     }
     if composer.contains("\"symfony/framework-bundle\"") || root.join("bin/console").is_file() {
@@ -61,6 +72,10 @@ pub fn framework_excludes(framework: Framework) -> Vec<String> {
         Framework::Laravel => &["storage", "bootstrap/cache"],
         Framework::Symfony => &["var"],
         Framework::Drupal => &["core", "sites/default/files"],
+        Framework::Magento => &["generated", "var", "pub/static", "setup", "dev", "lib/internal", "app/code/core", "lib", "downloader"],
+        Framework::PrestaShop => {
+            &["classes", "controllers", "src", "Core", "Adapter", "app", "cache", "var", "install", "install-dev", "tests"]
+        }
         Framework::Generic => &[],
     };
     dirs.iter().map(|d| d.to_string()).collect()
@@ -68,12 +83,38 @@ pub fn framework_excludes(framework: Framework) -> Vec<String> {
 
 const DRUPAL_DOCROOTS: [&str; 5] = ["", "web", "docroot", "html", "public"];
 
+pub(crate) fn drupal7_root(root: &Path) -> bool {
+    std::fs::read_to_string(root.join("includes/bootstrap.inc")).is_ok_and(|t| t.contains("define('VERSION', '7."))
+}
+
+pub(crate) fn prestashop_root(root: &Path) -> bool {
+    std::fs::read_to_string(root.join("config/settings.inc.php")).is_ok_and(|t| t.contains("_PS_VERSION_"))
+        || std::fs::read_to_string(root.join("app/AppKernel.php")).is_ok_and(|t| t.contains("PrestaShop"))
+        || root.join("classes/PrestaShopAutoload.php").is_file()
+}
+
 fn drupal_core_dirs(root: &Path) -> impl Iterator<Item = &'static str> + '_ {
     DRUPAL_DOCROOTS.into_iter().filter(move |d| root.join(d).join("core/lib/Drupal.php").is_file())
 }
 
 fn project_excludes(root: &Path, framework: Framework) -> Vec<String> {
     let mut dirs = framework_excludes(framework);
+    if framework == Framework::Drupal && drupal7_root(root) {
+        dirs = [
+            "includes",
+            "misc",
+            "modules",
+            "scripts",
+            "themes",
+            "profiles/minimal",
+            "profiles/standard",
+            "profiles/testing",
+            "sites/default/files",
+        ]
+        .iter()
+        .map(|d| d.to_string())
+        .collect();
+    }
     if framework == Framework::Drupal {
         for docroot in drupal_core_dirs(root).filter(|d| !d.is_empty()) {
             dirs.push(format!("{docroot}/core"));
