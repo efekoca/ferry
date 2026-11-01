@@ -215,6 +215,47 @@ async fn import_runtime_log(state: State<'_, AppState>, path: String, log: Strin
     Ok(respond(&root, scan, Some(&entry)))
 }
 
+fn selectable_lines() -> Vec<String> {
+    PhpVersion::TARGETS.iter().filter(|v| **v != PhpVersion::new(8, 1)).map(ToString::to_string).collect()
+}
+
+#[tauri::command]
+async fn local_php_versions() -> CmdResult<Vec<toolchain::LocalPhp>> {
+    blocking(|| Ok(toolchain::local_php(&selectable_lines()))).await
+}
+
+#[tauri::command]
+async fn run_local_check(state: State<'_, AppState>, path: String, target: String, kind: String) -> CmdResult<ScanResponse> {
+    let path = normalize_path(path);
+    let target = parse_target(&target)?;
+    let scan = state.scans.lock().unwrap().get(&path).cloned().ok_or_else(|| t!("Önce projeyi tarayın.", "Scan the project first."))?;
+    let (root, entry) = blocking(move || {
+        let root = project_root(&path)?;
+        let local = toolchain::local_php(&[target.to_string()]).into_iter().next().ok_or_else(|| {
+            t!(
+                "Bu bilgisayarda PHP {target} bulunamadı. Homebrew, Herd ya da paket yöneticinizle kurun.",
+                "PHP {target} wasn't found on this computer. Install it with Homebrew, Herd or your package manager."
+            )
+        })?;
+        let (label, output) = match kind.as_str() {
+            "lint" => {
+                let info = project::inspect(&root).map_err(|e| e.to_string())?;
+                let files = project::collect_php_files(&root, &info.excluded_dirs);
+                (format!("php -l · PHP {}", local.version), ferry_core::localcheck::lint(&local.path, &files))
+            }
+            "tests" => (
+                format!("PHPUnit · PHP {}", local.version),
+                ferry_core::localcheck::run_tests(&local.path, &root, Duration::from_secs(20 * 60))?,
+            ),
+            _ => return Err(t!("Bilinmeyen kontrol.", "Unknown check.")),
+        };
+        Ok((root, RuntimeLog { file: label, events: runtime::parse(&output) }))
+    })
+    .await?;
+    state.runtime.lock().unwrap().insert(root.to_string_lossy().to_string(), entry.clone());
+    Ok(respond(&root, scan, Some(&entry)))
+}
+
 #[tauri::command]
 async fn clear_runtime_log(state: State<'_, AppState>, path: String) -> CmdResult<ScanResponse> {
     let path = normalize_path(path);
@@ -395,6 +436,39 @@ async fn check_dependencies(state: State<'_, AppState>, path: String, target: St
 }
 
 #[derive(Deserialize)]
+struct WpItem {
+    kind: String,
+    slug: String,
+}
+
+#[tauri::command]
+async fn wordpress_latest(items: Vec<WpItem>) -> CmdResult<Vec<ferry_core::wordpress::Latest>> {
+    let curl = toolchain::find_executable("curl").ok_or_else(|| t!("curl bulunamadı.", "curl was not found."))?;
+    blocking(move || {
+        let fetch = |item: &WpItem| {
+            let url = ferry_core::wordpress::api_url(&item.kind, &item.slug)?;
+            let out = toolchain::command(&curl).args(["-sSL", "--max-time", "20", &url]).output().ok()?;
+            ferry_core::wordpress::parse_latest(&item.kind, &item.slug, &String::from_utf8_lossy(&out.stdout))
+        };
+        let mut out = Vec::new();
+        for chunk in items.chunks(8) {
+            let results: Vec<_> = std::thread::scope(|s| {
+                chunk.iter().map(|i| s.spawn(move || fetch(i))).collect::<Vec<_>>().into_iter().map(|h| h.join().ok().flatten()).collect()
+            });
+            out.extend(results.into_iter().flatten());
+        }
+        if !items.is_empty() && out.is_empty() {
+            return Err(t!(
+                "api.wordpress.org'a ulaşılamadı ya da hiçbir eklenti orada yayımlanmıyor.",
+                "Couldn't reach api.wordpress.org, or none of these are published there."
+            ));
+        }
+        Ok(out)
+    })
+    .await
+}
+
+#[derive(Deserialize)]
 struct LockedPackage {
     name: String,
     version: String,
@@ -424,6 +498,53 @@ async fn find_compatible_versions(target: String, packages: Vec<LockedPackage>) 
             }
         }
         Ok(out)
+    })
+    .await
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitState {
+    repo: bool,
+    dirty: Vec<String>,
+}
+
+#[tauri::command]
+async fn git_status(path: String, files: Vec<String>) -> CmdResult<GitState> {
+    let path = normalize_path(path);
+    blocking(move || {
+        let root = project_root(&path)?;
+        let Some(git) = toolchain::find_executable("git") else { return Ok(GitState { repo: false, dirty: Vec::new() }) };
+        let inside = toolchain::command(&git).arg("-C").arg(&root).args(["rev-parse", "--is-inside-work-tree"]).output();
+        if !inside.is_ok_and(|o| o.status.success()) {
+            return Ok(GitState { repo: false, dirty: Vec::new() });
+        }
+        let out = toolchain::command(&git)
+            .arg("-C")
+            .arg(&root)
+            .args(["status", "--porcelain", "--untracked-files=no", "--"])
+            .args(&files)
+            .output()
+            .map_err(|e| e.to_string())?;
+        let dirty = String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .filter_map(|l| l.get(3..))
+            .map(|p| p.rsplit(" -> ").next().unwrap_or(p).trim_matches('"').to_string())
+            .collect();
+        Ok(GitState { repo: true, dirty })
+    })
+    .await
+}
+
+#[tauri::command]
+async fn compare_targets(path: String) -> CmdResult<Vec<ferry_core::compare::TargetSummary>> {
+    let path = normalize_path(path);
+    blocking(move || {
+        let root = project_root(&path)?;
+        let info = project::inspect(&root).map_err(|e| e.to_string())?;
+        let files = project::collect_php_files(&root, &info.excluded_dirs);
+        let targets: Vec<PhpVersion> = PhpVersion::TARGETS.into_iter().filter(|v| *v != PhpVersion::new(8, 1)).collect();
+        Ok(ferry_core::compare::compare(&root, &files, &targets))
     })
     .await
 }
@@ -767,7 +888,10 @@ pub fn with_commands<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R
         inspect_project,
         scan_project,
         check_dependencies,
+        git_status,
+        compare_targets,
         find_compatible_versions,
+        wordpress_latest,
         toolchain_status,
         install_rector,
         rector_preview,
@@ -786,6 +910,8 @@ pub fn with_commands<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R
         prune_ignores,
         import_runtime_log,
         clear_runtime_log,
+        local_php_versions,
+        run_local_check,
         open_in_editor,
         get_settings,
         save_settings,
