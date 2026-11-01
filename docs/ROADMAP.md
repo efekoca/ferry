@@ -12,11 +12,6 @@ Ferry covers roughly half of the PHP 7.0–8.5 change catalog. Function, constan
 
 | Change | Version | Detection | Size |
 |---|---|---|---|
-| Too few arguments to project methods and constructors (`ArgumentCountError`); plain functions are done | 7.1 | Compare positional argument counts with required parameter counts from the index | M |
-| Wrong argument count for built-in functions, such as `mktime()` with no arguments, `crypt($pw)`, extra arguments | 8.0 | An arity table generated from stubs | M |
-| Error handlers written for PHP 7: `if (error_reporting() == 0)` to detect `@`, and handlers with a required fifth `$errcontext` parameter | 8.0 | Pattern plus resolving the callable passed to `set_error_handler` | S |
-| `set_exception_handler` callbacks typed `Exception` (an `Error` gives a TypeError) | 7.0 | Resolve the callable | S |
-| `parent::` in a class without a parent (Rector already fixes it, but Ferry doesn't report it) | 8.0 | Index | S |
 | `fn` and `match` as class names; `use ... as Match` | 7.4, 8.0 | Extend `RESERVED_CLASS_NAMES` | S |
 
 ### Cheap additions to existing tables
