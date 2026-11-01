@@ -12,6 +12,12 @@ class Php4Helpers
         return $db;
     }
 
+    public function join()
+    {
+        $parts = &func_get_args();
+        return implode(', ', $parts);
+    }
+
     public function close()
     {
         unset($this);

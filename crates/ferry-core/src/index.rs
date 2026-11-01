@@ -26,9 +26,25 @@ pub(crate) struct MethodSig {
     pub is_abstract: bool,
     pub params: Vec<crate::analyzer::ParamShape>,
     pub returns: Option<Vec<String>>,
+    pub returns_shown: Option<Vec<String>>,
+    pub param_fqns: Vec<Vec<String>>,
+    pub return_fqns: Vec<String>,
 }
 
-pub(crate) fn method_sig(tokens: &[Token], function: usize, close_body_scan: usize) -> Option<(String, MethodSig)> {
+pub(crate) fn resolve_type(tokens: &[Token], at: usize, names: &Names) -> String {
+    let lower = tokens[at].text.trim_start_matches('\\').to_ascii_lowercase();
+    let builtin = [
+        "int", "float", "string", "bool", "array", "null", "callable", "iterable", "false", "true", "void", "mixed", "object", "self",
+        "static", "parent", "never",
+    ];
+    if builtin.contains(&lower.as_str()) {
+        lower
+    } else {
+        names.resolve(at, &tokens[at].text)
+    }
+}
+
+pub(crate) fn method_sig(tokens: &[Token], function: usize, close_body_scan: usize, names: &Names) -> Option<(String, MethodSig)> {
     let name_at = (function + 1..close_body_scan).find(|&j| !tokens[j].is_punct("&"))?;
     let name = tokens.get(name_at).filter(|t| t.kind == TokenKind::Ident)?;
     let open = name_at + 1;
@@ -47,12 +63,16 @@ pub(crate) fn method_sig(tokens: &[Token], function: usize, close_body_scan: usi
     let start =
         (0..function).rev().find(|&j| tokens[j].is_punct(";") || tokens[j].is_punct("{") || tokens[j].is_punct("}")).map_or(0, |j| j + 1);
     let modifier = |m: &str| tokens[start..function].iter().any(|t| t.is_ident_ci(m));
+    let params = crate::analyzer::param_shapes(tokens, open, close);
     let sig = MethodSig {
         is_static: modifier("static"),
         is_private: modifier("private"),
         is_abstract: modifier("abstract"),
-        params: crate::analyzer::param_shapes(tokens, open, close),
+        param_fqns: params.iter().map(|p| p.ty_at.iter().map(|&k| resolve_type(tokens, k, names)).collect()).collect(),
+        return_fqns: crate::analyzer::return_type_at(tokens, close).into_iter().map(|k| resolve_type(tokens, k, names)).collect(),
+        params,
         returns: crate::analyzer::return_type(tokens, close),
+        returns_shown: crate::analyzer::return_type_shown(tokens, close),
     };
     Some((name.text.to_ascii_lowercase(), sig))
 }
@@ -146,8 +166,10 @@ impl ProjectIndex {
                     depth == 0
                 })
                 .unwrap_or(tokens.len() - 1);
-            let signatures: HashMap<String, MethodSig> =
-                (open..body_end).filter(|&k| tokens[k].is_ident_ci("function")).filter_map(|k| method_sig(tokens, k, body_end)).collect();
+            let signatures: HashMap<String, MethodSig> = (open..body_end)
+                .filter(|&k| tokens[k].is_ident_ci("function"))
+                .filter_map(|k| method_sig(tokens, k, body_end, &names))
+                .collect();
             let declares_methods = !signatures.is_empty() || tokens[open..body_end].iter().any(|t| t.is_ident_ci("function"));
             self.interfaces.entry(short(&name.text)).or_default().push(InterfaceInfo {
                 name: name.text.clone(),
@@ -189,6 +211,13 @@ impl ProjectIndex {
             [only] => Some(only),
             _ => None,
         }
+    }
+
+    pub(crate) fn supertypes(&self, fqn: &str) -> Option<Vec<String>> {
+        if let Some(t) = self.type_by_fqn(fqn) {
+            return Some(t.parent_fqn.iter().chain(&t.related_fqns).cloned().collect());
+        }
+        self.interface_by_fqn(fqn).map(|(_, _, parents)| parents.to_vec())
     }
 
     pub(crate) fn interface_by_fqn(&self, fqn: &str) -> Option<(&str, &HashMap<String, MethodSig>, &[String])> {
@@ -298,6 +327,10 @@ impl Names {
         Names { spaces, uses }
     }
 
+    pub(crate) fn declared(&self, at: usize, name: &str) -> String {
+        qualify(namespace_at(&self.spaces, at), name)
+    }
+
     pub(crate) fn resolve(&self, at: usize, name: &str) -> String {
         if let Some(rooted) = name.strip_prefix('\\') {
             return rooted.to_ascii_lowercase();
@@ -335,7 +368,7 @@ fn type_decls(tokens: &[Token]) -> Vec<NamedDecl> {
             continue;
         }
         let Some(name) = tokens.get(i + 1).filter(|n| n.kind == TokenKind::Ident) else { continue };
-        let Some(mut decl) = type_decl(tokens, i) else { continue };
+        let Some(mut decl) = type_decl(tokens, i, &names) else { continue };
         decl.info.fqn = qualify(namespace_at(&names.spaces, i), &name.text);
         decl.info.parent_fqn = decl_header_name(tokens, i, decl.open, "extends").map(|n| names.resolve(i, n));
         decl.info.related_fqns = decl_header_list(tokens, i, decl.open, "implements").iter().map(|n| names.resolve(i, n)).collect();
@@ -382,7 +415,7 @@ pub(crate) fn class_decls(tokens: &[Token]) -> Vec<TypeDecl> {
     type_decls(tokens).into_iter().map(|d| d.decl).filter(|d| !d.info.is_trait).collect()
 }
 
-fn type_decl(tokens: &[Token], kw: usize) -> Option<TypeDecl> {
+fn type_decl(tokens: &[Token], kw: usize, names: &Names) -> Option<TypeDecl> {
     let open = (kw + 1..tokens.len()).find(|&k| tokens[k].is_punct("{") || tokens[k].is_punct(";"))?;
     if !tokens[open].is_punct("{") {
         return None;
@@ -435,7 +468,7 @@ fn type_decl(tokens: &[Token], kw: usize) -> Option<TypeDecl> {
                 open_class |= name.is_ident_ci("__set");
                 info.methods.insert(name.text.to_ascii_lowercase());
             }
-            if let Some((name, sig)) = method_sig(tokens, k, close) {
+            if let Some((name, sig)) = method_sig(tokens, k, close, names) {
                 info.signatures.insert(name, sig);
             }
         } else if t.kind == TokenKind::Variable {
