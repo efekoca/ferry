@@ -81,4 +81,15 @@ Today Ferry is measured against PHP itself in two ways:
 - `compile_time_findings_match_php` lints thirteen old projects with `php -l` and compares compile-time findings. With `scripts/fetch-corpus.sh` the corpus covers WordPress, Drupal, CodeIgniter, phpBB, Joomla, Magento, PrestaShop, Laravel, Symfony, CakePHP, Yii, MediaWiki and Moodle.
 - `every_deprecated_function_is_reported` and `every_deprecated_method_and_constant_is_reported` ask the PHP binary which built-in symbols are deprecated and check that Ferry reports each one with the same version.
 
-Still missing is a benchmark for runtime findings (`null` to built-ins, dynamic properties, deprecated call forms). The plan: run the test suites of a few well-known projects released before PHP 8.4, such as Monolog 3.5, Carbon 3.0, CommonMark 2.4 and Laravel 11.0, on PHP 8.5 with PHPUnit's `--display-deprecations`, and compare the reported file and line pairs with Ferry's findings. This needs `composer install` and executes those projects' code, so it should run in a container or with explicit approval.
+A third, `scripts/runtime-benchmark.sh`, runs a project's PHPUnit tests file by file in Docker on the target PHP and merges the reported deprecations into the scan with `ferry-cli --runtime-log`. First run on PHP 8.5.12 (1 Nov 2026):
+
+| Project | Tests | Deprecations from project code | Already found by the static scan | Missed |
+|---|---|---|---|---|
+| Monolog 3.5.0 | `tests/Monolog` | 27 | 27 | 0 |
+| league/commonmark 2.4.2 | `tests/unit` | 4 | 3 | 1: `ord()` given a multi-byte string |
+| Laravel 11.0.0 | `tests/Support` | 73 | 62 | 11: `null` used as an array offset or `array_key_exists()` key through a variable |
+| PHPMailer 6.9.1, Carbon 3.0.0 | all | none reported | – | PHPUnit 9 and Carbon's setup don't print deprecations in this harness |
+
+So 92 of 104 runtime deprecations (88%) were already reported statically. Every miss is an 8.5 deprecation that depends on a runtime value, which is the case runtime log import exists for. Two PHPUnit warnings in Monolog came from the test environment (memory limit, missing git branch) and messages from `vendor/` are counted as outside the project.
+
+Next: make the harness report PHPUnit 9 deprecations (`convertDeprecationsToExceptions` or a `set_error_handler` bootstrap), report literal `$a[null]` statically, and add more projects.
