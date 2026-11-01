@@ -35,6 +35,60 @@ fn every_deprecated_function_is_reported() {
     }
 }
 
+#[test]
+#[ignore = "needs CORPUS_PHP"]
+fn every_deprecated_method_and_constant_is_reported() {
+    let (php, target) = php_and_target().expect("set CORPUS_PHP to a PHP binary");
+    let script = r#"
+        $cur = "";
+        set_error_handler(function ($no, $msg) use (&$cur) {
+            if ($no === E_DEPRECATED && preg_match('/deprecated since (\d+\.\d+)/', $msg, $m)) echo $cur, " ", $m[1], "\n";
+            return true;
+        });
+        foreach (array_keys(get_defined_constants()) as $k) { $cur = "const $k"; constant($k); }
+        foreach (array_merge(get_declared_classes(), get_declared_interfaces()) as $c) {
+            $r = new ReflectionClass($c);
+            if (!$r->isInternal()) continue;
+            foreach ($r->getReflectionConstants() as $k) {
+                if ($k->getDeclaringClass()->getName() !== $c) continue;
+                $cur = "classconst $c " . $k->getName();
+                constant("$c::" . $k->getName());
+            }
+            foreach ($r->getMethods() as $m) {
+                if (!$m->isDeprecated() || $m->getDeclaringClass()->getName() !== $c) continue;
+                $attr = $m->getAttributes("Deprecated")[0] ?? null;
+                $since = $attr ? ($attr->getArguments()["since"] ?? "?") : "?";
+                echo "method $c ", $m->getName(), " ", $m->isStatic() ? 1 : 0, " ", $since, "\n";
+            }
+        }
+    "#;
+    let out = Command::new(&php).args(["-r", script]).output().unwrap();
+    let mut missing = Vec::new();
+    let mut versions = Vec::new();
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        let parts: Vec<&str> = line.split(' ').collect();
+        let (src, since) = match parts.as_slice() {
+            ["method", class, method, "1", since] => (format!("<?php\n{class}::{method}();\n"), *since),
+            ["method", class, method, _, since] => (format!("<?php\n$o = new {class}();\n$o->{method}();\n"), *since),
+            ["classconst", class, name, since] => (format!("<?php\necho {class}::{name};\n"), *since),
+            ["const", name, since] => (format!("<?php\necho {name};\n"), *since),
+            _ => continue,
+        };
+        let found = analyzer::analyze_source("t.php", &src, target.parse().unwrap());
+        match found.first() {
+            None => missing.push(line.to_string()),
+            Some(f) if since != "?" && f.since.to_string() != since => versions.push(format!("{line} (Ferry says {})", f.since)),
+            _ => {}
+        }
+    }
+    assert!(
+        missing.is_empty() && versions.is_empty(),
+        "PHP {target} deprecates symbols Ferry doesn't report:\n{}\nwith a different version:\n{}",
+        missing.join("\n"),
+        versions.join("\n")
+    );
+}
+
 #[derive(Default)]
 struct Tally {
     php: usize,
