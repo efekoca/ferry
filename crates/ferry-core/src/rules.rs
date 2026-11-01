@@ -158,6 +158,7 @@ pub const PG_ALIASES: [(&str, &str); 24] = [
 ];
 
 pub const COMPILE_TIME: &[&str] = &[
+    "removed.parent_without_parent",
     "removed.curly_offset",
     "removed.real_cast",
     "removed.unset_cast",
@@ -1356,6 +1357,66 @@ pub mod patterns {
         note: Text::new(
             "PHP 8.5 kendi array_first() ve array_last() fonksiyonlarını ekledi; bunlar yalnızca diziyi alır. laravel/helpers aynı adı tanımlamadan önce function_exists() ile kontrol ettiği için PHP'nin fonksiyonu çağrılır ve callback ya da varsayılan değer verilen çağrı ArgumentCountError fırlatır. Illuminate\\Support\\Arr::first() ya da Arr::last() kullanın.",
             "PHP 8.5 adds its own array_first() and array_last(), which take only the array. laravel/helpers checks function_exists() before defining them, so PHP's function is called and a call with a callback or default throws ArgumentCountError. Use Illuminate\\Support\\Arr::first() or Arr::last().",
+        ),
+    };
+    pub const ERROR_HANDLER_CONTEXT: PatternRule = PatternRule {
+        id: "removed.error_handler_context",
+        title: Text::new("Beş zorunlu parametreli hata işleyici", "Error handler with five required parameters"),
+        severity: Severity::Breaking,
+        since: (8, 0),
+        replacement: tx("beşinci parametreye varsayılan değer verin ya da silin", "give the fifth parameter a default or remove it"),
+        fix: FixKind::Manual,
+        note: Text::new(
+            "PHP 8.0 hata işleyicilere beşinci $errcontext argümanını artık göndermiyor. Bu parametre zorunluysa her uyarıda işleyici ArgumentCountError fırlatır.",
+            "PHP 8.0 no longer passes the fifth $errcontext argument to error handlers. If that parameter is required, the handler throws ArgumentCountError on every warning.",
+        ),
+    };
+    pub const EXCEPTION_HANDLER_TYPE: PatternRule = PatternRule {
+        id: "removed.exception_handler_type",
+        title: Text::new("Exception tipli istisna işleyici", "Exception handler typed Exception"),
+        severity: Severity::Breaking,
+        since: (7, 0),
+        replacement: code("function (Throwable $e)"),
+        fix: FixKind::Manual,
+        note: Text::new(
+            "PHP 7'den beri yakalanmayan Error nesneleri de istisna işleyicisine gelir. Parametre Exception tipliyse bir Error geldiğinde işleyici TypeError fırlatır ve asıl hata kaybolur. Tipi Throwable yapın.",
+            "Since PHP 7, uncaught Error objects reach the exception handler too. With an Exception type, an Error makes the handler throw a TypeError and the original error is lost. Type it as Throwable.",
+        ),
+    };
+    pub const ERROR_REPORTING_ZERO: PatternRule = PatternRule {
+        id: "behavior.error_reporting_zero",
+        title: Text::new("@ için error_reporting() == 0 kontrolü", "error_reporting() == 0 check for @"),
+        severity: Severity::Behavior,
+        since: (8, 0),
+        replacement: code("!(error_reporting() & $errno)"),
+        fix: FixKind::Manual,
+        note: Text::new(
+            "PHP 8'de @ operatörü error_reporting() değerini 0 yapmıyor, ölümcül hataları açık bırakıyor. Bu kontrol artık hiç tutmaz ve @ ile susturulan uyarılar da işlenir.",
+            "In PHP 8 the @ operator no longer sets error_reporting() to 0; it keeps fatal errors on. This check never matches anymore, so warnings silenced with @ get handled too.",
+        ),
+    };
+    pub const PARENT_WITHOUT_PARENT: PatternRule = PatternRule {
+        id: "removed.parent_without_parent",
+        title: Text::new("Üst sınıfı olmayan sınıfta parent::", "parent:: in a class without a parent"),
+        severity: Severity::Breaking,
+        since: (8, 0),
+        replacement: tx("parent:: çağrısını silin ya da sınıfa extends ekleyin", "remove the parent:: call or add extends to the class"),
+        fix: FixKind::Manual,
+        note: Text::new(
+            "Sınıfın üst sınıfı yokken parent:: kullanmak PHP 8.0'da derleme hatasıdır; dosya hiç yüklenmez.",
+            "Using parent:: in a class without a parent is a compile error in PHP 8.0, so the file doesn't load.",
+        ),
+    };
+    pub const BUILTIN_ARITY: PatternRule = PatternRule {
+        id: "removed.builtin_arity",
+        title: Text::new("Yerleşik fonksiyona yanlış sayıda argüman", "Wrong number of arguments to a built-in"),
+        severity: Severity::Breaking,
+        since: (8, 0),
+        replacement: None,
+        fix: FixKind::Manual,
+        note: Text::new(
+            "PHP 7'de yerleşik fonksiyonlar eksik ya da fazla argümanla yalnızca uyarı verip null döndürüyordu. PHP 8'de çağrı ArgumentCountError fırlatır. Örneğin mktime() artık saati, crypt() de salt değerini zorunlu istiyor.",
+            "In PHP 7 a built-in function called with too few or too many arguments only warned and returned null. PHP 8 throws ArgumentCountError. For example, mktime() now requires the hour and crypt() the salt.",
         ),
     };
     pub const PARSE_STR_ONE_ARG: PatternRule = PatternRule {

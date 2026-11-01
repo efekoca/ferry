@@ -76,7 +76,8 @@ Ferry'nin kendi PHP sözcük çözümleyicisi ve kural seti vardır; kodu PHP'ni
 - yerleşik bir sınıfın ya da arayüzün metodunu PHP 8'in kabul etmediği bir imzayla ezen ve sınıfın hiç yüklenmemesine yol açan metotlar; örneğin Drupal 7'nin bir `PDO` alt sınıfındaki `query($query, array $args = array(), $options = array())` metodu
 - projedeki bir üst sınıfın, trait'in ya da arayüzün metodunu PHP 8'in kabul etmediği bir imzayla ezen metotlar; örneğin phpBB 3.2'nin üst sınıfta isteğe bağlı olan parametreyi zorunlu yapan `create_insert_array($user, $pre_create_data)` metodu. PHP 7 bunu yalnızca uyarıyla geçiyordu
 - `PDO::query()` ya da `Iterator::current()` gibi yerleşik bir sınıfın ya da arayüzün metodunu dönüş tipi olmadan ezen ve PHP 8.1'den itibaren `#[\ReturnTypeWillChange]` isteyen metotlar
-- yeni sürümde çalışmayı bırakan kodlar: PHP'ye sonradan eklenen bir fonksiyonu ya da sınıfı (`str_contains()`, `JsonException`) `function_exists()` kontrolü olmadan tanımlamak, statik olmayan bir metodu `Sinif::metot()` ile çağırmak, eksik argümanla yapılan çağrılar, `preg_replace()` içindeki `/e` belirteci ve artık nesne olan curl, GD ya da pgsql değerleri için `is_resource()`
+- yeni sürümde çalışmayı bırakan kodlar: PHP'ye sonradan eklenen bir fonksiyonu ya da sınıfı (`str_contains()`, `JsonException`) `function_exists()` kontrolü olmadan tanımlamak, statik olmayan bir metodu `Sinif::metot()` ile çağırmak, kendi fonksiyon, metot ve constructor'larınıza eksik argümanla yapılan çağrılar, yerleşik fonksiyonlara yanlış sayıda argüman (`mktime()`, `crypt($pw)`), beşinci `$errcontext` parametresini zorunlu tutan hata işleyiciler, `Exception` tipli istisna işleyiciler, üst sınıfı olmayan sınıfta `parent::`, `preg_replace()` içindeki `/e` belirteci ve artık nesne olan curl, GD ya da pgsql değerleri için `is_resource()`
+- PHP 8'de artık hiç tutmayan, `@` için yazılmış `error_reporting() == 0` kontrolleri
 - `eval()`, `extract()` ve değişken değişkenler gibi elle kontrol edilmesi gereken kodlar
 
 Ferry, hangi PHP'nin gerçekten çalışacağını belirleyen ve kodun çevresinde duran dosyaları da okur:
@@ -107,6 +108,10 @@ Ferry, Rector'ın tek başına çözemediği durumları da ele alır. Örneğin 
 ![PHP 8.4 ile uyumsuz üç paket, projenin PHP kısıtı ve her paketin sürümü, PHP gereksinimi ve durumunu gösteren Bağımlılıklar sayfası](assets/readme/dependencies-tr.webp)
 
 Her paket **Uyumlu**, **Uyumsuz** ya da **Belirsiz** (paket bir PHP gereksinimi bildirmiyorsa) olarak işaretlenir; uyumsuz paketler listenin başında yer alır. Geliştirme paketleri etiketlidir; **Sadece üretim** seçeneği onları gizler. Listenin üstündeki uyarı, geçişi engelleyen paketleri tek tek adıyla içeren, kopyalamaya hazır bir `composer update` komutu verir.
+
+**Uyumlu sürümleri bul**, engelleyen her paketin hangi sürüme geçmesi gerektiğini Packagist'e sorar. Önerilen sürüm, PHP gereksinimi (ve Ferry'nin bildiği durumlarda framework'ün kendi destek aralığı) hedefe izin veren ilk ana sürümün en yenisidir. İnternete çıkan tek özellik budur ve yalnızca siz tıkladığınızda çalışır.
+
+**PHP eklentileri**, kodun kullandığı her eklentiyi (`mysqli`, `gd`, `intl` gibi) kaç kez ve ilk nerede kullanıldığıyla listeler. `composer.json`'da `ext-*` olarak belirtilip belirtilmediğini ve bu bilgisayardaki PHP'de olup olmadığını gösterir. PHP'den çıkarılan eklentiler (8.4'te `imap` gibi) işaretlenir. `composer.json`'da belirtilmeyenler için yapıştırmaya hazır `ext-*` satırları önerilir; böylece Composer yeni sunucuda da bunları kontrol eder.
 
 ### Her şeyi Geçmiş'ten geri alın
 
@@ -232,7 +237,7 @@ Eksik bir şey olduğunda **Düzeltmeler** sayfası neyin eksik olduğunu söyle
 - **Yazılanlar:** yalnızca değişiklik uyguladığınız dosyalar. Diğer dosyalara dokunulmaz.
 - **Saklananlar:** her uygulamadan önceki dosya yedekleri (hepsi ya da bir sınır koyduysanız yalnızca en yenileri), neyin uygulandığının kaydı, Rector'ın önbelleği ve ayarlarınız. Hepsi uygulamanın veri klasöründe durur: macOS'ta `~/Library/Application Support/io.github.efekoca.ferry`, Windows'ta `%APPDATA%\io.github.efekoca.ferry`, Linux'ta `~/.local/share/io.github.efekoca.ferry`.
 - **Proje kodu:** Tarama kodunuzu hiçbir zaman çalıştırmaz. Düzeltmeleri hesaplarken Rector proje klasöründe çalışır ve projenin `vendor/autoload.php` dosyasını yükler; bu yüzden Composer'ın `autoload.files` listesindeki dosyalar çalıştırılır. Düzeltmeleri yalnızca güvendiğiniz projeler için hesaplayın.
-- **Ağ:** Ferry'nin kendisi hiçbir ağ isteği yapmaz. **Rector'ı kur**'u seçtiğinizde Composer, Rector'ı Packagist'ten indirir.
+- **Ağ:** Ferry kendiliğinden hiçbir ağ isteği yapmaz. **Rector'ı kur**'u seçtiğinizde Composer, Rector'ı Packagist'ten indirir. **Uyumlu sürümleri bul**'u seçtiğinizde Ferry, engelleyen paketlerin adlarını ve sürümlerini `repo.packagist.org`'a gönderir.
 
 ## Nasıl çalışır
 
