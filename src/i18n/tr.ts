@@ -144,6 +144,18 @@ export const tr = {
     switchText: (n: number) => `Hesaplanan ${n} dosyalık düzeltme önizlemesi silinir ve proje yeni hedefe göre yeniden taranır.`,
   },
   scoreLabel: (s: number) => `Hazırlık skoru: ${s}/100`,
+  compare: {
+    title: "Hedefleri karşılaştır",
+    text: "Projeyi PHP 8.2, 8.3, 8.4 ve 8.5 için ayrı ayrı tarar; hangi hedefin ne kadar iş çıkaracağını yan yana gösterir.",
+    run: "Karşılaştır",
+    failed: "Karşılaştırma yapılamadı",
+    target: "Hedef",
+    score: "Puan",
+    packages: "Engelleyen paket",
+    plusRoot: "+ composer.json",
+    current: "Seçili",
+    pick: "Bu hedefe geç",
+  },
   progress: {
     title: "İlerleme",
     first: "İlk tarama. Bir sonraki taramada nelerin değiştiğini burada göreceksiniz.",
