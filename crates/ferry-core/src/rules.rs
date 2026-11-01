@@ -373,10 +373,10 @@ pub const FUNCTIONS: &[SymbolRule] = &[
     rule!("deprecated.openssl_pkey_free", "openssl_pkey_free", D, (8, 0), REMOVE_CALL, M, NOOP_SINCE_80),
     rule!("deprecated.openssl_free_key", "openssl_free_key", D, (8, 0), REMOVE_CALL, M, NOOP_SINCE_80),
     rule!("deprecated.shmop_close", "shmop_close", D, (8, 0), REMOVE_CALL, M, NOOP_SINCE_80),
-    rule!("deprecated.intlcal_set", "intlcal_set", D, (8, 4), tx("IntlCalendar::setDate() ya da setDateTime()", "IntlCalendar::setDate() or setDateTime()"), M, Text::new(
+    rule!("deprecated.intlcal_set", "intlcal_set", D, (8, 4), tx("IntlCalendar::set(), setDate() ya da setDateTime()", "IntlCalendar::set(), setDate() or setDateTime()"), M, Text::new(
         "intlcal_set() 8.4'te kullanımdan kalktı.",
         "intlcal_set() is deprecated in 8.4.")),
-    rule!("deprecated.intlgregcal_create_instance", "intlgregcal_create_instance", D, (8, 4), tx("IntlGregorianCalendar::createFromDate() ya da createFromDateTime()", "IntlGregorianCalendar::createFromDate() or createFromDateTime()"), M, Text::new(
+    rule!("deprecated.intlgregcal_create_instance", "intlgregcal_create_instance", D, (8, 4), tx("new IntlGregorianCalendar(), createFromDate() ya da createFromDateTime()", "new IntlGregorianCalendar(), createFromDate() or createFromDateTime()"), M, Text::new(
         "intlgregcal_create_instance() 8.4'te kullanımdan kalktı.",
         "intlgregcal_create_instance() is deprecated in 8.4.")),
     rule!("removed.mbregex_encoding", "mbregex_encoding", R, (8, 0), code("mb_regex_encoding"), A, REMOVED_ALIAS),
@@ -770,9 +770,9 @@ pub const MEMBERS: &[MemberRule] = &[
             "transaction_*",
             D,
             (8, 5),
-            code("pg_transaction_status()"),
+            REMOVE_USE,
             M,
-            Text::new("Pdo\\Pgsql'in işlem durumu sabitleri 8.5'te kullanımdan kalktı.", "Pdo\\Pgsql's transaction state constants are deprecated in 8.5.")
+            PGSQL_TRANSACTION
         ),
     ),
     member(
@@ -864,6 +864,7 @@ pub const MEMBERS: &[MemberRule] = &[
     member(Mt, "reflectionparameter", rule!("deprecated.reflection_method", "getclass", D, (8, 0), code("getType()"), M, REFLECTION_TYPE)),
     member(Mt, "reflectionparameter", rule!("deprecated.reflection_method", "isarray", D, (8, 0), code("getType()"), M, REFLECTION_TYPE)),
     member(Mt, "reflectionparameter", rule!("deprecated.reflection_method", "iscallable", D, (8, 0), code("getType()"), M, REFLECTION_TYPE)),
+    member(K, "pdo", rule!("deprecated.pgsql_transaction_constant", "pgsql_transaction_*", D, (8, 5), REMOVE_USE, M, PGSQL_TRANSACTION)),
     member(K, "pdo", rule!("deprecated.pdo_driver_constant", "pgsql_*", D, (8, 5), code("Pdo\\Pgsql::*"), A, PDO_DRIVER)),
     member(K, "pdo", rule!("deprecated.pdo_driver_constant", "sqlite_*", D, (8, 5), code("Pdo\\Sqlite::*"), A, PDO_DRIVER)),
     member(K, "pdo", rule!("deprecated.pdo_driver_constant", "odbc_*", D, (8, 5), code("Pdo\\Odbc::*"), A, PDO_DRIVER)),
@@ -965,10 +966,120 @@ const REFLECTION_TYPE: Text = Text::new(
     "Bu ReflectionParameter metodu 8.0'da kullanımdan kalktı; parametrenin tipini getType() ve ReflectionNamedType ile okuyun.",
     "This ReflectionParameter method is deprecated in 8.0; read the parameter type with getType() and ReflectionNamedType.",
 );
+const PGSQL_TRANSACTION: Text = Text::new(
+    "PDO'nun PostgreSQL işlem durumu sabitleri hiçbir işe yaramadığı için 8.5'te kullanımdan kalktı. Pdo\\Pgsql::TRANSACTION_* da kullanımdan kalktığı için yerine geçen bir sabit yok; kullanımı silin, işlem durumunu PDO::inTransaction() ile kontrol edin.",
+    "PDO's PostgreSQL transaction state constants have no effect and are deprecated in 8.5. Pdo\\Pgsql::TRANSACTION_* is deprecated too, so there is no replacement; remove the use and check the state with PDO::inTransaction().",
+);
 const PDO_DRIVER: Text = Text::new(
     "PDO'nun sürücüye özel sabitleri 8.5'te kullanımdan kalktı; sürücünün kendi sınıfındaki sabiti kullanın.",
     "PDO's driver-specific constants are deprecated in 8.5; use the constant on the driver's own class.",
 );
+
+pub const ADDED_FUNCTIONS: &[(&str, (u32, u32))] = &[
+    ("array_all", (8, 4)),
+    ("array_any", (8, 4)),
+    ("array_find", (8, 4)),
+    ("array_find_key", (8, 4)),
+    ("array_first", (8, 5)),
+    ("array_is_list", (8, 1)),
+    ("array_key_first", (7, 3)),
+    ("array_key_last", (7, 3)),
+    ("array_last", (8, 5)),
+    ("bcceil", (8, 4)),
+    ("bcdivmod", (8, 4)),
+    ("bcfloor", (8, 4)),
+    ("bcround", (8, 4)),
+    ("curl_upkeep", (8, 2)),
+    ("enum_exists", (8, 1)),
+    ("error_clear_last", (7, 0)),
+    ("fdatasync", (8, 1)),
+    ("fdiv", (8, 0)),
+    ("fpow", (8, 4)),
+    ("fsync", (8, 1)),
+    ("gc_mem_caches", (7, 0)),
+    ("get_debug_type", (8, 0)),
+    ("get_error_handler", (8, 5)),
+    ("get_exception_handler", (8, 5)),
+    ("get_mangled_object_vars", (7, 4)),
+    ("get_resource_id", (8, 0)),
+    ("hash_hmac_algos", (7, 2)),
+    ("hrtime", (7, 3)),
+    ("http_clear_last_response_headers", (8, 4)),
+    ("http_get_last_response_headers", (8, 4)),
+    ("ini_parse_quantity", (8, 2)),
+    ("intdiv", (7, 0)),
+    ("is_countable", (7, 3)),
+    ("is_iterable", (7, 1)),
+    ("json_validate", (8, 3)),
+    ("libxml_get_external_entity_loader", (8, 2)),
+    ("mb_chr", (7, 2)),
+    ("mb_lcfirst", (8, 4)),
+    ("mb_ltrim", (8, 4)),
+    ("mb_ord", (7, 2)),
+    ("mb_rtrim", (8, 4)),
+    ("mb_scrub", (7, 2)),
+    ("mb_str_pad", (8, 3)),
+    ("mb_str_split", (7, 4)),
+    ("mb_trim", (8, 4)),
+    ("mb_ucfirst", (8, 4)),
+    ("memory_reset_peak_usage", (8, 2)),
+    ("mysqli_execute_query", (8, 2)),
+    ("net_get_interfaces", (7, 3)),
+    ("openssl_cipher_key_length", (8, 2)),
+    ("password_algos", (7, 4)),
+    ("preg_last_error_msg", (8, 0)),
+    ("preg_replace_callback_array", (7, 0)),
+    ("random_bytes", (7, 0)),
+    ("random_int", (7, 0)),
+    ("session_create_id", (7, 1)),
+    ("spl_object_id", (7, 2)),
+    ("str_contains", (8, 0)),
+    ("str_decrement", (8, 3)),
+    ("str_ends_with", (8, 0)),
+    ("str_increment", (8, 3)),
+    ("str_starts_with", (8, 0)),
+    ("stream_context_set_options", (8, 3)),
+    ("stream_isatty", (7, 2)),
+];
+
+pub const ADDED_CLASSES: &[(&str, (u32, u32))] = &[
+    ("allowdynamicproperties", (8, 2)),
+    ("argumentcounterror", (7, 1)),
+    ("arithmeticerror", (7, 0)),
+    ("assertionerror", (7, 0)),
+    ("attribute", (8, 0)),
+    ("compileerror", (7, 3)),
+    ("deprecated", (8, 4)),
+    ("divisionbyzeroerror", (7, 0)),
+    ("error", (7, 0)),
+    ("fiber", (8, 1)),
+    ("fibererror", (8, 1)),
+    ("jsonexception", (7, 3)),
+    ("nodiscard", (8, 5)),
+    ("override", (8, 3)),
+    ("parseerror", (7, 0)),
+    ("phptoken", (8, 0)),
+    ("returntypewillchange", (8, 1)),
+    ("sensitiveparameter", (8, 2)),
+    ("stringable", (8, 0)),
+    ("throwable", (7, 0)),
+    ("typeerror", (7, 0)),
+    ("unhandledmatcherror", (8, 0)),
+    ("valueerror", (8, 0)),
+    ("weakmap", (8, 0)),
+    ("weakreference", (7, 4)),
+];
+
+pub fn added_function(name: &str) -> Option<PhpVersion> {
+    ADDED_FUNCTIONS
+        .binary_search_by(|(n, _)| (*n).cmp(name))
+        .ok()
+        .map(|i| PhpVersion::new(ADDED_FUNCTIONS[i].1 .0, ADDED_FUNCTIONS[i].1 .1))
+}
+
+pub fn added_class(name: &str) -> Option<PhpVersion> {
+    ADDED_CLASSES.binary_search_by(|(n, _)| (*n).cmp(name)).ok().map(|i| PhpVersion::new(ADDED_CLASSES[i].1 .0, ADDED_CLASSES[i].1 .1))
+}
 
 pub mod patterns {
     use super::*;
@@ -1154,6 +1265,78 @@ pub mod patterns {
         note: Text::new(
             "define()'ın üçüncü parametresi PHP 8.0'da kaldırıldı. Sabite farklı harf büyüklüğüyle erişen yerler artık çalışmaz.",
             "The third argument of define() was removed in PHP 8.0. Code that reads the constant with different casing stops working.",
+        ),
+    };
+    pub const STATIC_CALL_TO_INSTANCE_METHOD: PatternRule = PatternRule {
+        id: "removed.static_call_to_instance_method",
+        title: Text::new("Statik olmayan metodun statik çağrılması", "Non-static method called statically"),
+        severity: Severity::Breaking,
+        since: (8, 0),
+        replacement: tx("nesne oluşturup ->metot() ile çağırın ya da metodu static yapın", "call it on an instance with ->method(), or make the method static"),
+        fix: FixKind::Manual,
+        note: Text::new(
+            "PHP 7'de yalnızca uyarı veren Sinif::metot() çağrısı, metot static değilse PHP 8'de Error fırlatır. Metot $this kullanmıyorsa static yapın; kullanıyorsa bir nesne üzerinden çağırın.",
+            "Calling Class::method() on a non-static method only warned in PHP 7; PHP 8 throws an Error. Make the method static if it doesn't use $this, otherwise call it on an instance.",
+        ),
+    };
+    pub const TOO_FEW_ARGUMENTS: PatternRule = PatternRule {
+        id: "removed.too_few_arguments",
+        title: Text::new("Eksik argümanla fonksiyon çağrısı", "Function called with too few arguments"),
+        severity: Severity::Breaking,
+        since: (7, 1),
+        replacement: tx("eksik argümanları verin ya da parametrelere varsayılan değer ekleyin", "pass the missing arguments or give the parameters defaults"),
+        fix: FixKind::Manual,
+        note: Text::new(
+            "PHP 7.0'a kadar eksik argüman yalnızca uyarı verip parametreyi null yapıyordu. PHP 7.1'den beri çağrı ArgumentCountError fırlatır.",
+            "Until PHP 7.0 a missing argument only warned and left the parameter null. Since PHP 7.1 the call throws ArgumentCountError.",
+        ),
+    };
+    pub const PREG_EVAL_MODIFIER: PatternRule = PatternRule {
+        id: "removed.preg_eval_modifier",
+        title: Text::new("preg_replace() içinde /e belirteci", "/e modifier in preg_replace()"),
+        severity: Severity::Breaking,
+        since: (7, 0),
+        replacement: code("preg_replace_callback()"),
+        fix: FixKind::Manual,
+        note: Text::new(
+            "/e belirteci PHP 7.0'da kaldırıldı. Çağrı artık uyarı verip null döndürür, yani metin sessizce boşalır. Değiştirme ifadesini bir fonksiyona taşıyıp preg_replace_callback() kullanın.",
+            "The /e modifier was removed in PHP 7.0. The call now warns and returns null, so the text is silently emptied. Move the replacement expression into a function and use preg_replace_callback().",
+        ),
+    };
+    pub const RESOURCE_CHECK: PatternRule = PatternRule {
+        id: "removed.resource_check",
+        title: Text::new("Artık nesne olan değer için is_resource()", "is_resource() on a handle that is now an object"),
+        severity: Severity::Breaking,
+        since: (8, 0),
+        replacement: tx("$handle !== false ya da instanceof kontrolü", "a $handle !== false or instanceof check"),
+        fix: FixKind::Manual,
+        note: Text::new(
+            "Bu fonksiyon artık resource yerine nesne döndürüyor (örneğin CurlHandle, GdImage, PgSql\\Connection). is_resource() bu değer için her zaman false döner, get_resource_type() TypeError fırlatır. Hata kontrolünü $handle !== false ile yapın.",
+            "This function now returns an object instead of a resource (for example CurlHandle, GdImage, PgSql\\Connection). is_resource() is always false for it and get_resource_type() throws a TypeError. Check for failure with $handle !== false.",
+        ),
+    };
+    pub const REDECLARED_BUILTIN: PatternRule = PatternRule {
+        id: "removed.redeclared_builtin",
+        title: Text::new("PHP'nin kendi fonksiyonunu ya da sınıfını yeniden tanımlama", "Redeclares a PHP built-in"),
+        severity: Severity::Breaking,
+        since: (7, 0),
+        replacement: tx("tanımı if (!function_exists(...)) ya da class_exists() ile koruyun", "wrap it in if (!function_exists(...)) or class_exists()"),
+        fix: FixKind::Manual,
+        note: Text::new(
+            "Bu ad sonradan PHP'nin kendisine eklendi. Korumasız tanım hedef sürümde \"Cannot redeclare\" hatasıyla dosyanın hiç yüklenmemesine yol açar. Tanımı function_exists() ya da class_exists() kontrolüyle sarın veya PHP'nin kendi sürümüne geçip tanımı silin.",
+            "PHP itself added this name later. An unguarded declaration stops the file from loading on the target with a \"Cannot redeclare\" error. Wrap it in a function_exists() or class_exists() check, or switch to PHP's own version and delete it.",
+        ),
+    };
+    pub const LARAVEL_NATIVE_ARRAY_FIRST: PatternRule = PatternRule {
+        id: "framework.laravel_native_array_first",
+        title: Text::new("Callback'li array_first() / array_last()", "array_first() / array_last() with a callback"),
+        severity: Severity::Breaking,
+        since: (8, 5),
+        replacement: code("Arr::first() / Arr::last()"),
+        fix: FixKind::Manual,
+        note: Text::new(
+            "PHP 8.5 kendi array_first() ve array_last() fonksiyonlarını ekledi; bunlar yalnızca diziyi alır. laravel/helpers aynı adı tanımlamadan önce function_exists() ile kontrol ettiği için PHP'nin fonksiyonu çağrılır ve callback ya da varsayılan değer verilen çağrı ArgumentCountError fırlatır. Illuminate\\Support\\Arr::first() ya da Arr::last() kullanın.",
+            "PHP 8.5 adds its own array_first() and array_last(), which take only the array. laravel/helpers checks function_exists() before defining them, so PHP's function is called and a call with a callback or default throws ArgumentCountError. Use Illuminate\\Support\\Arr::first() or Arr::last().",
         ),
     };
     pub const PARSE_STR_ONE_ARG: PatternRule = PatternRule {
