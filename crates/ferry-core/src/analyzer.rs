@@ -360,6 +360,12 @@ pub fn analyze_source_in(file: &str, src: &str, target: PhpVersion, index: &crat
     for k in unset_this(&tokens) {
         ctx.pattern(&patterns::UNSET_THIS, &tokens[k], None);
     }
+    for k in globals_writes(&tokens) {
+        ctx.pattern(&patterns::GLOBALS_WRITE, &tokens[k], None);
+    }
+    for (k, since, fixed) in reserved_aliases(&tokens) {
+        ctx.pattern_replaced(&patterns::RESERVED_ALIAS, &tokens[k], since, fixed);
+    }
     for (k, since) in builtin_results_by_ref(&tokens) {
         let args = if tokens.get(k + 3).is_some_and(|t| t.is_punct(")")) { "()" } else { "(…)" };
         let fixed = format!("${} = {}{args}", tokens[k - 2].text, tokens[k + 1].text.trim_start_matches('\\'));
@@ -1881,6 +1887,99 @@ fn case_semicolons(tokens: &[Token]) -> Vec<usize> {
     out
 }
 
+fn globals_writes(tokens: &[Token]) -> Vec<usize> {
+    let assign = ["=", "**=", "??=", "<<=", ">>="];
+    let mut out = Vec::new();
+    for i in 0..tokens.len() {
+        if tokens[i].kind != TokenKind::Variable || tokens[i].text != "GLOBALS" {
+            continue;
+        }
+        let prev = i.checked_sub(1).map(|p| &tokens[p]);
+        let after = |p: &str| prev.is_some_and(|t| t.is_punct(p));
+        if after("->") || after("?->") || after("::") || after("$") {
+            continue;
+        }
+        let next = tokens.get(i + 1);
+        let reference = after("&")
+            && !next.is_some_and(|n| n.is_punct("[") || n.is_punct("{"))
+            && i >= 2
+            && (["=", "(", ",", "[", "=>"].iter().any(|p| tokens[i - 2].is_punct(p)) || tokens[i - 2].is_ident_ci("return"));
+        let compound = next.is_some_and(|n| ["+", "-", "*", "/", ".", "%", "|", "&", "^"].iter().any(|op| n.is_punct(op)))
+            && tokens.get(i + 2).is_some_and(|eq| eq.is_punct("=") && eq.start == tokens[i + 1].end);
+        let written = compound
+            || next.is_some_and(|n| assign.iter().any(|a| n.is_punct(a)) || n.is_punct("++") || n.is_punct("--"))
+            || (after("++") || after("--")) && !next.is_some_and(|n| n.is_punct("[") || n.is_punct("{"));
+        let appended = next.is_some_and(|n| n.is_punct("["))
+            && tokens.get(i + 2).is_some_and(|t| t.is_punct("]"))
+            && tokens.get(i + 3).is_some_and(|t| t.is_punct("="));
+        let unset = (after("(") || after(",")) && next.is_some_and(|n| n.is_punct(")") || n.is_punct(",")) && {
+            let mut depth = 0;
+            (0..i)
+                .rev()
+                .find(|&k| {
+                    if tokens[k].is_punct(")") {
+                        depth += 1;
+                    } else if tokens[k].is_punct("(") {
+                        if depth == 0 {
+                            return true;
+                        }
+                        depth -= 1;
+                    }
+                    false
+                })
+                .is_some_and(|open| open > 0 && tokens[open - 1].is_ident_ci("unset"))
+        };
+        if reference || written || appended || unset {
+            out.push(i);
+        }
+    }
+    out
+}
+
+fn reserved_aliases(tokens: &[Token]) -> Vec<(usize, PhpVersion, String)> {
+    let mut out = Vec::new();
+    let mut stack: Vec<bool> = Vec::new();
+    for i in 0..tokens.len() {
+        let t = &tokens[i];
+        if t.is_punct("{") {
+            stack.push(i > 0 && (tokens[i - 1].is_ident_ci("namespace") || i > 1 && tokens[i - 2].is_ident_ci("namespace")));
+            continue;
+        }
+        if t.is_punct("}") {
+            stack.pop();
+            continue;
+        }
+        if !t.is_ident_ci("use") || !stack.iter().all(|ns| *ns) || i > 0 && tokens[i - 1].is_punct(")") {
+            continue;
+        }
+        if tokens.get(i + 1).is_some_and(|n| n.is_ident_ci("function") || n.is_ident_ci("const")) {
+            continue;
+        }
+        let end = (i + 1..tokens.len()).find(|&k| tokens[k].is_punct(";")).unwrap_or(tokens.len());
+        let mut part_start = i + 1;
+        for k in i + 1..=end {
+            if !(k == end || tokens[k].is_punct(",") || tokens[k].is_punct("{") || tokens[k].is_punct("}")) {
+                continue;
+            }
+            let idents: Vec<usize> = (part_start..k).filter(|&j| tokens[j].kind == TokenKind::Ident).collect();
+            part_start = k + 1;
+            let (target, alias) = match idents.as_slice() {
+                [target] => (*target, *target),
+                [target, kw, alias] if tokens[*kw].is_ident_ci("as") => (*target, *alias),
+                _ => continue,
+            };
+            let short = tokens[alias].text.rsplit('\\').next().unwrap_or_default().to_ascii_lowercase();
+            if let Some(&(_, a, b)) = RESERVED_CLASS_NAMES.iter().find(|(n, _, _)| *n == short) {
+                let name = tokens[alias].text.rsplit('\\').next().unwrap_or_default();
+                let mut base = name.chars();
+                let renamed = base.next().map(|c| format!("Base{}{}", c.to_ascii_uppercase(), base.as_str())).unwrap_or_default();
+                out.push((alias, PhpVersion::new(a, b), format!("{} as {renamed}", tokens[target].text.trim_start_matches('\\'))));
+            }
+        }
+    }
+    out
+}
+
 const BUILTIN_RESULT_ONE_ARG: &[&str] = &[
     "strlen",
     "is_null",
@@ -2414,6 +2513,66 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
     fn assign_new_by_reference_and_unset_this() {
         assert_eq!(count85("<?php $a = &new Foo; $b =& new Bar(); $c = new Baz; $d = &$e;", "removed.assign_new_by_ref"), 2);
         assert_eq!(count85("<?php unset($this); unset($a, $this); unset($this->x); $o->unset($this);", "removed.unset_this"), 2);
+    }
+
+    #[test]
+    fn writes_to_the_whole_globals_array() {
+        let id = "removed.globals_write";
+        for src in [
+            "$GLOBALS = [];",
+            "$GLOBALS += $more;",
+            "$GLOBALS .= 'x';",
+            "$GLOBALS++;",
+            "unset($a, $GLOBALS);",
+            "$copy = &$GLOBALS;",
+            "function f() { return [&$GLOBALS]; }",
+            "$GLOBALS[] = 1;",
+        ] {
+            assert_eq!(count85(&format!("<?php {src}"), id), 1, "{src}");
+        }
+        for src in [
+            "$GLOBALS['a'] = 1;",
+            "$GLOBALS['a']['b'] = 1;",
+            "unset($GLOBALS['a']);",
+            "$x = &$GLOBALS['a'];",
+            "$copy = $GLOBALS;",
+            "foreach ($GLOBALS as &$v) {}",
+            "if ($GLOBALS == []) {}",
+            "$x = $a & $GLOBALS;",
+            "$o->GLOBALS = 1;",
+            "$id = ++$GLOBALS['counter'];",
+        ] {
+            assert_eq!(count85(&format!("<?php {src}"), id), 0, "{src}");
+        }
+        assert_eq!(at("<?php $GLOBALS = [];", (8, 0)).iter().filter(|(r, _)| r == id).count(), 0);
+    }
+
+    #[test]
+    fn reserved_names_used_as_import_aliases() {
+        let id = "removed.reserved_alias";
+        for src in [
+            "namespace A; use B\\Object;",
+            "use B\\Object;",
+            "namespace A; use B\\C as object;",
+            "namespace A; use B\\{Object, Foo};",
+            "namespace A; use B\\Int, B\\C;",
+        ] {
+            assert_eq!(count85(&format!("<?php {src}"), id), 1, "{src}");
+        }
+        for src in [
+            "namespace A; use B\\Object as Obj;",
+            "namespace A; use function B\\object;",
+            "namespace A; use B\\Resource;",
+            "namespace A; class C { use Object; }",
+            "$f = function () use ($object) {};",
+        ] {
+            assert_eq!(count85(&format!("<?php {src}"), id), 0, "{src}");
+        }
+        assert_eq!(at("<?php use B\\Never;", (8, 0)).iter().filter(|(r, _)| r == id).count(), 0);
+        assert_eq!(at("<?php use B\\Never;", (8, 1)).iter().filter(|(r, _)| r == id).count(), 1);
+        let found = analyze_source("t.php", "<?php namespace A; use yii\\base\\Object; use B\\C as object;", PhpVersion::new(8, 4));
+        let fixes: Vec<String> = found.iter().filter(|f| f.rule_id == id).map(|f| f.replacement.as_ref().unwrap().en.clone()).collect();
+        assert_eq!(fixes, ["yii\\base\\Object as BaseObject", "B\\C as BaseObject"]);
     }
 
     #[test]

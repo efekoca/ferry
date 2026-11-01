@@ -62,7 +62,7 @@ Bir bulguyu seçtiğinizde şunları görürsünüz:
 Ferry'nin kendi PHP sözcük çözümleyicisi ve kural seti vardır; kodu PHP'nin okuduğu gibi okur. `$db->each()` gibi metot çağrıları, kendi namespace'inizdeki fonksiyonlar, metinlerin ve yorumların içindekiler kaldırılmış fonksiyon sanılmaz. Kurallar şunları kapsar:
 
 - `mysql_*`, `ereg*`, `each()`, `create_function()` ve `money_format()` gibi kaldırılan eklenti ve fonksiyonlar
-- `$str{0}`, `(real)` ve `(unset)` dönüşümleri, `$obj = &new Foo`, `$args = &func_get_args()`, `unset($this)`, döngü dışındaki `break` ve PHP 8'in attribute olarak okuduğu PHP 7 `#[` yorumları gibi artık ayrıştırılamayan ya da derlenemeyen yazımlar
+- `$str{0}`, `(real)` ve `(unset)` dönüşümleri, `$obj = &new Foo`, `$args = &func_get_args()`, `unset($this)`, `$GLOBALS` dizisinin tamamına yazma, `Object` gibi ayrılmış adların `use` takma adı olarak kullanılması, döngü dışındaki `break` ve PHP 8'in attribute olarak okuduğu PHP 7 `#[` yorumları gibi artık ayrıştırılamayan ya da derlenemeyen yazımlar
 - `"${var}"` yerleştirmesi, örtük nullable parametreler, `utf8_encode()`, `FILTER_SANITIZE_STRING` ve `E_STRICT` gibi kullanımdan kalkanlar
 - zorunlu bir parametreden önce gelen isteğe bağlı parametre, yerleşik metin fonksiyonlarına doğrudan verilen `null` ve `"self::method"` biçimindeki callable'lar gibi parametre ve çağrı kalıpları
 - yerleşik bir sınıfın ya da arayüzün metodunu PHP 8'in kabul etmediği bir imzayla ezen ve sınıfın hiç yüklenmemesine yol açan metotlar; örneğin Drupal 7'nin bir `PDO` alt sınıfındaki `query($query, array $args = array(), $options = array())` metodu
