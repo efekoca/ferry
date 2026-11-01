@@ -200,6 +200,7 @@ pub const CURLY_FIX: &str = "Rector\\Php74\\Rector\\ArrayDimFetch\\CurlyToSquare
 pub const BAREWORD_FIX: &str = "Ferry\\QuoteBarewordKeys";
 pub const NEW_BY_REF_FIX: &str = "Ferry\\Php70\\AssignNewWithoutReference";
 pub const DEFAULT_COLON_FIX: &str = "Ferry\\Php85\\DefaultColonAfterSwitch";
+pub const BUILTIN_BY_REF_FIX: &str = "Ferry\\Php70\\AssignBuiltinResultWithoutReference";
 
 pub fn fix_legacy_syntax(src: &str) -> Option<(String, Vec<&'static str>)> {
     let tokens = tokenize(src);
@@ -234,6 +235,14 @@ pub fn fix_legacy_syntax(src: &str) -> Option<(String, Vec<&'static str>)> {
     }
     if !by_ref.is_empty() {
         applied.push(NEW_BY_REF_FIX);
+    }
+    let builtin_refs = builtin_results_by_ref(&tokens);
+    for &(k, _) in &builtin_refs {
+        let end = if tokens[k].start > tokens[k - 1].end { tokens[k + 1].start } else { tokens[k].end };
+        edits.push((tokens[k].start, end, ""));
+    }
+    if !builtin_refs.is_empty() {
+        applied.push(BUILTIN_BY_REF_FIX);
     }
     let defaults: Vec<usize> = case_semicolons(&tokens).into_iter().filter(|&k| tokens[k].is_ident_ci("default")).collect();
     for &k in &defaults {
@@ -327,9 +336,10 @@ pub fn analyze_source_in(file: &str, src: &str, target: PhpVersion, index: &crat
             }
             Override::UserIncompatible(parent, sig) => {
                 let fixed: Vec<&ParamShape> = sig.params.iter().filter(|p| !p.variadic).collect();
-                let params: Vec<(bool, String, String)> = fixed.iter().map(|p| (p.by_ref, display_type(&p.ty), p.name.clone())).collect();
+                let params: Vec<(bool, String, String)> =
+                    fixed.iter().map(|p| (p.by_ref, display_type(&p.shown), p.name.clone())).collect();
                 let required = fixed.iter().rposition(|p| !p.optional).map_or(0, |i| i + 1);
-                let returns = sig.returns.as_deref().map(display_type).unwrap_or_default();
+                let returns = sig.returns_shown.as_deref().map(display_type).unwrap_or_default();
                 let variadic = sig.params.iter().find(|p| p.variadic).map(|p| p.name.clone());
                 let signature = render_signature(&tokens[over.name].text, sig.is_static, required, &params, variadic, &returns);
                 ctx.incompatible_override(&patterns::INCOMPATIBLE_USER_OVERRIDE, &tokens[over.name], &parent, signature);
@@ -349,6 +359,17 @@ pub fn analyze_source_in(file: &str, src: &str, target: PhpVersion, index: &crat
     }
     for k in unset_this(&tokens) {
         ctx.pattern(&patterns::UNSET_THIS, &tokens[k], None);
+    }
+    for k in globals_writes(&tokens) {
+        ctx.pattern(&patterns::GLOBALS_WRITE, &tokens[k], None);
+    }
+    for (k, since, fixed) in reserved_aliases(&tokens) {
+        ctx.pattern_replaced(&patterns::RESERVED_ALIAS, &tokens[k], since, fixed);
+    }
+    for (k, since) in builtin_results_by_ref(&tokens) {
+        let args = if tokens.get(k + 3).is_some_and(|t| t.is_punct(")")) { "()" } else { "(…)" };
+        let fixed = format!("${} = {}{args}", tokens[k - 2].text, tokens[k + 1].text.trim_start_matches('\\'));
+        ctx.pattern_replaced(&patterns::BUILTIN_RESULT_BY_REF, &tokens[k], since, fixed);
     }
     for k in stray_breaks(&tokens) {
         ctx.pattern(&patterns::BREAK_OUTSIDE_LOOP, &tokens[k], None);
@@ -566,6 +587,22 @@ impl<'a> Ctx<'a> {
         self.push(hit, line, column);
     }
 
+    fn pattern_replaced(&mut self, rule: &PatternRule, tok: &Token, since: PhpVersion, replacement: String) {
+        if !self.applies(since) {
+            return;
+        }
+        let hit = Hit {
+            rule_id: rule.id,
+            title: rule.title.into(),
+            message: rule.note,
+            since,
+            severity: rule.severity,
+            fix: rule.fix,
+            replacement: Some(Localized::same(replacement)),
+        };
+        self.push(hit, tok.line, tok.column);
+    }
+
     fn ident(&mut self, tokens: &[Token], i: usize) {
         let tok = &tokens[i];
         let bare = tok.text.trim_start_matches('\\');
@@ -775,15 +812,20 @@ impl<'a> Ctx<'a> {
             }
             (if is_call { MemberKind::StaticCall } else { MemberKind::Constant }, Some(name))
         } else if is_call {
+            if i >= 2 && tokens[i - 2].kind == TokenKind::Variable && tokens[i - 2].text == "this" {
+                return;
+            }
             (MemberKind::Method, None)
         } else {
             return;
         };
+        let receiver = (i >= 2 && tokens[i - 2].kind == TokenKind::Variable).then(|| tokens[i - 2].text.as_str());
         let Some(m) = MEMBERS.iter().find(|m| {
             m.kind == kind
                 && m.rule.matches(&lower)
                 && match class {
                     Some(c) => c.to_ascii_lowercase().starts_with(m.class),
+                    None if m.class == "reflectionparameter" => receiver.is_some_and(|r| reflection_parameters(tokens).contains(r)),
                     None => self.classes.iter().any(|c| c.starts_with(m.class)),
                 }
         }) else {
@@ -1302,6 +1344,8 @@ pub(crate) struct ParamShape {
     pub variadic: bool,
     pub optional: bool,
     pub ty: Vec<String>,
+    pub ty_at: Vec<usize>,
+    pub shown: Vec<String>,
     pub name: String,
 }
 
@@ -1323,11 +1367,14 @@ pub(crate) fn param_shapes(tokens: &[Token], open: usize, close: usize) -> Vec<P
             continue;
         }
         let param = &tokens[start..k];
+        let start_of_param = start;
         start = k + 1;
         let Some(var) = param.iter().position(|t| t.kind == TokenKind::Variable) else { continue };
         let mut ty = Vec::new();
+        let mut ty_at = Vec::new();
+        let mut shown = Vec::new();
         let mut attr = 0;
-        for t in &param[..var] {
+        for (j, t) in param[..var].iter().enumerate() {
             if t.is_punct("#[") || attr > 0 && t.is_punct("[") {
                 attr += 1;
             } else if attr > 0 && t.is_punct("]") {
@@ -1336,20 +1383,26 @@ pub(crate) fn param_shapes(tokens: &[Token], open: usize, close: usize) -> Vec<P
                 let name = t.text.trim_start_matches('\\').to_ascii_lowercase();
                 if !["public", "protected", "private", "readonly"].contains(&name.as_str()) {
                     ty.push(name);
+                    ty_at.push(start_of_param + j);
+                    shown.push(t.text.trim_start_matches('\\').to_string());
                 }
             } else if attr == 0 && t.is_punct("?") {
                 ty.push("null".into());
+                shown.push("null".into());
             }
         }
         let null_default = param.get(var + 1).is_some_and(|t| t.is_punct("=")) && param.get(var + 2).is_some_and(|t| t.is_ident_ci("null"));
         if null_default && !ty.is_empty() && !ty.iter().any(|t| t == "null" || t == "mixed") {
             ty.push("null".into());
+            shown.push("null".into());
         }
         out.push(ParamShape {
             by_ref: param[..var].iter().rev().take_while(|t| t.is_punct("&") || t.is_punct("...")).any(|t| t.is_punct("&")),
             variadic: param[..var].iter().any(|t| t.is_punct("...")),
             optional: param.get(var + 1).is_some_and(|t| t.is_punct("=")),
             ty,
+            ty_at,
+            shown,
             name: param[var].text.clone(),
         });
     }
@@ -1448,6 +1501,76 @@ fn user_parent_fits(
     fits(child, is_static, child_return, &shape)
 }
 
+fn class_name(t: &str) -> bool {
+    !SCALAR_TYPES.contains(&t) && !["mixed", "object", "self", "static", "parent", "never"].contains(&t)
+}
+
+fn builtin_ancestry(name: &str) -> Option<Vec<String>> {
+    if ["stdclass", "traversable"].contains(&name) {
+        return Some(Vec::new());
+    }
+    let found = crate::builtin::CLASSES.binary_search_by(|(c, _, _)| (*c).cmp(name)).ok()?;
+    Some(crate::builtin::CLASSES[found].1.iter().map(|p| p.to_string()).collect())
+}
+
+fn is_subtype(a: &str, b: &str, index: &crate::index::ProjectIndex) -> Option<bool> {
+    if a == b {
+        return Some(true);
+    }
+    if index.supertypes(b).is_none() && builtin_ancestry(b).is_none() {
+        return None;
+    }
+    let mut queue = vec![a.to_string()];
+    let mut seen = std::collections::HashSet::new();
+    let mut unknown = false;
+    while let Some(node) = queue.pop() {
+        if node == b {
+            return Some(true);
+        }
+        if !seen.insert(node.clone()) || seen.len() > 64 {
+            continue;
+        }
+        if let Some(parents) = index.supertypes(&node) {
+            queue.extend(parents);
+        } else if let Some(ancestors) = builtin_ancestry(&node) {
+            if ancestors.iter().any(|p| p == b) {
+                return Some(true);
+            }
+        } else {
+            unknown = true;
+        }
+    }
+    (!unknown).then_some(false)
+}
+
+fn class_mismatch(
+    child: &[ParamShape],
+    child_fqns: &[Vec<String>],
+    child_return: &[String],
+    parent: &crate::index::MethodSig,
+    index: &crate::index::ProjectIndex,
+) -> bool {
+    let open = ["mixed", "object", "iterable", "callable"];
+    let narrowed = child.iter().zip(child_fqns).zip(&parent.param_fqns).any(|((shape, c), p)| {
+        if shape.variadic || c.is_empty() || c.iter().any(|t| open.contains(&t.as_str())) {
+            return false;
+        }
+        let cs: Vec<&String> = c.iter().filter(|t| class_name(t)).collect();
+        p.iter()
+            .filter(|t| class_name(t) && !c.contains(t))
+            .any(|p| !cs.is_empty() && cs.iter().all(|c| is_subtype(p, c, index) == Some(false)))
+    });
+    let p = &parent.return_fqns;
+    let widened = !p.iter().any(|t| open.contains(&t.as_str()) || ["self", "static", "parent"].contains(&t.as_str())) && {
+        let ps: Vec<&String> = p.iter().filter(|t| class_name(t)).collect();
+        child_return
+            .iter()
+            .filter(|t| class_name(t) && !p.contains(t))
+            .any(|c| !ps.is_empty() && ps.iter().all(|p| is_subtype(c, p, index) == Some(false)))
+    };
+    narrowed || widened
+}
+
 fn user_declaration(
     fqn: &str,
     method: &str,
@@ -1505,7 +1628,25 @@ fn inherited_builtins(name: &str, method: &str, index: &crate::index::ProjectInd
     }
 }
 
+pub(crate) fn return_type_at(tokens: &[Token], close: usize) -> Vec<usize> {
+    if !tokens.get(close + 1).is_some_and(|t| t.is_punct(":")) {
+        return Vec::new();
+    }
+    (close + 2..tokens.len())
+        .take_while(|&k| !tokens[k].is_punct("{") && !tokens[k].is_punct(";"))
+        .filter(|&k| tokens[k].kind == TokenKind::Ident)
+        .collect()
+}
+
 pub(crate) fn return_type(tokens: &[Token], close: usize) -> Option<Vec<String>> {
+    return_type_as(tokens, close, |t| t.trim_start_matches('\\').to_ascii_lowercase())
+}
+
+pub(crate) fn return_type_shown(tokens: &[Token], close: usize) -> Option<Vec<String>> {
+    return_type_as(tokens, close, |t| t.trim_start_matches('\\').to_string())
+}
+
+fn return_type_as(tokens: &[Token], close: usize, name: impl Fn(&str) -> String) -> Option<Vec<String>> {
     if !tokens.get(close + 1)?.is_punct(":") {
         return None;
     }
@@ -1518,7 +1659,7 @@ pub(crate) fn return_type(tokens: &[Token], close: usize) -> Option<Vec<String>>
         } else if t.is_punct("?") {
             out.push("null".to_string());
         } else if t.kind == TokenKind::Ident {
-            out.push(t.text.trim_start_matches('\\').to_ascii_lowercase());
+            out.push(name(&t.text));
         }
     }
     Some(out)
@@ -1628,8 +1769,18 @@ fn builtin_overrides(tokens: &[Token], index: &crate::index::ProjectIndex) -> Ve
                     (0..k).rev().find(|&j| tokens[j].is_punct(";") || tokens[j].is_punct("{") || tokens[j].is_punct("}")).unwrap_or(0);
                 let is_static = tokens[start..k].iter().any(|t| t.is_ident_ci("static"));
                 if let Some((parent_name, sig)) = user_fqns.iter().find_map(|u| user_declaration(u, &lower, index, 0)) {
+                    let shapes = param_shapes(tokens, popen, close);
+                    let child_fqns: Vec<Vec<String>> =
+                        shapes.iter().map(|p| p.ty_at.iter().map(|&j| crate::index::resolve_type(tokens, j, &names)).collect()).collect();
+                    let this_class = names.declared(i + 1, &tokens[i + 1].text);
+                    let child_return_fqns: Vec<String> = return_type_at(tokens, close)
+                        .into_iter()
+                        .map(|j| crate::index::resolve_type(tokens, j, &names))
+                        .map(|t| if t == "static" || t == "self" { this_class.clone() } else { t })
+                        .collect();
                     if (lower != "__construct" || sig.is_abstract)
-                        && !user_parent_fits(&param_shapes(tokens, popen, close), is_static, child_return.as_deref(), &lower, &sig)
+                        && (!user_parent_fits(&shapes, is_static, child_return.as_deref(), &lower, &sig)
+                            || class_mismatch(&shapes, &child_fqns, &child_return_fqns, &sig, index))
                     {
                         out.push(BuiltinOverride { name: name_at, parent: name_at, problem: Override::UserIncompatible(parent_name, sig) });
                         continue;
@@ -1737,6 +1888,214 @@ fn case_semicolons(tokens: &[Token]) -> Vec<usize> {
                 break;
             }
         }
+    }
+    out
+}
+
+fn reflection_parameters(tokens: &[Token]) -> std::collections::HashSet<&str> {
+    let mut out = std::collections::HashSet::new();
+    for k in 0..tokens.len() {
+        let t = &tokens[k];
+        if t.kind != TokenKind::Variable {
+            continue;
+        }
+        let prev = k.checked_sub(1).map(|p| &tokens[p]);
+        let typed = prev.is_some_and(|p| p.text.trim_start_matches('\\').eq_ignore_ascii_case("ReflectionParameter"));
+        let looped = prev.is_some_and(|p| p.is_ident_ci("as"))
+            && (k.saturating_sub(8)..k).any(|j| tokens[j].is_ident_ci("getParameters"))
+            && tokens.get(k + 1).is_some_and(|n| n.is_punct(")"));
+        let created = tokens.get(k + 1).is_some_and(|n| n.is_punct("="))
+            && tokens.get(k + 2).is_some_and(|n| n.is_ident_ci("new"))
+            && tokens.get(k + 3).is_some_and(|n| n.text.trim_start_matches('\\').eq_ignore_ascii_case("ReflectionParameter"));
+        if typed || looped || created {
+            out.insert(t.text.as_str());
+        }
+    }
+    out
+}
+
+fn globals_writes(tokens: &[Token]) -> Vec<usize> {
+    let assign = ["=", "**=", "??=", "<<=", ">>="];
+    let mut out = Vec::new();
+    for i in 0..tokens.len() {
+        if tokens[i].kind != TokenKind::Variable || tokens[i].text != "GLOBALS" {
+            continue;
+        }
+        let prev = i.checked_sub(1).map(|p| &tokens[p]);
+        let after = |p: &str| prev.is_some_and(|t| t.is_punct(p));
+        if after("->") || after("?->") || after("::") || after("$") {
+            continue;
+        }
+        let next = tokens.get(i + 1);
+        let reference = after("&")
+            && !next.is_some_and(|n| n.is_punct("[") || n.is_punct("{"))
+            && i >= 2
+            && (["=", "(", ",", "[", "=>"].iter().any(|p| tokens[i - 2].is_punct(p)) || tokens[i - 2].is_ident_ci("return"));
+        let compound = next.is_some_and(|n| ["+", "-", "*", "/", ".", "%", "|", "&", "^"].iter().any(|op| n.is_punct(op)))
+            && tokens.get(i + 2).is_some_and(|eq| eq.is_punct("=") && eq.start == tokens[i + 1].end);
+        let written = compound
+            || next.is_some_and(|n| assign.iter().any(|a| n.is_punct(a)) || n.is_punct("++") || n.is_punct("--"))
+            || (after("++") || after("--")) && !next.is_some_and(|n| n.is_punct("[") || n.is_punct("{"));
+        let appended = next.is_some_and(|n| n.is_punct("["))
+            && tokens.get(i + 2).is_some_and(|t| t.is_punct("]"))
+            && tokens.get(i + 3).is_some_and(|t| t.is_punct("="));
+        let unset = (after("(") || after(",")) && next.is_some_and(|n| n.is_punct(")") || n.is_punct(",")) && {
+            let mut depth = 0;
+            (0..i)
+                .rev()
+                .find(|&k| {
+                    if tokens[k].is_punct(")") {
+                        depth += 1;
+                    } else if tokens[k].is_punct("(") {
+                        if depth == 0 {
+                            return true;
+                        }
+                        depth -= 1;
+                    }
+                    false
+                })
+                .is_some_and(|open| open > 0 && tokens[open - 1].is_ident_ci("unset"))
+        };
+        if reference || written || appended || unset {
+            out.push(i);
+        }
+    }
+    out
+}
+
+fn reserved_aliases(tokens: &[Token]) -> Vec<(usize, PhpVersion, String)> {
+    let mut out = Vec::new();
+    let mut stack: Vec<bool> = Vec::new();
+    for i in 0..tokens.len() {
+        let t = &tokens[i];
+        if t.is_punct("{") {
+            stack.push(i > 0 && (tokens[i - 1].is_ident_ci("namespace") || i > 1 && tokens[i - 2].is_ident_ci("namespace")));
+            continue;
+        }
+        if t.is_punct("}") {
+            stack.pop();
+            continue;
+        }
+        if !t.is_ident_ci("use") || !stack.iter().all(|ns| *ns) || i > 0 && tokens[i - 1].is_punct(")") {
+            continue;
+        }
+        if tokens.get(i + 1).is_some_and(|n| n.is_ident_ci("function") || n.is_ident_ci("const")) {
+            continue;
+        }
+        let end = (i + 1..tokens.len()).find(|&k| tokens[k].is_punct(";")).unwrap_or(tokens.len());
+        let mut part_start = i + 1;
+        for k in i + 1..=end {
+            if !(k == end || tokens[k].is_punct(",") || tokens[k].is_punct("{") || tokens[k].is_punct("}")) {
+                continue;
+            }
+            let idents: Vec<usize> = (part_start..k).filter(|&j| tokens[j].kind == TokenKind::Ident).collect();
+            part_start = k + 1;
+            let (target, alias) = match idents.as_slice() {
+                [target] => (*target, *target),
+                [target, kw, alias] if tokens[*kw].is_ident_ci("as") => (*target, *alias),
+                _ => continue,
+            };
+            let short = tokens[alias].text.rsplit('\\').next().unwrap_or_default().to_ascii_lowercase();
+            if let Some(&(_, a, b)) = RESERVED_CLASS_NAMES.iter().find(|(n, _, _)| *n == short) {
+                let name = tokens[alias].text.rsplit('\\').next().unwrap_or_default();
+                let mut base = name.chars();
+                let renamed = base.next().map(|c| format!("Base{}{}", c.to_ascii_uppercase(), base.as_str())).unwrap_or_default();
+                out.push((alias, PhpVersion::new(a, b), format!("{} as {renamed}", tokens[target].text.trim_start_matches('\\'))));
+            }
+        }
+    }
+    out
+}
+
+const BUILTIN_RESULT_ONE_ARG: &[&str] = &[
+    "strlen",
+    "is_null",
+    "is_bool",
+    "is_int",
+    "is_integer",
+    "is_long",
+    "is_float",
+    "is_double",
+    "is_string",
+    "is_array",
+    "is_object",
+    "is_resource",
+    "is_scalar",
+    "boolval",
+    "intval",
+    "floatval",
+    "doubleval",
+    "strval",
+    "defined",
+    "count",
+    "sizeof",
+    "gettype",
+];
+
+fn compiled_sprintf(format: &Token, args: usize) -> bool {
+    let quoted = matches!(format.kind, TokenKind::Str { backtick: false, .. }) && format.text.len() >= 2;
+    if !quoted || format.text.starts_with('"') && format.text.contains('$') {
+        return false;
+    }
+    let body = &format.text[1..format.text.len() - 1];
+    let mut chars = body.chars();
+    let mut placeholders = 0;
+    while let Some(c) = chars.next() {
+        if c == '%' {
+            match chars.next() {
+                Some('s' | 'd') => placeholders += 1,
+                Some('%') => {}
+                _ => return false,
+            }
+        }
+    }
+    placeholders + 1 == args
+}
+
+fn builtin_results_by_ref(tokens: &[Token]) -> Vec<(usize, PhpVersion)> {
+    let spaces = crate::index::namespaces(tokens);
+    let mut out = Vec::new();
+    for k in 2..tokens.len().saturating_sub(2) {
+        if !(tokens[k].is_punct("&") && tokens[k - 1].is_punct("=") && tokens[k - 2].kind == TokenKind::Variable) {
+            continue;
+        }
+        if k >= 3
+            && (tokens[k - 3].is_punct("->")
+                || tokens[k - 3].is_punct("?->")
+                || tokens[k - 3].is_punct("::")
+                || tokens[k - 3].is_punct("$"))
+        {
+            continue;
+        }
+        let name = &tokens[k + 1];
+        if name.kind != TokenKind::Ident || !tokens[k + 2].is_punct("(") {
+            continue;
+        }
+        let rooted = name.text.starts_with('\\');
+        let bare = name.text.trim_start_matches('\\').to_ascii_lowercase();
+        if bare.contains('\\') || !rooted && !crate::index::namespace_at(&spaces, k).is_empty() {
+            continue;
+        }
+        let args = call_args(tokens, k + 2);
+        let plain = args
+            .iter()
+            .all(|a| !a.iter().any(|t| t.is_punct("...")) && !(a.len() >= 2 && a[0].kind == TokenKind::Ident && a[1].is_punct(":")));
+        if !plain {
+            continue;
+        }
+        let n = args.len();
+        let since = match bare.as_str() {
+            b if BUILTIN_RESULT_ONE_ARG.contains(&b) && n == 1 => PhpVersion::new(7, 0),
+            "func_num_args" | "func_get_args" | "get_called_class" if n == 0 => PhpVersion::new(7, 0),
+            "get_class" if n <= 1 => PhpVersion::new(7, 0),
+            "array_key_exists" if n == 2 => PhpVersion::new(7, 0),
+            "array_slice" if n == 2 && args[0].len() == 3 && args[0][0].is_ident_ci("func_get_args") && args[0][1].is_punct("(") => {
+                PhpVersion::new(7, 0)
+            }
+            "sprintf" if n >= 1 && args[0].len() == 1 && compiled_sprintf(&args[0][0], n) => PhpVersion::new(8, 4),
+            _ => continue,
+        };
+        out.push((k, since));
     }
     out
 }
@@ -2184,6 +2543,129 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
     }
 
     #[test]
+    fn deprecated_extension_symbols_found_by_runtime_checks() {
+        let ids = |src: &str| at(src, (8, 5)).into_iter().map(|(id, _)| id).collect::<Vec<_>>();
+        assert_eq!(ids("<?php echo MYSQLI_NO_DATA, MYSQLI_IS_MARIADB, DOM_PHP_ERR;").len(), 3);
+        assert_eq!(ids("<?php echo NumberFormatter::TYPE_CURRENCY, ZipArchive::FL_RECOMPRESS, DateTimeInterface::RFC7231;").len(), 3);
+        assert_eq!(ids("<?php echo Pdo\\Pgsql::TRANSACTION_IDLE;"), ["deprecated.pgsql_transaction_constant"]);
+        let reflection = "deprecated.reflection_method";
+        for src in [
+            "<?php foreach ($m->getParameters() as $p) { $p->getClass(); }",
+            "<?php function f(ReflectionParameter $p) { return $p->isArray(); }",
+            "<?php $p = new ReflectionParameter([$a, 'b'], 0); $p->isCallable();",
+        ] {
+            assert_eq!(ids(src), [reflection], "{src}");
+        }
+        for src in ["<?php $r = new ReflectionClass($x); $definition->getClass();", "<?php use ReflectionParameter; $element->isArray();"] {
+            assert!(ids(src).is_empty(), "{src}");
+        }
+        assert_eq!(ids("<?php $db = new mysqli(); $db->init();"), ["deprecated.mysqli_method"]);
+        assert!(ids("<?php class Rs { function f() { $c = new mysqli(); $this->init(); } }").is_empty());
+    }
+
+    #[test]
+    fn writes_to_the_whole_globals_array() {
+        let id = "removed.globals_write";
+        for src in [
+            "$GLOBALS = [];",
+            "$GLOBALS += $more;",
+            "$GLOBALS .= 'x';",
+            "$GLOBALS++;",
+            "unset($a, $GLOBALS);",
+            "$copy = &$GLOBALS;",
+            "function f() { return [&$GLOBALS]; }",
+            "$GLOBALS[] = 1;",
+        ] {
+            assert_eq!(count85(&format!("<?php {src}"), id), 1, "{src}");
+        }
+        for src in [
+            "$GLOBALS['a'] = 1;",
+            "$GLOBALS['a']['b'] = 1;",
+            "unset($GLOBALS['a']);",
+            "$x = &$GLOBALS['a'];",
+            "$copy = $GLOBALS;",
+            "foreach ($GLOBALS as &$v) {}",
+            "if ($GLOBALS == []) {}",
+            "$x = $a & $GLOBALS;",
+            "$o->GLOBALS = 1;",
+            "$id = ++$GLOBALS['counter'];",
+        ] {
+            assert_eq!(count85(&format!("<?php {src}"), id), 0, "{src}");
+        }
+        assert_eq!(at("<?php $GLOBALS = [];", (8, 0)).iter().filter(|(r, _)| r == id).count(), 0);
+    }
+
+    #[test]
+    fn reserved_names_used_as_import_aliases() {
+        let id = "removed.reserved_alias";
+        for src in [
+            "namespace A; use B\\Object;",
+            "use B\\Object;",
+            "namespace A; use B\\C as object;",
+            "namespace A; use B\\{Object, Foo};",
+            "namespace A; use B\\Int, B\\C;",
+        ] {
+            assert_eq!(count85(&format!("<?php {src}"), id), 1, "{src}");
+        }
+        for src in [
+            "namespace A; use B\\Object as Obj;",
+            "namespace A; use function B\\object;",
+            "namespace A; use B\\Resource;",
+            "namespace A; class C { use Object; }",
+            "$f = function () use ($object) {};",
+        ] {
+            assert_eq!(count85(&format!("<?php {src}"), id), 0, "{src}");
+        }
+        assert_eq!(at("<?php use B\\Never;", (8, 0)).iter().filter(|(r, _)| r == id).count(), 0);
+        assert_eq!(at("<?php use B\\Never;", (8, 1)).iter().filter(|(r, _)| r == id).count(), 1);
+        let found = analyze_source("t.php", "<?php namespace A; use yii\\base\\Object; use B\\C as object;", PhpVersion::new(8, 4));
+        let fixes: Vec<String> = found.iter().filter(|f| f.rule_id == id).map(|f| f.replacement.as_ref().unwrap().en.clone()).collect();
+        assert_eq!(fixes, ["yii\\base\\Object as BaseObject", "B\\C as BaseObject"]);
+    }
+
+    #[test]
+    fn built_in_results_assigned_by_reference() {
+        let id = "removed.builtin_result_by_ref";
+        let fatal = [
+            "function g() { $args = & func_get_args(); }",
+            "function g($s) { $n =& STRLEN ($s); }",
+            "function g($a) { $n = &count($a); }",
+            "function g($o) { $c = &get_class(); }",
+            "function g($a) { $e = &array_key_exists(1, $a); }",
+            "function g() { $rest = &array_slice(func_get_args(), 1); }",
+            "namespace A; function g($s) { $n = &\\strlen($s); }",
+        ];
+        for src in fatal {
+            assert_eq!(count85(&format!("<?php {src}"), id), 1, "{src}");
+        }
+        let fine = [
+            "function g($a) { $n = &count($a, 1); }",
+            "function g($a) { $v = &end($a); }",
+            "function g($a) { $r = &array_slice($a, 1); }",
+            "function g($a) { $n = &strlen(...$a); }",
+            "function g($s) { $a[] = &strlen($s); }",
+            "function g($s) { $o->p = &strlen($s); }",
+            "function g($s) { $n = &$this->strlen($s); }",
+            "namespace A; function g($s) { $n = &strlen($s); }",
+            "function g($a) { $s = &sprintf(\"%.2f\", $a); }",
+            "function g($a) { $s = &sprintf(\"%s\", $a, $a); }",
+        ];
+        for src in fine {
+            assert_eq!(count85(&format!("<?php {src}"), id), 0, "{src}");
+        }
+        let sprintf = "<?php function g($a) { $s = &sprintf('%s-%d', $a, $a); }";
+        assert_eq!(at(sprintf, (8, 4)).iter().filter(|(r, _)| r == id).count(), 1);
+        assert_eq!(at(sprintf, (8, 3)).iter().filter(|(r, _)| r == id).count(), 0);
+        let found =
+            analyze_source("t.php", "<?php function g($s) { $args = &func_get_args(); $n = &\\strlen($s); }", PhpVersion::new(8, 4));
+        let fixes: Vec<String> = found.iter().filter(|f| f.rule_id == id).map(|f| f.replacement.as_ref().unwrap().en.clone()).collect();
+        assert_eq!(fixes, ["$args = func_get_args()", "$n = strlen(…)"]);
+        let (fixed, applied) = fix_legacy_syntax("<?php function g() { $args = & func_get_args(); $v = &end($a); }").unwrap();
+        assert_eq!(fixed, "<?php function g() { $args = func_get_args(); $v = &end($a); }");
+        assert_eq!(applied, [BUILTIN_BY_REF_FIX]);
+    }
+
+    #[test]
     fn legacy_syntax_prefix_handles_new_by_reference_and_default() {
         let src = "<?php\n$a = &new Foo;\n$b =& new Bar();\n$c = &$d;\nswitch ($x) { case 1: break; default; echo 1; }\n";
         let (fixed, applied) = fix_legacy_syntax(src).unwrap();
@@ -2362,6 +2844,33 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
         for src in fatal {
             assert_eq!(count85(&format!("<?php {src}"), id), 1, "{src}");
         }
+        let classes = [
+            ("class A { function f(A $a) {} } class B extends A { function f(B $a) {} }", 1),
+            ("interface I {} class X implements I {} class A { function f(I $a) {} } class B extends A { function f(X $a) {} }", 1),
+            ("class X {} class Y {} class A { function f(X $a) {} } class B extends A { function f(Y $a) {} }", 1),
+            ("class X {} class Y {} class A { function f(X|Y $a) {} } class B extends A { function f(X $a) {} }", 1),
+            ("class X {} class Y {} class A { function f(): X {} } class B extends A { function f(): Y {} }", 1),
+            ("class A { function f(): B {} } class B extends A { function f(): A {} }", 1),
+            ("class A { function f(B $a) {} } class B extends A { function f(A $a) {} }", 0),
+            ("class A { function f(): A {} } class B extends A { function f(): B {} }", 0),
+            ("interface I {} interface J extends I {} class A { function f(J $a) {} } class B extends A { function f(I $a) {} }", 0),
+            ("class X {} class Y {} class A { function f(X $a) {} } class B extends A { function f(X|Y $a) {} }", 0),
+            ("class X {} class A { function f(X $a) {} } class B extends A { function f(object $a) {} }", 0),
+            ("class X extends Exception {} class A { function f(X $a) {} } class B extends A { function f(Exception $a) {} }", 0),
+            ("class X {} class A { function f(X $a) {} } class B extends A { function f(Exception $a) {} }", 1),
+            ("class A { function f(Exception $a) {} } class B extends A { function f(RuntimeException $a) {} }", 1),
+            ("class A { function f(Exception $a) {} } class B extends A { function f(Throwable $a) {} }", 0),
+            ("class A { function f(): Exception {} } class B extends A { function f(): ArrayObject {} }", 1),
+            ("class A { function f(): Traversable {} } class B extends A { function f(): ArrayIterator {} }", 0),
+            ("class A { function f(stdClass $a) {} } class B extends A { function f(ArrayObject $a) {} }", 1),
+            ("class X {} class A { function f(): X {} } class B extends A { function f(): static {} }", 1),
+            ("class A { function f(): A {} } class B extends A { function f(): static {} }", 0),
+            ("class X extends Vendor\\Base {} class Y {} class A { function f(X $a) {} } class B extends A { function f(Y $a) {} }", 0),
+            ("namespace Lib { class X {} } namespace App { use Lib\\X as Y; class A { function f(Y $a) {} } class B extends A { function f(\\Lib\\X $a) {} } }", 0),
+        ];
+        for (src, n) in classes {
+            assert_eq!(count85(&format!("<?php {src}"), id), n, "{src}");
+        }
         let fine = [
             "class A { function f($a) {} } class B extends A { function f($a, $b = 1) {} }",
             "class A { function f(array $a) {} } class B extends A { function f($a) {} }",
@@ -2386,6 +2895,13 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
         let f = found.iter().find(|f| f.rule_id == id).unwrap();
         assert_eq!(f.title.en, "A::f()");
         assert_eq!(f.replacement.as_ref().unwrap().en, "function f(?int $a, &$b = …)");
+        let found = analyze_source(
+            "t.php",
+            "<?php class A { function f(Zend_Acl $acl): ?Zend_Result {} } class B extends A { function f() {} }",
+            PhpVersion::new(8, 1),
+        );
+        let f = found.iter().find(|f| f.rule_id == id).unwrap();
+        assert_eq!(f.replacement.as_ref().unwrap().en, "function f(Zend_Acl $acl): ?Zend_Result");
     }
 
     #[test]
