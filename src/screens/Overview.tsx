@@ -14,6 +14,7 @@ import {
   Sparkles,
   Wrench,
   ShieldAlert,
+  Columns3,
 } from "lucide-react";
 import { ConfirmDialog } from "../components/Modal";
 import { PageHeader } from "../components/Shell";
@@ -23,7 +24,9 @@ import { useI18n } from "../i18n";
 import { commonTitle, dependencyBlockers, FRAMEWORK_LABEL, formatDuration, formatNumber, scoreHeadline, scoreTone } from "../lib/labels";
 import { useStore } from "../lib/store";
 import { BLOCKED_TARGETS, PATCHED, PHP2SHELL_CVES, isBlockedTarget } from "../lib/security";
-import { TARGETS, type Finding, type FixKind, type HistoryEntry, type ScanHistory, type Target } from "../lib/types";
+import { TARGETS, type Finding, type FixKind, type HistoryEntry, type ScanHistory, type Target, type TargetSummary } from "../lib/types";
+import { useToast } from "../components/Toast";
+import { errorMessage } from "../lib/api";
 
 function topRules(findings: Finding[], loc: (f: Finding) => string) {
   const map = new Map<string, { titles: string[]; fix: Finding["fix"]; since: string; count: number }>();
@@ -186,6 +189,8 @@ export function Overview() {
               })}
 
               {scan.progress && <ProgressCard progress={scan.progress} />}
+
+              <CompareCard root={project.root} current={target} onPick={chooseTarget} />
 
               <div className="grid-4">
                 <Metric label={t.severity.breaking} value={s.breaking} hint={t.overview.metrics.breakingHint} tone="danger" onClick={() => showFindings({ severity: "breaking" })} />
@@ -352,6 +357,79 @@ function FixTile({ kind, n, total, onClick }: { kind: FixKind; n: number; total:
         {new Intl.NumberFormat(t.locale, { style: "percent" }).format(share)}
       </span>
     </button>
+  );
+}
+
+function CompareCard({ root, current, onPick }: { root: string; current: Target; onPick: (t: Target) => void }) {
+  const { t } = useI18n();
+  const { api } = useStore();
+  const toast = useToast();
+  const [rows, setRows] = useState<{ root: string; list: TargetSummary[] } | null>(null);
+  const [loading, setLoading] = useState(false);
+  const list = rows?.root === root ? rows.list : null;
+  const run = async () => {
+    if (!api) return;
+    setLoading(true);
+    try {
+      setRows({ root, list: await api.compareTargets(root) });
+    } catch (e) {
+      toast.push({ tone: "error", title: t.compare.failed, description: errorMessage(e, t.common.genericError) });
+    } finally {
+      setLoading(false);
+    }
+  };
+  return (
+    <Card title={t.compare.title} bodyClassName="">
+      {!list ? (
+        <div className="compare__intro">
+          <p className="muted">{t.compare.text}</p>
+          <Button variant="secondary" size="sm" icon={<Columns3 size={14} />} loading={loading} onClick={run}>
+            {t.compare.run}
+          </Button>
+        </div>
+      ) : (
+        <table className="table" aria-label={t.compare.title}>
+          <thead>
+            <tr>
+              <th>{t.compare.target}</th>
+              <th className="table__num">{t.compare.score}</th>
+              <th className="table__num">{t.severity.breaking}</th>
+              <th className="table__num">{t.severity.deprecated}</th>
+              <th className="table__num">{t.fix.manual}</th>
+              <th className="table__num">{t.compare.packages}</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {list.map((r) => {
+              const target = r.target as Target;
+              return (
+                <tr key={r.target} aria-current={target === current ? "true" : undefined} className={target === current ? "compare__current" : undefined}>
+                  <td className="mono">PHP {r.target}</td>
+                  <td className="table__num tabular">{r.summary.score}</td>
+                  <td className="table__num tabular">{r.summary.breaking}</td>
+                  <td className="table__num tabular">{r.summary.deprecated}</td>
+                  <td className="table__num tabular">{r.summary.manual}</td>
+                  <td className="table__num tabular">
+                    {r.blockingPackages}
+                    {r.rootBlocks && <span className="subtle"> {t.compare.plusRoot}</span>}
+                  </td>
+                  <td className="table__num">
+                    {target === current ? (
+                      <span className="subtle">{t.compare.current}</span>
+                    ) : (
+                      <Button size="sm" variant="ghost" onClick={() => onPick(target)}>
+                        {t.compare.pick}
+                      </Button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+    </Card>
   );
 }
 
