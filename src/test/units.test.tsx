@@ -126,7 +126,7 @@ describe("helpers", () => {
   it("counts an incompatible root constraint as a blocker", () => {
     expect(dependencyBlockers(null)).toEqual({ packages: 0, root: false, total: 0 });
     expect(
-      dependencyBlockers({ target: "8.4", rootConstraint: ">=7.1 <8.0", rootStatus: "incompatible", packages: [], hasLockFile: false }),
+      dependencyBlockers({ target: "8.4", rootConstraint: ">=7.1 <8.0", rootStatus: "incompatible", packages: [], hasLockFile: false, extensions: [] }),
     ).toEqual({ packages: 0, root: true, total: 1 });
   });
 

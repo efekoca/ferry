@@ -46,7 +46,7 @@ describe("accessibility", () => {
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Uygula" }));
     await screen.findByText("4 dosya güncellendi");
     await user.click(nav(/Bağımlılıklar/));
-    await screen.findByRole("table");
+    await screen.findAllByRole("table");
     await check("dependencies");
     await user.click(nav(/Geçmiş/));
     const row = (await screen.findAllByRole("row"))[1];

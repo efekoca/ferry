@@ -184,6 +184,18 @@ describe("Ferry app", () => {
     expect(screen.queryByRole("button", { name: /Yok sayılanlar/ })).not.toBeInTheDocument();
   });
 
+  it("lists PHP extensions and finds compatible package versions", async () => {
+    const user = setup();
+    await openAndScan(user);
+    await user.click(nav(/Bağımlılıklar/));
+    expect(await screen.findByRole("heading", { name: "PHP eklentileri" })).toBeInTheDocument();
+    expect(screen.getByText("PHP'den çıkarıldı")).toBeInTheDocument();
+    expect(screen.getByText(/composer.json'a eklenebilir: "ext-mysqli": "\*", "ext-gd": "\*"/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Uyumlu sürümleri bul" }));
+    expect(await screen.findByText(/Önerilen sürüm: v6.9.1/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Uyumlu sürümleri bul" })).not.toBeInTheDocument();
+  });
+
   it("offers to remove ignore entries that no longer match", async () => {
     const user = userEvent.setup();
     const staleIgnores = [{ ruleId: "removed.each", file: "old.php", snippet: "each($a);", reason: "eski" }];
