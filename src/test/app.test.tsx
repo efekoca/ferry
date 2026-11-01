@@ -231,6 +231,23 @@ describe("Ferry app", () => {
     await waitFor(() => expect(screen.getAllByRole("option")).toHaveLength(all));
   });
 
+  it("narrows the selection by rule and warns about uncommitted files", async () => {
+    const user = setup();
+    await openAndScan(user);
+    await user.click(nav(/Düzeltmeler/));
+    await user.click(await screen.findByRole("button", { name: /Değişiklikleri hesapla/ }));
+    await screen.findByRole("list", { name: "Dosyalar" });
+    await user.selectOptions(screen.getByRole("combobox", { name: "Seçimi daralt" }), "Yalnızca otomatik düzeltmeler");
+    const autoCount = screen.getByText(/ \/ 4 dosya seçili/).textContent;
+    expect(autoCount).not.toBe("4 / 4 dosya seçili");
+    await user.selectOptions(screen.getByRole("combobox", { name: "Seçimi daralt" }), "Tüm dosyalar");
+    await user.click(screen.getByRole("button", { name: "Tümünü uygula" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByText("1 dosyada commit edilmemiş değişiklik var")).toBeInTheDocument();
+    await user.click(within(dialog).getByText("Önerilen commit mesajı"));
+    expect(within(dialog).getByText(/PHP 8.4 uyumluluğu: Rector ile 4 dosya/)).toBeInTheDocument();
+  });
+
   it("saves the editor used to open findings", async () => {
     const user = userEvent.setup();
     const api = mockApi({ delay: 0 });

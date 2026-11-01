@@ -143,6 +143,23 @@ fn messages_follow_the_ui_language() {
 }
 
 #[test]
+fn reports_uncommitted_files_in_git_projects() {
+    let h = harness();
+    let none = h.ok("git_status", json!({ "path": h.root, "files": ["src/db.php"] }));
+    assert_eq!(none["repo"], false);
+    if toolchain::find_executable("git").is_none() {
+        return;
+    }
+    let git = |args: &[&str]| std::process::Command::new("git").arg("-C").arg(&h.root).args(args).output().unwrap();
+    git(&["init", "-q"]);
+    git(&["-c", "user.email=t@example.com", "-c", "user.name=t", "add", "."]);
+    git(&["-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-qm", "init"]);
+    std::fs::write(Path::new(&h.root).join("src/db.php"), "<?php\n// edited\n").unwrap();
+    let state = h.ok("git_status", json!({ "path": h.root, "files": ["src/db.php", "src/Greeter.php"] }));
+    assert_eq!(state, json!({ "repo": true, "dirty": ["src/db.php"] }));
+}
+
+#[test]
 fn settings_round_trip() {
     let h = harness();
     assert_eq!(h.ok("get_settings", json!({})), json!({ "phpPath": null, "snapshotLimit": null, "editor": null }));

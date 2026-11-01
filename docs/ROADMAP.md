@@ -59,8 +59,8 @@ Competing tools each cover part of an upgrade: PHPCompatibility (detection only;
 | 5 | **JUnit, Checkstyle and CSV output** with stable fingerprints | GitLab, Jenkins, spreadsheets | S |
 | 7 | **More runtime formats**: Symfony PHPUnit bridge summaries and Monolog JSON (PHP error logs, uncaught errors and `phpunit --display-deprecations` output are imported already) | Covers the remaining log shapes teams use | S |
 | 8 | **CSV with a `git blame` owner column** | Assign work across a team | S |
-| 9 | **Git integration**: refuse to apply on a dirty tree, optional branch per batch, generated commit message listing the Rector rules | Small, reviewable commits | M |
-| 10 | **Apply by rule or by hunk, and Rector level stepping** (`withPhpLevel`) | Answers "Rector changed too much" | S–M |
+| 9 | **Git integration, the rest**: an optional branch per batch and refusing to apply on a dirty tree (uncommitted-file warnings and a generated commit message are done) | Small, reviewable commits | S |
+| 10 | **Apply by hunk, and Rector level stepping** (`withPhpLevel`); selecting files by rule is done | Answers "Rector changed too much" | S–M |
 | 11 | **Lint and run tests with a local PHP of the target version** (Herd, Homebrew, phpenv are already detected) | Most of "Live test" without Docker | M |
 | 12 | **Compare targets side by side**: score, breaking findings and blocking packages for 8.2–8.5 | Helps choose between 8.3 and going straight to 8.5 | S–M |
 | 13 | **Docker "Live test"**: official `php:X.Y-cli` images with the project's extensions, `php -l`, then the test suite on the current and target versions, feeding item 7 | Covers behavior changes; turns "Coming soon" into a real feature | L |
