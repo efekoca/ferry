@@ -26,27 +26,29 @@ Tüm tokenlar `src/styles/tokens.css` içinde CSS değişkeni olarak tanımlıd�
 
 | Token | Açık | Koyu | Kullanım |
 |---|---|---|---|
-| `--bg` | `#F6F6F8` | `#0D0D11` | Uygulama zemini |
-| `--surface` | `#FFFFFF` | `#15151A` | Kart, panel |
-| `--surface-2` | `#F1F1F4` | `#1C1C22` | İç içe yüzey, hover |
-| `--surface-3` | `#E9E9EE` | `#24242B` | Basılı, seçili satır |
-| `--border` | `#E3E3E8` | `#26262E` | Varsayılan çizgi |
-| `--border-strong` | `#D0D0D8` | `#34343E` | Belirgin ayırıcı, seçenek kartı |
-| `--border-input` | `#84848F` | `#70707E` | Girdi, onay kutusu ve seçili segment kenarı (zemine karşı en az 3:1) |
+| `--bg` | `#F6F6F9` | `#0E0D1A` | Uygulama zemini |
+| `--surface` | `#FFFFFF` | `#151424` | Kart, panel |
+| `--surface-2` | `#F1F1F4` | `#1C1B2E` | İç içe yüzey, hover |
+| `--surface-3` | `#E9E9EE` | `#242338` | Basılı, seçili satır |
+| `--border` | `#E3E3E8` | `#27263A` | Varsayılan çizgi |
+| `--border-strong` | `#D0D0D8` | `#35344A` | Belirgin ayırıcı, seçenek kartı |
+| `--border-input` | `#84848F` | `#706F86` | Girdi, onay kutusu ve seçili segment kenarı (zemine karşı en az 3:1) |
 | `--text` | `#16161D` | `#ECECF1` | Birincil metin |
-| `--text-2` | `#585866` | `#A3A3B0` | İkincil metin |
-| `--text-3` | `#646471` | `#8A8A97` | İpucu, devre dışı (her yüzeyde en az 4.5:1) |
+| `--text-2` | `#585866` | `#A4A3B6` | İkincil metin |
+| `--text-3` | `#646471` | `#8B8AA0` | İpucu, devre dışı (her yüzeyde en az 4.5:1) |
 
 ### Renk — marka
 
 | Token | Açık | Koyu | Kullanım |
 |---|---|---|---|
-| `--accent` | `#2156D9` | `#5B9BFF` | Birincil buton, seçim, odak |
-| `--accent-hover` | `#1A47BD` | `#7AAEFF` | Hover |
-| `--accent-soft` | `#2156D91A` | `#5B9BFF24` | Seçili gezinme öğesi zemini |
-| `--accent-fg` | `#FFFFFF` | `#0D0D11` | Vurgu üstündeki metin |
+| `--accent` | `#4B4FC4` | `#8C90E6` | Birincil buton, seçim, odak |
+| `--accent-hover` | `#3F42AD` | `#A3A6EE` | Hover |
+| `--accent-soft` | `#4B4FC41A` | `#8C90E624` | Seçili gezinme öğesi zemini |
+| `--accent-fg` | `#FFFFFF` | `#121128` | Vurgu üstündeki metin |
 
-Vurgu rengi Ferry logosundaki denizden gelir: güven veren, doygun bir mavi.
+Vurgu rengi Ferry logosundaki küçük yelkenden gelir: PHP'nin lavanta tonu. Koyu temada logodaki
+`#8C90E6` doğrudan kullanılır; açık temada beyaz zemin üstünde okunabilsin diye koyulaştırılmış
+indigo kullanılır. Koyu yüzeyler logonun mürekkep zeminine (`#121128`) doğru hafifçe morumsudur.
 
 ### Renk — risk ve durum
 
