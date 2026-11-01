@@ -59,6 +59,8 @@ export const en: Dict = {
     toolsChecking: "Checking tools…",
     phpMissing: "PHP not found",
     rectorMissing: "Rector not installed",
+    phpVulnerable: (v: string) => `PHP ${v} has a security vulnerability`,
+    phpVulnerableHint: "Open Settings for details",
   },
   welcome: {
     title: "Get your code ready for the new PHP",
