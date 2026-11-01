@@ -33,7 +33,7 @@ pub struct ProjectInfo {
 pub(crate) const PHP_EXTENSIONS: [&str; 13] =
     ["php", "phtml", "inc", "module", "php3", "php4", "php5", "php7", "install", "theme", "profile", "engine", "ctp"];
 
-const ALWAYS_SKIP: [&str; 8] = ["vendor", "node_modules", ".git", ".svn", ".hg", ".idea", ".vscode", ".ferry"];
+pub(crate) const ALWAYS_SKIP: [&str; 8] = ["vendor", "node_modules", ".git", ".svn", ".hg", ".idea", ".vscode", ".ferry"];
 
 pub(crate) const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
 
