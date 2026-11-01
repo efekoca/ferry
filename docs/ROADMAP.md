@@ -12,12 +12,8 @@ Ferry covers roughly half of the PHP 7.0–8.5 change catalog. Function, constan
 
 | Change | Version | Detection | Size |
 |---|---|---|---|
-| A project function or class that redeclares a name PHP added later, without a `function_exists`/`class_exists` guard, such as `str_contains`, `array_key_first`, `mb_ucfirst`, `array_find`, `array_first`, `class Error`, `Override`, `Deprecated`. "Cannot redeclare" stops the file. | 7.0–8.5 | A name → version-added table generated from php-src stubs; flag global declarations that are newer than the current version and not newer than the target, unless guarded | M |
-| A non-static method called statically (`Helper::format()`) | Error in 8.0 | Resolve `Class::method(` through the index; skip `parent::`/`self::`/`static::` from instance context | S |
-| `preg_replace` with the `/e` modifier: the call returns null and data is lost | 7.0 | Parse the delimiter and modifiers of literal patterns | S |
-| Too few arguments to project functions, methods and constructors (`ArgumentCountError`) | 7.1 | Compare positional argument counts with required parameter counts from the index | M |
+| Too few arguments to project methods and constructors (`ArgumentCountError`); plain functions are done | 7.1 | Compare positional argument counts with required parameter counts from the index | M |
 | Wrong argument count for built-in functions, such as `mktime()` with no arguments, `crypt($pw)`, extra arguments | 8.0 | An arity table generated from stubs | M |
-| Resources that became objects: `is_resource($ch)`, `get_resource_type()`, `(int)$handle` on curl, gd, xml, openssl, sockets, ftp, ldap, pgsql, finfo, imap, odbc and dba handles. `if (!is_resource($ch))` now always takes the failure branch | 8.0, 8.1, 8.4 | Same-function dataflow from the creating function | M |
 | Error handlers written for PHP 7: `if (error_reporting() == 0)` to detect `@`, and handlers with a required fifth `$errcontext` parameter | 8.0 | Pattern plus resolving the callable passed to `set_error_handler` | S |
 | `set_exception_handler` callbacks typed `Exception` (an `Error` gives a TypeError) | 7.0 | Resolve the callable | S |
 | `parent::` in a class without a parent (Rector already fixes it, but Ferry doesn't report it) | 8.0 | Index | S |
@@ -41,12 +37,6 @@ Ferry covers roughly half of the PHP 7.0–8.5 change catalog. Function, constan
 - Locale-dependent code: since 8.0 floats are converted to strings without the locale, and since 8.2 `strtolower` and related functions are ASCII-only. This matters for Turkish (`tr_TR`) projects.
 - Sort callbacks that return a bool (8.0 deprecation, plus stable sorting).
 - Literal regex patterns that PCRE2 rejects (`[\w-.]` in 7.3, invalid escapes in 8.0, `{,3}` in 8.4).
-
-### Fixes to existing rules
-
-- `PDO::PGSQL_TRANSACTION_*` suggests `Pdo\Pgsql::*`, but those constants are deprecated in 8.5 too. *(verify the right replacement)*
-- `intlcal_set` and `intlgregcal_create_instance` are flagged on every call; 8.4 may only deprecate some forms. *(verify)*
-- `array_first` and `array_last` in `LARAVEL_HELPERS`: PHP 8.5 adds built-in functions with these names. With `laravel/helpers` the built-in wins and `array_first($array, $callback)` throws `ArgumentCountError`, so "install laravel/helpers" is the wrong advice for an 8.5 target. *(verify)*
 
 ### Out of reach for static analysis
 

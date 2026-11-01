@@ -70,6 +70,7 @@ Ferry has its own PHP lexer and rule set, so it reads code the way PHP does: met
 - methods that override a built-in class or interface method with a signature PHP 8 rejects, such as Drupal 7's `query($query, array $args = array(), $options = array())` on a `PDO` subclass, which stops the class from loading
 - methods that override a parent class, trait or interface method in the project with a signature PHP 8 rejects, such as phpBB 3.2's `create_insert_array($user, $pre_create_data)` making a parameter required that the parent declares optional, which was only a warning in PHP 7
 - methods that override a built-in class or interface without a return type, such as `PDO::query()` or `Iterator::current()`, which need `#[\ReturnTypeWillChange]` from PHP 8.1
+- code that stops working on a newer version, such as a function or class PHP added later (`str_contains()`, `JsonException`) declared without a `function_exists()` check, `Class::method()` on a non-static method, calls with too few arguments, the `preg_replace()` `/e` modifier, and `is_resource()` on curl, GD or pgsql handles that are now objects
 - code worth a manual check, such as `eval()`, `extract()`, and variable variables
 
 ### Review every change before it is applied
@@ -207,12 +208,12 @@ Everything runs on your computer:
 
 ## Known limitations
 
-- **Static analysis:** the scan reads code without running it, so behavior that depends on runtime values (for example, functions called by name from a string) can't always be found. Such cases are marked **Risky** where possible. Code that only runs on older versions, such as the body of `if (PHP_VERSION_ID < 80100)`, `version_compare(PHP_VERSION, '8.0', '<')`, the unreachable side of a version ternary or `&&`, code after `if (PHP_VERSION_ID >= 80000) { return …; }`, or `if (function_exists('mysql_connect'))`, is skipped. Syntax that PHP rejects or deprecates while compiling, such as `$str{0}` or `(double)`, is still reported there, because PHP compiles the whole file even if that branch never runs. Functions you define yourself with a removed name, for example an `each()` polyfill or a `mysql_*` shim loaded through Composer, are not reported.
+- **Static analysis:** the scan reads code without running it, so behavior that depends on runtime values (for example, functions called by name from a string) can't always be found. Such cases are marked **Risky** where possible. Code that only runs on older versions, such as the body of `if (PHP_VERSION_ID < 80100)`, `version_compare(PHP_VERSION, '8.0', '<')`, the unreachable side of a version ternary or `&&`, code after `if (PHP_VERSION_ID >= 80000) { return …; }`, or `if (function_exists('mysql_connect'))`, is skipped. Syntax that PHP rejects or deprecates while compiling, such as `$str{0}` or `(double)`, is still reported there, because PHP compiles the whole file even if that branch never runs. Functions you define yourself with a removed name, for example an `each()` polyfill or a `mysql_*` shim loaded through Composer, are not reported. The opposite case is: a function or class that PHP added later, such as `str_contains()` or `JsonException`, declared without a `function_exists()` or `class_exists()` check stops the file from loading. Files that are only included behind a version check are skipped.
 - **Behavior changes:** some changes only show up when the code runs, so no static tool can find them. Test these by running your app on the new version:
   - `0 == "foo"` is now `false`, which also affects `in_array()`, `array_search()` and `switch`.
   - Arithmetic on non-numeric strings throws a `TypeError`.
   - Many warnings became exceptions, for example `count()` on a non-countable value.
-  - Resources such as curl, GD and XML handles are now objects, so `is_resource()` checks fail.
+  - Resources such as curl, GD and XML handles are now objects, so `is_resource()` checks fail. Ferry reports the check when the same file assigns the handle, for example `$ch = curl_init()` followed by `is_resource($ch)`, but not when the handle comes from somewhere else.
   - PDO MySQL and SQLite return real integers and floats, so `=== "1"` comparisons fail.
   - Passing `null` through a variable to a built-in function is deprecated. Ferry reports a literal `null`, but can't see what a variable holds.
   - Dynamic properties are deprecated. Ferry follows parent classes and traits inside your project, but skips classes that extend something it can't see, such as a framework class in `vendor/`, because that parent could declare the property.
