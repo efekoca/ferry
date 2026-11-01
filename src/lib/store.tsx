@@ -127,6 +127,8 @@ interface AppStore {
   ignoreFinding(id: string, reason: string): Promise<boolean>;
   unignoreFinding(id: string): Promise<boolean>;
   pruneIgnores(): Promise<boolean>;
+  importRuntimeLog(): Promise<boolean>;
+  clearRuntimeLog(): Promise<boolean>;
 }
 
 const StoreContext = createContext<AppStore | null>(null);
@@ -457,7 +459,7 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
   }, [api, project, scan, target, toast, fail, t]);
 
   const updateIgnores = useCallback(
-    async (change: (root: string) => Promise<ScanResult>) => {
+    async (change: (root: string) => Promise<ScanResult>, failure?: string) => {
       if (!project) return false;
       const gen = generation.current;
       try {
@@ -465,7 +467,7 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
         if (gen === generation.current) setScan((prev) => ({ ...result, progress: result.progress ?? prev?.progress ?? null }));
         return true;
       } catch (e) {
-        fail(t.toast.ignoreFailed, e);
+        fail(failure ?? t.toast.ignoreFailed, e);
         return false;
       }
     },
@@ -485,18 +487,36 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
     [api, updateIgnores],
   );
 
+  const importRuntimeLog = useCallback(async () => {
+    if (!api) return false;
+    let log: string | null;
+    try {
+      log = await api.pickLogFile(t.dialogs.pickLog);
+    } catch (e) {
+      fail(t.toast.runtimeFailed, e);
+      return false;
+    }
+    if (!log) return false;
+    const picked = log;
+    return updateIgnores((root) => api.importRuntimeLog(root, picked), t.toast.runtimeFailed);
+  }, [api, updateIgnores, fail, t]);
+  const clearRuntimeLog = useCallback(
+    () => (api ? updateIgnores((root) => api.clearRuntimeLog(root), t.toast.runtimeFailed) : Promise.resolve(false)),
+    [api, updateIgnores, t],
+  );
+
   const value = useMemo<AppStore>(
     () => ({
       api, view, setView, findingsFilter, setFindingsFilter, showFindings, theme, setTheme, recent, forgetRecent, project, opening, openProject, closeProject,
       target, setTarget, scan, scanning, progress, runScan, deps, toolchain, refreshToolchain, installingRector,
       installRector, preview, previewMode, previewing, loadPreview, cancelPreview, applying, applyChanges, snapshots,
-      refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport, ignoreFinding, unignoreFinding, pruneIgnores,
+      refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport, ignoreFinding, unignoreFinding, pruneIgnores, importRuntimeLog, clearRuntimeLog,
     }),
     [
       api, view, findingsFilter, showFindings, theme, setTheme, recent, forgetRecent, project, opening, openProject, closeProject, target,
       setTarget, scan, scanning, progress, runScan, deps, toolchain, refreshToolchain, installingRector,
       installRector, preview, previewMode, previewing, loadPreview, cancelPreview, applying, applyChanges, snapshots,
-      refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport, ignoreFinding, unignoreFinding, pruneIgnores,
+      refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport, ignoreFinding, unignoreFinding, pruneIgnores, importRuntimeLog, clearRuntimeLog,
     ],
   );
 

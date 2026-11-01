@@ -20,6 +20,9 @@ export interface Api {
   pickProjectFolder(title: string): Promise<string | null>;
   pickSaveFile(defaultName: string): Promise<string | null>;
   pickPhpBinary(title: string): Promise<string | null>;
+  pickLogFile(title: string): Promise<string | null>;
+  importRuntimeLog(path: string, log: string): Promise<ScanResult>;
+  clearRuntimeLog(path: string): Promise<ScanResult>;
   inspectProject(path: string): Promise<ProjectInfo>;
   scanProject(path: string, target: string, run: number): Promise<ScanResult>;
   onScanProgress(handler: (p: ScanProgress) => void): Promise<() => void>;
@@ -66,6 +69,9 @@ async function tauriApi(): Promise<Api> {
     pickSaveFile: (defaultName) =>
       dialog.save({ defaultPath: defaultName, filters: [{ name: "Markdown", extensions: ["md"] }] }),
     pickPhpBinary: async (title) => single(await dialog.open({ multiple: false, title })),
+    pickLogFile: async (title) => single(await dialog.open({ multiple: false, title })),
+    importRuntimeLog: (path, log) => invoke("import_runtime_log", { path, log }),
+    clearRuntimeLog: (path) => invoke("clear_runtime_log", { path }),
     inspectProject: (path) => invoke("inspect_project", { path }),
     scanProject: (path, target, run) => invoke("scan_project", { path, target, run }),
     onScanProgress: (handler) => listen<ScanProgress>("scan://progress", (e) => handler(e.payload)),
