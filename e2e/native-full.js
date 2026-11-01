@@ -17,6 +17,7 @@
     }
     throw new Error(`timeout: ${what}`);
   };
+  const settles = (fn, ms = 5000) => until(fn, "", ms).then(() => true, () => false);
   const $ = (s, scope = document) => scope.querySelector(s);
   const $$ = (s, scope = document) => [...scope.querySelectorAll(s)];
   const button = (text, scope = document) =>
@@ -133,8 +134,7 @@
       await openRecent(projects.kuzey);
       await emit(`  chip=${$(".project-chip__name")?.textContent} platform=${text().match(/Platform\s*\n?\s*(\S+)/)?.[1]}`);
       key("2");
-      await sleep(300);
-      check(text().includes("Henüz tarama yapılmadı"), "Cmd+2 should open empty findings");
+      check(await settles(() => text().includes("Henüz tarama yapılmadı")), "Cmd+2 should open empty findings");
       key("1");
       await sleep(300);
       const score = await scan();
@@ -178,8 +178,7 @@
       await emit(`  preview ${files.length}: ${files.join(", ")}`);
       check(files.length >= 2, "kuzey preview should change several files");
       $$(".change-item input[type=checkbox]")[0].click();
-      await sleep(200);
-      check(text().includes(`${files.length - 1} / ${files.length} dosya seçili`), "unchecking one file updates count");
+      check(await settles(() => text().includes(`${files.length - 1} / ${files.length} dosya seçili`)), "unchecking one file updates count");
       await applyAndConfirm();
       const left = $$(".change-item__file").map((e) => e.textContent);
       check(left.length === 1 && left[0] === files[0], `unapplied file stays listed: ${left}`);
@@ -263,8 +262,7 @@
       radio("Modernleştirme").click();
       if (button("Durdur")) check(button("uygula", $(".apply-bar")) === undefined, "apply is disabled while recalculating");
       await until(() => !$$("button").some((b) => b.textContent.includes("Durdur")), "modern preview", 300000);
-      await sleep(300);
-      check(radio("Modernleştirme").getAttribute("aria-checked") === "true", "modernize stays selected");
+      check(await settles(() => radio("Modernleştirme").getAttribute("aria-checked") === "true"), "modernize stays selected");
       const modern = $$(".change-item__file").map((e) => e.textContent);
       await emit(`  compat=${compat.length} modern=${modern.length}: ${modern.join(", ")}`);
       check(modern.length >= compat.length, "modernize covers at least the compat files");
@@ -317,8 +315,7 @@
       await emit(`  deps: ${$("main").innerText.replace(/\n+/g, " / ").slice(0, 500)}`);
       check(text().includes("acme/dev"), "dev package listed");
       radio("Sadece üretim").click();
-      await sleep(300);
-      check(!text().includes("acme/dev") && text().includes("acme/x"), "production filter hides dev packages");
+      check(await settles(() => !text().includes("acme/dev") && text().includes("acme/x")), "production filter hides dev packages");
       radio("Tümü").click();
       const files = await preview();
       await emit(`  preview: ${files.join(", ")}`);
@@ -355,8 +352,7 @@
       key(",");
       await until(() => text().includes("Görünüm"), "settings via Cmd+,");
       radio("Koyu").click();
-      await sleep(200);
-      check(document.documentElement.dataset.theme === "dark", "dark theme");
+      check(await settles(() => document.documentElement.dataset.theme === "dark"), "dark theme");
       radio("English").click();
       await until(() => text().includes("Appearance"), "english");
       check(document.documentElement.lang === "en", "lang attr");

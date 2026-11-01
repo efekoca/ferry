@@ -1285,7 +1285,7 @@ fn call_args(tokens: &[Token], open: usize) -> Vec<&[Token]> {
     args
 }
 
-const RESERVED_CLASS_NAMES: [(&str, u32, u32); 12] = [
+const RESERVED_CLASS_NAMES: [(&str, u32, u32); 15] = [
     ("int", 7, 0),
     ("float", 7, 0),
     ("bool", 7, 0),
@@ -1298,6 +1298,9 @@ const RESERVED_CLASS_NAMES: [(&str, u32, u32); 12] = [
     ("object", 7, 2),
     ("mixed", 8, 0),
     ("never", 8, 1),
+    ("fn", 7, 4),
+    ("match", 8, 0),
+    ("readonly", 8, 1),
 ];
 
 fn expression_end(t: &Token) -> bool {
@@ -3921,5 +3924,19 @@ mod call_tests {
         let src = "<?php\nclass Cart {\n    function __construct($id, $owner) {}\n    function add($item, $qty = 1) {}\n    static function load($id) {}\n    function run() {\n        $this->add();\n        $this->add($x);\n        self::load();\n    }\n}\nclass Shop extends Cart {}\nnew Cart(1);\nnew Shop();\nnew Cart(1, 2);\nCart::load();";
         let lines: Vec<usize> = found(src, "8.0").into_iter().filter(|(_, r)| r == "removed.too_few_arguments").map(|(l, _)| l).collect();
         assert_eq!(lines, [7, 9, 13, 14, 16]);
+    }
+}
+
+#[cfg(test)]
+mod keyword_tests {
+    use super::*;
+
+    #[test]
+    fn keywords_used_as_class_names() {
+        let src = "<?php\nuse Lib\\Match;\nclass Fn {}\nclass Readonly {}\nclass Enum {}\nclass Matcher { public function match() {} }";
+        let found: Vec<(usize, String)> =
+            analyze_source("t.php", src, "8.2".parse().unwrap()).into_iter().map(|f| (f.line, f.rule_id)).collect();
+        assert_eq!(found.iter().map(|(l, _)| *l).collect::<Vec<_>>(), [2, 3, 4]);
+        assert!(analyze_source("t.php", src, "7.3".parse().unwrap()).is_empty());
     }
 }
