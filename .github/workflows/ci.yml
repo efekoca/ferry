@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     tags: ["v*"]
-    paths-ignore: ["**.md", "docs/**", "LICENSE"]
+    paths: ["Cargo.lock", "**/Cargo.toml", "pnpm-lock.yaml", "package.json", ".github/workflows/**"]
   pull_request:
   workflow_dispatch:
     inputs:
@@ -22,7 +22,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+      - id: diff
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != "pull_request" ]; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only HEAD^1 HEAD | grep -qvE '(\.md$|^docs/|^assets/|^LICENSE$)'; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "code=false" >> "$GITHUB_OUTPUT"
+          fi
+
   checks:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -58,6 +79,8 @@ jobs:
           cargo test -p ferry-core
 
   windows:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: windows-latest
     timeout-minutes: 40
     steps:
@@ -89,6 +112,8 @@ jobs:
         run: pnpm e2e:native
 
   linux:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-22.04
     timeout-minutes: 40
     steps:
