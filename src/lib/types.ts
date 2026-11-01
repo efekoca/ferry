@@ -54,6 +54,13 @@ export interface IgnoredFinding {
   reason: string;
 }
 
+export interface IgnoreEntry {
+  ruleId: string;
+  file: string;
+  snippet: string;
+  reason: string;
+}
+
 export interface ScanResult {
   target: string;
   filesScanned: number;
@@ -63,6 +70,7 @@ export interface ScanResult {
   durationMs: number;
   summary: Summary;
   ignored: IgnoredFinding[];
+  staleIgnores: IgnoreEntry[];
 }
 
 export interface ScanProgress {

@@ -294,7 +294,11 @@ fn run(o: &Options) -> Result<bool, String> {
     let info = project::inspect(&root).map_err(|e| e.to_string())?;
     let files = project::collect_php_files(&root, &info.excluded_dirs);
     let scan = analyzer::analyze_files(&root, &files, o.target, |_, _, _| {});
-    let (findings, ignored) = ignore::split(scan.findings, &ignore::load(&root));
+    let applied = ignore::apply(&root, scan.findings, &ignore::load(&root));
+    let (findings, ignored) = (applied.kept, applied.ignored);
+    for stale in &applied.stale {
+        eprintln!("ferry-cli: .ferry/ignore.json entry for {} in {} no longer matches any code", stale.rule_id, stale.file);
+    }
     let summary = report::summarize(&findings);
     let rendered = match o.format {
         Format::Text => render_text(&findings, &ignored, &summary, o),

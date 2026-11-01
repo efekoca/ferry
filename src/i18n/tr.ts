@@ -180,6 +180,8 @@ export const tr = {
     ignoredTitle: (n: number) => `${n} yok sayılan bulgu`,
     ignoredReason: "Yok sayma gerekçesi",
     unignore: "Yeniden göster",
+    staleIgnores: (n: number) => `.ferry/ignore.json içindeki ${n} kayıt artık hiçbir kodla eşleşmiyor; kod değişmiş ya da silinmiş olabilir.`,
+    pruneIgnores: "Bu kayıtları sil",
   },
   changes: {
     title: "Düzeltmeler",
