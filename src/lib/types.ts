@@ -131,6 +131,25 @@ export interface DependencyReport {
   packages: Dependency[];
   hasLockFile: boolean;
   extensions: ExtensionUse[];
+  wordpress: WpComponent[];
+}
+
+export interface WpComponent {
+  kind: "plugin" | "theme";
+  slug: string;
+  name: string;
+  version: string | null;
+  requiresPhp: string | null;
+  dir: string;
+}
+
+export interface WpLatest {
+  kind: "plugin" | "theme";
+  slug: string;
+  version: string | null;
+  requiresPhp: string | null;
+  lastUpdated: string | null;
+  closed: boolean;
 }
 
 export interface VersionSuggestion {

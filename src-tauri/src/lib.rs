@@ -395,6 +395,39 @@ async fn check_dependencies(state: State<'_, AppState>, path: String, target: St
 }
 
 #[derive(Deserialize)]
+struct WpItem {
+    kind: String,
+    slug: String,
+}
+
+#[tauri::command]
+async fn wordpress_latest(items: Vec<WpItem>) -> CmdResult<Vec<ferry_core::wordpress::Latest>> {
+    let curl = toolchain::find_executable("curl").ok_or_else(|| t!("curl bulunamadı.", "curl was not found."))?;
+    blocking(move || {
+        let fetch = |item: &WpItem| {
+            let url = ferry_core::wordpress::api_url(&item.kind, &item.slug)?;
+            let out = toolchain::command(&curl).args(["-sSL", "--max-time", "20", &url]).output().ok()?;
+            ferry_core::wordpress::parse_latest(&item.kind, &item.slug, &String::from_utf8_lossy(&out.stdout))
+        };
+        let mut out = Vec::new();
+        for chunk in items.chunks(8) {
+            let results: Vec<_> = std::thread::scope(|s| {
+                chunk.iter().map(|i| s.spawn(move || fetch(i))).collect::<Vec<_>>().into_iter().map(|h| h.join().ok().flatten()).collect()
+            });
+            out.extend(results.into_iter().flatten());
+        }
+        if !items.is_empty() && out.is_empty() {
+            return Err(t!(
+                "api.wordpress.org'a ulaşılamadı ya da hiçbir eklenti orada yayımlanmıyor.",
+                "Couldn't reach api.wordpress.org, or none of these are published there."
+            ));
+        }
+        Ok(out)
+    })
+    .await
+}
+
+#[derive(Deserialize)]
 struct LockedPackage {
     name: String,
     version: String,
@@ -768,6 +801,7 @@ pub fn with_commands<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R
         scan_project,
         check_dependencies,
         find_compatible_versions,
+        wordpress_latest,
         toolchain_status,
         install_rector,
         rector_preview,
