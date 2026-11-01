@@ -373,10 +373,10 @@ pub const FUNCTIONS: &[SymbolRule] = &[
     rule!("deprecated.openssl_pkey_free", "openssl_pkey_free", D, (8, 0), REMOVE_CALL, M, NOOP_SINCE_80),
     rule!("deprecated.openssl_free_key", "openssl_free_key", D, (8, 0), REMOVE_CALL, M, NOOP_SINCE_80),
     rule!("deprecated.shmop_close", "shmop_close", D, (8, 0), REMOVE_CALL, M, NOOP_SINCE_80),
-    rule!("deprecated.intlcal_set", "intlcal_set", D, (8, 4), tx("IntlCalendar::setDate() ya da setDateTime()", "IntlCalendar::setDate() or setDateTime()"), M, Text::new(
+    rule!("deprecated.intlcal_set", "intlcal_set", D, (8, 4), tx("IntlCalendar::set(), setDate() ya da setDateTime()", "IntlCalendar::set(), setDate() or setDateTime()"), M, Text::new(
         "intlcal_set() 8.4'te kullanımdan kalktı.",
         "intlcal_set() is deprecated in 8.4.")),
-    rule!("deprecated.intlgregcal_create_instance", "intlgregcal_create_instance", D, (8, 4), tx("IntlGregorianCalendar::createFromDate() ya da createFromDateTime()", "IntlGregorianCalendar::createFromDate() or createFromDateTime()"), M, Text::new(
+    rule!("deprecated.intlgregcal_create_instance", "intlgregcal_create_instance", D, (8, 4), tx("new IntlGregorianCalendar(), createFromDate() ya da createFromDateTime()", "new IntlGregorianCalendar(), createFromDate() or createFromDateTime()"), M, Text::new(
         "intlgregcal_create_instance() 8.4'te kullanımdan kalktı.",
         "intlgregcal_create_instance() is deprecated in 8.4.")),
     rule!("removed.mbregex_encoding", "mbregex_encoding", R, (8, 0), code("mb_regex_encoding"), A, REMOVED_ALIAS),
@@ -770,9 +770,9 @@ pub const MEMBERS: &[MemberRule] = &[
             "transaction_*",
             D,
             (8, 5),
-            code("pg_transaction_status()"),
+            REMOVE_USE,
             M,
-            Text::new("Pdo\\Pgsql'in işlem durumu sabitleri 8.5'te kullanımdan kalktı.", "Pdo\\Pgsql's transaction state constants are deprecated in 8.5.")
+            PGSQL_TRANSACTION
         ),
     ),
     member(
@@ -864,6 +864,7 @@ pub const MEMBERS: &[MemberRule] = &[
     member(Mt, "reflectionparameter", rule!("deprecated.reflection_method", "getclass", D, (8, 0), code("getType()"), M, REFLECTION_TYPE)),
     member(Mt, "reflectionparameter", rule!("deprecated.reflection_method", "isarray", D, (8, 0), code("getType()"), M, REFLECTION_TYPE)),
     member(Mt, "reflectionparameter", rule!("deprecated.reflection_method", "iscallable", D, (8, 0), code("getType()"), M, REFLECTION_TYPE)),
+    member(K, "pdo", rule!("deprecated.pgsql_transaction_constant", "pgsql_transaction_*", D, (8, 5), REMOVE_USE, M, PGSQL_TRANSACTION)),
     member(K, "pdo", rule!("deprecated.pdo_driver_constant", "pgsql_*", D, (8, 5), code("Pdo\\Pgsql::*"), A, PDO_DRIVER)),
     member(K, "pdo", rule!("deprecated.pdo_driver_constant", "sqlite_*", D, (8, 5), code("Pdo\\Sqlite::*"), A, PDO_DRIVER)),
     member(K, "pdo", rule!("deprecated.pdo_driver_constant", "odbc_*", D, (8, 5), code("Pdo\\Odbc::*"), A, PDO_DRIVER)),
@@ -964,6 +965,10 @@ const WAKEUP: Text = Text::new(
 const REFLECTION_TYPE: Text = Text::new(
     "Bu ReflectionParameter metodu 8.0'da kullanımdan kalktı; parametrenin tipini getType() ve ReflectionNamedType ile okuyun.",
     "This ReflectionParameter method is deprecated in 8.0; read the parameter type with getType() and ReflectionNamedType.",
+);
+const PGSQL_TRANSACTION: Text = Text::new(
+    "PDO'nun PostgreSQL işlem durumu sabitleri hiçbir işe yaramadığı için 8.5'te kullanımdan kalktı. Pdo\\Pgsql::TRANSACTION_* da kullanımdan kalktığı için yerine geçen bir sabit yok; kullanımı silin, işlem durumunu PDO::inTransaction() ile kontrol edin.",
+    "PDO's PostgreSQL transaction state constants have no effect and are deprecated in 8.5. Pdo\\Pgsql::TRANSACTION_* is deprecated too, so there is no replacement; remove the use and check the state with PDO::inTransaction().",
 );
 const PDO_DRIVER: Text = Text::new(
     "PDO'nun sürücüye özel sabitleri 8.5'te kullanımdan kalktı; sürücünün kendi sınıfındaki sabiti kullanın.",
@@ -1154,6 +1159,18 @@ pub mod patterns {
         note: Text::new(
             "define()'ın üçüncü parametresi PHP 8.0'da kaldırıldı. Sabite farklı harf büyüklüğüyle erişen yerler artık çalışmaz.",
             "The third argument of define() was removed in PHP 8.0. Code that reads the constant with different casing stops working.",
+        ),
+    };
+    pub const LARAVEL_NATIVE_ARRAY_FIRST: PatternRule = PatternRule {
+        id: "framework.laravel_native_array_first",
+        title: Text::new("Callback'li array_first() / array_last()", "array_first() / array_last() with a callback"),
+        severity: Severity::Breaking,
+        since: (8, 5),
+        replacement: code("Arr::first() / Arr::last()"),
+        fix: FixKind::Manual,
+        note: Text::new(
+            "PHP 8.5 kendi array_first() ve array_last() fonksiyonlarını ekledi; bunlar yalnızca diziyi alır. laravel/helpers aynı adı tanımlamadan önce function_exists() ile kontrol ettiği için PHP'nin fonksiyonu çağrılır ve callback ya da varsayılan değer verilen çağrı ArgumentCountError fırlatır. Illuminate\\Support\\Arr::first() ya da Arr::last() kullanın.",
+            "PHP 8.5 adds its own array_first() and array_last(), which take only the array. laravel/helpers checks function_exists() before defining them, so PHP's function is called and a call with a callback or default throws ArgumentCountError. Use Illuminate\\Support\\Arr::first() or Arr::last().",
         ),
     };
     pub const PARSE_STR_ONE_ARG: PatternRule = PatternRule {
