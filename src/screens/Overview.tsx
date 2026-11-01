@@ -167,8 +167,14 @@ export function Overview() {
                       {t.overview.scanMeta(fmt(scan.filesScanned), fmt(scan.linesScanned), formatDuration(scan.durationMs, t.locale))}
                     </span>
                   </div>
-                  <h2>{scoreHeadline(s.score, s.total, t)}</h2>
-                  <p>{s.total === 0 ? t.overview.clean : t.overview.summary(s.total, s.filesAffected, s.auto + s.likely)}</p>
+                  <h2>{scoreHeadline(s.score, s.total, t, scan.errors.length > 0)}</h2>
+                  <p>
+                    {s.total > 0
+                      ? t.overview.summary(s.total, s.filesAffected, s.auto + s.likely)
+                      : scan.errors.length > 0
+                        ? t.overview.cleanPartial
+                        : t.overview.clean}
+                  </p>
                 </div>
                 {s.total > 0 && (
                   <div className="fix-tiles">
@@ -178,6 +184,15 @@ export function Overview() {
                   </div>
                 )}
               </Card>
+
+              {scan.errors.length > 0 && (
+                <Callout tone="warn" icon={<CircleAlert size={16} />}>
+                  {t.overview.unreadable(
+                    scan.errors.length,
+                    scan.errors.slice(0, 3).map((e) => e.file).join(", ") + (scan.errors.length > 3 ? "…" : ""),
+                  )}
+                </Callout>
+              )}
 
               {frameworkBlockers.map((f) => {
                 const [lead, ...rest] = loc(f.message).split(/(?<=\.) /);
@@ -293,14 +308,6 @@ export function Overview() {
                 </Card>
               </div>
 
-              {scan.errors.length > 0 && (
-                <Callout tone="warn" icon={<CircleAlert size={16} />}>
-                  {t.overview.unreadable(
-                    scan.errors.length,
-                    scan.errors.slice(0, 3).map((e) => e.file).join(", ") + (scan.errors.length > 3 ? "…" : ""),
-                  )}
-                </Callout>
-              )}
             </>
           )}
         </div>

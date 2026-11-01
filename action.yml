@@ -19,6 +19,9 @@ inputs:
   sarif:
     description: Also write ferry.sarif for upload to GitHub code scanning
     default: "false"
+  allow-incomplete:
+    description: Don't fail the job when some files couldn't be scanned
+    default: "false"
 runs:
   using: composite
   steps:
@@ -35,8 +38,10 @@ runs:
         FAIL_ON: ${{ inputs.fail-on }}
         BASELINE: ${{ inputs.baseline }}
         SARIF: ${{ inputs.sarif }}
+        ALLOW_INCOMPLETE: ${{ inputs.allow-incomplete }}
       run: |
         args=(scan "$PROJECT" --target "$TARGET" --fail-on "$FAIL_ON")
         if [ -n "$BASELINE" ]; then args+=(--baseline "$BASELINE"); fi
-        if [ "$SARIF" = "true" ]; then ferry-cli "${args[@]}" --format sarif --output ferry.sarif --fail-on none; fi
+        if [ "$ALLOW_INCOMPLETE" = "true" ]; then args+=(--allow-incomplete); fi
+        if [ "$SARIF" = "true" ]; then ferry-cli "${args[@]}" --format sarif --output ferry.sarif --fail-on none --allow-incomplete; fi
         ferry-cli "${args[@]}" --format github
