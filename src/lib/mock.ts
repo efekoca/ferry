@@ -43,7 +43,7 @@ const NULLABLE = L(
 const NULLABLE_TITLE = L("Örtük nullable parametre", "Implicitly nullable parameter");
 const NULLABLE_REPL = L("?Tip $param = null", "?Type $param = null");
 
-type Seed = Omit<Finding, "id" | "column">;
+type Seed = Omit<Finding, "id" | "column" | "runtimeHits">;
 
 const SEEDS: Seed[] = [
   { file: "wp-includes/version.php", line: 16, ruleId: "framework.wordpress_version", title: same("WordPress 6.2"), message: L("WordPress 6.2, PHP 8.4 ile çalışmaz. PHP 8.4 için en az WordPress 6.7 gerekiyor; önce WordPress'i güncelleyin.", "WordPress 6.2 doesn't run on PHP 8.4. PHP 8.4 needs at least WordPress 6.7; update WordPress first."), since: "8.3", severity: "breaking", fix: "manual", replacement: same("WordPress 6.7+"), snippet: "$wp_version = '6.2.2';" },
@@ -156,6 +156,28 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
   const ignores = new Map<string, string>();
   let stale = opts.staleIgnores ?? [];
   let lastScan: ScanResult | null = null;
+  let runtimeLog: string | null = null;
+  const withRuntime = (findings: Finding[]): { findings: Finding[]; runtime: ScanResult["runtime"] } => {
+    if (!runtimeLog) return { findings: findings.map((f) => ({ ...f, runtimeHits: 0 })), runtime: null };
+    const hit = new Set(findings.filter((f) => f.ruleId.startsWith("removed.")).slice(0, 3).map((f) => f.id));
+    const marked = findings.filter((f) => !f.ruleId.startsWith("runtime.")).map((f) => ({ ...f, runtimeHits: hit.has(f.id) ? 12 : 0 }));
+    const extra: Finding = {
+      id: "includes/cart.php:44:1:runtime.warning",
+      file: "includes/cart.php",
+      line: 44,
+      column: 1,
+      ruleId: "runtime.warning",
+      title: L('Undefined array key "qty"', 'Undefined array key "qty"'),
+      message: L("Bu mesaj çalışma anı log'unda 7 kez görüldü; statik tarama burada bir şey bulmadı.", "This message appeared 7 times in the runtime log; the static scan found nothing here."),
+      since: "8.4",
+      severity: "behavior",
+      fix: "manual",
+      replacement: null,
+      snippet: "$qty = $item['qty'];",
+      runtimeHits: 7,
+    };
+    return { findings: [...marked, extra], runtime: { file: runtimeLog, events: 31, confirmed: hit.size, added: 1, outside: 4 } };
+  };
   const history = new Map<string, { at: number; score: number; total: number; ids: string[] }[]>();
   const track = (scan: ScanResult): ScanResult => {
     const list = history.get(scan.target) ?? [];
@@ -171,9 +193,10 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
   const withIgnores = (scan: ScanResult): ScanResult => {
     lastScan = scan;
     const all = [...scan.findings, ...scan.ignored.map((i) => i.finding)];
-    const findings = all.filter((f) => !ignores.has(f.id));
-    const ignored = all.filter((f) => ignores.has(f.id)).map((finding) => ({ finding, reason: ignores.get(finding.id)! }));
-    return { ...scan, findings, ignored, staleIgnores: stale, summary: summarize(findings) };
+    const merged = withRuntime(all);
+    const findings = merged.findings.filter((f) => !ignores.has(f.id));
+    const ignored = merged.findings.filter((f) => ignores.has(f.id)).map((finding) => ({ finding, reason: ignores.get(finding.id)! }));
+    return { ...scan, findings, ignored, staleIgnores: stale, runtime: merged.runtime, summary: summarize(findings) };
   };
   let pending = [...CHANGES];
   let cancelled = false;
@@ -196,6 +219,17 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
     pickProjectFolder: async () => MOCK_ROOT,
     pickSaveFile: async (name) => `/Users/demo/Desktop/${name}`,
     pickPhpBinary: async () => "/opt/homebrew/opt/php@8.4/bin/php",
+    pickLogFile: async () => "/var/log/php/php_errors.log",
+    importRuntimeLog: async (_path, log) => {
+      if (!lastScan) throw new Error("Scan the project first.");
+      runtimeLog = log.split("/").pop() ?? log;
+      return withIgnores(lastScan);
+    },
+    clearRuntimeLog: async () => {
+      if (!lastScan) throw new Error("Scan the project first.");
+      runtimeLog = null;
+      return withIgnores(lastScan);
+    },
     inspectProject: async (path): Promise<ProjectInfo> => {
       await sleep(delay / 3);
       return {
@@ -223,7 +257,7 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
       const findings: Finding[] = Array.from({ length: opts.scale ?? 1 }, (_, copy) =>
         seeds.map((s) => {
           const file = copy ? s.file.replace(/\.php$/, `-${copy}.php`) : s.file;
-          return { ...s, file, column: 9, id: `${file}:${s.line}:9:${s.ruleId}` };
+          return { ...s, file, column: 9, id: `${file}:${s.line}:9:${s.ruleId}`, runtimeHits: 0 };
         }),
       ).flat();
       return track(withIgnores({ target, filesScanned: total, linesScanned: 18432, findings, errors: [], durationMs: 184, summary: summarize(findings), ignored: [], staleIgnores: [] }));

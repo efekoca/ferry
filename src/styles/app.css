@@ -2818,3 +2818,12 @@ select.input {
   color: var(--text-2);
   font-variant-numeric: tabular-nums;
 }
+
+.detail__runtime {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+  color: var(--accent);
+  font-size: var(--text-sm);
+}

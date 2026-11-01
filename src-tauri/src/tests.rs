@@ -347,3 +347,30 @@ fn editor_links() {
     let err = h.invoke("open_in_editor", json!({ "path": h.root, "file": "../outside.php", "line": 1, "column": 1 })).unwrap_err();
     assert!(err.as_str().unwrap().contains("outside.php"));
 }
+
+#[test]
+fn runtime_logs_confirm_and_add_findings() {
+    let _lang = turkish();
+    let h = harness();
+    let root = h.root.clone();
+    h.ok("scan_project", json!({ "path": root, "target": "8.4", "run": 1 }));
+    let log = Path::new(&root).join("php_errors.log");
+    std::fs::write(
+        &log,
+        "PHP Deprecated:  The each() function is deprecated in /srv/app/src/Greeter.php on line 9\nPHP Warning:  Undefined variable $x in /srv/app/src/Greeter.php on line 3\nPHP Notice:  ignored line\n",
+    )
+    .unwrap();
+    let merged = h.ok("import_runtime_log", json!({ "path": root, "log": log }));
+    assert_eq!(merged["runtime"]["confirmed"], 1);
+    assert_eq!(merged["runtime"]["added"], 1);
+    let findings = merged["findings"].as_array().unwrap();
+    assert!(findings.iter().any(|f| f["ruleId"] == "removed.each" && f["runtimeHits"] == 1));
+    assert!(findings.iter().any(|f| f["ruleId"] == "runtime.warning" && f["file"] == "src/Greeter.php"));
+    let rescan = h.ok("scan_project", json!({ "path": root, "target": "8.4", "run": 2 }));
+    assert_eq!(rescan["runtime"]["added"], 1);
+    let cleared = h.ok("clear_runtime_log", json!({ "path": root }));
+    assert_eq!(cleared["runtime"], Value::Null);
+    let empty = Path::new(&root).join("empty.log");
+    std::fs::write(&empty, "nothing here\n").unwrap();
+    assert!(h.invoke("import_runtime_log", json!({ "path": root, "log": empty })).is_err());
+}

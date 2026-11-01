@@ -204,6 +204,21 @@ describe("Ferry app", () => {
     expect(screen.getByRole("img", { name: /Hazırlık puanının taramalar boyunca değişimi/ })).toBeInTheDocument();
   });
 
+  it("merges an imported runtime log into the findings", async () => {
+    const user = setup();
+    await openAndScan(user);
+    await user.click(nav(/Bulgular/));
+    const all = (await screen.findAllByRole("option")).length;
+    await user.click(screen.getByRole("button", { name: "Log içe aktar" }));
+    expect(await screen.findByText(/php_errors.log: 31 farklı mesaj/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getAllByRole("option")).toHaveLength(all + 1));
+    await user.click(screen.getByRole("button", { name: /^Çalışırken görülenler/ }));
+    expect(screen.getAllByRole("option")).toHaveLength(4);
+    expect(screen.getAllByText(/Çalışırken ×/).length).toBeGreaterThan(0);
+    await user.click(screen.getByRole("button", { name: "Log'u kaldır" }));
+    await waitFor(() => expect(screen.getAllByRole("option")).toHaveLength(all));
+  });
+
   it("saves the editor used to open findings", async () => {
     const user = userEvent.setup();
     const api = mockApi({ delay: 0 });
