@@ -12,11 +12,6 @@ Ferry covers roughly half of the PHP 7.0–8.5 change catalog. Function, constan
 
 | Change | Version | Detection | Size |
 |---|---|---|---|
-| Too few arguments to project methods and constructors (`ArgumentCountError`); plain functions are done | 7.1 | Compare positional argument counts with required parameter counts from the index | M |
-| Wrong argument count for built-in functions, such as `mktime()` with no arguments, `crypt($pw)`, extra arguments | 8.0 | An arity table generated from stubs | M |
-| Error handlers written for PHP 7: `if (error_reporting() == 0)` to detect `@`, and handlers with a required fifth `$errcontext` parameter | 8.0 | Pattern plus resolving the callable passed to `set_error_handler` | S |
-| `set_exception_handler` callbacks typed `Exception` (an `Error` gives a TypeError) | 7.0 | Resolve the callable | S |
-| `parent::` in a class without a parent (Rector already fixes it, but Ferry doesn't report it) | 8.0 | Index | S |
 | `fn` and `match` as class names; `use ... as Match` | 7.4, 8.0 | Extend `RESERVED_CLASS_NAMES` | S |
 
 ### Cheap additions to existing tables
@@ -46,8 +41,6 @@ String-to-number comparisons with `==` (8.0), `null` passed to built-ins from va
 
 | Addition | Why | Size |
 |---|---|---|
-| **Extension inventory.** Map functions, classes and constants to their extension (from phpstorm-stubs or php-src stubs), add `ext-*` requirements from `composer.json` and `composer.lock` and `docker-php-ext-install` lines, and flag extensions that the target no longer bundles: imap, pspell and oci8 moved to PECL in 8.4; mcrypt in 7.2. Respect `extension_loaded()` guards. | The function rules catch calls; nothing tells the user which extensions the server needs | M |
-| **Minimum compatible package version.** For each blocking package in `composer.lock`, read Packagist's p2 metadata and find the lowest release whose `require.php` allows the target; report abandoned packages with their replacement (for example `swiftmailer/swiftmailer` → `symfony/mailer`). Opt-in network use, cached on disk. | Turns "incompatible" into an action | M |
 | **Composer platform pitfalls.** `config.platform.ext-*` pinned below the target, `platform-check` disabled, a Composer 1 lock file (no `plugin-api-version`), plugins that need `composer-plugin-api ^1` (`config.platform.php` is done). | Each one makes Composer install packages for the wrong platform | S |
 | **More version pins and a bump action.** DDEV, Lando, Platform.sh and versioned PHP-FPM socket paths, plus a button that updates pins to the target (Dockerfile, Compose, CI files, `.tool-versions` and `.php-version` are reported already). | The upgrade isn't done until these change | S |
 | **More platforms.** Joomla 3/4/5, Moodle (its own `admin/environment.xml`), MediaWiki, phpBB, CodeIgniter, Yii, CakePHP, OpenCart. Keep the support ranges in a data file with a source URL and a verified date for each row. *(verify each range from official pages; Drupal 7, Magento and PrestaShop are already done)* | Legacy CMS users are Ferry's core audience | M |

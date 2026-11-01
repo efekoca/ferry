@@ -219,6 +219,23 @@ impl ProjectIndex {
         None
     }
 
+    pub(crate) fn method_signature(&self, fqn: &str, method: &str) -> Option<&MethodSig> {
+        let mut current = fqn.to_string();
+        for _ in 0..32 {
+            let t = self.type_by_fqn(&current)?;
+            if let Some(sig) = t.signatures.get(method) {
+                return Some(sig);
+            }
+            for tr in &t.trait_fqns {
+                if let Some(sig) = self.type_by_fqn(tr)?.signatures.get(method) {
+                    return Some(sig);
+                }
+            }
+            current = t.parent_fqn.clone()?;
+        }
+        None
+    }
+
     pub(crate) fn extends_or_is(&self, child: &str, ancestor: &str) -> Option<bool> {
         let mut current = child.to_string();
         for _ in 0..32 {

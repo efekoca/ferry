@@ -16,6 +16,7 @@ import {
   Package,
   RefreshCw,
   RotateCcw,
+  Search,
   Sun,
   Trash2,
   ShieldAlert,
@@ -30,7 +31,7 @@ import { LANGS, useI18n, type Lang } from "../i18n";
 import { errorMessage } from "../lib/api";
 import { formatBytes, formatRelative } from "../lib/labels";
 import { useStore, type Theme } from "../lib/store";
-import type { BackupUsage, DependencyStatus, FileChange, Settings, Snapshot } from "../lib/types";
+import type { BackupUsage, DependencyReport, DependencyStatus, FileChange, Settings, Snapshot, VersionSuggestion } from "../lib/types";
 
 const DEP_TONE: Record<DependencyStatus, "danger" | "auto" | "neutral"> = {
   incompatible: "danger",
@@ -58,8 +59,11 @@ function DepBadge({ status }: { status: DependencyStatus }) {
 
 export function Dependencies() {
   const { t, loc } = useI18n();
-  const { deps, scan, runScan, scanning, target } = useStore();
+  const { deps, scan, runScan, scanning, target, api } = useStore();
   const [showDev, setShowDev] = useState(true);
+  const [suggestions, setSuggestions] = useState<{ for: DependencyReport; list: VersionSuggestion[] } | null>(null);
+  const [looking, setLooking] = useState(false);
+  const toast = useToast();
 
   if (!deps) {
     return (
@@ -88,6 +92,21 @@ export function Dependencies() {
   const incompatible = packages.filter((p) => p.status === "incompatible");
   const bad = incompatible.length;
   const command = `composer update ${incompatible.map((p) => p.name).join(" ")} --with-all-dependencies`;
+  const found = suggestions?.for === deps ? suggestions.list : null;
+  const suggestionFor = (name: string) => found?.find((s) => s.name === name);
+  const findVersions = async () => {
+    if (!api) return;
+    setLooking(true);
+    try {
+      const list = await api.findCompatibleVersions(deps.target, incompatible.map((p) => ({ name: p.name, version: p.version })));
+      setSuggestions({ for: deps, list });
+    } catch (e) {
+      toast.push({ tone: "error", title: t.deps.findFailed, description: errorMessage(e, t.common.genericError) });
+    } finally {
+      setLooking(false);
+    }
+  };
+  const undeclared = deps.extensions.filter((e) => !e.declared && !e.removed).map((e) => `"ext-${e.name}": "*"`);
 
   return (
     <>
@@ -121,6 +140,14 @@ export function Dependencies() {
             <Callout tone="danger" icon={<CircleAlert size={16} />}>
               <strong>{t.deps.badTitle(bad, deps.target)}</strong> {t.deps.badText}
               <CommandLine command={command} />
+              {!found && api && (
+                <div className="row row--wrap dep-lookup">
+                  <Button size="sm" variant="secondary" icon={<Search size={13} />} loading={looking} onClick={findVersions}>
+                    {t.deps.findVersions}
+                  </Button>
+                  <span className="subtle">{t.deps.findVersionsNote}</span>
+                </div>
+              )}
             </Callout>
           ) : (
             <Callout tone="info" icon={<CircleCheck size={16} />}>
@@ -159,6 +186,18 @@ export function Dependencies() {
                       <td>
                         <span className="mono">{p.phpConstraint ?? <span className="subtle">{t.deps.unspecified}</span>}</span>
                         {p.note && <div className="dep-note">{loc(p.note)}</div>}
+                        {found && p.status === "incompatible" && (
+                          <div className="dep-note">
+                            {suggestionFor(p.name) ? (
+                              <>
+                                {t.deps.compatibleFrom(suggestionFor(p.name)!.version)}
+                                {suggestionFor(p.name)!.majorChange && <Badge tone="manual">{t.deps.majorChange}</Badge>}
+                              </>
+                            ) : (
+                              t.deps.noneFound
+                            )}
+                          </div>
+                        )}
                       </td>
                       <td>
                         <DepBadge status={p.status} />
@@ -167,6 +206,42 @@ export function Dependencies() {
                   ))}
                 </tbody>
               </table>
+            </Card>
+          )}
+
+          {deps.extensions.length > 0 && (
+            <Card title={t.deps.extensions} bodyClassName="">
+              <p className="card__intro muted">{t.deps.extensionsText}</p>
+              <table className="table" aria-label={t.deps.extensions}>
+                <thead>
+                  <tr>
+                    <th>{t.deps.extension}</th>
+                    <th>{t.deps.usedAt}</th>
+                    <th className="table__num">{t.deps.uses}</th>
+                    <th>{t.deps.declared}</th>
+                    <th>{t.deps.local}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {deps.extensions.map((e) => (
+                    <tr key={e.name}>
+                      <td>
+                        <span className="mono selectable">{e.name}</span> {e.removed && <Badge tone="danger">{t.deps.removedExt}</Badge>}
+                      </td>
+                      <td>
+                        <span className="mono">{e.symbol}</span>
+                        <div className="dep-note mono">
+                          {e.file}:{e.line}
+                        </div>
+                      </td>
+                      <td className="table__num tabular">{e.uses}</td>
+                      <td>{e.declared ? t.deps.yes : <span className="subtle">{t.deps.no}</span>}</td>
+                      <td>{e.available === null ? "—" : e.available ? t.deps.yes : <Badge tone="danger">{t.deps.no}</Badge>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {undeclared.length > 0 && <p className="card__intro subtle">{t.deps.addExt(undeclared.join(", "))}</p>}
             </Card>
           )}
         </div>
