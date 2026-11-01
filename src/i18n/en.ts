@@ -194,6 +194,13 @@ export const en: Dict = {
     staleIgnores: (n) =>
       `${n === 1 ? "1 entry" : `${n} entries`} in .ferry/ignore.json no longer ${n === 1 ? "matches" : "match"} any code; it may have changed or been deleted.`,
     pruneIgnores: "Remove them",
+    importLog: "Import log",
+    runtimeOnly: "Seen at runtime",
+    runtimeSeen: (n) => `Runtime ×${n}`,
+    runtimeSummary: (file, events, confirmed, added, outside) =>
+      `${file}: ${events} distinct messages. ${confirmed} findings confirmed at runtime, ${added} messages added as findings the static scan missed, ${outside} from files outside the project.`,
+    clearLog: "Remove log",
+    runtimeDetail: (n) => `This code raised a warning ${n} ${n === 1 ? "time" : "times"} in the runtime log.`,
   },
   changes: {
     title: "Fixes",
@@ -376,6 +383,7 @@ export const en: Dict = {
     deleteFailed: "Couldn't delete",
     reportSaved: "Report saved",
     reportFailed: "Couldn't save the report",
+    runtimeFailed: "Couldn't import the log",
     ignoreFailed: "Couldn't update the ignore list",
     editorFailed: "Couldn't open the file in the editor",
     phpSaved: "PHP path saved",
@@ -385,6 +393,7 @@ export const en: Dict = {
   dialogs: {
     pickProject: "Choose your PHP project folder",
     pickPhp: "Choose the PHP executable",
+    pickLog: "Choose a PHP error log or PHPUnit output",
     reportName: (name, t) => `${name}-php-${t}-report.md`,
   },
 };

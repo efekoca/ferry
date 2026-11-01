@@ -6,6 +6,7 @@ use ferry_core::ignore::{self, Ignore, IgnoredFinding};
 use ferry_core::project::{self, ProjectInfo};
 use ferry_core::rector::{self, FileChange, RectorError, RectorMode, RectorPreview};
 use ferry_core::rules::FixKind;
+use ferry_core::runtime;
 use ferry_core::snapshot::{fnv1a, Snapshot, SnapshotStore};
 use ferry_core::toolchain::{self, ToolchainStatus};
 use ferry_core::{diff, report, t, PhpVersion};
@@ -33,6 +34,7 @@ pub struct AppState {
     tools_dir: PathBuf,
     settings: Mutex<Settings>,
     scans: Mutex<HashMap<String, ScanResult>>,
+    runtime: Mutex<HashMap<String, RuntimeLog>>,
     latest_scan: Mutex<HashMap<String, u64>>,
     previews: Mutex<HashMap<String, (u64, RectorPreview)>>,
     writes: Arc<Mutex<()>>,
@@ -50,6 +52,7 @@ impl AppState {
             data_dir,
             settings: Mutex::new(settings),
             scans: Mutex::new(HashMap::new()),
+            runtime: Mutex::new(HashMap::new()),
             latest_scan: Mutex::new(HashMap::new()),
             previews: Mutex::new(HashMap::new()),
             writes: Arc::new(Mutex::new(())),
@@ -142,13 +145,82 @@ struct ScanResponse {
     ignored: Vec<IgnoredFinding>,
     stale_ignores: Vec<Ignore>,
     progress: Option<history::Progress>,
+    runtime: Option<RuntimeSummary>,
 }
 
-fn respond(root: &Path, mut scan: ScanResult) -> ScanResponse {
+#[derive(Clone)]
+struct RuntimeLog {
+    file: String,
+    events: Vec<runtime::Event>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RuntimeSummary {
+    file: String,
+    events: usize,
+    confirmed: usize,
+    added: usize,
+    outside: usize,
+}
+
+fn respond(root: &Path, mut scan: ScanResult, log: Option<&RuntimeLog>) -> ScanResponse {
+    let runtime = log.map(|log| {
+        let merged = runtime::merge(root, &mut scan.findings, &log.events, scan.target);
+        RuntimeSummary {
+            file: log.file.clone(),
+            events: log.events.len(),
+            confirmed: merged.confirmed,
+            added: merged.added,
+            outside: merged.outside,
+        }
+    });
     let applied = ignore::apply(root, std::mem::take(&mut scan.findings), &ignore::load(root));
     scan.findings = applied.kept;
     let summary = report::summarize(&scan.findings);
-    ScanResponse { scan, summary, ignored: applied.ignored, stale_ignores: applied.stale, progress: None }
+    ScanResponse { scan, summary, ignored: applied.ignored, stale_ignores: applied.stale, progress: None, runtime }
+}
+
+impl AppState {
+    fn runtime_log(&self, path: &str) -> Option<RuntimeLog> {
+        self.runtime.lock().unwrap().get(path).cloned()
+    }
+}
+
+#[tauri::command]
+async fn import_runtime_log(state: State<'_, AppState>, path: String, log: String) -> CmdResult<ScanResponse> {
+    let path = normalize_path(path);
+    let scan = state.scans.lock().unwrap().get(&path).cloned().ok_or_else(|| t!("Önce projeyi tarayın.", "Scan the project first."))?;
+    let (root, entry) = blocking(move || {
+        let root = project_root(&path)?;
+        let failed = |e: &dyn std::fmt::Display| t!("Log okunamadı: {e}", "Couldn't read the log: {e}");
+        let meta = std::fs::metadata(&log).map_err(|e| failed(&ferry_core::i18n::io_error(&e)))?;
+        if meta.len() > 200 * 1024 * 1024 {
+            return Err(t!("Log 200 MB'tan büyük.", "The log is larger than 200 MB."));
+        }
+        let bytes = std::fs::read(&log).map_err(|e| failed(&ferry_core::i18n::io_error(&e)))?;
+        let events = runtime::parse(&String::from_utf8_lossy(&bytes));
+        if events.is_empty() {
+            return Err(t!(
+                "Log'da PHP uyarısı, kullanımdan kalkma ya da hata satırı bulunamadı.",
+                "No PHP warning, deprecation or error lines were found in the log."
+            ));
+        }
+        let name = Path::new(&log).file_name().map_or(log.clone(), |n| n.to_string_lossy().to_string());
+        Ok((root, RuntimeLog { file: name, events }))
+    })
+    .await?;
+    let key = root.to_string_lossy().to_string();
+    state.runtime.lock().unwrap().insert(key, entry.clone());
+    Ok(respond(&root, scan, Some(&entry)))
+}
+
+#[tauri::command]
+async fn clear_runtime_log(state: State<'_, AppState>, path: String) -> CmdResult<ScanResponse> {
+    let path = normalize_path(path);
+    let scan = state.scans.lock().unwrap().get(&path).cloned().ok_or_else(|| t!("Önce projeyi tarayın.", "Scan the project first."))?;
+    state.runtime.lock().unwrap().remove(&path);
+    Ok(respond(&project_root(&path)?, scan, None))
 }
 
 #[tauri::command]
@@ -177,7 +249,7 @@ async fn scan_project<R: Runtime>(app: AppHandle<R>, path: String, target: Strin
     if latest {
         state.scans.lock().unwrap().insert(path.clone(), scan.clone());
     }
-    let mut response = respond(Path::new(&path), scan);
+    let mut response = respond(Path::new(&path), scan, state.runtime_log(&path).as_ref());
     if latest {
         let file = state.data_dir.join("history").join(format!("{:016x}.json", fnv1a(path.as_bytes())));
         let target = response.scan.target.to_string();
@@ -194,6 +266,7 @@ fn now_secs() -> u64 {
 async fn ignore_finding(state: State<'_, AppState>, path: String, id: String, reason: String) -> CmdResult<ScanResponse> {
     let path = normalize_path(path);
     let scan = state.scans.lock().unwrap().get(&path).cloned().ok_or_else(|| t!("Önce projeyi tarayın.", "Scan the project first."))?;
+    let log = state.runtime_log(&path);
     if reason.trim().is_empty() {
         return Err(t!("Yok sayma için bir gerekçe yazın.", "Write a reason for ignoring it."));
     }
@@ -212,7 +285,7 @@ async fn ignore_finding(state: State<'_, AppState>, path: String, id: String, re
             let e = ferry_core::i18n::io_error(&e);
             t!("Yok sayma listesi kaydedilemedi: {e}", "Couldn't save the ignore list: {e}")
         })?;
-        Ok(respond(&root, scan))
+        Ok(respond(&root, scan, log.as_ref()))
     })
     .await
 }
@@ -221,6 +294,7 @@ async fn ignore_finding(state: State<'_, AppState>, path: String, id: String, re
 async fn unignore_finding(state: State<'_, AppState>, path: String, id: String) -> CmdResult<ScanResponse> {
     let path = normalize_path(path);
     let scan = state.scans.lock().unwrap().get(&path).cloned().ok_or_else(|| t!("Önce projeyi tarayın.", "Scan the project first."))?;
+    let log = state.runtime_log(&path);
     blocking(move || {
         let root = project_root(&path)?;
         let finding = scan
@@ -234,7 +308,7 @@ async fn unignore_finding(state: State<'_, AppState>, path: String, id: String) 
             let e = ferry_core::i18n::io_error(&e);
             t!("Yok sayma listesi kaydedilemedi: {e}", "Couldn't save the ignore list: {e}")
         })?;
-        Ok(respond(&root, scan))
+        Ok(respond(&root, scan, log.as_ref()))
     })
     .await
 }
@@ -243,6 +317,7 @@ async fn unignore_finding(state: State<'_, AppState>, path: String, id: String) 
 async fn prune_ignores(state: State<'_, AppState>, path: String) -> CmdResult<ScanResponse> {
     let path = normalize_path(path);
     let scan = state.scans.lock().unwrap().get(&path).cloned().ok_or_else(|| t!("Önce projeyi tarayın.", "Scan the project first."))?;
+    let log = state.runtime_log(&path);
     blocking(move || {
         let root = project_root(&path)?;
         let ignores = ignore::load(&root);
@@ -252,7 +327,7 @@ async fn prune_ignores(state: State<'_, AppState>, path: String) -> CmdResult<Sc
             let e = ferry_core::i18n::io_error(&e);
             t!("Yok sayma listesi kaydedilemedi: {e}", "Couldn't save the ignore list: {e}")
         })?;
-        Ok(respond(&root, scan))
+        Ok(respond(&root, scan, log.as_ref()))
     })
     .await
 }
@@ -605,10 +680,11 @@ async fn delete_all_snapshots(state: State<'_, AppState>) -> CmdResult<()> {
 async fn export_report(state: State<'_, AppState>, path: String, destination: String) -> CmdResult<()> {
     let path = normalize_path(path);
     let scan = state.scans.lock().unwrap().get(&path).cloned().ok_or_else(|| t!("Önce projeyi tarayın.", "Scan the project first."))?;
+    let log = state.runtime_log(&path);
     blocking(move || {
         let root = project_root(&path)?;
         let info = project::inspect(&root).map_err(|e| e.to_string())?;
-        let scan = respond(&root, scan).scan;
+        let scan = respond(&root, scan, log.as_ref()).scan;
         let deps = deps::check(&root, scan.target);
         let md = report::to_markdown(&info, &scan, Some(&deps), i18n::lang());
         std::fs::write(&destination, md).map_err(|e| {
@@ -660,6 +736,8 @@ pub fn with_commands<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R
         ignore_finding,
         unignore_finding,
         prune_ignores,
+        import_runtime_log,
+        clear_runtime_log,
         open_in_editor,
         get_settings,
         save_settings,

@@ -68,6 +68,7 @@ pub fn scan(root: &Path, target: PhpVersion) -> Vec<Finding> {
                 fix: FixKind::Manual,
                 replacement: h.replacement,
                 snippet: lines.get(h.line - 1).map_or(String::new(), |l| l.trim().to_string()),
+                runtime_hits: 0,
             });
         }
         if out.len() > MAX_FILES {

@@ -35,6 +35,7 @@ export interface Finding {
   fix: FixKind;
   replacement: Localized | null;
   snippet: string;
+  runtimeHits: number;
 }
 
 export interface Summary {
@@ -85,6 +86,15 @@ export interface ScanResult {
   ignored: IgnoredFinding[];
   staleIgnores: IgnoreEntry[];
   progress?: ScanHistory | null;
+  runtime?: RuntimeSummary | null;
+}
+
+export interface RuntimeSummary {
+  file: string;
+  events: number;
+  confirmed: number;
+  added: number;
+  outside: number;
 }
 
 export interface ScanProgress {

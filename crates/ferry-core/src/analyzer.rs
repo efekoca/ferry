@@ -21,6 +21,7 @@ pub struct Finding {
     pub fix: FixKind,
     pub replacement: Option<Localized>,
     pub snippet: String,
+    pub runtime_hits: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -532,6 +533,7 @@ impl<'a> Ctx<'a> {
             fix: hit.fix,
             replacement: hit.replacement,
             snippet: self.snippet(line),
+            runtime_hits: 0,
         });
     }
 

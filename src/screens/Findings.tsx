@@ -1,5 +1,5 @@
 import { useDeferredValue, useEffect, useMemo, useState, type ReactNode } from "react";
-import { ArrowRight, CircleCheck, ClipboardList, EyeOff, FileCode2, FolderSearch, Info, Lightbulb, Search, Sparkles, SquareArrowOutUpRight, Undo2, X } from "lucide-react";
+import { Activity, ArrowRight, CircleCheck, ClipboardList, EyeOff, FileCode2, FolderSearch, Info, Lightbulb, Search, Sparkles, SquareArrowOutUpRight, Undo2, X } from "lucide-react";
 import { ConfirmDialog } from "../components/Modal";
 import { PageHeader } from "../components/Shell";
 import { useToast } from "../components/Toast";
@@ -33,7 +33,8 @@ export function filterFindings(findings: Finding[], { fix, severity, rule, query
 
 export function Findings() {
   const { t, loc } = useI18n();
-  const { scan, setView, project, api, runScan, scanning, findingsFilter: filter, setFindingsFilter, ignoreFinding, unignoreFinding, pruneIgnores } = useStore();
+  const { scan, setView, project, api, runScan, scanning, findingsFilter: filter, setFindingsFilter, ignoreFinding, unignoreFinding, pruneIgnores, importRuntimeLog, clearRuntimeLog } = useStore();
+  const [onlyRuntime, setOnlyRuntime] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showIgnored, setShowIgnored] = useState(false);
   const [ignoring, setIgnoring] = useState<{ id: string; reason: string } | null>(null);
@@ -48,7 +49,12 @@ export function Findings() {
     [scan, viewingIgnored, ignoredList],
   );
   const deferredFilter = useDeferredValue(filter);
-  const visible = useMemo(() => filterFindings(findings, deferredFilter), [findings, deferredFilter]);
+  const runtimeCount = useMemo(() => findings.filter((f) => f.runtimeHits > 0).length, [findings]);
+  const runtimeFilter = onlyRuntime && runtimeCount > 0;
+  const visible = useMemo(
+    () => filterFindings(findings, deferredFilter).filter((f) => !runtimeFilter || f.runtimeHits > 0),
+    [findings, deferredFilter, runtimeFilter],
+  );
   const [limit, setLimit] = useState({ for: visible, count: PAGE });
   const shown = limit.for === visible ? limit.count : PAGE;
   const showMore = (count: number) => setLimit({ for: visible, count });
@@ -131,6 +137,17 @@ export function Findings() {
     </Button>
   );
   const selectedReason = selected ? reasons.get(selected.id) : undefined;
+  const runtime = scan?.runtime;
+  const runtimeNotice = runtime && (
+    <Callout tone="info" icon={<Activity size={15} />}>
+      <div className="row row--wrap">
+        <span>{t.findings.runtimeSummary(runtime.file, runtime.events, runtime.confirmed, runtime.added, runtime.outside)}</span>
+        <Button size="sm" variant="ghost" onClick={() => void clearRuntimeLog()}>
+          {t.findings.clearLog}
+        </Button>
+      </div>
+    </Callout>
+  );
   const stale = scan?.staleIgnores ?? [];
   const staleNotice = stale.length > 0 && (
     <Callout tone="warn" icon={<EyeOff size={15} />}>
@@ -182,6 +199,9 @@ export function Findings() {
                     <Chip key={k} pressed={filter.severity === k} onClick={() => update({ severity: filter.severity === k ? null : k })} label={t.severity[k]} count={countSev(k)} />
                   ))}
                 </div>
+                {runtimeCount > 0 && (
+                  <Chip pressed={runtimeFilter} onClick={() => setOnlyRuntime(!runtimeFilter)} label={t.findings.runtimeOnly} count={runtimeCount} />
+                )}
                 {ruleTitle && (
                   <button type="button" className="chip chip--removable" onClick={() => update({ rule: null })} aria-label={t.findings.removeRule(ruleTitle)}>
                     {ruleTitle}
@@ -190,6 +210,7 @@ export function Findings() {
                 )}
               </div>
               {staleNotice}
+              {runtimeNotice}
               <div className="toolbar__summary">
                 <span aria-live="polite">{t.findings.showing(visible.length, findings.length)}</span>
                 {filtered && (
@@ -198,6 +219,9 @@ export function Findings() {
                   </Button>
                 )}
                 {ignoredToggle}
+                <Button variant="ghost" size="sm" icon={<Activity size={13} />} onClick={() => void importRuntimeLog()}>
+                  {t.findings.importLog}
+                </Button>
               </div>
             </div>
 
@@ -244,6 +268,7 @@ export function Findings() {
                             <div className="finding__snippet">{f.snippet}</div>
                           </span>
                           <span className="finding__badges">
+                            {f.runtimeHits > 0 && <Badge tone="accent">{t.findings.runtimeSeen(f.runtimeHits)}</Badge>}
                             <RiskBadge fix={f.fix} />
                           </span>
                         </button>
@@ -285,6 +310,11 @@ export function Findings() {
                 <div className="detail__section">
                   <h3>{t.findings.why}</h3>
                   <p className="selectable">{loc(selected.message)}</p>
+                  {selected.runtimeHits > 0 && !selected.ruleId.startsWith("runtime.") && (
+                    <p className="detail__runtime">
+                      <Activity size={13} aria-hidden /> {t.findings.runtimeDetail(selected.runtimeHits)}
+                    </p>
+                  )}
                 </div>
 
                 {selected.replacement && (

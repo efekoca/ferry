@@ -64,7 +64,7 @@ Competing tools each cover part of an upgrade: PHPCompatibility (detection only;
 | 1 | **Project config (`.ferry/`)**: target, excluded paths, ignores, baseline, editor, test command; committed to git | Foundation for most items below | S |
 | 3 | **Custom editor command or URL** for editors outside the built-in list (VS Code, Cursor, PhpStorm, Sublime Text and Zed are done) | Covers Neovim, Emacs and in-house setups | S |
 | 5 | **JUnit, Checkstyle and CSV output** with stable fingerprints | GitLab, Jenkins, spreadsheets | S |
-| 7 | **Import runtime deprecations**: PHP error logs, PHPUnit and Symfony bridge output, Monolog JSON. Merge them with static findings, mark matches "confirmed at runtime" with a hit count, and separate own code from vendor code | No tool merges runtime evidence with static findings; it covers what static analysis can't see (section 1) | M |
+| 7 | **More runtime formats**: Symfony PHPUnit bridge summaries and Monolog JSON (PHP error logs, uncaught errors and `phpunit --display-deprecations` output are imported already) | Covers the remaining log shapes teams use | S |
 | 8 | **CSV with a `git blame` owner column** | Assign work across a team | S |
 | 9 | **Git integration**: refuse to apply on a dirty tree, optional branch per batch, generated commit message listing the Rector rules | Small, reviewable commits | M |
 | 10 | **Apply by rule or by hunk, and Rector level stepping** (`withPhpLevel`) | Answers "Rector changed too much" | S–M |

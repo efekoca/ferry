@@ -18,6 +18,7 @@ Options:
                                      with --baseline only findings missing from the baseline count
   --baseline <file>                  Compare with a baseline written by --write-baseline
   --write-baseline <file>            Save the current findings as a baseline
+  --runtime-log <file>               Merge a PHP error log or PHPUnit deprecation output into the results
   --lang <en|tr>                     Language of messages (default: en)
   -h, --help                         Show this help";
 
@@ -48,6 +49,7 @@ struct Options {
     lang: Lang,
     baseline: Option<PathBuf>,
     write_baseline: Option<PathBuf>,
+    runtime_log: Option<PathBuf>,
 }
 
 fn parse(args: &[String]) -> Result<Options, String> {
@@ -59,7 +61,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
     }
     let (mut root, mut target, mut format, mut output, mut fail_on, mut lang) =
         (None, None, Format::Text, None, FailOn::Breaking, Lang::En);
-    let (mut baseline, mut write_baseline) = (None, None);
+    let (mut baseline, mut write_baseline, mut runtime_log) = (None, None, None);
     while let Some(arg) = it.next() {
         let mut value = |name: &str| it.next().cloned().ok_or_else(|| format!("{name} needs a value"));
         match arg.as_str() {
@@ -87,6 +89,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
             }
             "--baseline" => baseline = Some(PathBuf::from(value("--baseline")?)),
             "--write-baseline" => write_baseline = Some(PathBuf::from(value("--write-baseline")?)),
+            "--runtime-log" => runtime_log = Some(PathBuf::from(value("--runtime-log")?)),
             "--lang" => {
                 lang = match value("--lang")?.as_str() {
                     "en" => Lang::En,
@@ -111,7 +114,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
     if fail_on == FailOn::New && baseline.is_none() {
         return Err("--fail-on new needs --baseline".into());
     }
-    Ok(Options { root, target, format, output, fail_on, lang, baseline, write_baseline })
+    Ok(Options { root, target, format, output, fail_on, lang, baseline, write_baseline, runtime_log })
 }
 
 fn text(l: &Localized, lang: Lang) -> &str {
@@ -201,6 +204,7 @@ fn finding_json(f: &Finding, lang: Lang) -> Value {
         "message": text(&f.message, lang),
         "replacement": f.replacement.as_ref().map(|r| text(r, lang)),
         "snippet": f.snippet,
+        "runtimeHits": f.runtime_hits,
     })
 }
 
@@ -307,7 +311,19 @@ fn run(o: &Options) -> Result<bool, String> {
     let root = std::fs::canonicalize(&o.root).map_err(|e| format!("{}: {e}", o.root.display()))?;
     let info = project::inspect(&root).map_err(|e| e.to_string())?;
     let files = project::collect_php_files(&root, &info.excluded_dirs);
-    let scan = analyzer::analyze_files(&root, &files, o.target, |_, _, _| {});
+    let mut scan = analyzer::analyze_files(&root, &files, o.target, |_, _, _| {});
+    if let Some(path) = &o.runtime_log {
+        let text = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let events = ferry_core::runtime::parse(&String::from_utf8_lossy(&text));
+        let merged = ferry_core::runtime::merge(&root, &mut scan.findings, &events, o.target);
+        eprintln!(
+            "ferry-cli: runtime log: {} events, {} matched findings, {} new, {} outside the project",
+            events.len(),
+            merged.confirmed,
+            merged.added,
+            merged.outside
+        );
+    }
     let applied = ignore::apply(&root, scan.findings, &ignore::load(&root));
     let (findings, ignored) = (applied.kept, applied.ignored);
     for stale in &applied.stale {
@@ -408,6 +424,7 @@ mod tests {
             lang: Lang::En,
             baseline: None,
             write_baseline: None,
+            runtime_log: None,
         };
         assert!(run(&options(FailOn::Breaking)).unwrap());
         let report: Value = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
@@ -438,6 +455,7 @@ mod tests {
             lang: Lang::En,
             baseline,
             write_baseline: write,
+            runtime_log: None,
         };
         assert!(!run(&options(None, Some(base.clone()))).unwrap());
         assert!(!run(&options(Some(base.clone()), None)).unwrap());

@@ -192,6 +192,13 @@ export const tr = {
     unignore: "Yeniden göster",
     staleIgnores: (n: number) => `.ferry/ignore.json içindeki ${n} kayıt artık hiçbir kodla eşleşmiyor; kod değişmiş ya da silinmiş olabilir.`,
     pruneIgnores: "Bu kayıtları sil",
+    importLog: "Log içe aktar",
+    runtimeOnly: "Çalışırken görülenler",
+    runtimeSeen: (n: number) => `Çalışırken ×${n}`,
+    runtimeSummary: (file: string, events: number, confirmed: number, added: number, outside: number) =>
+      `${file}: ${events} farklı mesaj. ${confirmed} bulgu çalışırken doğrulandı, ${added} mesaj statik taramanın bulmadığı yeni bulgu olarak eklendi, ${outside} mesaj proje dışındaki dosyalardan.`,
+    clearLog: "Log'u kaldır",
+    runtimeDetail: (n: number) => `Bu kod çalışma anı log'unda ${n} kez uyarı verdi.`,
   },
   changes: {
     title: "Düzeltmeler",
@@ -373,6 +380,7 @@ export const tr = {
     deleteFailed: "Silinemedi",
     reportSaved: "Rapor kaydedildi",
     reportFailed: "Rapor kaydedilemedi",
+    runtimeFailed: "Log içe aktarılamadı",
     ignoreFailed: "Yok sayma listesi güncellenemedi",
     editorFailed: "Dosya editörde açılamadı",
     phpSaved: "PHP yolu kaydedildi",
@@ -382,6 +390,7 @@ export const tr = {
   dialogs: {
     pickProject: "PHP projesinin klasörünü seçin",
     pickPhp: "PHP çalıştırılabilir dosyasını seçin",
+    pickLog: "PHP hata log'unu ya da PHPUnit çıktısını seçin",
     reportName: (name: string, t: string) => `${name}-php-${t}-rapor.md`,
   },
 };

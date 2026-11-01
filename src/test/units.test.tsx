@@ -96,6 +96,7 @@ describe("filterFindings", () => {
   const base: Omit<Finding, "id" | "file" | "fix" | "severity" | "title"> = {
     line: 1,
     column: 1,
+    runtimeHits: 0,
     ruleId: "x",
     message: { tr: "", en: "" },
     since: "8.0",
