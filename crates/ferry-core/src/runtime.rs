@@ -26,7 +26,7 @@ pub struct Event {
 
 fn level_of(text: &str) -> Option<Level> {
     let t = text.to_ascii_lowercase();
-    if t.contains("deprecated") {
+    if t.contains("deprecat") {
         Some(Level::Deprecated)
     } else if t.contains("fatal error") || t.contains("uncaught") || t.contains("parse error") {
         Some(Level::Fatal)
@@ -55,8 +55,13 @@ pub fn parse(log: &str) -> Vec<Event> {
         found.entry((path, line, message)).and_modify(|e| e.1 += 1).or_insert((level, 1));
     };
     let lines: Vec<&str> = log.lines().collect();
+    let mut section = Level::Deprecated;
     for (k, raw) in lines.iter().enumerate() {
         let text = raw.trim();
+        if text.ends_with(':') && (text.contains(" triggered ") || text.starts_with("There w")) {
+            section = level_of(text).unwrap_or(Level::Warning);
+            continue;
+        }
         let body = text.find("PHP ").map_or(text, |i| &text[i + 4..]);
         if let Some(colon) = body.find(':') {
             if let Some(level) = level_of(&body[..colon]) {
@@ -74,7 +79,7 @@ pub fn parse(log: &str) -> Vec<Event> {
                 continue;
             }
             let message = lines.get(k + 1).map(|m| m.trim().to_string()).unwrap_or_default();
-            let level = level_of(&message).unwrap_or(Level::Deprecated);
+            let level = section;
             add(path.trim().to_string(), line, level, message);
         }
     }
@@ -114,15 +119,15 @@ pub fn merge(root: &Path, findings: &mut Vec<Finding>, events: &[Event], target:
             merged.confirmed += 1;
             continue;
         }
-        if let Some(f) = findings.iter_mut().find(|f| f.file == file && f.line == e.line && f.rule_id.starts_with("runtime.")) {
-            f.runtime_hits += e.count;
-            continue;
-        }
         let (rule, severity) = match e.level {
             Level::Fatal => ("runtime.fatal", Severity::Breaking),
             Level::Warning => ("runtime.warning", Severity::Behavior),
             Level::Deprecated => ("runtime.deprecated", Severity::Deprecated),
         };
+        if let Some(f) = findings.iter_mut().find(|f| f.file == file && f.line == e.line && f.rule_id == rule) {
+            f.runtime_hits += e.count;
+            continue;
+        }
         let snippet = std::fs::read_to_string(root.join(&file))
             .ok()
             .and_then(|t| t.lines().nth(e.line.saturating_sub(1)).map(|l| l.trim().chars().take(200).collect()))
@@ -160,8 +165,15 @@ mod tests {
 PHP Warning:  Undefined array key \"id\" in /var/www/site/src/Cart.php on line 4
 PHP Deprecated:  strftime() is deprecated in /var/www/site/vendor/x/y.php on line 9
 PHP Fatal error:  Uncaught TypeError: count(): Argument #1 must be of type Countable|array, null given in /home/me/site/src/Cart.php:5
+1 test triggered 1 PHP deprecation:
+
 1) /home/runner/work/site/src/Cart.php:2
 each() is deprecated
+
+1 test triggered 1 PHP warning:
+
+1) /home/runner/work/site/src/Cart.php:3
+Undefined array key \"total\"
 
 ";
 
@@ -175,6 +187,7 @@ each() is deprecated
             summary,
             [
                 ("Cart.php".to_string(), 2, Level::Deprecated, 1),
+                ("Cart.php".to_string(), 3, Level::Warning, 1),
                 ("Cart.php".to_string(), 3, Level::Deprecated, 2),
                 ("Cart.php".to_string(), 4, Level::Warning, 1),
                 ("Cart.php".to_string(), 5, Level::Fatal, 1),
@@ -189,10 +202,10 @@ each() is deprecated
         std::fs::write(dir.path().join("vendor/x/y.php"), "<?php\n").unwrap();
         let mut findings = analyze_source("src/Cart.php", src, "8.2".parse().unwrap());
         let merged = merge(dir.path(), &mut findings, &events, "8.2".parse().unwrap());
-        assert_eq!((merged.confirmed, merged.added, merged.outside), (1, 3, 1));
+        assert_eq!((merged.confirmed, merged.added, merged.outside), (1, 4, 1));
         let each = findings.iter().find(|f| f.rule_id == "removed.each").unwrap();
         assert_eq!(each.runtime_hits, 1);
-        let warning = findings.iter().find(|f| f.rule_id == "runtime.warning").unwrap();
+        let warning = findings.iter().find(|f| f.rule_id == "runtime.warning" && f.line == 4).unwrap();
         assert_eq!((warning.line, warning.snippet.as_str()), (4, "echo $row['id'];"));
     }
 }
