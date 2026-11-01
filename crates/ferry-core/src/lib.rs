@@ -20,6 +20,7 @@ pub mod project;
 pub mod rector;
 pub mod report;
 pub mod rules;
+pub mod runtime;
 pub mod server;
 pub mod snapshot;
 pub mod toolchain;

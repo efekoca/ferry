@@ -367,6 +367,7 @@ fn finding(
         fix: FixKind::Manual,
         replacement: Some(replacement),
         snippet,
+        runtime_hits: 0,
     }
 }
 
