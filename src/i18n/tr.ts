@@ -144,6 +144,16 @@ export const tr = {
     switchText: (n: number) => `Hesaplanan ${n} dosyalık düzeltme önizlemesi silinir ve proje yeni hedefe göre yeniden taranır.`,
   },
   scoreLabel: (s: number) => `Hazırlık skoru: ${s}/100`,
+  git: {
+    selectBy: "Seçimi daralt",
+    selectAll: "Tüm dosyalar",
+    onlyAuto: "Yalnızca otomatik düzeltmeler",
+    byRule: (title: string, n: number) => `${title} (${n} dosya)`,
+    dirtyTitle: (n: number) => `${n} dosyada commit edilmemiş değişiklik var`,
+    dirtyText: "Ferry uygulamadan önce yedek alır, ama bu dosyaları önce Git'e commit ederseniz düzeltmeleri ayrı bir commit olarak inceleyebilirsiniz.",
+    message: "Önerilen commit mesajı",
+    subject: (target: string, n: number) => `PHP ${target} uyumluluğu: Rector ile ${n} dosya`,
+  },
   progress: {
     title: "İlerleme",
     first: "İlk tarama. Bir sonraki taramada nelerin değiştiğini burada göreceksiniz.",

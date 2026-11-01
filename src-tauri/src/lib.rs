@@ -428,6 +428,40 @@ async fn find_compatible_versions(target: String, packages: Vec<LockedPackage>) 
     .await
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitState {
+    repo: bool,
+    dirty: Vec<String>,
+}
+
+#[tauri::command]
+async fn git_status(path: String, files: Vec<String>) -> CmdResult<GitState> {
+    let path = normalize_path(path);
+    blocking(move || {
+        let root = project_root(&path)?;
+        let Some(git) = toolchain::find_executable("git") else { return Ok(GitState { repo: false, dirty: Vec::new() }) };
+        let inside = toolchain::command(&git).arg("-C").arg(&root).args(["rev-parse", "--is-inside-work-tree"]).output();
+        if !inside.is_ok_and(|o| o.status.success()) {
+            return Ok(GitState { repo: false, dirty: Vec::new() });
+        }
+        let out = toolchain::command(&git)
+            .arg("-C")
+            .arg(&root)
+            .args(["status", "--porcelain", "--untracked-files=no", "--"])
+            .args(&files)
+            .output()
+            .map_err(|e| e.to_string())?;
+        let dirty = String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .filter_map(|l| l.get(3..))
+            .map(|p| p.rsplit(" -> ").next().unwrap_or(p).trim_matches('"').to_string())
+            .collect();
+        Ok(GitState { repo: true, dirty })
+    })
+    .await
+}
+
 #[tauri::command]
 async fn toolchain_status(state: State<'_, AppState>) -> CmdResult<ToolchainStatus> {
     let tools = state.tools_dir();
@@ -767,6 +801,7 @@ pub fn with_commands<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R
         inspect_project,
         scan_project,
         check_dependencies,
+        git_status,
         find_compatible_versions,
         toolchain_status,
         install_rector,
