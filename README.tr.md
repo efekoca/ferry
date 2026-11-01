@@ -115,6 +115,19 @@ Ferry her uygulamadan önce değiştireceği dosyaları yedekler. **Geçmiş** s
 - **Klavye kısayolları:** **⌘O** proje açar, **⌘1**–**⌘5** sayfalar arasında geçiş yapar, **⌘,** **Ayarlar**'ı açar, **⌘+** / **⌘−** arayüzü yakınlaştırır ya da uzaklaştırır. Windows ve Linux'ta **⌘** yerine **Ctrl** kullanın.
 - **Erişilebilir:** Her şey klavyeyle yapılabilir, odak her zaman görünür ve arayüz WCAG 2.1 AA kontrast ölçütlerini karşılar. Yüksek yakınlaştırmada paneller alt alta dizilir, kenar çubuğu simgelere iner.
 
+### CI için komut satırı
+
+`ferry-cli` aynı taramayı pencere açmadan yapar. Böylece hedef sürümde çalışmayacak kod ekleyen bir değişiklik, CI hattında birleştirilmeden durdurulabilir. `.ferry/ignore.json` dosyasını okuduğu için uygulamada yok saydığınız bulgular CI'da da yok sayılır.
+
+```bash
+cargo build --release -p ferry-cli
+target/release/ferry-cli scan . --target 8.4 --format github
+```
+
+- `--format text|json|sarif|github`: düz metin, özet ve yok sayılan bulgularla birlikte JSON, GitHub code scanning ve benzeri araçlar için SARIF 2.1.0 ya da değişen satırlarda GitHub Actions uyarıları.
+- `--fail-on breaking|deprecated|any|none`: komutun 1 koduyla çıkması için gereken en düşük önem derecesi (varsayılanı `breaking`). Klasörün bulunamaması gibi hatalarda çıkış kodu 2'dir.
+- `--output <dosya>` raporu bir dosyaya yazar, `--lang tr` mesajları Türkçe yapar.
+
 ## Desteklenen projeler
 
 | Proje türü | Nasıl tanınır | Kendiliğinden atlananlar |
@@ -247,6 +260,7 @@ Testleri gerçek Rector'la çalıştırmak için `FERRY_TEST_TOOLS` değişkenin
 | Klasör | İçerik |
 |---|---|
 | `crates/ferry-core` | Motor: sözcük çözümleyici, kurallar ve analiz, Rector entegrasyonu, farklar, yedekler ve Composer kontrolleri |
+| `crates/ferry-cli` | CI için komut satırı tarayıcısı; metin, JSON, SARIF ve GitHub uyarısı çıktısı verir |
 | `src-tauri` | Masaüstü kabuğu: komutlar, pencere ve platform ayarları |
 | `src` | React ve TypeScript arayüzü (tasarım sistemi: [docs/DESIGN.md](docs/DESIGN.md)) |
 | `demo` | Uygulamayı denemek ve testler için örnek projeler |

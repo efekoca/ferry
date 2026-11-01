@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/ferry-core", "src-tauri"]
+members = ["crates/ferry-core", "crates/ferry-cli", "src-tauri"]
 
 [workspace.package]
 version = "0.1.0"
