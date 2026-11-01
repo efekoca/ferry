@@ -385,6 +385,15 @@ pub fn analyze_source_in(file: &str, src: &str, target: PhpVersion, index: &crat
     for (k, since) in resource_checks(&tokens) {
         ctx.pattern_since(&patterns::RESOURCE_CHECK, tokens[k].line, tokens[k].column, since);
     }
+    for (k, rule) in handler_checks(&tokens) {
+        ctx.pattern(rule, &tokens[k], None);
+    }
+    for k in parent_without_parent(&tokens) {
+        ctx.pattern(&patterns::PARENT_WITHOUT_PARENT, &tokens[k], None);
+    }
+    for k in method_calls_with_too_few(&tokens, index) {
+        ctx.pattern(&patterns::TOO_FEW_ARGUMENTS, &tokens[k], None);
+    }
     for k in static_calls_to_instance_methods(&tokens, index) {
         ctx.pattern(&patterns::STATIC_CALL_TO_INSTANCE_METHOD, &tokens[k], None);
     }
@@ -735,6 +744,15 @@ impl<'a> Ctx<'a> {
             let single = |n: usize| args.get(n).filter(|a| a.len() == 1).map(|a| &a[0]);
             let named = args.iter().any(|a| a.len() > 1 && a[1].is_punct(":") && a[0].kind == TokenKind::Ident);
             let spread = args.iter().any(|a| a.first().is_some_and(|t| t.is_punct("...")));
+            if !named && !spread && self.applies(PhpVersion::new(8, 0)) {
+                if let Ok(k) = crate::arity::ARITY.binary_search_by(|(n, _, _)| (*n).cmp(lower.as_str())) {
+                    let (_, required, max) = crate::arity::ARITY[k];
+                    let n = args.len();
+                    if (n < required as usize || (max != 255 && n > max as usize)) && !catches_error(tokens, i) {
+                        self.arity(tok, n, required, max);
+                    }
+                }
+            }
             let callable_slot = CALLABLE_ARGS.iter().chain(&[("is_callable", 0)]).find(|(f, _)| *f == lower).map(|&(_, n)| n);
             if let Some(slot) = callable_slot {
                 if let Some(arg) = single(slot).filter(|_| lower != "is_callable") {
@@ -893,6 +911,25 @@ impl<'a> Ctx<'a> {
             severity: m.rule.severity(),
             fix: m.rule.fix,
             replacement: m.rule.replacement.map(Into::into),
+        };
+        self.push(hit, tok.line, tok.column);
+    }
+
+    fn arity(&mut self, tok: &Token, given: usize, required: u8, max: u8) {
+        let name = tok.text.trim_start_matches('\\');
+        let expects = match (required, max) {
+            (r, 255) => Localized { tr: format!("en az {r} argüman"), en: format!("at least {r} arguments") },
+            (r, m) if r == m => Localized { tr: format!("tam {r} argüman"), en: format!("exactly {r} arguments") },
+            (r, m) => Localized { tr: format!("{r}–{m} argüman"), en: format!("{r} to {m} arguments") },
+        };
+        let hit = Hit {
+            rule_id: patterns::BUILTIN_ARITY.id,
+            title: Localized { tr: format!("{name}() {given} argümanla"), en: format!("{name}() with {given} arguments") },
+            message: patterns::BUILTIN_ARITY.note,
+            since: PhpVersion::new(8, 0),
+            severity: Severity::Breaking,
+            fix: FixKind::Manual,
+            replacement: Some(expects),
         };
         self.push(hit, tok.line, tok.column);
     }
@@ -2426,6 +2463,148 @@ fn eval_modifier(t: &Token) -> bool {
     !modifiers.is_empty() && modifiers.chars().all(|c| c.is_ascii_alphabetic()) && modifiers.contains('e')
 }
 
+fn required_params(params: &[ParamShape]) -> usize {
+    params.iter().rposition(|p| !p.optional && !p.variadic).map_or(0, |k| k + 1)
+}
+
+fn unpacked(args: &[&[Token]]) -> bool {
+    args.iter().any(|a| a.first().is_some_and(|t| t.is_punct("...")) || a.len() > 1 && a[1].is_punct(":") && a[0].kind == TokenKind::Ident)
+}
+
+fn callback_params(tokens: &[Token], arg: &[Token]) -> Option<Vec<ParamShape>> {
+    let first = arg.iter().position(|t| !t.is_ident_ci("static"))?;
+    if arg[first].is_ident_ci("function") || arg[first].is_ident_ci("fn") {
+        let offset = (arg.as_ptr() as usize - tokens.as_ptr() as usize) / std::mem::size_of::<Token>();
+        let open = offset + first + arg[first..].iter().position(|t| t.is_punct("("))?;
+        let close = crate::guards::matching(tokens, open)?;
+        return Some(param_shapes(tokens, open, close));
+    }
+    let [name] = arg else { return None };
+    let TokenKind::Str { .. } = name.kind else { return None };
+    let wanted = name.text.get(1..name.text.len().saturating_sub(1))?.trim_start_matches('\\').to_ascii_lowercase();
+    let methods = method_tokens(tokens);
+    let k = (0..tokens.len().saturating_sub(2))
+        .find(|&k| tokens[k].is_ident_ci("function") && !methods.contains(&k) && tokens[k + 1].text.eq_ignore_ascii_case(&wanted))?;
+    let open = k + 2;
+    tokens.get(open).filter(|t| t.is_punct("("))?;
+    let close = crate::guards::matching(tokens, open)?;
+    Some(param_shapes(tokens, open, close))
+}
+
+fn handler_checks(tokens: &[Token]) -> Vec<(usize, &'static PatternRule)> {
+    let mut out = Vec::new();
+    for k in 0..tokens.len().saturating_sub(1) {
+        let name = tokens[k].text.trim_start_matches('\\').to_ascii_lowercase();
+        let prev_member = k > 0 && (tokens[k - 1].is_punct("->") || tokens[k - 1].is_punct("::") || tokens[k - 1].is_ident_ci("function"));
+        if tokens[k].kind != TokenKind::Ident || !tokens[k + 1].is_punct("(") || prev_member {
+            continue;
+        }
+        match name.as_str() {
+            "set_error_handler" | "set_exception_handler" => {
+                let args = call_args(tokens, k + 1);
+                let Some(params) = args.first().and_then(|a| callback_params(tokens, a)) else { continue };
+                if name == "set_error_handler" && required_params(&params) >= 5 {
+                    out.push((k, &patterns::ERROR_HANDLER_CONTEXT));
+                }
+                if name == "set_exception_handler" && params.first().is_some_and(|p| p.ty == ["exception"]) {
+                    out.push((k, &patterns::EXCEPTION_HANDLER_TYPE));
+                }
+            }
+            "error_reporting" if tokens.get(k + 2).is_some_and(|t| t.is_punct(")")) => {
+                let zero = |t: Option<&Token>| t.is_some_and(|t| t.text == "0");
+                let eq = |t: Option<&Token>| t.is_some_and(|t| t.is_punct("==") || t.is_punct("==="));
+                let after = eq(tokens.get(k + 3)) && zero(tokens.get(k + 4));
+                let before = k >= 2 && eq(tokens.get(k - 1)) && zero(tokens.get(k - 2));
+                let negated = k >= 1 && tokens[k - 1].is_punct("!");
+                if after || before || negated {
+                    out.push((k, &patterns::ERROR_REPORTING_ZERO));
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+fn parent_without_parent(tokens: &[Token]) -> Vec<usize> {
+    let decls = crate::index::class_and_trait_decls(tokens);
+    let mut out = Vec::new();
+    for (k, t) in tokens.iter().enumerate() {
+        if !t.is_ident_ci("parent") || !tokens.get(k + 1).is_some_and(|n| n.is_punct("::")) {
+            continue;
+        }
+        let Some(decl) = decls.iter().rfind(|d| d.open < k && k < d.close) else { continue };
+        let anonymous = decl.info.name.is_empty() || tokens[..decl.open].iter().rev().take(12).any(|t| t.is_ident_ci("new"));
+        if !decl.info.is_trait && decl.info.parent.is_none() && !anonymous {
+            out.push(k);
+        }
+    }
+    out
+}
+
+fn method_calls_with_too_few(tokens: &[Token], index: &crate::index::ProjectIndex) -> Vec<usize> {
+    let names = crate::index::Names::new(tokens);
+    let decls = crate::index::class_and_trait_decls(tokens);
+    let enclosing = |k: usize| decls.iter().rfind(|d| d.open < k && k < d.close);
+    let mut out = Vec::new();
+    for k in 0..tokens.len().saturating_sub(3) {
+        let (fqn, method, open, at) =
+            if tokens[k].is_ident_ci("new") && tokens[k + 1].kind == TokenKind::Ident && tokens[k + 2].is_punct("(") {
+                if tokens[k + 1].is_ident_ci("class") {
+                    continue;
+                }
+                let class = &tokens[k + 1].text;
+                let fqn = match class.to_ascii_lowercase().as_str() {
+                    "self" | "static" => match enclosing(k) {
+                        Some(d) => d.info.fqn.clone(),
+                        None => continue,
+                    },
+                    "parent" => match enclosing(k).and_then(|d| d.info.parent_fqn.clone()) {
+                        Some(p) => p,
+                        None => continue,
+                    },
+                    _ => names.resolve(k + 1, class),
+                };
+                (fqn, "__construct".to_string(), k + 2, k + 1)
+            } else if tokens[k].kind == TokenKind::Variable
+                && tokens[k].text == "this"
+                && tokens[k + 1].is_punct("->")
+                && tokens[k + 2].kind == TokenKind::Ident
+                && tokens.get(k + 3).is_some_and(|t| t.is_punct("("))
+            {
+                let Some(d) = enclosing(k).filter(|d| !d.info.is_trait) else { continue };
+                (d.info.fqn.clone(), tokens[k + 2].text.to_ascii_lowercase(), k + 3, k + 2)
+            } else if tokens[k].kind == TokenKind::Ident
+                && tokens[k + 1].is_punct("::")
+                && tokens[k + 2].kind == TokenKind::Ident
+                && tokens.get(k + 3).is_some_and(|t| t.is_punct("("))
+                && !(k > 0 && (tokens[k - 1].is_ident_ci("new") || tokens[k - 1].is_punct("->") || tokens[k - 1].is_punct("::")))
+            {
+                let class = &tokens[k].text;
+                let fqn = match class.to_ascii_lowercase().as_str() {
+                    "self" | "static" => match enclosing(k).filter(|d| !d.info.is_trait) {
+                        Some(d) => d.info.fqn.clone(),
+                        None => continue,
+                    },
+                    "parent" => match enclosing(k).filter(|d| !d.info.is_trait).and_then(|d| d.info.parent_fqn.clone()) {
+                        Some(p) => p,
+                        None => continue,
+                    },
+                    _ => names.resolve(k, class),
+                };
+                (fqn, tokens[k + 2].text.to_ascii_lowercase(), k + 3, k + 2)
+            } else {
+                continue;
+            };
+        let Some(sig) = index.method_signature(&fqn, &method) else { continue };
+        let args = call_args(tokens, open);
+        if !unpacked(&args) && args.len() < required_params(&sig.params) && !catches_error(tokens, at) {
+            out.push(at);
+        }
+    }
+    out
+}
+
 fn catches_error(tokens: &[Token], at: usize) -> bool {
     let mut depth = 0usize;
     for j in (0..at).rev() {
@@ -3695,5 +3874,52 @@ mod suspect_rule_tests {
                 ("deprecated.pdo_driver_constant", crate::rules::FixKind::Auto)
             ]
         );
+    }
+}
+
+#[cfg(test)]
+mod call_tests {
+    use super::*;
+
+    fn found(src: &str, target: &str) -> Vec<(usize, String)> {
+        analyze_source("t.php", src, target.parse().unwrap()).into_iter().map(|f| (f.line, f.rule_id)).collect()
+    }
+
+    #[test]
+    fn builtin_argument_counts() {
+        let src = "<?php\n$t = mktime();\n$c = crypt($pw);\n$n = time($x);\nstrlen($s);\nsprintf('%s %s', $a, $b, $c);\ntry { mktime(); } catch (ArgumentCountError $e) {}\nimplode(...$parts);";
+        let r = "removed.builtin_arity".to_string();
+        assert_eq!(found(src, "8.0"), [(2, r.clone()), (3, r.clone()), (4, r.clone())]);
+        assert!(found(src, "7.4").is_empty());
+        let f = &analyze_source("t.php", "<?php\ncrypt($pw);", "8.0".parse().unwrap())[0];
+        assert_eq!((f.title.en.as_str(), f.replacement.as_ref().unwrap().en.as_str()), ("crypt() with 1 arguments", "exactly 2 arguments"));
+    }
+
+    #[test]
+    fn error_and_exception_handlers() {
+        let src = "<?php\nset_error_handler(function ($no, $str, $file, $line, $ctx) {});\nset_error_handler(function ($no, $str, $file, $line, $ctx = []) {});\nset_error_handler('legacy_handler');\nfunction legacy_handler($a, $b, $c, $d, array $e) {\n    if (error_reporting() == 0) { return; }\n    if (!error_reporting()) { return; }\n    if (!(error_reporting() & $a)) { return; }\n}\nset_exception_handler(function (Exception $e) {});\nset_exception_handler(function (Throwable $e) {});";
+        assert_eq!(
+            found(src, "8.0"),
+            [
+                (2, "removed.error_handler_context".to_string()),
+                (4, "removed.error_handler_context".to_string()),
+                (6, "behavior.error_reporting_zero".to_string()),
+                (7, "behavior.error_reporting_zero".to_string()),
+                (10, "removed.exception_handler_type".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn parent_calls_without_a_parent() {
+        let src = "<?php\nclass A { function f() { return parent::f(); } }\nclass B extends A { function f() { return parent::f(); } }\ntrait T { function f() { return parent::f(); } }";
+        assert_eq!(found(src, "8.0"), [(2, "removed.parent_without_parent".to_string())]);
+    }
+
+    #[test]
+    fn methods_and_constructors_with_too_few_arguments() {
+        let src = "<?php\nclass Cart {\n    function __construct($id, $owner) {}\n    function add($item, $qty = 1) {}\n    static function load($id) {}\n    function run() {\n        $this->add();\n        $this->add($x);\n        self::load();\n    }\n}\nclass Shop extends Cart {}\nnew Cart(1);\nnew Shop();\nnew Cart(1, 2);\nCart::load();";
+        let lines: Vec<usize> = found(src, "8.0").into_iter().filter(|(_, r)| r == "removed.too_few_arguments").map(|(l, _)| l).collect();
+        assert_eq!(lines, [7, 9, 13, 14, 16]);
     }
 }
