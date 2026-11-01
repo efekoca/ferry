@@ -84,6 +84,7 @@ export interface TargetSummary {
 
 export interface ScanResult {
   target: string;
+  filesFound: number;
   filesScanned: number;
   linesScanned: number;
   findings: Finding[];

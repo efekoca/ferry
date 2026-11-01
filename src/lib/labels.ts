@@ -39,8 +39,8 @@ export function scoreTone(score: number): "auto" | "manual" | "danger" {
   return "danger";
 }
 
-export function scoreHeadline(score: number, total: number, t: Dict): string {
-  if (total === 0) return t.overview.headline.ready;
+export function scoreHeadline(score: number, total: number, t: Dict, incomplete = false): string {
+  if (total === 0) return incomplete ? t.overview.headline.incomplete : t.overview.headline.ready;
   if (score >= 80) return t.overview.headline.small;
   if (score >= 50) return t.overview.headline.medium;
   return t.overview.headline.large;

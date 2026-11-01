@@ -28,6 +28,7 @@ pub struct Finding {
 #[serde(rename_all = "camelCase")]
 pub struct ScanResult {
     pub target: PhpVersion,
+    pub files_found: usize,
     pub files_scanned: usize,
     pub lines_scanned: usize,
     pub findings: Vec<Finding>,
@@ -96,7 +97,8 @@ pub fn analyze_files(root: &Path, files: &[PathBuf], target: PhpVersion, mut pro
     findings.sort_by(|a, b| (a.severity, &a.file, a.line, a.column).cmp(&(b.severity, &b.file, b.line, b.column)));
     ScanResult {
         target,
-        files_scanned: files.len(),
+        files_found: files.len(),
+        files_scanned: files.len() - errors.len(),
         lines_scanned: lines,
         findings,
         errors,
