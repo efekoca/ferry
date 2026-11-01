@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { useI18n } from "../i18n";
 import { dependencyBlockers, FRAMEWORK_LABEL, modKey } from "../lib/labels";
+import { isVulnerable } from "../lib/security";
 import { useStore, type View } from "../lib/store";
 
 export function Logo({ className = "brand__mark" }: { className?: string }) {
@@ -83,10 +84,14 @@ export function Sidebar() {
   );
 
   const toolsOk = !!toolchain?.php && !!toolchain?.rector;
-  const toolsTone = !toolchain ? "" : toolsOk ? "dot--ok" : toolchain.php ? "dot--warn" : "dot--error";
+  const phpVersion = toolchain?.php?.version;
+  const vulnerablePhp = phpVersion && isVulnerable(phpVersion) ? phpVersion : null;
+  const toolsTone = !toolchain ? "" : vulnerablePhp ? "dot--error" : toolsOk ? "dot--ok" : toolchain.php ? "dot--warn" : "dot--error";
   const toolsText = !toolchain
     ? t.nav.toolsChecking
-    : toolsOk
+    : vulnerablePhp
+      ? t.nav.phpVulnerable(vulnerablePhp)
+      : toolsOk
       ? `PHP ${toolchain.php?.version ?? ""} · Rector ${toolchain.rector?.version ?? ""}`
       : toolchain.php
         ? t.nav.rectorMissing
@@ -134,8 +139,17 @@ export function Sidebar() {
           <span>{t.nav.settings}</span>
         </button>
         <div className="status-line" role="status">
-          <span className={`dot ${toolsTone}`} aria-hidden />
-          <span>{toolsText}</span>
+          {vulnerablePhp ? (
+            <button type="button" className="status-line__link" onClick={() => setView("settings")} title={t.nav.phpVulnerableHint}>
+              <span className={`dot ${toolsTone}`} aria-hidden />
+              <span>{toolsText}</span>
+            </button>
+          ) : (
+            <>
+              <span className={`dot ${toolsTone}`} aria-hidden />
+              <span>{toolsText}</span>
+            </>
+          )}
         </div>
       </div>
     </aside>

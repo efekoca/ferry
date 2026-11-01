@@ -1,6 +1,6 @@
 import type { Localized } from "../i18n";
 
-export type Framework = "wordpress" | "laravel" | "symfony" | "drupal" | "generic";
+export type Framework = "wordpress" | "laravel" | "symfony" | "drupal" | "magento" | "prestashop" | "generic";
 export type Severity = "breaking" | "deprecated" | "behavior";
 export type FixKind = "auto" | "likely" | "manual";
 export type DependencyStatus = "compatible" | "incompatible" | "unknown";

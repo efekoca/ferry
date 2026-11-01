@@ -11,7 +11,11 @@ const LARAVEL_MAX_PHP: [(u32, (u32, u32)); 9] =
 const WORDPRESS_MIN: [((u32, u32), (u32, u32)); 7] =
     [((7, 4), (5, 3)), ((8, 0), (5, 6)), ((8, 1), (5, 9)), ((8, 2), (6, 1)), ((8, 3), (6, 4)), ((8, 4), (6, 7)), ((8, 5), (6, 9))];
 
-const DRUPAL_MAX_PHP: [((u32, u32), (u32, u32)); 9] = [
+const DRUPAL_MAX_PHP: [((u32, u32), (u32, u32)); 13] = [
+    ((7, 0), (8, 0)),
+    ((7, 92), (8, 1)),
+    ((7, 94), (8, 2)),
+    ((7, 103), (8, 3)),
     ((8, 0), (7, 4)),
     ((9, 0), (8, 1)),
     ((10, 0), (8, 2)),
@@ -72,6 +76,8 @@ pub fn check(root: &Path, framework: Framework, target: PhpVersion) -> Vec<Findi
         Framework::WordPress => wordpress(root, target).into_iter().collect(),
         Framework::Drupal => drupal(root, target).into_iter().collect(),
         Framework::Symfony => symfony(root, target).into_iter().collect(),
+        Framework::Magento => magento(root, target).into_iter().collect(),
+        Framework::PrestaShop => prestashop(root, target).into_iter().collect(),
         Framework::Generic => Vec::new(),
     }
 }
@@ -98,6 +104,14 @@ fn table_lookup<T: Copy>(table: &[((u32, u32), T)], version: (u32, u32)) -> Opti
 }
 
 fn drupal(root: &Path, target: PhpVersion) -> Option<Finding> {
+    let d7 = std::fs::read_to_string(root.join("includes/bootstrap.inc")).ok().and_then(|text| {
+        let (line, snippet) = line_of(&text, "define('VERSION'")?;
+        let version = snippet.split(['\'', '"']).nth(3)?.to_string();
+        Some((line, snippet, version))
+    });
+    if let Some((line, snippet, version)) = d7 {
+        return drupal7(target, line, snippet, &version);
+    }
     let (package, version) = locked_version(root, &["drupal/core", "drupal/core-recommended", "drupal/drupal"]).or_else(|| {
         ["", "web/", "docroot/", "html/", "public/"].iter().find_map(|base| {
             let text = std::fs::read_to_string(root.join(format!("{base}core/lib/Drupal.php"))).ok()?;
@@ -114,6 +128,7 @@ fn drupal(root: &Path, target: PhpVersion) -> Option<Finding> {
     let needed = if target >= PhpVersion::new(8, 5) { "11.3" } else { "10.4" };
     let (file, line, snippet) = package_line(root, &package, &version);
     let (cur, max_s, t) = (format!("{}.{}", current.0, current.1), format!("{}.{}", max.0, max.1), target.to_string());
+    let max_s_acc = crate::i18n::tr_accusative(&max_s);
     Some(finding(
         &file,
         line,
@@ -123,10 +138,161 @@ fn drupal(root: &Path, target: PhpVersion) -> Option<Finding> {
         since,
         Severity::Breaking,
         Localized {
-            tr: format!("Drupal {cur} en fazla PHP {max_s}'i destekliyor. PHP {t} için Drupal'ı en az {needed} sürümüne yükseltin."),
+            tr: format!("Drupal {cur} en fazla PHP {max_s_acc} destekliyor. PHP {t} için Drupal'ı en az {needed} sürümüne yükseltin."),
             en: format!("Drupal {cur} supports PHP up to {max_s}. PHP {t} needs at least Drupal {needed}."),
         },
         Localized::same(format!("composer require drupal/core-recommended:^{needed} --with-all-dependencies")),
+    ))
+}
+
+fn drupal7(target: PhpVersion, line: usize, snippet: String, version: &str) -> Option<Finding> {
+    let current = version_parts(version)?;
+    let max = table_lookup(&DRUPAL_MAX_PHP, current)?;
+    let since = next_minor(max);
+    if target < since {
+        return None;
+    }
+    let cur = format!("{}.{}", current.0, current.1);
+    let t = target.to_string();
+    let within = DRUPAL_MAX_PHP.iter().find(|(v, m)| v.0 == 7 && PhpVersion::new(m.0, m.1) >= target).map(|(v, _)| format!("7.{}", v.1));
+    let t_acc = crate::i18n::tr_accusative(&target.to_string());
+    let (tr, en, fix) = match within {
+        Some(need) => (
+            format!("Drupal {cur}, PHP {t} ile çalışmaz. PHP {t} için Drupal 7'yi en az {need} sürümüne güncelleyin."),
+            format!("Drupal {cur} doesn't run on PHP {t}. PHP {t} needs at least Drupal {need}."),
+            format!("Drupal {need}+"),
+        ),
+        None => (
+            format!("Hiçbir Drupal 7 sürümü PHP {t_acc} desteklemiyor; Drupal 7'nin desteği 5 Ocak 2025'te bitti. PHP {t} için siteyi Drupal 10 ya da 11'e taşımanız gerekiyor."),
+            format!("No Drupal 7 release supports PHP {t}, and Drupal 7 reached end of life on 5 January 2025. PHP {t} needs the site moved to Drupal 10 or 11."),
+            "Drupal 10.4+ / 11.3+".to_string(),
+        ),
+    };
+    Some(finding(
+        "includes/bootstrap.inc",
+        line,
+        snippet,
+        "framework.drupal_version",
+        format!("Drupal {cur}"),
+        since,
+        Severity::Breaking,
+        Localized { tr, en },
+        Localized::same(fix),
+    ))
+}
+
+type Release = (u32, u32, u32);
+
+const MAGENTO2_MAX_PHP: [(Release, (u32, u32)); 6] =
+    [((2, 0, 0), (7, 4)), ((2, 4, 4), (8, 1)), ((2, 4, 6), (8, 2)), ((2, 4, 7), (8, 3)), ((2, 4, 8), (8, 4)), ((2, 4, 9), (8, 5))];
+
+const PRESTASHOP_MAX_PHP: [(Release, (u32, u32)); 3] = [((1, 6, 0), (7, 4)), ((8, 0, 0), (8, 1)), ((9, 0, 0), (8, 5))];
+
+fn release_parts(v: &str) -> Option<Release> {
+    let mut parts = v.trim_start_matches(['v', 'V']).split(|c: char| !c.is_ascii_digit()).filter(|p| !p.is_empty());
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
+    let patch = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
+    Some((major, minor, patch))
+}
+
+fn release_label((major, minor, patch): Release) -> String {
+    format!("{major}.{minor}.{patch}")
+}
+
+fn magento(root: &Path, target: PhpVersion) -> Option<Finding> {
+    if let Ok(text) = std::fs::read_to_string(root.join("app/Mage.php")) {
+        if text.contains("getOpenMageVersionInfo") || locked_version(root, &["openmage/magento-lts"]).is_some() {
+            return None;
+        }
+        let since = PhpVersion::new(8, 0);
+        if target < since {
+            return None;
+        }
+        let (line, snippet) = line_of(&text, "function getVersionInfo").unwrap_or((1, "Mage".to_string()));
+        let t = target.to_string();
+        let t_acc = crate::i18n::tr_accusative(&target.to_string());
+        return Some(finding(
+            "app/Mage.php",
+            line,
+            snippet,
+            "framework.magento_version",
+            "Magento 1".to_string(),
+            since,
+            Severity::Breaking,
+            Localized {
+                tr: format!("Magento 1'in desteği Haziran 2020'de, PHP 8 çıkmadan bitti; hiçbir Magento 1 sürümü PHP {t_acc} resmi olarak desteklemiyor. Bakımı süren OpenMage LTS'ye geçmeniz ya da Magento 2'ye taşınmanız gerekiyor."),
+                en: format!("Magento 1 reached end of life in June 2020, before PHP 8 came out, and no Magento 1 release officially supports PHP {t}. Move to the maintained OpenMage LTS fork or migrate to Magento 2."),
+            },
+            Localized::same("composer require openmage/magento-lts"),
+        ));
+    }
+    let (package, version) =
+        locked_version(root, &["magento/product-community-edition", "magento/product-enterprise-edition", "magento/magento2-base"])?;
+    let current = release_parts(&version)?;
+    let max = MAGENTO2_MAX_PHP.iter().rev().find(|(v, _)| *v <= current)?.1;
+    let since = next_minor(max);
+    if target < since {
+        return None;
+    }
+    let needed = MAGENTO2_MAX_PHP.iter().find(|(_, m)| PhpVersion::new(m.0, m.1) >= target).map(|(v, _)| release_label(*v))?;
+    let (file, line, snippet) = package_line(root, &package, &version);
+    let (cur, t) = (release_label(current), target.to_string());
+    let t_acc = crate::i18n::tr_accusative(&target.to_string());
+    Some(finding(
+        &file,
+        line,
+        snippet,
+        "framework.magento_version",
+        format!("Magento {cur}"),
+        since,
+        Severity::Breaking,
+        Localized {
+            tr: format!("Magento {cur} resmi olarak PHP {t_acc} desteklemiyor. PHP {t} için Magento'yu en az {needed} sürümüne yükseltin."),
+            en: format!("Magento {cur} doesn't officially support PHP {t}. PHP {t} needs at least Magento {needed}."),
+        },
+        Localized::same(format!("composer require {package}:{needed} --no-update && composer update")),
+    ))
+}
+
+fn prestashop(root: &Path, target: PhpVersion) -> Option<Finding> {
+    let (rel, line, snippet, version) = [
+        ("app/AppKernel.php", "const VERSION"),
+        ("config/settings.inc.php", "_PS_VERSION_"),
+        ("install/install_version.php", "_PS_INSTALL_VERSION_"),
+        ("install-dev/install_version.php", "_PS_INSTALL_VERSION_"),
+    ]
+    .iter()
+    .find_map(|(rel, needle)| {
+        let text = std::fs::read_to_string(root.join(rel)).ok()?;
+        let (line, snippet) = line_of(&text, needle)?;
+        let version = snippet.split(['\'', '"']).find(|p| p.starts_with(|c: char| c.is_ascii_digit()))?.to_string();
+        Some((rel.to_string(), line, snippet.clone(), version))
+    })?;
+    let current = release_parts(&version)?;
+    let max = PRESTASHOP_MAX_PHP.iter().rev().find(|(v, _)| *v <= current)?.1;
+    let since = next_minor(max);
+    if target < since {
+        return None;
+    }
+    let needed = PRESTASHOP_MAX_PHP.iter().find(|(_, m)| PhpVersion::new(m.0, m.1) >= target).map(|(v, _)| format!("{}.{}", v.0, v.1))?;
+    let (cur, t) = (version.clone(), target.to_string());
+    let t_acc = crate::i18n::tr_accusative(&target.to_string());
+    Some(finding(
+        &rel,
+        line,
+        snippet,
+        "framework.prestashop_version",
+        format!("PrestaShop {cur}"),
+        since,
+        Severity::Breaking,
+        Localized {
+            tr: format!(
+                "PrestaShop {cur} resmi olarak PHP {t_acc} desteklemiyor. PHP {t} için PrestaShop'u en az {needed} sürümüne yükseltin."
+            ),
+            en: format!("PrestaShop {cur} doesn't officially support PHP {t}. PHP {t} needs at least PrestaShop {needed}."),
+        },
+        Localized::same(format!("PrestaShop {needed}+")),
     ))
 }
 
@@ -220,6 +386,7 @@ fn laravel(root: &Path, target: PhpVersion) -> Option<Finding> {
         .map(|l| ("composer.json", l))
         .unwrap_or(("composer.lock", (1, version.clone())));
     let (max_s, t) = (format!("{}.{}", max.0, max.1), target.to_string());
+    let max_s_acc = crate::i18n::tr_accusative(&max_s);
     Some(finding(
         file,
         line,
@@ -229,7 +396,7 @@ fn laravel(root: &Path, target: PhpVersion) -> Option<Finding> {
         since,
         Severity::Breaking,
         Localized {
-            tr: format!("Laravel {major} resmi olarak en fazla PHP {max_s}'i destekliyor. PHP {t} için Laravel'i en az {needed}. sürüme yükseltmeniz gerekiyor."),
+            tr: format!("Laravel {major} resmi olarak en fazla PHP {max_s_acc} destekliyor. PHP {t} için Laravel'i en az {needed}. sürüme yükseltmeniz gerekiyor."),
             en: format!("Laravel {major} officially supports PHP up to {max_s}. PHP {t} needs at least Laravel {needed}."),
         },
         Localized::same(format!("composer require laravel/framework:^{needed}.0 --with-all-dependencies")),
@@ -272,6 +439,7 @@ fn wordpress(root: &Path, target: PhpVersion) -> Option<Finding> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::project;
 
     fn project(files: &[(&str, &str)]) -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
@@ -309,6 +477,53 @@ mod tests {
         assert_eq!(check(old.path(), Framework::Drupal, PhpVersion::new(8, 2))[0].since, PhpVersion::new(8, 2));
         let new = project(&[("composer.lock", r#"{"packages":[{"name":"drupal/core","version":"11.3.1"}]}"#)]);
         assert!(check(new.path(), Framework::Drupal, PhpVersion::new(8, 5)).is_empty());
+    }
+
+    #[test]
+    fn drupal7_version_against_target() {
+        let dir = project(&[("includes/bootstrap.inc", "<?php\n\ndefine('VERSION', '7.98');\n")]);
+        assert_eq!(project::detect_framework(dir.path()), Framework::Drupal);
+        assert!(check(dir.path(), Framework::Drupal, PhpVersion::new(8, 2)).is_empty());
+        let f = &check(dir.path(), Framework::Drupal, PhpVersion::new(8, 3))[0];
+        assert_eq!((f.file.as_str(), f.line, f.since), ("includes/bootstrap.inc", 3, PhpVersion::new(8, 3)));
+        assert!(f.message.en.contains("at least Drupal 7.103"), "{}", f.message.en);
+        let f = &check(dir.path(), Framework::Drupal, PhpVersion::new(8, 4))[0];
+        assert!(f.message.en.contains("No Drupal 7 release supports PHP 8.4"), "{}", f.message.en);
+        assert!(f.message.tr.contains("PHP 8.4'ü"), "{}", f.message.tr);
+    }
+
+    #[test]
+    fn magento_versions_against_target() {
+        let m1 = project(&[("app/Mage.php", "<?php\nfinal class Mage {\n    public static function getVersionInfo() {}\n}\n")]);
+        assert_eq!(project::detect_framework(m1.path()), Framework::Magento);
+        let f = &check(m1.path(), Framework::Magento, PhpVersion::new(8, 2))[0];
+        assert_eq!((f.file.as_str(), f.line, f.since), ("app/Mage.php", 3, PhpVersion::new(8, 0)));
+        let openmage =
+            project(&[("app/Mage.php", "<?php\nfinal class Mage {\n    public static function getOpenMageVersionInfo() {}\n}\n")]);
+        assert!(check(openmage.path(), Framework::Magento, PhpVersion::new(8, 4)).is_empty());
+        let m2 = project(&[
+            ("composer.json", "{\n  \"require\": {\n    \"magento/product-community-edition\": \"2.4.7-p3\"\n  }\n}\n"),
+            ("composer.lock", r#"{"packages":[{"name":"magento/product-community-edition","version":"2.4.7-p3"}]}"#),
+        ]);
+        assert_eq!(project::detect_framework(m2.path()), Framework::Magento);
+        assert!(check(m2.path(), Framework::Magento, PhpVersion::new(8, 3)).is_empty());
+        let f = &check(m2.path(), Framework::Magento, PhpVersion::new(8, 5))[0];
+        assert_eq!((f.file.as_str(), f.line, f.since), ("composer.json", 3, PhpVersion::new(8, 4)));
+        assert!(f.message.en.contains("at least Magento 2.4.9"), "{}", f.message.en);
+    }
+
+    #[test]
+    fn prestashop_versions_against_target() {
+        let old = project(&[("config/settings.inc.php", "<?php\ndefine('_PS_VERSION_', '1.6.1.24');\n")]);
+        assert_eq!(project::detect_framework(old.path()), Framework::PrestaShop);
+        let f = &check(old.path(), Framework::PrestaShop, PhpVersion::new(8, 2))[0];
+        assert_eq!((f.file.as_str(), f.line, f.since), ("config/settings.inc.php", 2, PhpVersion::new(8, 0)));
+        assert!(f.message.en.contains("at least PrestaShop 9.0"), "{}", f.message.en);
+        let eight = project(&[("app/AppKernel.php", "<?php\nclass AppKernel {\n    const VERSION = '8.1.7';\n} // PrestaShop\n")]);
+        assert_eq!(project::detect_framework(eight.path()), Framework::PrestaShop);
+        assert_eq!(check(eight.path(), Framework::PrestaShop, PhpVersion::new(8, 2))[0].since, PhpVersion::new(8, 2));
+        let nine = project(&[("app/AppKernel.php", "<?php\nclass AppKernel {\n    const VERSION = '9.0.1';\n} // PrestaShop\n")]);
+        assert!(check(nine.path(), Framework::PrestaShop, PhpVersion::new(8, 5)).is_empty());
     }
 
     #[test]
