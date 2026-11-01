@@ -91,6 +91,7 @@ pub fn analyze_files(root: &Path, files: &[PathBuf], target: PhpVersion, mut pro
     if let Some(framework) = index.framework {
         findings.extend(crate::framework::check(root, framework, target));
     }
+    findings.extend(crate::server::scan(root, target));
     findings.sort_by(|a, b| (a.severity, &a.file, a.line, a.column).cmp(&(b.severity, &b.file, b.line, b.column)));
     ScanResult {
         target,
