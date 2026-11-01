@@ -53,6 +53,10 @@ export const FRAMEWORK_LABEL = {
   drupal: "Drupal",
   magento: "Magento",
   prestashop: "PrestaShop",
+  joomla: "Joomla",
+  moodle: "Moodle",
+  mediawiki: "MediaWiki",
+  phpbb: "phpBB",
   generic: "PHP",
 } as const;
 
