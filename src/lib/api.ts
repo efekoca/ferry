@@ -11,6 +11,7 @@ import type {
   Settings,
   Snapshot,
   ToolchainStatus,
+  VersionSuggestion,
 } from "./types";
 import { mockApi } from "./mock";
 import type { Lang } from "../i18n";
@@ -23,6 +24,7 @@ export interface Api {
   scanProject(path: string, target: string, run: number): Promise<ScanResult>;
   onScanProgress(handler: (p: ScanProgress) => void): Promise<() => void>;
   checkDependencies(path: string, target: string): Promise<DependencyReport>;
+  findCompatibleVersions(target: string, packages: { name: string; version: string }[]): Promise<VersionSuggestion[]>;
   toolchainStatus(): Promise<ToolchainStatus>;
   installRector(): Promise<ToolchainStatus>;
   rectorPreview(path: string, target: string, mode: RectorMode): Promise<RectorPreview>;
@@ -67,6 +69,7 @@ async function tauriApi(): Promise<Api> {
     scanProject: (path, target, run) => invoke("scan_project", { path, target, run }),
     onScanProgress: (handler) => listen<ScanProgress>("scan://progress", (e) => handler(e.payload)),
     checkDependencies: (path, target) => invoke("check_dependencies", { path, target }),
+    findCompatibleVersions: (target, packages) => invoke("find_compatible_versions", { target, packages }),
     toolchainStatus: () => invoke("toolchain_status"),
     installRector: () => invoke("install_rector"),
     rectorPreview: (path, target, mode) => invoke("rector_preview", { path, target, mode }),
