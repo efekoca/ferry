@@ -68,6 +68,7 @@ Ferry has its own PHP lexer and rule set, so it reads code the way PHP does: met
 - methods that override a built-in class or interface method with a signature PHP 8 rejects, such as Drupal 7's `query($query, array $args = array(), $options = array())` on a `PDO` subclass, which stops the class from loading
 - methods that override a parent class, trait or interface method in the project with a signature PHP 8 rejects, such as phpBB 3.2's `create_insert_array($user, $pre_create_data)` making a parameter required that the parent declares optional, which was only a warning in PHP 7
 - methods that override a built-in class or interface without a return type, such as `PDO::query()` or `Iterator::current()`, which need `#[\ReturnTypeWillChange]` from PHP 8.1
+- code that stops working on a newer version, such as a function or class PHP added later (`str_contains()`, `JsonException`) declared without a `function_exists()` check, `Class::method()` on a non-static method, calls with too few arguments, the `preg_replace()` `/e` modifier, and `is_resource()` on curl, GD or pgsql handles that are now objects
 - code worth a manual check, such as `eval()`, `extract()`, and variable variables
 
 ### Review every change before it is applied
