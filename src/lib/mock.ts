@@ -1,6 +1,7 @@
 import type { Api } from "./api";
 import type { Localized } from "../i18n";
 import type {
+  CheckRun,
   DependencyReport,
   DiffLine,
   FileChange,
@@ -169,6 +170,7 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
   let stale = opts.staleIgnores ?? [];
   let lastScan: ScanResult | null = null;
   let runtimeLog: string | null = null;
+  let runtimeCheck: CheckRun | null = null;
   const withRuntime = (findings: Finding[]): { findings: Finding[]; runtime: ScanResult["runtime"] } => {
     if (!runtimeLog) return { findings: findings.map((f) => ({ ...f, runtimeHits: 0 })), runtime: null };
     const hit = new Set(findings.filter((f) => f.ruleId.startsWith("removed.")).slice(0, 3).map((f) => f.id));
@@ -188,7 +190,7 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
       snippet: "$qty = $item['qty'];",
       runtimeHits: 7,
     };
-    return { findings: [...marked, extra], runtime: { file: runtimeLog, events: 31, confirmed: hit.size, added: 1, outside: 4 } };
+    return { findings: [...marked, extra], runtime: { file: runtimeLog, events: 31, confirmed: hit.size, added: 1, outside: 4, check: runtimeCheck } };
   };
   const history = new Map<string, { at: number; score: number; total: number; ids: string[] }[]>();
   const track = (scan: ScanResult): ScanResult => {
@@ -237,6 +239,7 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
     importRuntimeLog: async (_path, log) => {
       if (!lastScan) throw new Error("Scan the project first.");
       runtimeLog = log.split("/").pop() ?? log;
+      runtimeCheck = null;
       return withIgnores(lastScan);
     },
     localPhpVersions: async () => [
@@ -247,11 +250,24 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
       if (!lastScan) throw new Error("Scan the project first.");
       await sleep(delay);
       runtimeLog = kind === "lint" ? `php -l · PHP ${target}` : `PHPUnit · PHP ${target}`;
+      runtimeCheck = {
+        kind,
+        command: kind === "lint" ? "php -l" : "php vendor/bin/phpunit --display-deprecations --display-warnings --no-progress",
+        exitCode: kind === "lint" ? null : 0,
+        timedOut: false,
+        passed: true,
+        durationMs: 1840,
+        files: kind === "lint" ? 128 : 0,
+        failed: 0,
+        notRun: 0,
+        log: kind === "lint" ? "" : "OK (42 tests, 97 assertions)\n",
+      };
       return withIgnores(lastScan);
     },
     clearRuntimeLog: async () => {
       if (!lastScan) throw new Error("Scan the project first.");
       runtimeLog = null;
+      runtimeCheck = null;
       return withIgnores(lastScan);
     },
     inspectProject: async (path): Promise<ProjectInfo> => {
@@ -342,7 +358,7 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
       snapshots = [snapshot, ...snapshots];
       pending = pending.filter((c) => !files.includes(c.file));
       files.forEach((f) => fixed.add(f));
-      return { snapshot, written: files, lintErrors: [] };
+      return { snapshot, written: files, lintErrors: [], lintChecked: true };
     },
     listSnapshots: async () => snapshots,
     restoreSnapshot: async (_path, id) => {

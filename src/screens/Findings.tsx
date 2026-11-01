@@ -151,14 +151,25 @@ export function Findings() {
   );
   const selectedReason = selected ? reasons.get(selected.id) : undefined;
   const runtime = scan?.runtime;
+  const lastCheck = runtime?.check;
   const runtimeNotice = runtime && (
-    <Callout tone="info" icon={<Activity size={15} />}>
+    <Callout tone={lastCheck && !lastCheck.passed ? "warn" : "info"} icon={<Activity size={15} />}>
       <div className="row row--wrap">
-        <span>{t.findings.runtimeSummary(runtime.file, runtime.events, runtime.confirmed, runtime.added, runtime.outside)}</span>
+        <span>
+          {lastCheck && <strong className="check-result">{t.findings.checkResult(lastCheck)} </strong>}
+          {t.findings.runtimeSummary(runtime.file, runtime.events, runtime.confirmed, runtime.added, runtime.outside)}
+        </span>
         <Button size="sm" variant="ghost" onClick={() => void clearRuntimeLog()}>
           {t.findings.clearLog}
         </Button>
       </div>
+      {lastCheck?.log && (
+        <details className="check-log">
+          <summary>{t.findings.showOutput}</summary>
+          <code className="check-log__command">{lastCheck.command}</code>
+          <pre>{lastCheck.log}</pre>
+        </details>
+      )}
     </Callout>
   );
   const stale = scan?.staleIgnores ?? [];

@@ -6,8 +6,8 @@ use crate::toolchain::{command, ToolError};
 use crate::version::PhpVersion;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::process::{Command, Output};
+use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 
 const RECTOR_TIMEOUT: Duration = Duration::from_secs(20 * 60);
@@ -519,45 +519,14 @@ pub fn parse_output(root: &Path, stdout: &str, staging: &Staging) -> Result<(Vec
     Ok((changes, errors))
 }
 
-pub(crate) fn run_cancellable(mut cmd: Command, program: &Path, cancel: &AtomicBool, timeout: Duration) -> Result<Output, RectorError> {
-    let mut child = cmd
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|source| ToolError::Spawn { program: program.display().to_string(), source })?;
-    let read = |pipe: Option<Box<dyn std::io::Read + Send>>| {
-        std::thread::spawn(move || {
-            let mut buf = Vec::new();
-            if let Some(mut pipe) = pipe {
-                let _ = pipe.read_to_end(&mut buf);
-            }
-            buf
-        })
-    };
-    let stdout = read(child.stdout.take().map(|p| Box::new(p) as _));
-    let stderr = read(child.stderr.take().map(|p| Box::new(p) as _));
-    let started = Instant::now();
-    let io = |e| RectorError::Io("rector".into(), e);
-    let status = loop {
-        if let Some(status) = child.try_wait().map_err(io)? {
-            break status;
-        }
-        let stop = if cancel.load(Ordering::Relaxed) {
-            Some(RectorError::Cancelled)
-        } else if started.elapsed() >= timeout {
-            Some(RectorError::TimedOut(timeout.as_secs().div_ceil(60).max(1)))
-        } else {
-            None
-        };
-        if let Some(err) = stop {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(err);
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    };
-    Ok(Output { status, stdout: stdout.join().unwrap_or_default(), stderr: stderr.join().unwrap_or_default() })
+pub(crate) fn run_cancellable(cmd: Command, program: &Path, cancel: &AtomicBool, timeout: Duration) -> Result<Output, RectorError> {
+    let done = crate::toolchain::run_process(cmd, program, cancel, timeout)?;
+    match (done.stopped, done.status) {
+        (Some(crate::toolchain::Stop::Cancelled), _) => Err(RectorError::Cancelled),
+        (Some(crate::toolchain::Stop::TimedOut), _) => Err(RectorError::TimedOut(timeout.as_secs().div_ceil(60).max(1))),
+        (None, Some(status)) => Ok(Output { status, stdout: done.stdout, stderr: done.stderr }),
+        (None, None) => Err(RectorError::Io("rector".into(), std::io::Error::other("wait failed"))),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -878,7 +847,7 @@ mod tests {
         let flag = cancel.clone();
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(200));
-            flag.store(true, Ordering::Relaxed);
+            flag.store(true, std::sync::atomic::Ordering::Relaxed);
         });
         let mut cmd = Command::new(sleep);
         cmd.arg("30");

@@ -152,6 +152,7 @@ struct ScanResponse {
 struct RuntimeLog {
     file: String,
     events: Vec<runtime::Event>,
+    check: Option<ferry_core::localcheck::CheckRun>,
 }
 
 #[derive(Serialize)]
@@ -162,6 +163,7 @@ struct RuntimeSummary {
     confirmed: usize,
     added: usize,
     outside: usize,
+    check: Option<ferry_core::localcheck::CheckRun>,
 }
 
 fn respond(root: &Path, mut scan: ScanResult, log: Option<&RuntimeLog>) -> ScanResponse {
@@ -173,6 +175,7 @@ fn respond(root: &Path, mut scan: ScanResult, log: Option<&RuntimeLog>) -> ScanR
             confirmed: merged.confirmed,
             added: merged.added,
             outside: merged.outside,
+            check: log.check.clone(),
         }
     });
     let applied = ignore::apply(root, std::mem::take(&mut scan.findings), &ignore::load(root));
@@ -207,7 +210,7 @@ async fn import_runtime_log(state: State<'_, AppState>, path: String, log: Strin
             ));
         }
         let name = Path::new(&log).file_name().map_or(log.clone(), |n| n.to_string_lossy().to_string());
-        Ok((root, RuntimeLog { file: name, events }))
+        Ok((root, RuntimeLog { file: name, events, check: None }))
     })
     .await?;
     let key = root.to_string_lossy().to_string();
@@ -229,6 +232,7 @@ async fn run_local_check(state: State<'_, AppState>, path: String, target: Strin
     let path = normalize_path(path);
     let target = parse_target(&target)?;
     let scan = state.scans.lock().unwrap().get(&path).cloned().ok_or_else(|| t!("Önce projeyi tarayın.", "Scan the project first."))?;
+    let shutdown = state.shutdown.clone();
     let (root, entry) = blocking(move || {
         let root = project_root(&path)?;
         let local = toolchain::local_php(&[target.to_string()]).into_iter().next().ok_or_else(|| {
@@ -237,7 +241,7 @@ async fn run_local_check(state: State<'_, AppState>, path: String, target: Strin
                 "PHP {target} wasn't found on this computer. Install it with Homebrew, Herd or your package manager."
             )
         })?;
-        let (label, output) = match kind.as_str() {
+        let (label, run) = match kind.as_str() {
             "lint" => {
                 let info = project::inspect(&root).map_err(|e| e.to_string())?;
                 let files = project::collect_php_files(&root, &info.excluded_dirs);
@@ -245,11 +249,11 @@ async fn run_local_check(state: State<'_, AppState>, path: String, target: Strin
             }
             "tests" => (
                 format!("PHPUnit · PHP {}", local.version),
-                ferry_core::localcheck::run_tests(&local.path, &root, Duration::from_secs(20 * 60))?,
+                ferry_core::localcheck::run_tests(&local.path, &root, Duration::from_secs(20 * 60), &shutdown)?,
             ),
             _ => return Err(t!("Bilinmeyen kontrol.", "Unknown check.")),
         };
-        Ok((root, RuntimeLog { file: label, events: runtime::parse(&output) }))
+        Ok((root, RuntimeLog { file: label, events: runtime::parse(&run.output), check: Some(run) }))
     })
     .await?;
     state.runtime.lock().unwrap().insert(root.to_string_lossy().to_string(), entry.clone());
@@ -660,6 +664,7 @@ struct ApplyResult {
     snapshot: Snapshot,
     written: Vec<String>,
     lint_errors: Vec<String>,
+    lint_checked: bool,
 }
 
 #[tauri::command]
@@ -717,15 +722,15 @@ async fn apply_changes(
                 if let Some(limit) = snapshot_limit {
                     let _ = store.prune(&root, limit.max(1) as usize);
                 }
-                let lint_errors = toolchain::find_php(php_override.as_deref())
+                let lint = toolchain::find_php(php_override.as_deref())
                     .filter(|php| toolchain::php_version(php).and_then(|v| v.parse::<PhpVersion>().ok()).is_some_and(|v| v >= target))
                     .map(|php| {
                         let files =
                             selected.iter().map(|c| (c.file.as_str(), originals.get(&c.file).map(String::as_str), c.new_content.as_str()));
                         toolchain::new_syntax_errors(&php, files)
-                    })
-                    .unwrap_or_default();
-                Ok(ApplyResult { snapshot, written, lint_errors })
+                    });
+                let lint_checked = lint.as_ref().is_some_and(|l| l.not_run.is_empty());
+                Ok(ApplyResult { snapshot, written, lint_errors: lint.map(|l| l.errors).unwrap_or_default(), lint_checked })
             }
             Err(e) => match store.restore_files(&root, &snapshot.id, Some(&written)) {
                 Ok(_) => {
