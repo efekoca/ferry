@@ -641,6 +641,7 @@ pub fn apply(root: &Path, changes: &[&FileChange]) -> Result<Vec<String>, Rector
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
     fn change(file: &str, before: &str, after: &str) -> FileChange {
         FileChange {
             file: file.into(),
