@@ -91,6 +91,7 @@ pub struct ProjectIndex {
     version_includes: HashSet<String>,
     types: HashMap<String, Vec<TypeInfo>>,
     interfaces: HashMap<String, Vec<InterfaceInfo>>,
+    constants: HashSet<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -132,7 +133,12 @@ impl ProjectIndex {
         index
     }
 
+    pub fn defines_constant(&self, name: &str) -> bool {
+        self.constants.contains(name)
+    }
+
     fn add(&mut self, tokens: &[Token]) {
+        self.constants.extend(crate::analyzer::defined_constants(tokens));
         let methods = crate::analyzer::method_tokens(tokens);
         let spaces = namespaces(tokens);
         let names = Names::new(tokens);
