@@ -12,6 +12,7 @@ pub mod project;
 pub mod rector;
 pub mod report;
 pub mod rules;
+pub mod server;
 pub mod snapshot;
 pub mod toolchain;
 pub mod version;
