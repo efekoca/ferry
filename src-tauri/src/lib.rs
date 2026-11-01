@@ -1,5 +1,6 @@
 use ferry_core::analyzer::{self, ScanResult};
 use ferry_core::deps::{self, DependencyReport};
+use ferry_core::history;
 use ferry_core::i18n::{self, Lang};
 use ferry_core::ignore::{self, Ignore, IgnoredFinding};
 use ferry_core::project::{self, ProjectInfo};
@@ -139,13 +140,15 @@ struct ScanResponse {
     scan: ScanResult,
     summary: report::Summary,
     ignored: Vec<IgnoredFinding>,
+    stale_ignores: Vec<Ignore>,
+    progress: Option<history::Progress>,
 }
 
 fn respond(root: &Path, mut scan: ScanResult) -> ScanResponse {
-    let (kept, ignored) = ignore::split(std::mem::take(&mut scan.findings), &ignore::load(root));
-    scan.findings = kept;
+    let applied = ignore::apply(root, std::mem::take(&mut scan.findings), &ignore::load(root));
+    scan.findings = applied.kept;
     let summary = report::summarize(&scan.findings);
-    ScanResponse { scan, summary, ignored }
+    ScanResponse { scan, summary, ignored: applied.ignored, stale_ignores: applied.stale, progress: None }
 }
 
 #[tauri::command]
@@ -170,10 +173,17 @@ async fn scan_project<R: Runtime>(app: AppHandle<R>, path: String, target: Strin
     .await?;
     let (path, scan) = result;
     let state = app.state::<AppState>();
-    if state.latest_scan.lock().unwrap().get(&path) == Some(&run) {
+    let latest = state.latest_scan.lock().unwrap().get(&path) == Some(&run);
+    if latest {
         state.scans.lock().unwrap().insert(path.clone(), scan.clone());
     }
-    Ok(respond(Path::new(&path), scan))
+    let mut response = respond(Path::new(&path), scan);
+    if latest {
+        let file = state.data_dir.join("history").join(format!("{:016x}.json", fnv1a(path.as_bytes())));
+        let target = response.scan.target.to_string();
+        response.progress = history::record(&file, now_secs(), &target, response.summary.score, &response.scan.findings).ok();
+    }
+    Ok(response)
 }
 
 fn now_secs() -> u64 {
@@ -221,6 +231,24 @@ async fn unignore_finding(state: State<'_, AppState>, path: String, id: String) 
         let mut ignores = ignore::load(&root);
         ignores.retain(|i| !i.matches(finding));
         ignore::save(&root, &ignores).map_err(|e| {
+            let e = ferry_core::i18n::io_error(&e);
+            t!("Yok sayma listesi kaydedilemedi: {e}", "Couldn't save the ignore list: {e}")
+        })?;
+        Ok(respond(&root, scan))
+    })
+    .await
+}
+
+#[tauri::command]
+async fn prune_ignores(state: State<'_, AppState>, path: String) -> CmdResult<ScanResponse> {
+    let path = normalize_path(path);
+    let scan = state.scans.lock().unwrap().get(&path).cloned().ok_or_else(|| t!("Önce projeyi tarayın.", "Scan the project first."))?;
+    blocking(move || {
+        let root = project_root(&path)?;
+        let ignores = ignore::load(&root);
+        let stale = ignore::apply(&root, Vec::new(), &ignores).stale;
+        let kept: Vec<Ignore> = ignores.into_iter().filter(|i| !stale.contains(i)).collect();
+        ignore::save(&root, &kept).map_err(|e| {
             let e = ferry_core::i18n::io_error(&e);
             t!("Yok sayma listesi kaydedilemedi: {e}", "Couldn't save the ignore list: {e}")
         })?;
@@ -679,6 +707,7 @@ pub fn with_commands<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R
         export_report,
         ignore_finding,
         unignore_finding,
+        prune_ignores,
         open_in_editor,
         get_settings,
         save_settings,

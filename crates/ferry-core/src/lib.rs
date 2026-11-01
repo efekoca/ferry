@@ -1,6 +1,8 @@
 pub mod analyzer;
 #[rustfmt::skip]
 mod builtin;
+#[rustfmt::skip]
+mod arity;
 pub mod deps;
 pub mod diff;
 pub mod extensions;
@@ -8,6 +10,7 @@ pub mod extensions;
 mod ext_map;
 pub mod framework;
 mod guards;
+pub mod history;
 pub mod i18n;
 pub mod ignore;
 pub mod index;

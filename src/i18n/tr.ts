@@ -144,6 +144,16 @@ export const tr = {
     switchText: (n: number) => `Hesaplanan ${n} dosyalık düzeltme önizlemesi silinir ve proje yeni hedefe göre yeniden taranır.`,
   },
   scoreLabel: (s: number) => `Hazırlık skoru: ${s}/100`,
+  progress: {
+    title: "İlerleme",
+    first: "İlk tarama. Bir sonraki taramada nelerin değiştiğini burada göreceksiniz.",
+    since: "Son taramadan beri",
+    resolved: (n: number) => `${n} çözüldü`,
+    added: (n: number) => `${n} yeni`,
+    unchanged: "Değişiklik yok",
+    trend: (scores: string) => `Hazırlık puanının taramalar boyunca değişimi: ${scores}`,
+    point: (date: string, score: number, total: number) => `${date} · puan ${score} · ${total} bulgu`,
+  },
   findings: {
     title: "Bulgular",
     subtitle: (t: string, n: number) => `PHP ${t} · ${n} bulgu`,
@@ -180,6 +190,8 @@ export const tr = {
     ignoredTitle: (n: number) => `${n} yok sayılan bulgu`,
     ignoredReason: "Yok sayma gerekçesi",
     unignore: "Yeniden göster",
+    staleIgnores: (n: number) => `.ferry/ignore.json içindeki ${n} kayıt artık hiçbir kodla eşleşmiyor; kod değişmiş ya da silinmiş olabilir.`,
+    pruneIgnores: "Bu kayıtları sil",
   },
   changes: {
     title: "Düzeltmeler",

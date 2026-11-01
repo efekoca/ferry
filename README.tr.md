@@ -42,6 +42,8 @@ Her sayı bir kısayoldur: **Kritik**'e, **Elle düzelt**'e ya da en sık görü
 
 Bakımını sizin yapmadığınız framework kodu kendiliğinden atlanır: WordPress'te `wp-admin` ve `wp-includes`, Laravel'de `storage` ve `bootstrap/cache`, Symfony'de `var`, Drupal çekirdeği; her projede de `vendor` ve `node_modules`. Atlanan klasörler genel bakışta yazılıdır.
 
+İkinci taramadan sonra **Son taramadan beri** kaç bulgunun çözüldüğünü, kaçının yeni olduğunu ve o hedef için her taramanın hazırlık puanını bir eğri olarak gösterir. Ferry her hedef için son 30 taramayı projede değil, kendi veri klasöründe tutar.
+
 **Rapor al** ile sonuçları bir Markdown dosyasına kaydedebilir, bir iş kaydına ekleyebilir ya da ekibinizle paylaşabilirsiniz.
 
 ### Her bulgu, açıklamasıyla
@@ -61,6 +63,8 @@ Bir bulguyu seçtiğinizde şunları görürsünüz:
 
 Bir bulgunun sizin için geçerli olmadığına karar verdiyseniz (örneğin yalnızca eski sunucuda çalışan bir kod) **Yok say** onu listeden ve puandan çıkarır. Ferry bir gerekçe ister ve bunu projedeki `.ferry/ignore.json` dosyasına yazar; bu dosyayı depoya eklerseniz karar kodla birlikte taşınır. Eşleştirme kural, dosya ve kod üzerinden yapılır, bu yüzden üstteki satırlar kaysa da bulgu yok sayılmaya devam eder. Bulgular sayfasındaki **Yok sayılanlar** bunları gerekçeleriyle listeler, **Yeniden göster** bir bulguyu geri getirir.
 
+Bir bulguyu kodun içinde de yok sayabilirsiniz: Aynı satıra ya da bir üst satıra yazılan `// ferry-ignore removed.each yalnızca PHP 5 sunucusunda çalışıyor` yorumu o kuralı orada yok sayar. `removed.*` bir grubu, yalnızca `// ferry-ignore` ise o satırdaki bütün kuralları kapsar. `.ferry/ignore.json` içindeki bir kayıt kod değiştiği ya da silindiği için artık hiçbir kodla eşleşmiyorsa Bulgular sayfası bunu söyler ve kaydı silmeyi önerir.
+
 Ferry'nin kendi PHP sözcük çözümleyicisi ve kural seti vardır; kodu PHP'nin okuduğu gibi okur. `$db->each()` gibi metot çağrıları, kendi namespace'inizdeki fonksiyonlar, metinlerin ve yorumların içindekiler kaldırılmış fonksiyon sanılmaz. Kurallar şunları kapsar:
 
 - `mysql_*`, `ereg*`, `each()`, `create_function()` ve `money_format()` gibi kaldırılan eklenti ve fonksiyonlar
@@ -70,7 +74,8 @@ Ferry'nin kendi PHP sözcük çözümleyicisi ve kural seti vardır; kodu PHP'ni
 - yerleşik bir sınıfın ya da arayüzün metodunu PHP 8'in kabul etmediği bir imzayla ezen ve sınıfın hiç yüklenmemesine yol açan metotlar; örneğin Drupal 7'nin bir `PDO` alt sınıfındaki `query($query, array $args = array(), $options = array())` metodu
 - projedeki bir üst sınıfın, trait'in ya da arayüzün metodunu PHP 8'in kabul etmediği bir imzayla ezen metotlar; örneğin phpBB 3.2'nin üst sınıfta isteğe bağlı olan parametreyi zorunlu yapan `create_insert_array($user, $pre_create_data)` metodu. PHP 7 bunu yalnızca uyarıyla geçiyordu
 - `PDO::query()` ya da `Iterator::current()` gibi yerleşik bir sınıfın ya da arayüzün metodunu dönüş tipi olmadan ezen ve PHP 8.1'den itibaren `#[\ReturnTypeWillChange]` isteyen metotlar
-- yeni sürümde çalışmayı bırakan kodlar: PHP'ye sonradan eklenen bir fonksiyonu ya da sınıfı (`str_contains()`, `JsonException`) `function_exists()` kontrolü olmadan tanımlamak, statik olmayan bir metodu `Sinif::metot()` ile çağırmak, eksik argümanla yapılan çağrılar, `preg_replace()` içindeki `/e` belirteci ve artık nesne olan curl, GD ya da pgsql değerleri için `is_resource()`
+- yeni sürümde çalışmayı bırakan kodlar: PHP'ye sonradan eklenen bir fonksiyonu ya da sınıfı (`str_contains()`, `JsonException`) `function_exists()` kontrolü olmadan tanımlamak, statik olmayan bir metodu `Sinif::metot()` ile çağırmak, kendi fonksiyon, metot ve constructor'larınıza eksik argümanla yapılan çağrılar, yerleşik fonksiyonlara yanlış sayıda argüman (`mktime()`, `crypt($pw)`), beşinci `$errcontext` parametresini zorunlu tutan hata işleyiciler, `Exception` tipli istisna işleyiciler, üst sınıfı olmayan sınıfta `parent::`, `preg_replace()` içindeki `/e` belirteci ve artık nesne olan curl, GD ya da pgsql değerleri için `is_resource()`
+- PHP 8'de artık hiç tutmayan, `@` için yazılmış `error_reporting() == 0` kontrolleri
 - `eval()`, `extract()` ve değişken değişkenler gibi elle kontrol edilmesi gereken kodlar
 
 Ferry, hangi PHP'nin gerçekten çalışacağını belirleyen ve kodun çevresinde duran dosyaları da okur:
@@ -137,6 +142,19 @@ target/release/ferry-cli scan . --target 8.4 --format github
 - `--format text|json|sarif|github`: düz metin, özet ve yok sayılan bulgularla birlikte JSON, GitHub code scanning ve benzeri araçlar için SARIF 2.1.0 ya da değişen satırlarda GitHub Actions uyarıları.
 - `--fail-on breaking|deprecated|any|none`: komutun 1 koduyla çıkması için gereken en düşük önem derecesi (varsayılanı `breaking`). Klasörün bulunamaması gibi hatalarda çıkış kodu 2'dir.
 - `--output <dosya>` raporu bir dosyaya yazar, `--lang tr` mesajları Türkçe yapar.
+- `--write-baseline <dosya>` bugünkü bulguları kaydeder, `--baseline <dosya>` ise onlarla karşılaştırır: `--fail-on` için yalnızca baseline'da olmayan bulgular sayılır, `--fail-on new` bunlardan herhangi biri varsa başarısız olur. Böylece yüzlerce eski bulgusu olan bir projede yenilerin eklenmesi engellenebilir.
+
+Depo aynı zamanda `ferry-cli`'ı derleyip pull request'lere uyarı ekleyen bir GitHub Action'dır:
+
+```yaml
+- uses: efekoca/ferry@main
+  with:
+    target: "8.4"
+    baseline: .ferry/baseline.json
+    fail-on: new
+```
+
+`sarif: "true"` verirseniz `github/codeql-action/upload-sarif` için `ferry.sarif` de yazılır.
 
 ## Desteklenen projeler
 

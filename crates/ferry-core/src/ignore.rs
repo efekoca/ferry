@@ -72,6 +72,59 @@ pub fn split(findings: Vec<Finding>, ignores: &[Ignore]) -> (Vec<Finding>, Vec<I
     (kept, ignored)
 }
 
+pub struct Applied {
+    pub kept: Vec<Finding>,
+    pub ignored: Vec<IgnoredFinding>,
+    pub stale: Vec<Ignore>,
+}
+
+fn inline_reason(line: &str, rule_id: &str) -> Option<String> {
+    let at = line.find("ferry-ignore")?;
+    let rest = line[at + "ferry-ignore".len()..].trim_start_matches(':').trim();
+    let rest = rest.split("*/").next().unwrap_or_default().split("-->").next().unwrap_or_default().trim();
+    let (first, tail) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
+    let names_rule = first.contains('.') || first.ends_with('*');
+    if names_rule {
+        let matches = first.strip_suffix('*').map_or(first == rule_id, |prefix| rule_id.starts_with(prefix));
+        matches.then(|| tail.trim().to_string())
+    } else {
+        Some(rest.to_string())
+    }
+}
+
+pub fn apply(root: &Path, findings: Vec<Finding>, ignores: &[Ignore]) -> Applied {
+    let mut sources: std::collections::HashMap<String, Option<Vec<String>>> = std::collections::HashMap::new();
+    let mut lines_of = |file: &str| -> Option<Vec<String>> {
+        sources
+            .entry(file.to_string())
+            .or_insert_with(|| {
+                std::fs::read(root.join(file)).ok().map(|b| String::from_utf8_lossy(&b).lines().map(str::to_string).collect())
+            })
+            .clone()
+    };
+    let (mut kept, mut ignored) = (Vec::new(), Vec::new());
+    for f in findings {
+        if let Some(i) = ignores.iter().find(|i| i.matches(&f)) {
+            ignored.push(IgnoredFinding { reason: i.reason.clone(), finding: f });
+            continue;
+        }
+        let inline = lines_of(&f.file).and_then(|lines| {
+            let here = lines.get(f.line.wrapping_sub(1)).and_then(|l| inline_reason(l, &f.rule_id));
+            here.or_else(|| f.line.checked_sub(2).and_then(|k| lines.get(k)).and_then(|l| inline_reason(l, &f.rule_id)))
+        });
+        match inline {
+            Some(reason) => ignored.push(IgnoredFinding { reason, finding: f }),
+            None => kept.push(f),
+        }
+    }
+    let stale = ignores
+        .iter()
+        .filter(|i| !lines_of(&i.file).is_some_and(|lines| lines.iter().any(|l| l.trim() == i.snippet || l.contains(i.snippet.as_str()))))
+        .cloned()
+        .collect();
+    Applied { kept, ignored, stale }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -90,5 +143,26 @@ mod tests {
         assert_eq!(kept[0].line, 5);
         assert_eq!((ignored[0].finding.line, ignored[0].reason.as_str()), (4, "vendored copy"));
         assert!(load(&dir.path().join("missing")).is_empty());
+    }
+
+    #[test]
+    fn inline_comments_and_stale_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = "<?php\n// ferry-ignore removed.each only runs on the PHP 5 server\neach($a);\neach($b); // ferry-ignore\n/* ferry-ignore removed.* legacy */ each($c);\n// ferry-ignore deprecated.utf8_encode wrong rule\neach($d);\n";
+        std::fs::write(dir.path().join("a.php"), src).unwrap();
+        let findings = analyze_source("a.php", src, "8.2".parse().unwrap());
+        let gone = Ignore {
+            rule_id: "removed.each".into(),
+            file: "a.php".into(),
+            snippet: "each($old);".into(),
+            reason: "x".into(),
+            created_at: 0,
+        };
+        let missing = Ignore { file: "deleted.php".into(), ..gone.clone() };
+        let applied = apply(dir.path(), findings, &[gone.clone(), missing.clone()]);
+        let reasons: Vec<(usize, &str)> = applied.ignored.iter().map(|i| (i.finding.line, i.reason.as_str())).collect();
+        assert_eq!(reasons, [(3, "only runs on the PHP 5 server"), (4, ""), (5, "legacy")]);
+        assert_eq!(applied.kept.iter().map(|f| f.line).collect::<Vec<_>>(), [7]);
+        assert_eq!(applied.stale, [gone, missing]);
     }
 }

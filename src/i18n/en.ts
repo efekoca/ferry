@@ -145,6 +145,16 @@ export const en: Dict = {
     switchText: (n) => `The fix preview for ${n} files will be discarded and the project rescanned for the new target.`,
   },
   scoreLabel: (s) => `Readiness score: ${s}/100`,
+  progress: {
+    title: "Progress",
+    first: "First scan. Next time you'll see what changed here.",
+    since: "Since the last scan",
+    resolved: (n) => `${n} resolved`,
+    added: (n) => `${n} new`,
+    unchanged: "No change",
+    trend: (scores) => `Readiness score across scans: ${scores}`,
+    point: (date, score, total) => `${date} · score ${score} · ${total} findings`,
+  },
   findings: {
     title: "Findings",
     subtitle: (t, n) => `PHP ${t} · ${n} findings`,
@@ -181,6 +191,9 @@ export const en: Dict = {
     ignoredTitle: (n) => (n === 1 ? "1 ignored finding" : `${n} ignored findings`),
     ignoredReason: "Why it's ignored",
     unignore: "Show again",
+    staleIgnores: (n) =>
+      `${n === 1 ? "1 entry" : `${n} entries`} in .ferry/ignore.json no longer ${n === 1 ? "matches" : "match"} any code; it may have changed or been deleted.`,
+    pruneIgnores: "Remove them",
   },
   changes: {
     title: "Fixes",

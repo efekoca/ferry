@@ -42,6 +42,8 @@ Every number is a shortcut: click **Breaking**, **Manual** or one of the most co
 
 Framework code you don't maintain is skipped automatically: `wp-admin` and `wp-includes` in WordPress, `storage` and `bootstrap/cache` in Laravel, `var` in Symfony, Drupal core, and `vendor` and `node_modules` everywhere. The overview names the skipped folders.
 
+After the second scan, **Since the last scan** shows how many findings were resolved and how many are new, with the readiness score of every scan for that target as a trend line. Ferry keeps the last 30 scans per target in its own data folder, never in the project.
+
 **Export report** saves the results as a Markdown file you can attach to a ticket or share with your team.
 
 ### Every finding, explained
@@ -61,6 +63,8 @@ Select a finding to see:
 
 **Ignore** takes a finding out of the list and the score once you've decided it doesn't apply, for example code that only runs on the old server. Ferry asks for a reason and saves it to `.ferry/ignore.json` in the project, so the decision travels with the code when you commit that file. The match uses the rule, the file and the code, so an ignored finding stays ignored when lines above it move. **Ignored** on the Findings page lists them with their reasons, and **Show again** brings one back.
 
+You can also ignore a finding in the code itself: a `// ferry-ignore removed.each only runs on the PHP 5 server` comment on the same line or the line above ignores that rule there, `removed.*` covers a group, and a bare `// ferry-ignore` covers every rule on the line. When an entry in `.ferry/ignore.json` no longer matches any code, because it changed or was deleted, the Findings page says so and offers to remove it.
+
 Ferry has its own PHP lexer and rule set, so it reads code the way PHP does: method calls such as `$db->each()`, functions in your own namespace, and text inside strings and comments are not mistaken for removed functions. Its rules cover:
 
 - removed extensions and functions, such as `mysql_*`, `ereg*`, `each()`, `create_function()`, and `money_format()`
@@ -70,7 +74,8 @@ Ferry has its own PHP lexer and rule set, so it reads code the way PHP does: met
 - methods that override a built-in class or interface method with a signature PHP 8 rejects, such as Drupal 7's `query($query, array $args = array(), $options = array())` on a `PDO` subclass, which stops the class from loading
 - methods that override a parent class, trait or interface method in the project with a signature PHP 8 rejects, such as phpBB 3.2's `create_insert_array($user, $pre_create_data)` making a parameter required that the parent declares optional, which was only a warning in PHP 7
 - methods that override a built-in class or interface without a return type, such as `PDO::query()` or `Iterator::current()`, which need `#[\ReturnTypeWillChange]` from PHP 8.1
-- code that stops working on a newer version, such as a function or class PHP added later (`str_contains()`, `JsonException`) declared without a `function_exists()` check, `Class::method()` on a non-static method, calls with too few arguments, the `preg_replace()` `/e` modifier, and `is_resource()` on curl, GD or pgsql handles that are now objects
+- code that stops working on a newer version, such as a function or class PHP added later (`str_contains()`, `JsonException`) declared without a `function_exists()` check, `Class::method()` on a non-static method, calls with too few arguments to your functions, methods and constructors, built-in functions called with the wrong number of arguments (`mktime()`, `crypt($pw)`), error handlers that require a fifth `$errcontext` parameter, exception handlers typed `Exception`, `parent::` in a class without a parent, the `preg_replace()` `/e` modifier, and `is_resource()` on curl, GD or pgsql handles that are now objects
+- `error_reporting() == 0` checks for `@`, which no longer match in PHP 8
 - code worth a manual check, such as `eval()`, `extract()`, and variable variables
 
 Ferry also reads the files around the code that decide which PHP actually runs:
@@ -137,6 +142,19 @@ target/release/ferry-cli scan . --target 8.4 --format github
 - `--format text|json|sarif|github`: plain text, JSON with the summary and ignored findings, SARIF 2.1.0 for GitHub code scanning and other viewers, or GitHub Actions annotations on the changed lines.
 - `--fail-on breaking|deprecated|any|none`: the lowest severity that makes the command exit with code 1 (default `breaking`). Errors such as a missing folder exit with code 2.
 - `--output <file>` writes the report to a file, and `--lang tr` switches the messages to Turkish.
+- `--write-baseline <file>` saves today's findings, and `--baseline <file>` compares with them: only findings that aren't in the baseline count toward `--fail-on`, and `--fail-on new` fails on any of them. This lets a project with hundreds of old findings stop new ones from coming in.
+
+The repository is also a GitHub Action that builds `ferry-cli` and annotates pull requests:
+
+```yaml
+- uses: efekoca/ferry@main
+  with:
+    target: "8.4"
+    baseline: .ferry/baseline.json
+    fail-on: new
+```
+
+Set `sarif: "true"` to also write `ferry.sarif` for `github/codeql-action/upload-sarif`.
 
 ## Supported projects
 

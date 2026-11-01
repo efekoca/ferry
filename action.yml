@@ -1,0 +1,42 @@
+name: Ferry PHP upgrade scan
+description: Scan a PHP project for code that breaks on a newer PHP version and report it on pull requests.
+branding:
+  icon: anchor
+  color: purple
+inputs:
+  target:
+    description: PHP version to check against (8.2, 8.3, 8.4 or 8.5)
+    required: true
+  path:
+    description: Project folder to scan
+    default: "."
+  fail-on:
+    description: breaking, deprecated, any, new or none
+    default: breaking
+  baseline:
+    description: Baseline file written by ferry-cli --write-baseline; with it only new findings fail the job
+    default: ""
+  sarif:
+    description: Also write ferry.sarif for upload to GitHub code scanning
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - uses: actions/cache@v4
+      with:
+        path: ~/.cargo/bin/ferry-cli
+        key: ferry-cli-${{ runner.os }}-${{ hashFiles(format('{0}/Cargo.lock', github.action_path)) }}-${{ github.action_ref }}
+    - shell: bash
+      run: command -v ferry-cli >/dev/null || cargo install --locked --path "$GITHUB_ACTION_PATH/crates/ferry-cli"
+    - shell: bash
+      env:
+        TARGET: ${{ inputs.target }}
+        PROJECT: ${{ inputs.path }}
+        FAIL_ON: ${{ inputs.fail-on }}
+        BASELINE: ${{ inputs.baseline }}
+        SARIF: ${{ inputs.sarif }}
+      run: |
+        args=(scan "$PROJECT" --target "$TARGET" --fail-on "$FAIL_ON")
+        if [ -n "$BASELINE" ]; then args+=(--baseline "$BASELINE"); fi
+        if [ "$SARIF" = "true" ]; then ferry-cli "${args[@]}" --format sarif --output ferry.sarif --fail-on none; fi
+        ferry-cli "${args[@]}" --format github
