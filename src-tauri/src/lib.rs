@@ -550,6 +550,19 @@ async fn compare_targets(path: String) -> CmdResult<Vec<ferry_core::compare::Tar
 }
 
 #[tauri::command]
+async fn write_probe(destination: String) -> CmdResult<String> {
+    blocking(move || {
+        let token = ferry_core::probe::token();
+        std::fs::write(&destination, ferry_core::probe::script(&token)).map_err(|e| {
+            let e = ferry_core::i18n::io_error(&e);
+            t!("Yoklama dosyası kaydedilemedi: {e}", "Couldn't save the probe file: {e}")
+        })?;
+        Ok(token)
+    })
+    .await
+}
+
+#[tauri::command]
 async fn toolchain_status(state: State<'_, AppState>) -> CmdResult<ToolchainStatus> {
     let tools = state.tools_dir();
     let php = state.php_override();
@@ -888,6 +901,7 @@ pub fn with_commands<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R
         inspect_project,
         scan_project,
         check_dependencies,
+        write_probe,
         git_status,
         compare_targets,
         find_compatible_versions,
