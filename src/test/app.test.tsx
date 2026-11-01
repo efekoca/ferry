@@ -231,6 +231,18 @@ describe("Ferry app", () => {
     await waitFor(() => expect(screen.getAllByRole("option")).toHaveLength(all));
   });
 
+  it("lints and runs tests with a local PHP of the target", async () => {
+    const user = setup();
+    await openAndScan(user);
+    await user.click(nav(/Bulgular/));
+    await user.click(await screen.findByRole("button", { name: "PHP 8.4.27 ile lint et" }));
+    expect(await screen.findByText(/php -l · PHP 8.4: 31 farklı mesaj/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Testleri PHP 8.4.27 ile çalıştır" }));
+    const dialog = await screen.findByRole("dialog", { name: "Projenin testleri çalıştırılsın mı?" });
+    await user.click(within(dialog).getByRole("button", { name: "Testleri çalıştır" }));
+    expect(await screen.findByText(/PHPUnit · PHP 8.4: 31 farklı mesaj/)).toBeInTheDocument();
+  });
+
   it("saves the editor used to open findings", async () => {
     const user = userEvent.setup();
     const api = mockApi({ delay: 0 });

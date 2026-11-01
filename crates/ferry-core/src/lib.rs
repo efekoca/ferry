@@ -15,6 +15,7 @@ pub mod i18n;
 pub mod ignore;
 pub mod index;
 pub mod lexer;
+pub mod localcheck;
 pub mod packagist;
 pub mod project;
 pub mod rector;
