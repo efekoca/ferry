@@ -322,11 +322,19 @@ impl Staging {
         let _ = std::fs::remove_dir_all(&dir);
         let mut files = Vec::new();
         let mut scope = std::collections::HashSet::new();
+        let mut constants = std::collections::HashSet::new();
+        let mut candidates = Vec::new();
         for path in crate::project::collect_php_files(root, excluded_dirs) {
             scope.insert(crate::analyzer::relative_path(root, &path));
             let Ok(bytes) = std::fs::read(&path) else { continue };
-            let Ok(text) = std::str::from_utf8(&bytes) else { continue };
-            let Some((fixed, applied)) = crate::analyzer::fix_legacy_syntax(text) else {
+            let Ok(text) = String::from_utf8(bytes) else { continue };
+            constants.extend(crate::analyzer::constant_names(&text));
+            if crate::analyzer::fix_legacy_syntax(&text).is_some() {
+                candidates.push((path, text));
+            }
+        }
+        for (path, text) in candidates {
+            let Some((fixed, applied)) = crate::analyzer::fix_legacy_syntax_with(&text, &constants) else {
                 continue;
             };
             let rel = crate::analyzer::relative_path(root, &path);
@@ -335,7 +343,7 @@ impl Staging {
                 std::fs::create_dir_all(parent).map_err(|e| RectorError::Io(parent.display().to_string(), e))?;
             }
             std::fs::write(&dest, &fixed).map_err(|e| RectorError::Io(dest.display().to_string(), e))?;
-            files.push(StagedFile { rel, fixed, original: text.to_string(), rules: applied.into_iter().map(describe_rule).collect() });
+            files.push(StagedFile { rel, fixed, original: text, rules: applied.into_iter().map(describe_rule).collect() });
         }
         Ok(Staging { dir, files, scope: Some(scope) })
     }
@@ -510,7 +518,7 @@ pub fn parse_output(root: &Path, stdout: &str, staging: &Staging) -> Result<(Vec
             diff: diff::compute(&f.original, &f.fixed, 3),
             file: f.rel.clone(),
             rules: f.rules.clone(),
-            fix: FixKind::Auto,
+            fix: f.rules.iter().map(|r| r.fix).max().unwrap_or(FixKind::Auto),
             original_hash: fnv1a(f.original.as_bytes()),
             new_content: f.fixed.clone(),
         });
@@ -799,6 +807,20 @@ mod tests {
         assert!(errors.is_empty(), "{errors:?}");
         let files: Vec<&str> = changes.iter().map(|c| c.file.as_str()).collect();
         assert_eq!(files, ["src/a.php"]);
+    }
+
+    #[test]
+    fn constants_defined_in_other_files_stay_constants() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("config.php"), "<?php define('active', 'actual-key'); const other_key = 1;").unwrap();
+        std::fs::write(root.join("a.php"), "<?php\nrequire 'config.php';\necho $a[active] . $a[other_key] . $a[missing];\n").unwrap();
+        let staging = Staging::prepare(root, &[], root.join(".ferry-staged")).unwrap();
+        let (changes, errors) = parse_output(root, r#"{"file_diffs": []}"#, &staging).unwrap();
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].new_content, "<?php\nrequire 'config.php';\necho $a[active] . $a[other_key] . $a['missing'];\n");
+        assert_eq!(changes[0].fix, FixKind::Likely, "a staged-only file keeps its riskiest rule");
     }
 
     #[test]
