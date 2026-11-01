@@ -114,6 +114,19 @@ Before every apply, Ferry backs up the files it is about to change. The **Histor
 - **Keyboard shortcuts:** **⌘O** opens a project, **⌘1** to **⌘5** switch between pages, **⌘,** opens **Settings**, and **⌘+** / **⌘−** zoom the interface. On Windows and Linux, use **Ctrl** instead of **⌘**.
 - **Accessible:** everything works from the keyboard, focus is always visible, and the interface meets WCAG 2.1 AA contrast. At high zoom levels the layout stacks its panes and narrows the sidebar to icons.
 
+### Command line for CI
+
+`ferry-cli` runs the same scan without the window, so a pipeline can stop a merge that adds code the target version can't run. It reads `.ferry/ignore.json`, so findings ignored in the app stay ignored in CI.
+
+```bash
+cargo build --release -p ferry-cli
+target/release/ferry-cli scan . --target 8.4 --format github
+```
+
+- `--format text|json|sarif|github`: plain text, JSON with the summary and ignored findings, SARIF 2.1.0 for GitHub code scanning and other viewers, or GitHub Actions annotations on the changed lines.
+- `--fail-on breaking|deprecated|any|none`: the lowest severity that makes the command exit with code 1 (default `breaking`). Errors such as a missing folder exit with code 2.
+- `--output <file>` writes the report to a file, and `--lang tr` switches the messages to Turkish.
+
 ## Supported projects
 
 | Project type | Detected by | Skipped automatically |
@@ -246,6 +259,7 @@ To run the tests against real Rector, point `FERRY_TEST_TOOLS` to a folder where
 | Path | Contents |
 |---|---|
 | `crates/ferry-core` | the engine: lexer, rules and analyzer, Rector integration, diffs, backups, and Composer checks |
+| `crates/ferry-cli` | command-line scanner for CI, with text, JSON, SARIF and GitHub annotation output |
 | `src-tauri` | desktop shell: commands, window, and platform settings |
 | `src` | React and TypeScript interface (design system in [docs/DESIGN.md](docs/DESIGN.md)) |
 | `demo` | sample projects for trying the app and for the tests |

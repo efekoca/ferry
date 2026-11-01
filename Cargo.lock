@@ -976,6 +976,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferry-cli"
+version = "0.1.0"
+dependencies = [
+ "ferry-core",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "ferry-core"
 version = "0.1.0"
 dependencies = [
