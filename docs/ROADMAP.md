@@ -80,8 +80,9 @@ A third, `scripts/runtime-benchmark.sh`, runs a project's PHPUnit tests file by 
 | Monolog 3.5.0 | `tests/Monolog` | 27 | 27 | 0 |
 | league/commonmark 2.4.2 | `tests/unit` | 4 | 3 | 1: `ord()` given a multi-byte string |
 | Laravel 11.0.0 | `tests/Support` | 73 | 62 | 11: `null` used as an array offset or `array_key_exists()` key through a variable |
-| PHPMailer 6.9.1, Carbon 3.0.0 | all | none reported | – | PHPUnit 9 and Carbon's setup don't print deprecations in this harness |
+| PHPMailer 6.9.1 | `test` | 5 | 5 | 0 |
+| Carbon 3.0.0 | `tests` | 7 | 7 | 0 (the suite stops in its bootstrap on 8.5, so only these were reported) |
 
-So 92 of 104 runtime deprecations (88%) were already reported statically. Every miss is an 8.5 deprecation that depends on a runtime value, which is the case runtime log import exists for. Two PHPUnit warnings in Monolog came from the test environment (memory limit, missing git branch) and messages from `vendor/` are counted as outside the project.
+So 104 of 116 runtime deprecations (90%) were already reported statically. Every miss is an 8.5 deprecation that depends on a runtime value, which is the case runtime log import exists for. Two PHPUnit warnings in Monolog came from the test environment (memory limit, missing git branch) and messages from `vendor/` are counted as outside the project.
 
-Next: make the harness report PHPUnit 9 deprecations (`convertDeprecationsToExceptions` or a `set_error_handler` bootstrap), report literal `$a[null]` statically, and add more projects.
+Next: add more projects, and run the suites that stop early (Carbon) after fixing their bootstrap.
