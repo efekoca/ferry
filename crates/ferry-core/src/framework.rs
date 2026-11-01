@@ -78,6 +78,10 @@ pub fn check(root: &Path, framework: Framework, target: PhpVersion) -> Vec<Findi
         Framework::Symfony => symfony(root, target).into_iter().collect(),
         Framework::Magento => magento(root, target).into_iter().collect(),
         Framework::PrestaShop => prestashop(root, target).into_iter().collect(),
+        Framework::Joomla => joomla(root, target).into_iter().collect(),
+        Framework::Moodle => moodle(root, target).into_iter().collect(),
+        Framework::MediaWiki => mediawiki(root, target).into_iter().collect(),
+        Framework::Phpbb => phpbb(root, target).into_iter().collect(),
         Framework::Generic => Vec::new(),
     }
 }
@@ -187,6 +191,144 @@ const MAGENTO2_MAX_PHP: [(Release, (u32, u32)); 6] =
     [((2, 0, 0), (7, 4)), ((2, 4, 4), (8, 1)), ((2, 4, 6), (8, 2)), ((2, 4, 7), (8, 3)), ((2, 4, 8), (8, 4)), ((2, 4, 9), (8, 5))];
 
 const PRESTASHOP_MAX_PHP: [(Release, (u32, u32)); 3] = [((1, 6, 0), (7, 4)), ((8, 0, 0), (8, 1)), ((9, 0, 0), (8, 5))];
+
+const JOOMLA_MAX_PHP: [(Release, (u32, u32)); 8] = [
+    ((3, 0, 0), (8, 0)),
+    ((4, 0, 0), (8, 0)),
+    ((4, 0, 5), (8, 1)),
+    ((4, 3, 0), (8, 2)),
+    ((5, 0, 0), (8, 3)),
+    ((5, 3, 0), (8, 4)),
+    ((5, 4, 0), (8, 5)),
+    ((6, 0, 0), (8, 4)),
+];
+
+const MOODLE_MAX_PHP: [(Release, (u32, u32)); 19] = [
+    ((3, 0, 0), (7, 0)),
+    ((3, 2, 0), (7, 1)),
+    ((3, 4, 0), (7, 2)),
+    ((3, 6, 0), (7, 2)),
+    ((3, 6, 4), (7, 3)),
+    ((3, 8, 0), (7, 3)),
+    ((3, 8, 3), (7, 4)),
+    ((3, 11, 0), (7, 4)),
+    ((3, 11, 8), (8, 0)),
+    ((4, 0, 0), (7, 4)),
+    ((4, 0, 2), (8, 0)),
+    ((4, 1, 0), (8, 0)),
+    ((4, 1, 2), (8, 1)),
+    ((4, 2, 0), (8, 1)),
+    ((4, 2, 3), (8, 2)),
+    ((4, 3, 0), (8, 2)),
+    ((4, 4, 0), (8, 3)),
+    ((5, 0, 0), (8, 4)),
+    ((5, 4, 0), (8, 5)),
+];
+
+const MEDIAWIKI_MAX_PHP: [(Release, (u32, u32)); 5] =
+    [((1, 31, 0), (7, 3)), ((1, 35, 0), (7, 4)), ((1, 39, 0), (8, 1)), ((1, 42, 0), (8, 3)), ((1, 46, 0), (8, 5))];
+
+const PHPBB_MAX_PHP: [(Release, (u32, u32)); 4] = [((3, 2, 0), (7, 2)), ((3, 3, 0), (7, 4)), ((3, 3, 6), (8, 1)), ((3, 3, 12), (8, 3))];
+
+struct Located {
+    file: String,
+    line: usize,
+    snippet: String,
+    version: String,
+}
+
+fn locate(root: &Path, sources: &[(&str, &str)]) -> Option<Located> {
+    sources.iter().find_map(|(rel, needle)| {
+        let text = std::fs::read_to_string(root.join(rel)).ok()?;
+        let (line, snippet) = line_of(&text, needle)?;
+        let raw = snippet.split(['\'', '"']).find(|p| p.starts_with(|c: char| c.is_ascii_digit()))?;
+        let version: String = raw.chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
+        Some(Located { file: rel.to_string(), line, snippet, version: version.trim_end_matches('.').to_string() })
+    })
+}
+
+fn release_check(
+    found: Located,
+    table: &[(Release, (u32, u32))],
+    product: &str,
+    rule: &str,
+    severity: Severity,
+    target: PhpVersion,
+) -> Option<Finding> {
+    let current = release_parts(&found.version)?;
+    let max = table.iter().rev().find(|(v, _)| *v <= current)?.1;
+    let since = next_minor(max);
+    if target < since {
+        return None;
+    }
+    let needed =
+        table.iter().find(|(v, m)| *v > current && PhpVersion::new(m.0, m.1) >= target).map(|(v, _)| format!("{}.{}.{}", v.0, v.1, v.2));
+    let (cur, t, t_acc) = (found.version.clone(), target.to_string(), crate::i18n::tr_accusative(&target.to_string()));
+    let (tr, en, replacement) = match &needed {
+        Some(n) => (
+            format!("{product} {cur} resmi olarak PHP {t_acc} desteklemiyor. PHP {t} için {product}'u en az {n} sürümüne yükseltin."),
+            format!("{product} {cur} doesn't officially support PHP {t}. PHP {t} needs at least {product} {n}."),
+            format!("{product} {n}+"),
+        ),
+        None => (
+            format!("{product} {cur} resmi olarak PHP {t_acc} desteklemiyor ve bunu destekleyen bir sürümü henüz yayımlanmadı."),
+            format!("{product} {cur} doesn't officially support PHP {t}, and no release that does has been published yet."),
+            format!("PHP {}", max.0.to_string() + "." + &max.1.to_string()),
+        ),
+    };
+    Some(finding(
+        &found.file,
+        found.line,
+        found.snippet,
+        rule,
+        format!("{product} {cur}"),
+        since,
+        severity,
+        Localized { tr, en },
+        Localized::same(replacement),
+    ))
+}
+
+fn joomla(root: &Path, target: PhpVersion) -> Option<Finding> {
+    let found = std::fs::read_to_string(root.join("libraries/src/Version.php"))
+        .ok()
+        .and_then(|text| {
+            let num = |name: &str| {
+                line_of(&text, name)
+                    .and_then(|(l, s)| Some((l, s.clone(), s.split(['=', ';']).nth(1)?.trim().trim_matches(['\'', '"']).to_string())))
+            };
+            let (line, snippet, major) = num("const MAJOR_VERSION")?;
+            let (_, _, minor) = num("const MINOR_VERSION")?;
+            let (_, _, patch) = num("const PATCH_VERSION")?;
+            Some(Located { file: "libraries/src/Version.php".into(), line, snippet, version: format!("{major}.{minor}.{patch}") })
+        })
+        .or_else(|| {
+            let rel = "libraries/cms/version/version.php";
+            let text = std::fs::read_to_string(root.join(rel)).ok()?;
+            let value = |name: &str| line_of(&text, name).and_then(|(l, s)| Some((l, s.clone(), s.split(['\'', '"']).nth(1)?.to_string())));
+            let (line, snippet, release) = value("RELEASE")?;
+            let level = value("DEV_LEVEL").map(|v| v.2).unwrap_or_else(|| "0".into());
+            Some(Located { file: rel.into(), line, snippet, version: format!("{release}.{level}") })
+        })?;
+    let major = release_parts(&found.version)?.0;
+    let severity = if major <= 4 { Severity::Breaking } else { Severity::Behavior };
+    release_check(found, &JOOMLA_MAX_PHP, "Joomla", "framework.joomla_version", severity, target)
+}
+
+fn moodle(root: &Path, target: PhpVersion) -> Option<Finding> {
+    let found = locate(root, &[("version.php", "$release"), ("public/version.php", "$release")])?;
+    release_check(found, &MOODLE_MAX_PHP, "Moodle", "framework.moodle_version", Severity::Breaking, target)
+}
+
+fn mediawiki(root: &Path, target: PhpVersion) -> Option<Finding> {
+    let found = locate(root, &[("includes/Defines.php", "'MW_VERSION'"), ("includes/DefaultSettings.php", "$wgVersion")])?;
+    release_check(found, &MEDIAWIKI_MAX_PHP, "MediaWiki", "framework.mediawiki_version", Severity::Behavior, target)
+}
+
+fn phpbb(root: &Path, target: PhpVersion) -> Option<Finding> {
+    let found = locate(root, &[("includes/constants.php", "'PHPBB_VERSION'"), ("phpBB/includes/constants.php", "'PHPBB_VERSION'")])?;
+    release_check(found, &PHPBB_MAX_PHP, "phpBB", "framework.phpbb_version", Severity::Breaking, target)
+}
 
 fn release_parts(v: &str) -> Option<Release> {
     let mut parts = v.trim_start_matches(['v', 'V']).split(|c: char| !c.is_ascii_digit()).filter(|p| !p.is_empty());
@@ -546,5 +688,45 @@ mod tests {
         assert!(f.message.en.contains("at least WordPress 6.7"), "{}", f.message.en);
         let old = project(&[("web/wp/wp-includes/version.php", "<?php\n$wp_version = \"4.9.8\";\n")]);
         assert_eq!(check(old.path(), Framework::WordPress, PhpVersion::new(8, 1))[0].since, PhpVersion::new(7, 4));
+    }
+
+    #[test]
+    fn joomla_moodle_mediawiki_and_phpbb_versions() {
+        let joomla4 = project(&[
+            ("libraries/src/Version.php", "<?php\nnamespace Joomla\\CMS;\nfinal class Version {\n    public const MAJOR_VERSION = 4;\n    public const MINOR_VERSION = 0;\n    public const PATCH_VERSION = 4;\n}\n"),
+            ("administrator/index.php", "<?php\n"),
+        ]);
+        assert_eq!(project::detect_framework(joomla4.path()), Framework::Joomla);
+        let f = &check(joomla4.path(), Framework::Joomla, PhpVersion::new(8, 1))[0];
+        assert_eq!((f.title.en.as_str(), f.severity, f.line), ("Joomla 4.0.4", Severity::Breaking, 4));
+        assert!(f.message.en.contains("at least Joomla 4.0.5"), "{}", f.message.en);
+        let joomla3 = project(&[(
+            "libraries/cms/version/version.php",
+            "<?php\nfinal class JVersion {\n    const RELEASE = '3.9';\n    const DEV_LEVEL = '28';\n}\n",
+        )]);
+        assert_eq!(check(joomla3.path(), Framework::Joomla, PhpVersion::new(8, 2))[0].title.en, "Joomla 3.9.28");
+
+        let moodle = project(&[
+            ("version.php", "<?php\n$version  = 2024100700.00;\n$release  = '4.5.1+ (Build: 20250103)';\n"),
+            ("lib/moodlelib.php", "<?php\n"),
+        ]);
+        assert_eq!(project::detect_framework(moodle.path()), Framework::Moodle);
+        assert!(check(moodle.path(), Framework::Moodle, PhpVersion::new(8, 3)).is_empty());
+        let f = &check(moodle.path(), Framework::Moodle, PhpVersion::new(8, 4))[0];
+        assert_eq!((f.title.en.as_str(), f.since), ("Moodle 4.5.1", PhpVersion::new(8, 4)));
+        assert!(f.message.en.contains("at least Moodle 5.0.0"), "{}", f.message.en);
+
+        let wiki = project(&[("includes/Defines.php", "<?php\ndefine( 'MW_VERSION', '1.43.3' );\n")]);
+        assert_eq!(project::detect_framework(wiki.path()), Framework::MediaWiki);
+        let f = &check(wiki.path(), Framework::MediaWiki, PhpVersion::new(8, 4))[0];
+        assert_eq!((f.severity, f.since), (Severity::Behavior, PhpVersion::new(8, 4)));
+
+        let bb = project(&[("phpBB/includes/constants.php", "<?php\n@define('PHPBB_VERSION', '3.3.5');\n")]);
+        assert_eq!(project::detect_framework(bb.path()), Framework::Phpbb);
+        let f = &check(bb.path(), Framework::Phpbb, PhpVersion::new(8, 0))[0];
+        assert!(f.message.en.contains("at least phpBB 3.3.6"), "{}", f.message.en);
+        let latest = project(&[("includes/constants.php", "<?php\n@define('PHPBB_VERSION', '3.3.19');\n")]);
+        let f = &check(latest.path(), Framework::Phpbb, PhpVersion::new(8, 4))[0];
+        assert!(f.message.en.contains("no release that does has been published yet"), "{}", f.message.en);
     }
 }
