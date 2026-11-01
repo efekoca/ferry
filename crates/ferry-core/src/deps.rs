@@ -31,6 +31,7 @@ pub struct DependencyReport {
     pub packages: Vec<Dependency>,
     pub has_lock_file: bool,
     pub extensions: Vec<crate::extensions::ExtensionUse>,
+    pub wordpress: Vec<crate::wordpress::Component>,
 }
 
 fn status_for(constraint: Option<&str>, target: PhpVersion) -> DependencyStatus {
@@ -50,6 +51,7 @@ pub fn check(root: &Path, target: PhpVersion) -> DependencyReport {
     let mut report = check_packages(root, target);
     let excluded = crate::project::inspect(root).map(|i| i.excluded_dirs).unwrap_or_default();
     report.extensions = crate::extensions::used(root, &crate::project::collect_php_files(root, &excluded));
+    report.wordpress = crate::wordpress::inventory(root);
     report
 }
 
@@ -106,6 +108,7 @@ pub fn check_packages(root: &Path, target: PhpVersion) -> DependencyReport {
         packages,
         has_lock_file: lock.is_some(),
         extensions: Vec::new(),
+        wordpress: Vec::new(),
     }
 }
 

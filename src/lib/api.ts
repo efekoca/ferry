@@ -14,6 +14,7 @@ import type {
   TargetSummary,
   ToolchainStatus,
   VersionSuggestion,
+  WpLatest,
 } from "./types";
 import { mockApi } from "./mock";
 import type { Lang } from "../i18n";
@@ -34,6 +35,7 @@ export interface Api {
   gitStatus(path: string, files: string[]): Promise<{ repo: boolean; dirty: string[] }>;
   compareTargets(path: string): Promise<TargetSummary[]>;
   findCompatibleVersions(target: string, packages: { name: string; version: string }[]): Promise<VersionSuggestion[]>;
+  wordpressLatest(items: { kind: string; slug: string }[]): Promise<WpLatest[]>;
   toolchainStatus(): Promise<ToolchainStatus>;
   installRector(): Promise<ToolchainStatus>;
   rectorPreview(path: string, target: string, mode: RectorMode): Promise<RectorPreview>;
@@ -87,6 +89,7 @@ async function tauriApi(): Promise<Api> {
     gitStatus: (path, files) => invoke("git_status", { path, files }),
     compareTargets: (path) => invoke("compare_targets", { path }),
     findCompatibleVersions: (target, packages) => invoke("find_compatible_versions", { target, packages }),
+    wordpressLatest: (items) => invoke("wordpress_latest", { items }),
     toolchainStatus: () => invoke("toolchain_status"),
     installRector: () => invoke("install_rector"),
     rectorPreview: (path, target, mode) => invoke("rector_preview", { path, target, mode }),
