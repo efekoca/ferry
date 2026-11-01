@@ -33,7 +33,7 @@ import { errorMessage } from "../lib/api";
 import { formatBytes, formatRelative } from "../lib/labels";
 import { useStore, type Theme } from "../lib/store";
 import { compareProbe, parseProbe } from "../lib/probe";
-import type { BackupUsage, DependencyReport, DependencyStatus, ExtensionUse, FileChange, Settings, Snapshot, VersionSuggestion, WpLatest } from "../lib/types";
+import type { BackupUsage, DependencyReport, DependencyStatus, ExtensionUse, FileChange, Settings, Snapshot, SnapshotConflict, VersionSuggestion, WpLatest } from "../lib/types";
 
 const DEP_TONE: Record<DependencyStatus, "danger" | "auto" | "neutral"> = {
   incompatible: "danger",
@@ -442,7 +442,7 @@ export function History() {
   const [pending, setPending] = useState<{ snapshot: Snapshot; action: "restore" | "delete" } | null>(null);
   const [reviewing, setReviewing] = useState<Snapshot | null>(null);
   const [busy, setBusy] = useState(false);
-  const [conflicts, setConflicts] = useState<string[]>([]);
+  const [conflicts, setConflicts] = useState<SnapshotConflict[]>([]);
   const deleting = pending?.action === "delete";
   const restoringId = pending?.action === "restore" ? pending.snapshot.id : null;
 
@@ -566,9 +566,9 @@ export function History() {
             <Callout tone="warn" icon={<CircleAlert size={15} />}>
               <strong>{t.history.conflictTitle(conflicts.length)}</strong>
               <ul className="conflict-list">
-                {conflicts.map((f) => (
-                  <li key={f}>
-                    <bdi>{f}</bdi>
+                {conflicts.map((c) => (
+                  <li key={c.file}>
+                    <bdi>{c.file}</bdi>
                   </li>
                 ))}
               </ul>
