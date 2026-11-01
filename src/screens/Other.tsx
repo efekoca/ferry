@@ -33,7 +33,7 @@ import { errorMessage } from "../lib/api";
 import { formatBytes, formatRelative } from "../lib/labels";
 import { useStore, type Theme } from "../lib/store";
 import { compareProbe, parseProbe } from "../lib/probe";
-import type { BackupUsage, DependencyReport, ExtensionUse, DependencyStatus, FileChange, Settings, Snapshot, VersionSuggestion } from "../lib/types";
+import type { BackupUsage, DependencyReport, DependencyStatus, ExtensionUse, FileChange, Settings, Snapshot, VersionSuggestion, WpLatest } from "../lib/types";
 
 const DEP_TONE: Record<DependencyStatus, "danger" | "auto" | "neutral"> = {
   incompatible: "danger",
@@ -65,6 +65,8 @@ export function Dependencies() {
   const [showDev, setShowDev] = useState(true);
   const [suggestions, setSuggestions] = useState<{ for: DependencyReport; list: VersionSuggestion[] } | null>(null);
   const [looking, setLooking] = useState(false);
+  const [latest, setLatest] = useState<{ for: DependencyReport; list: WpLatest[] } | null>(null);
+  const [checkingWp, setCheckingWp] = useState(false);
   const toast = useToast();
 
   if (!deps) {
@@ -106,6 +108,19 @@ export function Dependencies() {
       toast.push({ tone: "error", title: t.deps.findFailed, description: errorMessage(e, t.common.genericError) });
     } finally {
       setLooking(false);
+    }
+  };
+  const wpLatest = latest?.for === deps ? latest.list : null;
+  const breakingIn = (dir: string) => scan?.findings.filter((f) => f.severity === "breaking" && f.file.startsWith(`${dir}/`)).length ?? 0;
+  const checkWordpress = async () => {
+    if (!api) return;
+    setCheckingWp(true);
+    try {
+      setLatest({ for: deps, list: await api.wordpressLatest(deps.wordpress.map((c) => ({ kind: c.kind, slug: c.slug }))) });
+    } catch (e) {
+      toast.push({ tone: "error", title: t.deps.wpFailed, description: errorMessage(e, t.common.genericError) });
+    } finally {
+      setCheckingWp(false);
     }
   };
   const undeclared = deps.extensions.filter((e) => !e.declared && !e.removed).map((e) => `"ext-${e.name}": "*"`);
@@ -208,6 +223,63 @@ export function Dependencies() {
                   ))}
                 </tbody>
               </table>
+            </Card>
+          )}
+
+          {deps.wordpress.length > 0 && (
+            <Card title={t.deps.wpTitle} bodyClassName="">
+              <p className="card__intro muted">{t.deps.wpText}</p>
+              <table className="table" aria-label={t.deps.wpTitle}>
+                <thead>
+                  <tr>
+                    <th>{t.deps.wpName}</th>
+                    <th>{t.deps.wpInstalled}</th>
+                    <th className="table__num">{t.deps.wpBreaking}</th>
+                    {wpLatest && <th>{t.deps.wpLatest}</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {deps.wordpress.map((c) => {
+                    const l = wpLatest?.find((x) => x.kind === c.kind && x.slug === c.slug);
+                    const breaking = breakingIn(c.dir);
+                    return (
+                      <tr key={`${c.kind}:${c.slug}`}>
+                        <td>
+                          {c.name} <Badge>{c.kind === "plugin" ? t.deps.wpPlugin : t.deps.wpTheme}</Badge>
+                          <div className="dep-note mono">{c.dir}</div>
+                        </td>
+                        <td>
+                          <span className="mono">{c.version ?? "—"}</span>
+                          {c.requiresPhp && <div className="dep-note">{t.deps.wpRequires(c.requiresPhp)}</div>}
+                        </td>
+                        <td className="table__num tabular">{breaking > 0 ? <Badge tone="danger">{breaking}</Badge> : <span className="subtle">0</span>}</td>
+                        {wpLatest && (
+                          <td>
+                            {!l ? (
+                              <span className="subtle">{t.deps.wpNotListed}</span>
+                            ) : l.closed ? (
+                              <Badge tone="danger">{t.deps.wpClosed}</Badge>
+                            ) : (
+                              <>
+                                <span className="mono">{l.version}</span>
+                                {l.requiresPhp && <div className="dep-note">{t.deps.wpRequires(l.requiresPhp)}</div>}
+                              </>
+                            )}
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              {!wpLatest && api && (
+                <div className="row row--wrap dep-lookup card__intro">
+                  <Button size="sm" variant="secondary" icon={<Search size={13} />} loading={checkingWp} onClick={checkWordpress}>
+                    {t.deps.wpCheck}
+                  </Button>
+                  <span className="subtle">{t.deps.wpCheckNote}</span>
+                </div>
+              )}
             </Card>
           )}
 
