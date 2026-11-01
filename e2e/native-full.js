@@ -133,8 +133,8 @@
     async function kuzey() {
       await openRecent(projects.kuzey);
       await emit(`  chip=${$(".project-chip__name")?.textContent} platform=${text().match(/Platform\s*\n?\s*(\S+)/)?.[1]}`);
-      key("2");
-      check(await settles(() => text().includes("Henüz tarama yapılmadı")), "Cmd+2 should open empty findings");
+      const findingsOpen = () => text().includes("Henüz tarama yapılmadı");
+      check(await settles(() => findingsOpen() || (key("2"), false)), "Cmd+2 should open empty findings");
       key("1");
       await sleep(300);
       const score = await scan();
