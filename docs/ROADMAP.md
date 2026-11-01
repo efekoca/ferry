@@ -73,10 +73,10 @@ Competing tools each cover part of an upgrade: PHPCompatibility (detection only;
 | # | Feature | Why | Size |
 |---|---|---|---|
 | 1 | **Project config (`.ferry/`)**: target, excluded paths, ignores, baseline, editor, test command; committed to git | Foundation for most items below | S |
-| 2 | **Ignore a finding with a reason**, as a file entry or a `// ferry-ignore rule-id` comment; report entries that no longer match | False positives are the top complaint about every competing tool; without this the score can't honestly reach 100 | S–M |
-| 3 | **Open in editor** (PhpStorm, VS Code, Cursor, Zed, Sublime, custom URL) at the finding's line | "Show in folder" is the only file action today | S |
-| 4 | **Command-line mode**: `ferry scan --target 8.4 --format sarif\|json\|junit\|checkstyle\|github --fail-on new\|breaking`, with a GitHub Action | Teams adopt tools that can gate pull requests; the Rust core has no GUI dependency | M |
-| 5 | **SARIF, JSON, JUnit, Checkstyle and CSV export** with stable fingerprints | GitHub code scanning, GitLab, Jenkins, spreadsheets | S after 4 |
+| 2 | **Inline ignores and stale entries**: a `// ferry-ignore rule-id` comment next to the code, and a report of `.ferry/ignore.json` entries that no longer match (file ignores with a reason are done) | Keeps the ignore list honest as code changes | S |
+| 3 | **Custom editor command or URL** for editors outside the built-in list (VS Code, Cursor, PhpStorm, Sublime Text and Zed are done) | Covers Neovim, Emacs and in-house setups | S |
+| 4 | **Command-line extras**: `--fail-on new` against a baseline and a ready-made GitHub Action (`ferry-cli scan` with text, JSON, SARIF and GitHub output is done) | Easier adoption in pipelines | S |
+| 5 | **JUnit, Checkstyle and CSV output** with stable fingerprints | GitLab, Jenkins, spreadsheets | S |
 | 6 | **Baseline and progress over time**: compact snapshots per scan, new/unchanged/fixed between scans, a score trend chart | A ratchet for CI and something to show management | M |
 | 7 | **Import runtime deprecations**: PHP error logs, PHPUnit and Symfony bridge output, Monolog JSON. Merge them with static findings, mark matches "confirmed at runtime" with a hit count, and separate own code from vendor code | No tool merges runtime evidence with static findings; it covers what static analysis can't see (section 1) | M |
 | 8 | **CSV with a `git blame` owner column** | Assign work across a team | S |

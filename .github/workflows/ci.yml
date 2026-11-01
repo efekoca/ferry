@@ -75,8 +75,8 @@ jobs:
           echo "FERRY_TEST_TOOLS=$RUNNER_TEMP/tools" >> "$GITHUB_ENV"
       - name: Core
         run: |
-          cargo clippy -p ferry-core --all-targets -- -D warnings
-          cargo test -p ferry-core
+          cargo clippy -p ferry-core -p ferry-cli --all-targets -- -D warnings
+          cargo test -p ferry-core -p ferry-cli
 
   windows:
     needs: changes

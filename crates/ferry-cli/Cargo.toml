@@ -1,0 +1,13 @@
+[package]
+name = "ferry-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Command-line PHP upgrade scanner for CI, built on ferry-core."
+
+[dependencies]
+ferry-core = { path = "../ferry-core" }
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
