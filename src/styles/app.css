@@ -2852,6 +2852,34 @@ select.input {
   font-size: var(--text-sm);
 }
 
+.change-list__narrow {
+  padding: 0 var(--space-3) var(--space-2);
+}
+
+.change-list__narrow select.input {
+  width: 100%;
+}
+
+.dirty-list {
+  margin-top: var(--space-1);
+  font-size: var(--text-xs);
+}
+
+.commit-message {
+  margin-top: var(--space-3);
+  text-align: left;
+}
+
+.commit-message summary {
+  cursor: pointer;
+  font-weight: 600;
+  margin-bottom: var(--space-2);
+}
+
+.commit-message .command__text {
+  white-space: pre-wrap;
+}
+
 .toolbar__actions {
   display: flex;
   flex-wrap: wrap;

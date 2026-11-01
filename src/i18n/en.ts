@@ -145,6 +145,16 @@ export const en: Dict = {
     switchText: (n) => `The fix preview for ${n} files will be discarded and the project rescanned for the new target.`,
   },
   scoreLabel: (s) => `Readiness score: ${s}/100`,
+  git: {
+    selectBy: "Narrow the selection",
+    selectAll: "All files",
+    onlyAuto: "Automatic fixes only",
+    byRule: (title, n) => `${title} (${n === 1 ? "1 file" : `${n} files`})`,
+    dirtyTitle: (n) => (n === 1 ? "1 file has uncommitted changes" : `${n} files have uncommitted changes`),
+    dirtyText: "Ferry backs them up before applying, but committing them to Git first lets you review the fixes as a separate commit.",
+    message: "Suggested commit message",
+    subject: (target, n) => `PHP ${target} compatibility: ${n === 1 ? "1 file" : `${n} files`} via Rector`,
+  },
   compare: {
     title: "Compare targets",
     text: "Scans the project for PHP 8.2, 8.3, 8.4 and 8.5 and shows side by side how much work each target means.",
