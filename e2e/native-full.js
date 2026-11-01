@@ -81,9 +81,18 @@
   };
 
   const openRecent = async (path) => {
-    const item = await until(() => $$(".recent__item").find((b) => b.querySelector(".recent__path")?.textContent === path), `recent ${path}`);
-    item.click();
-    await until(() => text().includes("Hangi sürüme geçiyorsunuz?") || text().includes("Which version"), "overview");
+    const overview = () => text().includes("Hangi sürüme geçiyorsunuz?") || text().includes("Which version");
+    const start = Date.now();
+    while (!overview()) {
+      if (Date.now() - start > 60000) throw new Error("timeout: overview");
+      const item = await until(
+        () => $$(".recent__item").find((b) => !b.disabled && b.querySelector(".recent__path")?.textContent === path),
+        `recent ${path}`,
+      );
+      item.click();
+      await until(() => overview() || !item.isConnected || item.disabled, "open started", 5000).catch(() => {});
+      await until(() => overview() || !$$(".recent__item").some((b) => b.disabled), "opened", 30000).catch(() => {});
+    }
   };
   const scan = async () => {
     await click("Taramayı başlat");

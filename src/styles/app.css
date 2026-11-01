@@ -411,6 +411,23 @@ html[data-platform="macos"] .sidebar {
   color: var(--text-3);
 }
 
+.status-line__link {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--danger-fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.status-line__link:hover span:not(.dot) {
+  text-decoration: underline;
+}
+
 .dot {
   width: 7px;
   height: 7px;
@@ -2654,6 +2671,7 @@ button.metric {
   .nav__item > span:not(.nav__count),
   .project-chip__text,
   .status-line > span:not(.dot),
+  .status-line__link > span:not(.dot),
   .nav__label {
     position: absolute;
     width: 1px;
