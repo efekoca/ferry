@@ -321,6 +321,15 @@ fn ignored_findings_move_out_of_the_summary() {
     let restored = h.ok("unignore_finding", json!({ "path": root, "id": first["id"] }));
     assert_eq!(restored["summary"]["total"].as_u64().unwrap(), total);
     assert_eq!(restored["ignored"], json!([]));
+    assert_eq!(restored["staleIgnores"], json!([]));
+
+    let stale = json!({ "ignores": [{ "ruleId": "removed.each", "file": "gone.php", "snippet": "each($x);", "reason": "old" }] });
+    std::fs::write(Path::new(&root).join(".ferry/ignore.json"), stale.to_string()).unwrap();
+    let rescan = h.ok("scan_project", json!({ "path": root, "target": "8.4", "run": 3 }));
+    assert_eq!(rescan["staleIgnores"][0]["file"], "gone.php");
+    let pruned = h.ok("prune_ignores", json!({ "path": root }));
+    assert_eq!(pruned["staleIgnores"], json!([]));
+    assert!(!std::fs::read_to_string(Path::new(&root).join(".ferry/ignore.json")).unwrap().contains("gone.php"));
 }
 
 #[test]

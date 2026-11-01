@@ -184,6 +184,17 @@ describe("Ferry app", () => {
     expect(screen.queryByRole("button", { name: /Yok sayılanlar/ })).not.toBeInTheDocument();
   });
 
+  it("offers to remove ignore entries that no longer match", async () => {
+    const user = userEvent.setup();
+    const staleIgnores = [{ ruleId: "removed.each", file: "old.php", snippet: "each($a);", reason: "eski" }];
+    render(<App api={mockApi({ delay: 0, staleIgnores })} />);
+    await openAndScan(user);
+    await user.click(nav(/Bulgular/));
+    expect(await screen.findByText(/1 kayıt artık hiçbir kodla eşleşmiyor/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Bu kayıtları sil" }));
+    await waitFor(() => expect(screen.queryByText(/artık hiçbir kodla eşleşmiyor/)).not.toBeInTheDocument());
+  });
+
   it("saves the editor used to open findings", async () => {
     const user = userEvent.setup();
     const api = mockApi({ delay: 0 });

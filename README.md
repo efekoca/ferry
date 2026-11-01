@@ -61,6 +61,8 @@ Select a finding to see:
 
 **Ignore** takes a finding out of the list and the score once you've decided it doesn't apply, for example code that only runs on the old server. Ferry asks for a reason and saves it to `.ferry/ignore.json` in the project, so the decision travels with the code when you commit that file. The match uses the rule, the file and the code, so an ignored finding stays ignored when lines above it move. **Ignored** on the Findings page lists them with their reasons, and **Show again** brings one back.
 
+You can also ignore a finding in the code itself: a `// ferry-ignore removed.each only runs on the PHP 5 server` comment on the same line or the line above ignores that rule there, `removed.*` covers a group, and a bare `// ferry-ignore` covers every rule on the line. When an entry in `.ferry/ignore.json` no longer matches any code, because it changed or was deleted, the Findings page says so and offers to remove it.
+
 Ferry has its own PHP lexer and rule set, so it reads code the way PHP does: method calls such as `$db->each()`, functions in your own namespace, and text inside strings and comments are not mistaken for removed functions. Its rules cover:
 
 - removed extensions and functions, such as `mysql_*`, `ereg*`, `each()`, `create_function()`, and `money_format()`
