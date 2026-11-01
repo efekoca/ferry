@@ -317,6 +317,10 @@ fn ignored_findings_move_out_of_the_summary() {
 
     let rescan = h.ok("scan_project", json!({ "path": root, "target": "8.4", "run": 2 }));
     assert_eq!(rescan["ignored"].as_array().unwrap().len(), 1);
+    assert_eq!(rescan["progress"]["history"].as_array().unwrap().len(), 2);
+    assert_eq!(rescan["progress"]["newSinceLast"], 0);
+    assert_eq!(rescan["progress"]["fixedSinceLast"], 1);
+    assert_eq!(scan["progress"]["newSinceLast"], Value::Null);
 
     let restored = h.ok("unignore_finding", json!({ "path": root, "id": first["id"] }));
     assert_eq!(restored["summary"]["total"].as_u64().unwrap(), total);

@@ -1,5 +1,6 @@
 use ferry_core::analyzer::{self, ScanResult};
 use ferry_core::deps::{self, DependencyReport};
+use ferry_core::history;
 use ferry_core::i18n::{self, Lang};
 use ferry_core::ignore::{self, Ignore, IgnoredFinding};
 use ferry_core::project::{self, ProjectInfo};
@@ -140,13 +141,14 @@ struct ScanResponse {
     summary: report::Summary,
     ignored: Vec<IgnoredFinding>,
     stale_ignores: Vec<Ignore>,
+    progress: Option<history::Progress>,
 }
 
 fn respond(root: &Path, mut scan: ScanResult) -> ScanResponse {
     let applied = ignore::apply(root, std::mem::take(&mut scan.findings), &ignore::load(root));
     scan.findings = applied.kept;
     let summary = report::summarize(&scan.findings);
-    ScanResponse { scan, summary, ignored: applied.ignored, stale_ignores: applied.stale }
+    ScanResponse { scan, summary, ignored: applied.ignored, stale_ignores: applied.stale, progress: None }
 }
 
 #[tauri::command]
@@ -171,10 +173,17 @@ async fn scan_project<R: Runtime>(app: AppHandle<R>, path: String, target: Strin
     .await?;
     let (path, scan) = result;
     let state = app.state::<AppState>();
-    if state.latest_scan.lock().unwrap().get(&path) == Some(&run) {
+    let latest = state.latest_scan.lock().unwrap().get(&path) == Some(&run);
+    if latest {
         state.scans.lock().unwrap().insert(path.clone(), scan.clone());
     }
-    Ok(respond(Path::new(&path), scan))
+    let mut response = respond(Path::new(&path), scan);
+    if latest {
+        let file = state.data_dir.join("history").join(format!("{:016x}.json", fnv1a(path.as_bytes())));
+        let target = response.scan.target.to_string();
+        response.progress = history::record(&file, now_secs(), &target, response.summary.score, &response.scan.findings).ok();
+    }
+    Ok(response)
 }
 
 fn now_secs() -> u64 {

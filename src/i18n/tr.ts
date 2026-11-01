@@ -144,6 +144,16 @@ export const tr = {
     switchText: (n: number) => `Hesaplanan ${n} dosyalık düzeltme önizlemesi silinir ve proje yeni hedefe göre yeniden taranır.`,
   },
   scoreLabel: (s: number) => `Hazırlık skoru: ${s}/100`,
+  progress: {
+    title: "İlerleme",
+    first: "İlk tarama. Bir sonraki taramada nelerin değiştiğini burada göreceksiniz.",
+    since: "Son taramadan beri",
+    resolved: (n: number) => `${n} çözüldü`,
+    added: (n: number) => `${n} yeni`,
+    unchanged: "Değişiklik yok",
+    trend: (scores: string) => `Hazırlık puanının taramalar boyunca değişimi: ${scores}`,
+    point: (date: string, score: number, total: number) => `${date} · puan ${score} · ${total} bulgu`,
+  },
   findings: {
     title: "Bulgular",
     subtitle: (t: string, n: number) => `PHP ${t} · ${n} bulgu`,

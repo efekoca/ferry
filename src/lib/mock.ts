@@ -156,6 +156,18 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
   const ignores = new Map<string, string>();
   let stale = opts.staleIgnores ?? [];
   let lastScan: ScanResult | null = null;
+  const history = new Map<string, { at: number; score: number; total: number; ids: string[] }[]>();
+  const track = (scan: ScanResult): ScanResult => {
+    const list = history.get(scan.target) ?? [];
+    const prev = list[list.length - 1];
+    const ids = scan.findings.map((f) => f.id);
+    const added = prev ? ids.filter((id) => !prev.ids.includes(id)).length : null;
+    const fixed = prev ? prev.ids.filter((id) => !ids.includes(id)).length : null;
+    list.push({ at: Math.floor(Date.now() / 1000), score: scan.summary.score, total: scan.summary.total, ids });
+    history.set(scan.target, list);
+    const entries = list.slice(-30).map(({ at, score, total }) => ({ at, target: scan.target, score, total }));
+    return { ...scan, progress: { history: entries, newSinceLast: added, fixedSinceLast: fixed } };
+  };
   const withIgnores = (scan: ScanResult): ScanResult => {
     lastScan = scan;
     const all = [...scan.findings, ...scan.ignored.map((i) => i.finding)];
@@ -214,7 +226,7 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
           return { ...s, file, column: 9, id: `${file}:${s.line}:9:${s.ruleId}` };
         }),
       ).flat();
-      return withIgnores({ target, filesScanned: total, linesScanned: 18432, findings, errors: [], durationMs: 184, summary: summarize(findings), ignored: [], staleIgnores: [] });
+      return track(withIgnores({ target, filesScanned: total, linesScanned: 18432, findings, errors: [], durationMs: 184, summary: summarize(findings), ignored: [], staleIgnores: [] }));
     },
     onScanProgress: async (handler) => {
       listeners.add(handler);
