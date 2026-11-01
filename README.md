@@ -42,6 +42,8 @@ Every number is a shortcut: click **Breaking**, **Manual** or one of the most co
 
 Framework code you don't maintain is skipped automatically: `wp-admin` and `wp-includes` in WordPress, `storage` and `bootstrap/cache` in Laravel, `var` in Symfony, Drupal core, and `vendor` and `node_modules` everywhere. The overview names the skipped folders.
 
+**Compare targets** scans the project for PHP 8.2, 8.3, 8.4 and 8.5 at once and puts the score, breaking, deprecated and manual findings, and blocking packages side by side, so you can see whether going straight to 8.5 costs much more than stopping at 8.3. **Switch to this target** picks one.
+
 After the second scan, **Since the last scan** shows how many findings were resolved and how many are new, with the readiness score of every scan for that target as a trend line. Ferry keeps the last 30 scans per target in its own data folder, never in the project.
 
 **Export report** saves the results as a Markdown file you can attach to a ticket or share with your team.
@@ -64,6 +66,8 @@ Select a finding to see:
 **Ignore** takes a finding out of the list and the score once you've decided it doesn't apply, for example code that only runs on the old server. Ferry asks for a reason and saves it to `.ferry/ignore.json` in the project, so the decision travels with the code when you commit that file. The match uses the rule, the file and the code, so an ignored finding stays ignored when lines above it move. **Ignored** on the Findings page lists them with their reasons, and **Show again** brings one back.
 
 **Import log** adds what really happened when the code ran. Point it at a PHP error log (`php_errors.log`, Apache's `error_log`) or the output of `phpunit --display-deprecations`, ideally from a run on the target version. Each deprecation, warning or fatal error is matched to the project file and line: a finding on that line gets a **Runtime ×N** badge, and messages the static scan didn't catch are added as findings of their own. **Seen at runtime** filters the list to them. The log stays in memory until you remove it or close the project. `ferry-cli --runtime-log <file>` does the same in CI.
+
+When the target PHP version is installed on this computer (Homebrew, Herd, MAMP, Laragon, phpenv or a `php8.x` binary), the Findings page also offers **Lint with PHP 8.x**, which runs `php -l` on every file with that PHP, and **Run tests on PHP 8.x**, which runs `vendor/bin/phpunit` after asking first. Their warnings are merged the same way as an imported log.
 
 You can also ignore a finding in the code itself: a `// ferry-ignore removed.each only runs on the PHP 5 server` comment on the same line or the line above ignores that rule there, `removed.*` covers a group, and a bare `// ferry-ignore` covers every rule on the line. When an entry in `.ferry/ignore.json` no longer matches any code, because it changed or was deleted, the Findings page says so and offers to remove it.
 
@@ -96,6 +100,8 @@ The **Fixes** page runs Rector on your project in dry-run mode. No files change.
 - **Compatibility** makes only the changes needed to run on the new version. It is the best place to start.
 - **Modernize** also adopts newer syntax for the target version.
 - Pick the files you want and press **Apply**. Files marked **Review** carry a note to check them first.
+- **Narrow the selection** picks only the automatic fixes, or only the files a given Rector rule changed, so you can apply and commit one kind of change at a time.
+- In a Git project, the confirmation lists selected files that already have uncommitted changes and offers a ready-to-copy commit message that names the rules being applied.
 - After applying, Ferry checks the changed files with `php -l` and warns you if a change left one that no longer parses, so you can roll it back from **History** right away.
 
 Ferry handles cases Rector cannot on its own. For example, a file that uses `$str{0}` makes Rector skip the whole file. Ferry rewrites those offsets to `$str[0]` first, and does the same for `= &new`, `= &func_get_args()` and `default;`, so the rest of the file is still fixed.

@@ -1,17 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
-import { CircleAlert, CircleCheck, CircleStop, Download, GitCompareArrows, RotateCw, ShieldCheck, Sparkles, Wand2 } from "lucide-react";
+import { CircleAlert, CircleCheck, CircleStop, Download, GitBranch, GitCompareArrows, RotateCw, ShieldCheck, Sparkles, Wand2 } from "lucide-react";
 import { DiffViewer } from "../components/DiffViewer";
 import { ConfirmDialog } from "../components/Modal";
 import { PageHeader } from "../components/Shell";
-import { Button, Callout, Card, EmptyState, Progress, RiskBadge, RuleChips, Segmented } from "../components/ui";
+import { Button, Callout, Card, CommandLine, EmptyState, Progress, RiskBadge, RuleChips, Segmented } from "../components/ui";
 import { useI18n } from "../i18n";
 import { useStore } from "../lib/store";
 import type { FileChange, RectorMode, RectorPreview } from "../lib/types";
 
 export function Changes() {
-  const { t } = useI18n();
-  const { toolchain, installRector, installingRector, preview, previewMode, previewing, loadPreview, cancelPreview, applyChanges, applying, target, setView } =
+  const { t, loc } = useI18n();
+  const { toolchain, installRector, installingRector, preview, previewMode, previewing, loadPreview, cancelPreview, applyChanges, applying, target, setView, api, project } =
     useStore();
+  const [dirty, setDirty] = useState<string[]>([]);
   const [mode, setMode] = useState<RectorMode>(previewMode);
   const [excluded, setExcluded] = useState<{ preview: RectorPreview | null; files: Set<string> }>({ preview: null, files: new Set() });
   const [active, setActive] = useState<string | null>(null);
@@ -37,6 +38,38 @@ export function Changes() {
 
   const setSelected = (next: Set<string>) =>
     setExcluded({ preview, files: new Set(changes.filter((c) => !next.has(c.file)).map((c) => c.file)) });
+
+  const ruleOptions = useMemo(() => {
+    const map = new Map<string, { title: string; files: string[] }>();
+    for (const c of changes) {
+      for (const r of c.rules) {
+        const entry = map.get(r.class) ?? { title: loc(r.title), files: [] };
+        if (!entry.files.includes(c.file)) entry.files.push(c.file);
+        map.set(r.class, entry);
+      }
+    }
+    return [...map.entries()].sort((a, b) => b[1].files.length - a[1].files.length);
+  }, [changes, loc]);
+  const narrow = (value: string) => {
+    if (value === "all") setSelected(new Set(changes.map((c) => c.file)));
+    else if (value === "auto") setSelected(new Set(changes.filter((c) => c.fix === "auto").map((c) => c.file)));
+    else setSelected(new Set(ruleOptions.find(([cls]) => cls === value)?.[1].files ?? []));
+  };
+  const commitMessage = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const c of chosen) for (const r of c.rules) counts.set(loc(r.title), (counts.get(loc(r.title)) ?? 0) + 1);
+    const lines = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([title, n]) => `- ${title} (${n})`);
+    return [t.git.subject(preview?.target ?? target, chosen.length), "", ...lines].join("\n");
+  }, [chosen, loc, preview, target, t]);
+  const openConfirm = () => {
+    setDirty([]);
+    setConfirming(true);
+    if (api && project)
+      api
+        .gitStatus(project.root, chosen.map((c) => c.file))
+        .then((s) => setDirty(s.dirty))
+        .catch(() => {});
+  };
 
   const toggle = (file: string) => {
     const next = new Set(selected);
@@ -233,6 +266,20 @@ export function Changes() {
             />
             <span>{t.changes.selected(chosen.length, changes.length)}</span>
           </label>
+          <div className="change-list__narrow">
+            <select className="input" aria-label={t.git.selectBy} value="" onChange={(e) => narrow(e.target.value)}>
+              <option value="" disabled>
+                {t.git.selectBy}
+              </option>
+              <option value="all">{t.git.selectAll}</option>
+              <option value="auto">{t.git.onlyAuto}</option>
+              {ruleOptions.map(([cls, r]) => (
+                <option key={cls} value={cls}>
+                  {t.git.byRule(r.title, r.files.length)}
+                </option>
+              ))}
+            </select>
+          </div>
           <ul className="change-list" aria-label={t.changes.files}>
             {changes.map((c) => (
               <ChangeItem
@@ -251,7 +298,7 @@ export function Changes() {
               <span className="hint">
                 <span className="stat-add">+{totals.add}</span> <span className="stat-del">−{totals.del}</span> {t.common.lines}
               </span>
-              <Button variant="primary" disabled={chosen.length === 0 || previewing} loading={applying} onClick={() => setConfirming(true)}>
+              <Button variant="primary" disabled={chosen.length === 0 || previewing} loading={applying} onClick={openConfirm}>
                 {chosen.length === changes.length ? t.changes.applyAll : t.changes.applySome(chosen.length)}
               </Button>
             </div>
@@ -304,6 +351,18 @@ export function Changes() {
         }}
       >
         <span className="tabular">{t.changes.confirmText(totals.add, totals.del)}</span>
+        {dirty.length > 0 && (
+          <Callout tone="warn" icon={<GitBranch size={15} />}>
+            <strong>{t.git.dirtyTitle(dirty.length)}</strong> {t.git.dirtyText}
+            <div className="mono selectable dirty-list">{dirty.slice(0, 5).join(", ")}</div>
+          </Callout>
+        )}
+        {project?.isGitRepo && (
+          <details className="commit-message">
+            <summary>{t.git.message}</summary>
+            <CommandLine command={commitMessage} />
+          </details>
+        )}
       </ConfirmDialog>
     </>
   );

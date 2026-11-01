@@ -42,6 +42,8 @@ Her sayı bir kısayoldur: **Kritik**'e, **Elle düzelt**'e ya da en sık görü
 
 Bakımını sizin yapmadığınız framework kodu kendiliğinden atlanır: WordPress'te `wp-admin` ve `wp-includes`, Laravel'de `storage` ve `bootstrap/cache`, Symfony'de `var`, Drupal çekirdeği; her projede de `vendor` ve `node_modules`. Atlanan klasörler genel bakışta yazılıdır.
 
+**Hedefleri karşılaştır** projeyi PHP 8.2, 8.3, 8.4 ve 8.5 için aynı anda tarar; puanı, kritik, eskimiş ve elle düzeltilecek bulguları ve engelleyen paketleri yan yana gösterir. Böylece doğrudan 8.5'e geçmenin 8.3'te durmaktan ne kadar fazla iş çıkaracağını görürsünüz. **Bu hedefe geç** birini seçer.
+
 İkinci taramadan sonra **Son taramadan beri** kaç bulgunun çözüldüğünü, kaçının yeni olduğunu ve o hedef için her taramanın hazırlık puanını bir eğri olarak gösterir. Ferry her hedef için son 30 taramayı projede değil, kendi veri klasöründe tutar.
 
 **Rapor al** ile sonuçları bir Markdown dosyasına kaydedebilir, bir iş kaydına ekleyebilir ya da ekibinizle paylaşabilirsiniz.
@@ -64,6 +66,8 @@ Bir bulguyu seçtiğinizde şunları görürsünüz:
 Bir bulgunun sizin için geçerli olmadığına karar verdiyseniz (örneğin yalnızca eski sunucuda çalışan bir kod) **Yok say** onu listeden ve puandan çıkarır. Ferry bir gerekçe ister ve bunu projedeki `.ferry/ignore.json` dosyasına yazar; bu dosyayı depoya eklerseniz karar kodla birlikte taşınır. Eşleştirme kural, dosya ve kod üzerinden yapılır, bu yüzden üstteki satırlar kaysa da bulgu yok sayılmaya devam eder. Bulgular sayfasındaki **Yok sayılanlar** bunları gerekçeleriyle listeler, **Yeniden göster** bir bulguyu geri getirir.
 
 **Log içe aktar**, kod çalışırken gerçekten ne olduğunu ekler. Bir PHP hata log'u (`php_errors.log`, Apache'nin `error_log` dosyası) ya da `phpunit --display-deprecations` çıktısı seçin; tercihen hedef sürümde yapılmış bir çalıştırmanın çıktısı olsun. Her kullanımdan kalkma, uyarı ya da ölümcül hata projedeki dosya ve satırla eşleştirilir: O satırdaki bulguya **Çalışırken ×N** rozeti eklenir, statik taramanın yakalamadığı mesajlar da ayrı bulgu olarak eklenir. **Çalışırken görülenler** listeyi bunlara süzer. Log, siz kaldırana ya da projeyi kapatana kadar bellekte durur. CI'da aynısını `ferry-cli --runtime-log <dosya>` yapar.
+
+Hedef PHP sürümü bu bilgisayarda kuruluysa (Homebrew, Herd, MAMP, Laragon, phpenv ya da `php8.x` adlı bir çalıştırılabilir dosya), Bulgular sayfası iki seçenek daha sunar: **PHP 8.x ile lint et** her dosyada o PHP ile `php -l` çalıştırır; **Testleri PHP 8.x ile çalıştır** önce sorar, sonra `vendor/bin/phpunit`'i çalıştırır. Çıkan uyarılar, içe aktarılan bir log gibi bulgularla birleştirilir.
 
 Bir bulguyu kodun içinde de yok sayabilirsiniz: Aynı satıra ya da bir üst satıra yazılan `// ferry-ignore removed.each yalnızca PHP 5 sunucusunda çalışıyor` yorumu o kuralı orada yok sayar. `removed.*` bir grubu, yalnızca `// ferry-ignore` ise o satırdaki bütün kuralları kapsar. `.ferry/ignore.json` içindeki bir kayıt kod değiştiği ya da silindiği için artık hiçbir kodla eşleşmiyorsa Bulgular sayfası bunu söyler ve kaydı silmeyi önerir.
 
@@ -96,6 +100,8 @@ Ferry, hangi PHP'nin gerçekten çalışacağını belirleyen ve kodun çevresin
 - **Uyumluluk** yalnızca yeni sürümde çalışmak için gerekenleri değiştirir. Başlamak için en doğru yer burasıdır.
 - **Modernleştirme** hedef sürümün yeni yazımlarını da benimser.
 - İstediğiniz dosyaları seçip **Uygula**'ya basın. **Gözden geçir** olarak işaretlenen dosyalarda önce kontrol etmeniz için bir not bulunur.
+- **Seçimi daralt** yalnızca otomatik düzeltmeleri ya da belirli bir Rector kuralının değiştirdiği dosyaları seçer; böylece her seferinde tek tür değişikliği uygulayıp commit edebilirsiniz.
+- Git projelerinde onay penceresi, seçilen dosyalardan commit edilmemiş değişikliği olanları listeler ve uygulanan kuralları sayan, kopyalamaya hazır bir commit mesajı önerir.
 - Uyguladıktan sonra Ferry değişen dosyaları `php -l` ile kontrol eder; bir değişiklik dosyayı ayrıştırılamaz hâle getirdiyse sizi uyarır, böylece **Geçmiş**'ten hemen geri alabilirsiniz.
 
 Ferry, Rector'ın tek başına çözemediği durumları da ele alır. Örneğin `$str{0}` yazımı içeren bir dosyayı Rector tamamen atlar. Ferry bu yazımları önce `$str[0]` olarak düzeltir, aynısını `= &new`, `= &func_get_args()` ve `default;` için de yapar; böylece dosyanın geri kalanı da düzeltilir.

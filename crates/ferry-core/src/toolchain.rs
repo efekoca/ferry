@@ -176,6 +176,57 @@ pub fn find_php(override_path: Option<&Path>) -> Option<PathBuf> {
     find_executable("php")
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalPhp {
+    pub line: String,
+    pub version: String,
+    pub path: PathBuf,
+}
+
+fn php_candidates(line: &str) -> Vec<PathBuf> {
+    let compact = line.replace('.', "");
+    let exe = |dir: PathBuf| dir.join(if cfg!(windows) { "php.exe" } else { "php" });
+    let mut out = Vec::new();
+    let h = home();
+    if cfg!(target_os = "macos") {
+        out.push(PathBuf::from(format!("/opt/homebrew/opt/php@{line}/bin/php")));
+        out.push(PathBuf::from(format!("/usr/local/opt/php@{line}/bin/php")));
+        if let Some(h) = &h {
+            out.push(h.join(format!("Library/Application Support/Herd/bin/php{compact}")));
+        }
+        out.extend(expand_glob(Path::new("/Applications/MAMP/bin/php"), &format!("php{line}"), "bin/php"));
+    } else if cfg!(windows) {
+        out.extend(expand_glob(Path::new("C:\\laragon\\bin\\php"), &format!("php-{line}"), "php.exe"));
+        if let Some(h) = &h {
+            out.push(h.join(format!(".config\\herd\\bin\\php{compact}\\php.exe")));
+        }
+        out.push(exe(PathBuf::from("C:\\php")));
+        out.push(exe(PathBuf::from("C:\\xampp\\php")));
+    } else {
+        out.push(PathBuf::from(format!("/usr/bin/php{line}")));
+        out.push(PathBuf::from(format!("/usr/local/bin/php{line}")));
+        if let Some(h) = &h {
+            out.extend(expand_glob(&h.join(".phpenv/versions"), line, "bin/php"));
+        }
+    }
+    out.extend(find_executable(&format!("php{line}")));
+    out.extend(find_executable("php"));
+    out
+}
+
+pub fn local_php(lines: &[String]) -> Vec<LocalPhp> {
+    lines
+        .iter()
+        .filter_map(|line| {
+            php_candidates(line).into_iter().filter(|p| p.is_file()).find_map(|path| {
+                let version = php_version(&path)?;
+                version.starts_with(&format!("{line}.")).then(|| LocalPhp { line: line.to_string(), version, path })
+            })
+        })
+        .collect()
+}
+
 pub fn require_supported_php(php: &Path) -> Result<(), ToolError> {
     let Some(version) = php_version(php) else { return Ok(()) };
     let mut parts = version.split(|c: char| !c.is_ascii_digit()).filter_map(|p| p.parse::<u32>().ok());
