@@ -42,6 +42,8 @@ Her sayı bir kısayoldur: **Kritik**'e, **Elle düzelt**'e ya da en sık görü
 
 Bakımını sizin yapmadığınız framework kodu kendiliğinden atlanır: WordPress'te `wp-admin` ve `wp-includes`, Laravel'de `storage` ve `bootstrap/cache`, Symfony'de `var`, Drupal çekirdeği; her projede de `vendor` ve `node_modules`. Atlanan klasörler genel bakışta yazılıdır.
 
+**Hedefleri karşılaştır** projeyi PHP 8.2, 8.3, 8.4 ve 8.5 için aynı anda tarar; puanı, kritik, eskimiş ve elle düzeltilecek bulguları ve engelleyen paketleri yan yana gösterir. Böylece doğrudan 8.5'e geçmenin 8.3'te durmaktan ne kadar fazla iş çıkaracağını görürsünüz. **Bu hedefe geç** birini seçer.
+
 İkinci taramadan sonra **Son taramadan beri** kaç bulgunun çözüldüğünü, kaçının yeni olduğunu ve o hedef için her taramanın hazırlık puanını bir eğri olarak gösterir. Ferry her hedef için son 30 taramayı projede değil, kendi veri klasöründe tutar.
 
 **Rapor al** ile sonuçları bir Markdown dosyasına kaydedebilir, bir iş kaydına ekleyebilir ya da ekibinizle paylaşabilirsiniz.
@@ -65,6 +67,8 @@ Bir bulgunun sizin için geçerli olmadığına karar verdiyseniz (örneğin yal
 
 **Log içe aktar**, kod çalışırken gerçekten ne olduğunu ekler. Bir PHP hata log'u (`php_errors.log`, Apache'nin `error_log` dosyası) ya da `phpunit --display-deprecations` çıktısı seçin; tercihen hedef sürümde yapılmış bir çalıştırmanın çıktısı olsun. Her kullanımdan kalkma, uyarı ya da ölümcül hata projedeki dosya ve satırla eşleştirilir: O satırdaki bulguya **Çalışırken ×N** rozeti eklenir, statik taramanın yakalamadığı mesajlar da ayrı bulgu olarak eklenir. **Çalışırken görülenler** listeyi bunlara süzer. Log, siz kaldırana ya da projeyi kapatana kadar bellekte durur. CI'da aynısını `ferry-cli --runtime-log <dosya>` yapar.
 
+Hedef PHP sürümü bu bilgisayarda kuruluysa (Homebrew, Herd, MAMP, Laragon, phpenv ya da `php8.x` adlı bir çalıştırılabilir dosya), Bulgular sayfası iki seçenek daha sunar: **PHP 8.x ile lint et** her dosyada o PHP ile `php -l` çalıştırır; **Testleri PHP 8.x ile çalıştır** önce sorar, sonra `vendor/bin/phpunit`'i çalıştırır. Çıkan uyarılar, içe aktarılan bir log gibi bulgularla birleştirilir.
+
 Bir bulguyu kodun içinde de yok sayabilirsiniz: Aynı satıra ya da bir üst satıra yazılan `// ferry-ignore removed.each yalnızca PHP 5 sunucusunda çalışıyor` yorumu o kuralı orada yok sayar. `removed.*` bir grubu, yalnızca `// ferry-ignore` ise o satırdaki bütün kuralları kapsar. `.ferry/ignore.json` içindeki bir kayıt kod değiştiği ya da silindiği için artık hiçbir kodla eşleşmiyorsa Bulgular sayfası bunu söyler ve kaydı silmeyi önerir.
 
 Ferry'nin kendi PHP sözcük çözümleyicisi ve kural seti vardır; kodu PHP'nin okuduğu gibi okur. `$db->each()` gibi metot çağrıları, kendi namespace'inizdeki fonksiyonlar, metinlerin ve yorumların içindekiler kaldırılmış fonksiyon sanılmaz. Kurallar şunları kapsar:
@@ -84,6 +88,7 @@ Ferry, hangi PHP'nin gerçekten çalışacağını belirleyen ve kodun çevresin
 
 - `.htaccess`: PHP-FPM'de 500 hatası veren ve `<IfModule mod_php.c>` dışında kalan `php_value` ve `php_flag` satırları ile PHP 8'in artık eşleşmediği `<IfModule mod_php5.c>` ya da `mod_php7.c` blokları
 - `.user.ini`, `php.ini` ve `.htaccess` içinde PHP'nin kaldırdığı ya da kullanımdan kaldırdığı ayarlar: `register_globals` (açıkken PHP hiç başlamaz), `track_errors`, `allow_url_include` ve `session.trans_sid_hosts` gibi
+- `platform-check` seçeneği kapatılmış bir `composer.json` ve Composer 1 ile oluşturulmuş bir `composer.lock`
 - `Dockerfile`, Docker Compose, GitHub Actions, GitLab CI, Travis, Bitbucket Pipelines, `.tool-versions`, `.php-version` ve `composer.json`'daki `config.platform.php` içinde hedefinizin altında sabitlenmiş PHP sürümleri
 
 ### Her değişikliği uygulamadan önce inceleyin
@@ -95,6 +100,8 @@ Ferry, hangi PHP'nin gerçekten çalışacağını belirleyen ve kodun çevresin
 - **Uyumluluk** yalnızca yeni sürümde çalışmak için gerekenleri değiştirir. Başlamak için en doğru yer burasıdır.
 - **Modernleştirme** hedef sürümün yeni yazımlarını da benimser.
 - İstediğiniz dosyaları seçip **Uygula**'ya basın. **Gözden geçir** olarak işaretlenen dosyalarda önce kontrol etmeniz için bir not bulunur.
+- **Seçimi daralt** yalnızca otomatik düzeltmeleri ya da belirli bir Rector kuralının değiştirdiği dosyaları seçer; böylece her seferinde tek tür değişikliği uygulayıp commit edebilirsiniz.
+- Git projelerinde onay penceresi, seçilen dosyalardan commit edilmemiş değişikliği olanları listeler ve uygulanan kuralları sayan, kopyalamaya hazır bir commit mesajı önerir.
 - Uyguladıktan sonra Ferry değişen dosyaları `php -l` ile kontrol eder; bir değişiklik dosyayı ayrıştırılamaz hâle getirdiyse sizi uyarır, böylece **Geçmiş**'ten hemen geri alabilirsiniz.
 
 Ferry, Rector'ın tek başına çözemediği durumları da ele alır. Örneğin `$str{0}` yazımı içeren bir dosyayı Rector tamamen atlar. Ferry bu yazımları önce `$str[0]` olarak düzeltir, aynısını `= &new`, `= &func_get_args()` ve `default;` için de yapar; böylece dosyanın geri kalanı da düzeltilir.
@@ -110,6 +117,8 @@ Ferry, Rector'ın tek başına çözemediği durumları da ele alır. Örneğin 
 Her paket **Uyumlu**, **Uyumsuz** ya da **Belirsiz** (paket bir PHP gereksinimi bildirmiyorsa) olarak işaretlenir; uyumsuz paketler listenin başında yer alır. Geliştirme paketleri etiketlidir; **Sadece üretim** seçeneği onları gizler. Listenin üstündeki uyarı, geçişi engelleyen paketleri tek tek adıyla içeren, kopyalamaya hazır bir `composer update` komutu verir.
 
 **Uyumlu sürümleri bul**, engelleyen her paketin hangi sürüme geçmesi gerektiğini Packagist'e sorar. Önerilen sürüm, PHP gereksinimi (ve Ferry'nin bildiği durumlarda framework'ün kendi destek aralığı) hedefe izin veren ilk ana sürümün en yenisidir. İnternete çıkan tek özellik budur ve yalnızca siz tıkladığınızda çalışır.
+
+WordPress projelerinde **WordPress eklentileri ve temaları** her eklentiyi ve temayı kurulu sürümü, `Requires PHP` başlığı ve kendi kodunda bulunan kritik sorunlarla listeler. **En son sürümleri bul** her biri için api.wordpress.org'dan güncel sürümü sorar ve orada kaldırılmış eklentileri işaretler.
 
 **PHP eklentileri**, kodun kullandığı her eklentiyi (`mysqli`, `gd`, `intl` gibi) kaç kez ve ilk nerede kullanıldığıyla listeler. `composer.json`'da `ext-*` olarak belirtilip belirtilmediğini ve bu bilgisayardaki PHP'de olup olmadığını gösterir. PHP'den çıkarılan eklentiler (8.4'te `imap` gibi) işaretlenir. `composer.json`'da belirtilmeyenler için yapıştırmaya hazır `ext-*` satırları önerilir; böylece Composer yeni sunucuda da bunları kontrol eder.
 
@@ -168,15 +177,23 @@ Depo aynı zamanda `ferry-cli`'ı derleyip pull request'lere uyarı ekleyen bir 
 | **Drupal** | `composer.json`'da `drupal/core`, `core/lib/Drupal.php` (`web/`, `docroot/`, `html/` veya `public/` altında da) ya da Drupal 7'nin `includes/bootstrap.inc` dosyası | Drupal çekirdeği, `sites/default/files` |
 | **Magento** | `app/Mage.php` (Magento 1), `bin/magento` ya da `composer.json`'da bir `magento/product-*` paketi | `generated`, `var`, `pub/static`, `setup`, `dev`; Magento 1'de `app/code/core` ve `lib` |
 | **PrestaShop** | `config/settings.inc.php`, `app/AppKernel.php` ya da `classes/PrestaShopAutoload.php` | `classes`, `controllers`, `src`, `app` gibi çekirdek klasörleri; `modules`, `override` ve `themes` taranır |
+| **Joomla** | `administrator` klasörüyle birlikte `libraries/src/Version.php` ya da Joomla 3'ün `libraries/cms/version/version.php` dosyası | `cache`, `tmp`, `administrator/cache`, `libraries/vendor`, `media` |
+| **Moodle** | `lib/moodlelib.php` ile birlikte `version.php` (5.1'den itibaren `public/version.php`) | `vendor` klasörleri |
+| **MediaWiki** | `includes/Defines.php` içindeki `MW_VERSION` ya da `includes/DefaultSettings.php` içindeki `$wgVersion` | `includes`, `languages`, `maintenance`, `resources` gibi çekirdek klasörler; `extensions` ve `skins` taranır |
+| **phpBB** | `includes/constants.php` içindeki `PHPBB_VERSION` (`phpBB/` altında da aranır) | `phpbb`, `includes`, `cache`, `install` gibi çekirdek klasörler; `ext` ve `styles` taranır |
 | **Düz PHP** | PHP dosyası içeren her klasör | — |
 
-WordPress, Laravel, Drupal, Magento, PrestaShop ve Symfony projelerinde Ferry platformun kendisini de kontrol eder:
+WordPress, Laravel, Drupal, Magento, PrestaShop, Joomla, Moodle, MediaWiki, phpBB ve Symfony projelerinde Ferry platformun kendisini de kontrol eder:
 
 - **WordPress:** `wp-includes/version.php`'deki çekirdek sürümü, hedef PHP sürümünü destekleyen en eski WordPress sürümüyle karşılaştırılır (örneğin PHP 8.4 için en az WordPress 6.7 gerekir).
 - **Laravel:** `composer.lock`'taki `laravel/framework` sürümü Laravel'in desteklediği PHP aralığıyla karşılaştırılır. Ayrıca Laravel 6'nın kaldırdığı `str_*` ve `array_*` yardımcıları ile `Input` facade'ı işaretlenir; PHP 8 en az Laravel 6.20 gerektirdiği için `laravel/helpers` kurulu değilse bunlar da bozulur.
 - **Drupal:** Çekirdek sürümü Drupal'ın PHP gereksinimleriyle karşılaştırılır (örneğin PHP 8.5 için en az Drupal 11.3 gerekir). Drupal 7 de kontrol edilir: PHP 8.2 için en az 7.94, PHP 8.3 için en az 7.103 gerekir; hiçbir Drupal 7 sürümü PHP 8.4'te çalışmaz.
 - **Magento:** Magento 2'nin `composer.lock`'taki sürümü Adobe'nin sistem gereksinimleriyle karşılaştırılır (örneğin PHP 8.4 için en az 2.4.8 gerekir). Magento 1 PHP 8'i hiç desteklemediği için, proje OpenMage LTS kullanmıyorsa işaretlenir.
 - **PrestaShop:** Çekirdek sürümü PrestaShop'un gereksinimleriyle karşılaştırılır: 1.6 ve 1.7 PHP 8'i desteklemez, 8.0–8.2 en fazla PHP 8.1'i, 9.x en fazla PHP 8.5'i destekler.
+- **Joomla:** Çekirdek sürümü, Joomla kılavuzunun her sürüm için listelediği PHP sürümleriyle karşılaştırılır: 3.x en fazla PHP 8.0'ı destekler, 4.0.5 8.1'i, 4.3 8.2'yi ekler, 5.0 8.3'ü destekler, 5.3 8.4'ü ve 5.4 8.5'i ekler. Joomla 5.x ve 6.x için yalnızca önerilen sürümleri yayımladığından bu bulgular **Riskli** olarak işaretlenir.
+- **Moodle:** `version.php`'deki `$release` değeri, Moodle'ın PHP politikasıyla yama sürümüne kadar karşılaştırılır (örneğin PHP 8.2 için en az 4.2.3, PHP 8.4 için en az 5.0 gerekir).
+- **MediaWiki:** Sürüm, mediawiki.org'daki uyumluluk tablosuyla karşılaştırılır (örneğin PHP 8.4 için en az 1.46 gerekir). Tabloda boşluklar olduğu için bulgular **Riskli** olarak işaretlenir.
+- **phpBB:** `PHPBB_VERSION`, her sürümün `INSTALL.html` dosyasındaki PHP aralığıyla karşılaştırılır: 3.3.6 PHP 8.0 ve 8.1'i, 3.3.12 8.2 ve 8.3'ü ekler; 8.4'ü destekleyen kararlı bir sürüm henüz yok.
 - **Symfony:** Symfony en yüksek PHP sürümünü yayımlamadığı için, bakımı hedef PHP sürümü çıkmadan biten bir sürüm **Riskli** olarak işaretlenir.
 
 `vendor` ve `node_modules` her zaman atlanır. 2 MB'tan büyük dosyalar atlanır ve tarama sonuçlarında listelenir; hiçbir dosya sessizce dışarıda kalmaz.
@@ -237,7 +254,7 @@ Eksik bir şey olduğunda **Düzeltmeler** sayfası neyin eksik olduğunu söyle
 - **Yazılanlar:** yalnızca değişiklik uyguladığınız dosyalar. Diğer dosyalara dokunulmaz.
 - **Saklananlar:** her uygulamadan önceki dosya yedekleri (hepsi ya da bir sınır koyduysanız yalnızca en yenileri), neyin uygulandığının kaydı, Rector'ın önbelleği ve ayarlarınız. Hepsi uygulamanın veri klasöründe durur: macOS'ta `~/Library/Application Support/io.github.efekoca.ferry`, Windows'ta `%APPDATA%\io.github.efekoca.ferry`, Linux'ta `~/.local/share/io.github.efekoca.ferry`.
 - **Proje kodu:** Tarama kodunuzu hiçbir zaman çalıştırmaz. Düzeltmeleri hesaplarken Rector proje klasöründe çalışır ve projenin `vendor/autoload.php` dosyasını yükler; bu yüzden Composer'ın `autoload.files` listesindeki dosyalar çalıştırılır. Düzeltmeleri yalnızca güvendiğiniz projeler için hesaplayın.
-- **Ağ:** Ferry kendiliğinden hiçbir ağ isteği yapmaz. **Rector'ı kur**'u seçtiğinizde Composer, Rector'ı Packagist'ten indirir. **Uyumlu sürümleri bul**'u seçtiğinizde Ferry, engelleyen paketlerin adlarını ve sürümlerini `repo.packagist.org`'a gönderir.
+- **Ağ:** Ferry kendiliğinden hiçbir ağ isteği yapmaz. **Rector'ı kur**'u seçtiğinizde Composer, Rector'ı Packagist'ten indirir. **Uyumlu sürümleri bul**'u seçtiğinizde Ferry, engelleyen paketlerin adlarını ve sürümlerini `repo.packagist.org`'a; **En son sürümleri bul**'u seçtiğinizde WordPress eklenti ve tema adlarını `api.wordpress.org`'a gönderir.
 
 ## Nasıl çalışır
 

@@ -42,6 +42,8 @@ Every number is a shortcut: click **Breaking**, **Manual** or one of the most co
 
 Framework code you don't maintain is skipped automatically: `wp-admin` and `wp-includes` in WordPress, `storage` and `bootstrap/cache` in Laravel, `var` in Symfony, Drupal core, and `vendor` and `node_modules` everywhere. The overview names the skipped folders.
 
+**Compare targets** scans the project for PHP 8.2, 8.3, 8.4 and 8.5 at once and puts the score, breaking, deprecated and manual findings, and blocking packages side by side, so you can see whether going straight to 8.5 costs much more than stopping at 8.3. **Switch to this target** picks one.
+
 After the second scan, **Since the last scan** shows how many findings were resolved and how many are new, with the readiness score of every scan for that target as a trend line. Ferry keeps the last 30 scans per target in its own data folder, never in the project.
 
 **Export report** saves the results as a Markdown file you can attach to a ticket or share with your team.
@@ -65,6 +67,8 @@ Select a finding to see:
 
 **Import log** adds what really happened when the code ran. Point it at a PHP error log (`php_errors.log`, Apache's `error_log`) or the output of `phpunit --display-deprecations`, ideally from a run on the target version. Each deprecation, warning or fatal error is matched to the project file and line: a finding on that line gets a **Runtime ×N** badge, and messages the static scan didn't catch are added as findings of their own. **Seen at runtime** filters the list to them. The log stays in memory until you remove it or close the project. `ferry-cli --runtime-log <file>` does the same in CI.
 
+When the target PHP version is installed on this computer (Homebrew, Herd, MAMP, Laragon, phpenv or a `php8.x` binary), the Findings page also offers **Lint with PHP 8.x**, which runs `php -l` on every file with that PHP, and **Run tests on PHP 8.x**, which runs `vendor/bin/phpunit` after asking first. Their warnings are merged the same way as an imported log.
+
 You can also ignore a finding in the code itself: a `// ferry-ignore removed.each only runs on the PHP 5 server` comment on the same line or the line above ignores that rule there, `removed.*` covers a group, and a bare `// ferry-ignore` covers every rule on the line. When an entry in `.ferry/ignore.json` no longer matches any code, because it changed or was deleted, the Findings page says so and offers to remove it.
 
 Ferry has its own PHP lexer and rule set, so it reads code the way PHP does: method calls such as `$db->each()`, functions in your own namespace, and text inside strings and comments are not mistaken for removed functions. Its rules cover:
@@ -84,6 +88,7 @@ Ferry also reads the files around the code that decide which PHP actually runs:
 
 - `.htaccess`: `php_value` and `php_flag` lines outside `<IfModule mod_php.c>`, which give a 500 error on PHP-FPM, and `<IfModule mod_php5.c>` or `mod_php7.c` blocks that PHP 8 no longer matches
 - `.user.ini`, `php.ini` and `.htaccess` settings that PHP removed or deprecated, such as `register_globals` (PHP won't start with it on), `track_errors`, `allow_url_include` and `session.trans_sid_hosts`
+- `composer.json` with `platform-check` turned off, and a `composer.lock` written by Composer 1
 - PHP versions pinned below your target in `Dockerfile`, Docker Compose, GitHub Actions, GitLab CI, Travis, Bitbucket Pipelines, `.tool-versions`, `.php-version`, and `config.platform.php` in `composer.json`
 
 ### Review every change before it is applied
@@ -95,6 +100,8 @@ The **Fixes** page runs Rector on your project in dry-run mode. No files change.
 - **Compatibility** makes only the changes needed to run on the new version. It is the best place to start.
 - **Modernize** also adopts newer syntax for the target version.
 - Pick the files you want and press **Apply**. Files marked **Review** carry a note to check them first.
+- **Narrow the selection** picks only the automatic fixes, or only the files a given Rector rule changed, so you can apply and commit one kind of change at a time.
+- In a Git project, the confirmation lists selected files that already have uncommitted changes and offers a ready-to-copy commit message that names the rules being applied.
 - After applying, Ferry checks the changed files with `php -l` and warns you if a change left one that no longer parses, so you can roll it back from **History** right away.
 
 Ferry handles cases Rector cannot on its own. For example, a file that uses `$str{0}` makes Rector skip the whole file. Ferry rewrites those offsets to `$str[0]` first, and does the same for `= &new`, `= &func_get_args()` and `default;`, so the rest of the file is still fixed.
@@ -110,6 +117,8 @@ A declared requirement like `^8.0` doesn't always mean the package works on the 
 Each package is marked **Compatible**, **Incompatible**, or **Unknown** (when the package declares no PHP requirement), with incompatible packages listed first. Development packages are labeled, and **Production only** hides them. The warning above the list gives a ready-to-copy `composer update` command naming exactly the packages that block the upgrade.
 
 **Find compatible versions** asks Packagist which release to move each blocking package to: the newest release of the first major version whose PHP requirement, and the framework's own support range where Ferry knows it, allows the target. It's the only feature that goes online, and only when you click it.
+
+In a WordPress project, **WordPress plugins and themes** lists every plugin and theme with its installed version, its `Requires PHP` header and the breaking issues found in its own code. **Find latest versions** asks api.wordpress.org for the current release of each and marks plugins that were closed there.
 
 **PHP extensions** lists every extension the code uses, such as `mysqli`, `gd` or `intl`, with how often and where it's first used. It shows whether `composer.json` declares it as `ext-*` and whether the PHP on this computer has it. Extensions that left PHP, such as `imap` in 8.4, are marked. Ready-to-paste `ext-*` lines are offered for the ones `composer.json` doesn't declare, so Composer checks the new server for them.
 
@@ -168,15 +177,23 @@ Set `sarif: "true"` to also write `ferry.sarif` for `github/codeql-action/upload
 | **Drupal** | `drupal/core` in `composer.json`, `core/lib/Drupal.php` (also under `web/`, `docroot/`, `html/`, or `public/`), or Drupal 7's `includes/bootstrap.inc` | Drupal core, `sites/default/files` |
 | **Magento** | `app/Mage.php` (Magento 1), `bin/magento`, or a `magento/product-*` package in `composer.json` | `generated`, `var`, `pub/static`, `setup`, `dev`; in Magento 1, `app/code/core` and `lib` |
 | **PrestaShop** | `config/settings.inc.php`, `app/AppKernel.php`, or `classes/PrestaShopAutoload.php` | core folders such as `classes`, `controllers`, `src`, `app`; `modules`, `override` and `themes` are scanned |
+| **Joomla** | `libraries/src/Version.php` with an `administrator` folder, or Joomla 3's `libraries/cms/version/version.php` | `cache`, `tmp`, `administrator/cache`, `libraries/vendor`, `media` |
+| **Moodle** | `version.php` (or `public/version.php` from 5.1) with `lib/moodlelib.php` | `vendor` folders |
+| **MediaWiki** | `MW_VERSION` in `includes/Defines.php`, or `$wgVersion` in `includes/DefaultSettings.php` | core folders such as `includes`, `languages`, `maintenance`, `resources`; `extensions` and `skins` are scanned |
+| **phpBB** | `PHPBB_VERSION` in `includes/constants.php` (also under `phpBB/`) | core folders such as `phpbb`, `includes`, `cache`, `install`; `ext` and `styles` are scanned |
 | **Plain PHP** | any folder with PHP files | — |
 
-For WordPress, Laravel, Drupal, Magento, PrestaShop, and Symfony, Ferry also checks the platform itself:
+For WordPress, Laravel, Drupal, Magento, PrestaShop, Joomla, Moodle, MediaWiki, phpBB, and Symfony, Ferry also checks the platform itself:
 
 - **WordPress:** the core version in `wp-includes/version.php` against the oldest WordPress release that supports your target PHP version (for example, PHP 8.4 needs WordPress 6.7).
 - **Laravel:** the `laravel/framework` version in `composer.lock` against Laravel's supported PHP range, plus the `str_*` and `array_*` helpers and the `Input` facade that Laravel 6 removed. PHP 8 needs Laravel 6.20 or newer, so these break too unless `laravel/helpers` is installed.
 - **Drupal:** the core version against Drupal's PHP requirements (for example, PHP 8.5 needs Drupal 11.3). Drupal 7 is checked too: PHP 8.2 needs 7.94 and PHP 8.3 needs 7.103, and no Drupal 7 release runs on PHP 8.4.
 - **Magento:** Magento 2's version in `composer.lock` against Adobe's system requirements (for example, PHP 8.4 needs 2.4.8). Magento 1 never supported PHP 8, so it's flagged unless the project uses the OpenMage LTS fork.
 - **PrestaShop:** the core version against PrestaShop's requirements: 1.6 and 1.7 don't support PHP 8, 8.0–8.2 go up to PHP 8.1, and 9.x goes up to PHP 8.5.
+- **Joomla:** the core version against the PHP versions the Joomla manual lists for each release: 3.x goes up to PHP 8.0, 4.0.5 adds 8.1, 4.3 adds 8.2, 5.0 supports 8.3, 5.3 adds 8.4 and 5.4 adds 8.5. Joomla only publishes recommended versions for 5.x and 6.x, so those are marked **Risky**.
+- **Moodle:** `$release` in `version.php` against Moodle's PHP policy, down to the patch release (for example, PHP 8.2 needs 4.2.3 and PHP 8.4 needs 5.0).
+- **MediaWiki:** the version against mediawiki.org's compatibility matrix (for example, PHP 8.4 needs 1.46). The matrix has gaps, so findings are marked **Risky**.
+- **phpBB:** `PHPBB_VERSION` against the PHP range in each release's `INSTALL.html`: 3.3.6 adds PHP 8.0 and 8.1, 3.3.12 adds 8.2 and 8.3, and no stable release supports 8.4 yet.
 - **Symfony:** Symfony doesn't publish a maximum PHP version, so a release whose maintenance ended before your target PHP version came out is marked **Risky**.
 
 `vendor` and `node_modules` are always skipped. Files larger than 2 MB are skipped and listed in the scan results, so nothing is left out silently.
@@ -237,7 +254,7 @@ When something is missing, the **Fixes** page says what and offers **Install Rec
 - **Written:** only the files you apply changes to. Every other file stays untouched.
 - **Stored:** backups of the files before each apply (all of them, or only the newest if you set a limit), a record of what was applied, Rector's cache, and your settings, in the app's data folder: `~/Library/Application Support/io.github.efekoca.ferry` on macOS `%APPDATA%\io.github.efekoca.ferry` on Windows, and `~/.local/share/io.github.efekoca.ferry` on Linux.
 - **Project code:** scanning never runs your code. Calculating fixes runs Rector in the project folder, and Rector loads the project's `vendor/autoload.php`, so files listed under Composer's `autoload.files` are executed. Only calculate fixes for projects you trust.
-- **Network:** Ferry makes no network requests on its own. When you choose **Install Rector**, Composer downloads Rector from Packagist. When you choose **Find compatible versions**, Ferry sends the names and versions of the blocking packages to `repo.packagist.org`.
+- **Network:** Ferry makes no network requests on its own. When you choose **Install Rector**, Composer downloads Rector from Packagist. When you choose **Find compatible versions**, Ferry sends the names and versions of the blocking packages to `repo.packagist.org`, and **Find latest versions** sends WordPress plugin and theme names to `api.wordpress.org`.
 
 ## How it works
 
