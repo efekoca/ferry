@@ -75,6 +75,13 @@ export interface ScanHistory {
   fixedSinceLast: number | null;
 }
 
+export interface TargetSummary {
+  target: string;
+  summary: Summary;
+  blockingPackages: number;
+  rootBlocks: boolean;
+}
+
 export interface ScanResult {
   target: string;
   filesScanned: number;
@@ -87,6 +94,12 @@ export interface ScanResult {
   staleIgnores: IgnoreEntry[];
   progress?: ScanHistory | null;
   runtime?: RuntimeSummary | null;
+}
+
+export interface LocalPhp {
+  line: string;
+  version: string;
+  path: string;
 }
 
 export interface RuntimeSummary {
@@ -131,6 +144,25 @@ export interface DependencyReport {
   packages: Dependency[];
   hasLockFile: boolean;
   extensions: ExtensionUse[];
+  wordpress: WpComponent[];
+}
+
+export interface WpComponent {
+  kind: "plugin" | "theme";
+  slug: string;
+  name: string;
+  version: string | null;
+  requiresPhp: string | null;
+  dir: string;
+}
+
+export interface WpLatest {
+  kind: "plugin" | "theme";
+  slug: string;
+  version: string | null;
+  requiresPhp: string | null;
+  lastUpdated: string | null;
+  closed: boolean;
 }
 
 export interface VersionSuggestion {

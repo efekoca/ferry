@@ -129,6 +129,7 @@ interface AppStore {
   pruneIgnores(): Promise<boolean>;
   importRuntimeLog(): Promise<boolean>;
   clearRuntimeLog(): Promise<boolean>;
+  runLocalCheck(kind: "lint" | "tests"): Promise<boolean>;
 }
 
 const StoreContext = createContext<AppStore | null>(null);
@@ -505,18 +506,24 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
     [api, updateIgnores, t],
   );
 
+  const runLocalCheck = useCallback(
+    (kind: "lint" | "tests") =>
+      api ? updateIgnores((root) => api.runLocalCheck(root, target, kind), t.toast.localCheckFailed) : Promise.resolve(false),
+    [api, updateIgnores, target, t],
+  );
+
   const value = useMemo<AppStore>(
     () => ({
       api, view, setView, findingsFilter, setFindingsFilter, showFindings, theme, setTheme, recent, forgetRecent, project, opening, openProject, closeProject,
       target, setTarget, scan, scanning, progress, runScan, deps, toolchain, refreshToolchain, installingRector,
       installRector, preview, previewMode, previewing, loadPreview, cancelPreview, applying, applyChanges, snapshots,
-      refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport, ignoreFinding, unignoreFinding, pruneIgnores, importRuntimeLog, clearRuntimeLog,
+      refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport, ignoreFinding, unignoreFinding, pruneIgnores, importRuntimeLog, clearRuntimeLog, runLocalCheck,
     }),
     [
       api, view, findingsFilter, showFindings, theme, setTheme, recent, forgetRecent, project, opening, openProject, closeProject, target,
       setTarget, scan, scanning, progress, runScan, deps, toolchain, refreshToolchain, installingRector,
       installRector, preview, previewMode, previewing, loadPreview, cancelPreview, applying, applyChanges, snapshots,
-      refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport, ignoreFinding, unignoreFinding, pruneIgnores, importRuntimeLog, clearRuntimeLog,
+      refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport, ignoreFinding, unignoreFinding, pruneIgnores, importRuntimeLog, clearRuntimeLog, runLocalCheck,
     ],
   );
 

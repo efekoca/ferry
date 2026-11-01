@@ -3,6 +3,7 @@ import type {
   BackupUsage,
   DependencyReport,
   FileChange,
+  LocalPhp,
   ProjectInfo,
   RectorMode,
   RectorPreview,
@@ -10,8 +11,10 @@ import type {
   ScanResult,
   Settings,
   Snapshot,
+  TargetSummary,
   ToolchainStatus,
   VersionSuggestion,
+  WpLatest,
 } from "./types";
 import { mockApi } from "./mock";
 import type { Lang } from "../i18n";
@@ -23,11 +26,16 @@ export interface Api {
   pickLogFile(title: string): Promise<string | null>;
   importRuntimeLog(path: string, log: string): Promise<ScanResult>;
   clearRuntimeLog(path: string): Promise<ScanResult>;
+  localPhpVersions(): Promise<LocalPhp[]>;
+  runLocalCheck(path: string, target: string, kind: "lint" | "tests"): Promise<ScanResult>;
   inspectProject(path: string): Promise<ProjectInfo>;
   scanProject(path: string, target: string, run: number): Promise<ScanResult>;
   onScanProgress(handler: (p: ScanProgress) => void): Promise<() => void>;
   checkDependencies(path: string, target: string): Promise<DependencyReport>;
+  gitStatus(path: string, files: string[]): Promise<{ repo: boolean; dirty: string[] }>;
+  compareTargets(path: string): Promise<TargetSummary[]>;
   findCompatibleVersions(target: string, packages: { name: string; version: string }[]): Promise<VersionSuggestion[]>;
+  wordpressLatest(items: { kind: string; slug: string }[]): Promise<WpLatest[]>;
   toolchainStatus(): Promise<ToolchainStatus>;
   installRector(): Promise<ToolchainStatus>;
   rectorPreview(path: string, target: string, mode: RectorMode): Promise<RectorPreview>;
@@ -72,11 +80,16 @@ async function tauriApi(): Promise<Api> {
     pickLogFile: async (title) => single(await dialog.open({ multiple: false, title })),
     importRuntimeLog: (path, log) => invoke("import_runtime_log", { path, log }),
     clearRuntimeLog: (path) => invoke("clear_runtime_log", { path }),
+    localPhpVersions: () => invoke("local_php_versions"),
+    runLocalCheck: (path, target, kind) => invoke("run_local_check", { path, target, kind }),
     inspectProject: (path) => invoke("inspect_project", { path }),
     scanProject: (path, target, run) => invoke("scan_project", { path, target, run }),
     onScanProgress: (handler) => listen<ScanProgress>("scan://progress", (e) => handler(e.payload)),
     checkDependencies: (path, target) => invoke("check_dependencies", { path, target }),
+    gitStatus: (path, files) => invoke("git_status", { path, files }),
+    compareTargets: (path) => invoke("compare_targets", { path }),
     findCompatibleVersions: (target, packages) => invoke("find_compatible_versions", { target, packages }),
+    wordpressLatest: (items) => invoke("wordpress_latest", { items }),
     toolchainStatus: () => invoke("toolchain_status"),
     installRector: () => invoke("install_rector"),
     rectorPreview: (path, target, mode) => invoke("rector_preview", { path, target, mode }),
