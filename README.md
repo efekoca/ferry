@@ -150,7 +150,7 @@ cargo build --release -p ferry-cli
 target/release/ferry-cli scan . --target 8.4 --format github
 ```
 
-- `--format text|json|sarif|github`: plain text, JSON with the summary and ignored findings, SARIF 2.1.0 for GitHub code scanning and other viewers, or GitHub Actions annotations on the changed lines.
+- `--format text|json|sarif|github|junit|checkstyle|csv`: plain text, JSON with the summary and ignored findings, SARIF 2.1.0 for GitHub code scanning and other viewers, GitHub Actions annotations on the changed lines, JUnit XML for Jenkins and GitLab test reports, Checkstyle XML, or CSV for spreadsheets. `--blame` adds the `git blame` author of each line to the CSV, so the work can be split across a team.
 - `--fail-on breaking|deprecated|any|none`: the lowest severity that makes the command exit with code 1 (default `breaking`). Errors such as a missing folder exit with code 2.
 - `--output <file>` writes the report to a file, and `--lang tr` switches the messages to Turkish.
 - `--write-baseline <file>` saves today's findings, and `--baseline <file>` compares with them: only findings that aren't in the baseline count toward `--fail-on`, and `--fail-on new` fails on any of them. This lets a project with hundreds of old findings stop new ones from coming in.

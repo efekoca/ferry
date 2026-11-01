@@ -55,9 +55,7 @@ Competing tools each cover part of an upgrade: PHPCompatibility (detection only;
 |---|---|---|---|
 | 1 | **Project config (`.ferry/`)**: target, excluded paths, ignores, baseline, editor, test command; committed to git | Foundation for most items below | S |
 | 3 | **Custom editor command or URL** for editors outside the built-in list (VS Code, Cursor, PhpStorm, Sublime Text and Zed are done) | Covers Neovim, Emacs and in-house setups | S |
-| 5 | **JUnit, Checkstyle and CSV output** with stable fingerprints | GitLab, Jenkins, spreadsheets | S |
 | 7 | **More runtime formats**: Symfony PHPUnit bridge summaries and Monolog JSON (PHP error logs, uncaught errors and `phpunit --display-deprecations` output are imported already) | Covers the remaining log shapes teams use | S |
-| 8 | **CSV with a `git blame` owner column** | Assign work across a team | S |
 | 9 | **Git integration, the rest**: an optional branch per batch and refusing to apply on a dirty tree (uncommitted-file warnings and a generated commit message are done) | Small, reviewable commits | S |
 | 10 | **Apply by hunk, and Rector level stepping** (`withPhpLevel`); selecting files by rule is done | Answers "Rector changed too much" | S–M |
 | 13 | **Docker "Live test"**: official `php:X.Y-cli` images with the project's extensions, `php -l`, then the test suite on the current and target versions, feeding item 7 | Covers behavior changes; turns "Coming soon" into a real feature | L |
