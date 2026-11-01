@@ -42,6 +42,8 @@ Every number is a shortcut: click **Breaking**, **Manual** or one of the most co
 
 Framework code you don't maintain is skipped automatically: `wp-admin` and `wp-includes` in WordPress, `storage` and `bootstrap/cache` in Laravel, `var` in Symfony, Drupal core, and `vendor` and `node_modules` everywhere. The overview names the skipped folders.
 
+**Compare targets** scans the project for PHP 8.2, 8.3, 8.4 and 8.5 at once and puts the score, breaking, deprecated and manual findings, and blocking packages side by side, so you can see whether going straight to 8.5 costs much more than stopping at 8.3. **Switch to this target** picks one.
+
 After the second scan, **Since the last scan** shows how many findings were resolved and how many are new, with the readiness score of every scan for that target as a trend line. Ferry keeps the last 30 scans per target in its own data folder, never in the project.
 
 **Export report** saves the results as a Markdown file you can attach to a ticket or share with your team.

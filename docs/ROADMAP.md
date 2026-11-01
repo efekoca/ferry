@@ -62,7 +62,6 @@ Competing tools each cover part of an upgrade: PHPCompatibility (detection only;
 | 9 | **Git integration**: refuse to apply on a dirty tree, optional branch per batch, generated commit message listing the Rector rules | Small, reviewable commits | M |
 | 10 | **Apply by rule or by hunk, and Rector level stepping** (`withPhpLevel`) | Answers "Rector changed too much" | S–M |
 | 11 | **Lint and run tests with a local PHP of the target version** (Herd, Homebrew, phpenv are already detected) | Most of "Live test" without Docker | M |
-| 12 | **Compare targets side by side**: score, breaking findings and blocking packages for 8.2–8.5 | Helps choose between 8.3 and going straight to 8.5 | S–M |
 | 13 | **Docker "Live test"**: official `php:X.Y-cli` images with the project's extensions, `php -l`, then the test suite on the current and target versions, feeding item 7 | Covers behavior changes; turns "Coming soon" into a real feature | L |
 | 14 | **AI help for manual findings**, opt-in per project, own API key or a local model, through the same preview, backup and lint flow | Manual findings are where time goes; the privacy promise needs an explicit opt-in | M–L |
 | 15 | Issue creation (GitHub/GitLab), incremental cached scans for very large projects, scanning `vendor/` for library parents, multiple composer roots, more interface languages | Teams, enterprise, reach | M each |

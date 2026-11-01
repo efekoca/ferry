@@ -429,6 +429,19 @@ async fn find_compatible_versions(target: String, packages: Vec<LockedPackage>) 
 }
 
 #[tauri::command]
+async fn compare_targets(path: String) -> CmdResult<Vec<ferry_core::compare::TargetSummary>> {
+    let path = normalize_path(path);
+    blocking(move || {
+        let root = project_root(&path)?;
+        let info = project::inspect(&root).map_err(|e| e.to_string())?;
+        let files = project::collect_php_files(&root, &info.excluded_dirs);
+        let targets: Vec<PhpVersion> = PhpVersion::TARGETS.into_iter().filter(|v| *v != PhpVersion::new(8, 1)).collect();
+        Ok(ferry_core::compare::compare(&root, &files, &targets))
+    })
+    .await
+}
+
+#[tauri::command]
 async fn toolchain_status(state: State<'_, AppState>) -> CmdResult<ToolchainStatus> {
     let tools = state.tools_dir();
     let php = state.php_override();
@@ -767,6 +780,7 @@ pub fn with_commands<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R
         inspect_project,
         scan_project,
         check_dependencies,
+        compare_targets,
         find_compatible_versions,
         toolchain_status,
         install_rector,

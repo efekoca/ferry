@@ -145,6 +145,18 @@ export const en: Dict = {
     switchText: (n) => `The fix preview for ${n} files will be discarded and the project rescanned for the new target.`,
   },
   scoreLabel: (s) => `Readiness score: ${s}/100`,
+  compare: {
+    title: "Compare targets",
+    text: "Scans the project for PHP 8.2, 8.3, 8.4 and 8.5 and shows side by side how much work each target means.",
+    run: "Compare",
+    failed: "Couldn't compare the targets",
+    target: "Target",
+    score: "Score",
+    packages: "Blocking packages",
+    plusRoot: "+ composer.json",
+    current: "Selected",
+    pick: "Switch to this target",
+  },
   progress: {
     title: "Progress",
     first: "First scan. Next time you'll see what changed here.",
