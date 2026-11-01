@@ -41,10 +41,9 @@ String-to-number comparisons with `==` (8.0), `null` passed to built-ins from va
 
 | Addition | Why | Size |
 |---|---|---|
-| **Composer platform pitfalls.** `config.platform.ext-*` pinned below the target, `platform-check` disabled, a Composer 1 lock file (no `plugin-api-version`), plugins that need `composer-plugin-api ^1` (`config.platform.php` is done). | Each one makes Composer install packages for the wrong platform | S |
+| **Composer platform pitfalls, the rest.** `config.platform.ext-*` pinned below the target and plugins that need `composer-plugin-api ^1` (`platform-check: false`, Composer 1 lock files and `config.platform.php` are done). | Each one makes Composer install packages for the wrong platform | S |
 | **More version pins and a bump action.** DDEV, Lando, Platform.sh and versioned PHP-FPM socket paths, plus a button that updates pins to the target (Dockerfile, Compose, CI files, `.tool-versions` and `.php-version` are reported already). | The upgrade isn't done until these change | S |
-| **More platforms.** Joomla 3/4/5, Moodle (its own `admin/environment.xml`), MediaWiki, phpBB, CodeIgniter, Yii, CakePHP, OpenCart. Keep the support ranges in a data file with a source URL and a verified date for each row. *(verify each range from official pages; Drupal 7, Magento and PrestaShop are already done)* | Legacy CMS users are Ferry's core audience | M |
-| **WordPress plugins and themes.** Read plugin and theme headers (`Version`, `Requires PHP`) and, opt-in, query api.wordpress.org for the latest version, its PHP requirement and whether the plugin was closed. Say "update first" or "fix it yourself" for each. | Most breakage after a host's forced PHP upgrade comes from plugins. WP Engine's checker is unmaintained, stuck at PHP 8.0, and rated 2.7/5 | M |
+| **More platforms.** CodeIgniter, Yii, CakePHP and OpenCart, plus re-checking the MediaWiki matrix and Joomla 6 once they publish firm ranges (Joomla, Moodle, MediaWiki and phpBB are done). | Legacy CMS users are Ferry's core audience | M |
 | **Polyfill cleanup.** `symfony/polyfill-php*` and `random_compat` become no-ops once the target passes their version. | Smaller dependency tree | S |
 
 ## 3. Workflow features
@@ -55,13 +54,9 @@ Competing tools each cover part of an upgrade: PHPCompatibility (detection only;
 |---|---|---|---|
 | 1 | **Project config (`.ferry/`)**: target, excluded paths, ignores, baseline, editor, test command; committed to git | Foundation for most items below | S |
 | 3 | **Custom editor command or URL** for editors outside the built-in list (VS Code, Cursor, PhpStorm, Sublime Text and Zed are done) | Covers Neovim, Emacs and in-house setups | S |
-| 5 | **JUnit, Checkstyle and CSV output** with stable fingerprints | GitLab, Jenkins, spreadsheets | S |
 | 7 | **More runtime formats**: Symfony PHPUnit bridge summaries and Monolog JSON (PHP error logs, uncaught errors and `phpunit --display-deprecations` output are imported already) | Covers the remaining log shapes teams use | S |
-| 8 | **CSV with a `git blame` owner column** | Assign work across a team | S |
-| 9 | **Git integration**: refuse to apply on a dirty tree, optional branch per batch, generated commit message listing the Rector rules | Small, reviewable commits | M |
-| 10 | **Apply by rule or by hunk, and Rector level stepping** (`withPhpLevel`) | Answers "Rector changed too much" | S–M |
-| 11 | **Lint and run tests with a local PHP of the target version** (Herd, Homebrew, phpenv are already detected) | Most of "Live test" without Docker | M |
-| 12 | **Compare targets side by side**: score, breaking findings and blocking packages for 8.2–8.5 | Helps choose between 8.3 and going straight to 8.5 | S–M |
+| 9 | **Git integration, the rest**: an optional branch per batch and refusing to apply on a dirty tree (uncommitted-file warnings and a generated commit message are done) | Small, reviewable commits | S |
+| 10 | **Apply by hunk, and Rector level stepping** (`withPhpLevel`); selecting files by rule is done | Answers "Rector changed too much" | S–M |
 | 13 | **Docker "Live test"**: official `php:X.Y-cli` images with the project's extensions, `php -l`, then the test suite on the current and target versions, feeding item 7 | Covers behavior changes; turns "Coming soon" into a real feature | L |
 | 14 | **AI help for manual findings**, opt-in per project, own API key or a local model, through the same preview, backup and lint flow | Manual findings are where time goes; the privacy promise needs an explicit opt-in | M–L |
 | 15 | Issue creation (GitHub/GitLab), incremental cached scans for very large projects, scanning `vendor/` for library parents, multiple composer roots, more interface languages | Teams, enterprise, reach | M each |
@@ -80,8 +75,9 @@ A third, `scripts/runtime-benchmark.sh`, runs a project's PHPUnit tests file by 
 | Monolog 3.5.0 | `tests/Monolog` | 27 | 27 | 0 |
 | league/commonmark 2.4.2 | `tests/unit` | 4 | 3 | 1: `ord()` given a multi-byte string |
 | Laravel 11.0.0 | `tests/Support` | 73 | 62 | 11: `null` used as an array offset or `array_key_exists()` key through a variable |
-| PHPMailer 6.9.1, Carbon 3.0.0 | all | none reported | – | PHPUnit 9 and Carbon's setup don't print deprecations in this harness |
+| PHPMailer 6.9.1 | `test` | 5 | 5 | 0 |
+| Carbon 3.0.0 | `tests` | 7 | 7 | 0 (the suite stops in its bootstrap on 8.5, so only these were reported) |
 
-So 92 of 104 runtime deprecations (88%) were already reported statically. Every miss is an 8.5 deprecation that depends on a runtime value, which is the case runtime log import exists for. Two PHPUnit warnings in Monolog came from the test environment (memory limit, missing git branch) and messages from `vendor/` are counted as outside the project.
+So 104 of 116 runtime deprecations (90%) were already reported statically. Every miss is an 8.5 deprecation that depends on a runtime value, which is the case runtime log import exists for. Two PHPUnit warnings in Monolog came from the test environment (memory limit, missing git branch) and messages from `vendor/` are counted as outside the project.
 
-Next: make the harness report PHPUnit 9 deprecations (`convertDeprecationsToExceptions` or a `set_error_handler` bootstrap), report literal `$a[null]` statically, and add more projects.
+Next: add more projects, and run the suites that stop early (Carbon) after fixing their bootstrap.

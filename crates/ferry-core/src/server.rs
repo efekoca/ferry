@@ -37,6 +37,7 @@ pub fn scan(root: &Path, target: PhpVersion) -> Vec<Finding> {
             ".htaccess" => Kind::Htaccess,
             ".user.ini" | "php.ini" => Kind::Ini,
             "composer.json" if entry.depth() == 1 => Kind::Composer,
+            "composer.lock" if entry.depth() == 1 => Kind::ComposerLock,
             ".tool-versions" | ".php-version" if entry.depth() == 1 => Kind::Pin,
             ".gitlab-ci.yml" | "bitbucket-pipelines.yml" | ".travis.yml" => Kind::Ci,
             n if n == "dockerfile" || n.starts_with("dockerfile.") || n.ends_with(".dockerfile") => Kind::Docker,
@@ -51,6 +52,7 @@ pub fn scan(root: &Path, target: PhpVersion) -> Vec<Finding> {
             Kind::Htaccess => htaccess(&text),
             Kind::Ini => ini(&text),
             Kind::Composer => composer(&text, target),
+            Kind::ComposerLock => composer_lock(&text, target),
             Kind::Pin | Kind::Docker | Kind::Ci => pins(&text, kind, target),
         };
         let lines: Vec<&str> = text.lines().collect();
@@ -83,6 +85,7 @@ enum Kind {
     Htaccess,
     Ini,
     Composer,
+    ComposerLock,
     Pin,
     Docker,
     Ci,
@@ -304,17 +307,58 @@ fn pins(text: &str, kind: Kind, target: PhpVersion) -> Vec<Hit> {
     out.into_iter().filter(old).map(|(line, v)| pin_hit(line, v, target, PINNED)).collect()
 }
 
+const PLATFORM_CHECK: Text = Text::new(
+    "config.platform-check kapalı. Composer, kurulu paketlerin sunucudaki PHP sürümüyle ve eklentilerle uyumlu olduğunu çalışırken artık kontrol etmiyor; uyumsuz bir paket ancak bir hata çıktığında fark edilir. Geçiş sırasında açık tutun.",
+    "config.platform-check is turned off, so Composer no longer checks at runtime that the installed packages fit the server's PHP version and extensions. An incompatible package only shows up when something fails. Keep it on during the upgrade.",
+);
+
+const COMPOSER1_LOCK: Text = Text::new(
+    "Bu composer.lock Composer 1 ile oluşturulmuş (plugin-api-version yok). Composer 1 artık güncellenmiyor ve Packagist'in yeni meta verisini okuyamıyor. PHP 8 uyumlu paket sürümlerine geçmeden önce Composer 2 ile composer update çalıştırın.",
+    "This composer.lock was written by Composer 1 (there is no plugin-api-version). Composer 1 is no longer maintained and can't read Packagist's current metadata. Run composer update with Composer 2 before moving to PHP 8 compatible package versions.",
+);
+
+fn line_of(text: &str, needle: &str) -> usize {
+    text.lines().position(|l| l.contains(needle)).map_or(1, |k| k + 1)
+}
+
 fn composer(text: &str, target: PhpVersion) -> Vec<Hit> {
     let Ok(json) = serde_json::from_str::<serde_json::Value>(text) else { return Vec::new() };
-    let Some(pinned) = json.pointer("/config/platform/php").and_then(|v| v.as_str()) else { return Vec::new() };
-    let Some(found) = version_at(pinned.trim_start_matches(['^', '~', '>', '=', ' '])) else { return Vec::new() };
-    if found >= target {
+    let mut out = Vec::new();
+    if json.pointer("/config/platform-check").is_some_and(|v| v == &serde_json::Value::Bool(false) || v.as_str() == Some("false")) {
+        out.push(Hit {
+            line: line_of(text, "\"platform-check\""),
+            rule: "server.composer_platform_check",
+            title: Localized::same("config.platform-check: false"),
+            since: target,
+            severity: Severity::Behavior,
+            message: PLATFORM_CHECK,
+            replacement: Some(Localized::same("\"platform-check\": true")),
+        });
+    }
+    let pinned = json.pointer("/config/platform/php").and_then(|v| v.as_str());
+    if let Some(found) = pinned.and_then(|p| version_at(p.trim_start_matches(['^', '~', '>', '=', ' ']))).filter(|f| *f < target) {
+        let lines: Vec<&str> = text.lines().collect();
+        let platform = lines.iter().position(|l| l.contains("\"platform\"")).unwrap_or(0);
+        let line = (platform..lines.len()).find(|&k| lines[k].contains("\"php\"")).map_or(platform + 1, |k| k + 1);
+        out.push(pin_hit(line, found, target, PLATFORM));
+    }
+    out
+}
+
+fn composer_lock(text: &str, target: PhpVersion) -> Vec<Hit> {
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(text) else { return Vec::new() };
+    if json.get("plugin-api-version").is_some() || json.get("packages").is_none() || json.get("content-hash").is_none() {
         return Vec::new();
     }
-    let lines: Vec<&str> = text.lines().collect();
-    let platform = lines.iter().position(|l| l.contains("\"platform\"")).unwrap_or(0);
-    let line = (platform..lines.len()).find(|&k| lines[k].contains("\"php\"")).map_or(platform + 1, |k| k + 1);
-    vec![pin_hit(line, found, target, PLATFORM)]
+    vec![Hit {
+        line: 1,
+        rule: "server.composer1_lock",
+        title: Localized { tr: "Composer 1 kilit dosyası".into(), en: "Composer 1 lock file".into() },
+        since: target,
+        severity: Severity::Behavior,
+        message: COMPOSER1_LOCK,
+        replacement: Some(Localized::same("composer update (Composer 2)")),
+    }]
 }
 
 #[cfg(test)]
@@ -343,7 +387,11 @@ mod tests {
         write(".github/workflows/ci.yml", "jobs:\n  test:\n    strategy:\n      matrix:\n        php: ['7.4', '8.0']\n    steps:\n      - uses: shivammathur/setup-php@v2\n        with:\n          php-version: ${{ matrix.php }}\n  modern:\n    steps:\n      - with:\n          php-version: '8.4'\n");
         write(".github/workflows/legacy.yml", "matrix:\n  include:\n    - php: 7.4\n    - php: 7.3\n");
         write(".tool-versions", "nodejs 20.1.0\nphp 8.2.10\n");
-        write("composer.json", "{\n  \"config\": {\n    \"platform\": {\n      \"php\": \"7.4.33\"\n    }\n  }\n}\n");
+        write(
+            "composer.json",
+            "{\n  \"config\": {\n    \"platform-check\": false,\n    \"platform\": {\n      \"php\": \"7.4.33\"\n    }\n  }\n}\n",
+        );
+        write("composer.lock", "{\n  \"content-hash\": \"abc\",\n  \"packages\": []\n}\n");
         write("vendor/pkg/.htaccess", "php_value x 1\n");
         let found = scan(root, PhpVersion::new(8, 4));
         let expected = [
@@ -353,7 +401,9 @@ mod tests {
             (".htaccess", 4, "removed.ini_setting"),
             (".tool-versions", 2, "server.php_version_pin"),
             ("Dockerfile", 1, "server.php_version_pin"),
-            ("composer.json", 4, "server.php_version_pin"),
+            ("composer.json", 3, "server.composer_platform_check"),
+            ("composer.json", 5, "server.php_version_pin"),
+            ("composer.lock", 1, "server.composer1_lock"),
             ("docker-compose.yml", 5, "server.php_version_pin"),
             ("public/.user.ini", 2, "deprecated.ini_setting"),
             ("public/.user.ini", 4, "removed.ini_setting"),

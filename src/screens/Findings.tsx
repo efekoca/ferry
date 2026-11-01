@@ -1,5 +1,5 @@
 import { useDeferredValue, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Activity, ArrowRight, CircleCheck, ClipboardList, EyeOff, FileCode2, FolderSearch, Info, Lightbulb, Search, Sparkles, SquareArrowOutUpRight, Undo2, X } from "lucide-react";
+import { Activity, ArrowRight, CircleCheck, FileCheck2, FlaskConical, ClipboardList, EyeOff, FileCode2, FolderSearch, Info, Lightbulb, Search, Sparkles, SquareArrowOutUpRight, Undo2, X } from "lucide-react";
 import { ConfirmDialog } from "../components/Modal";
 import { PageHeader } from "../components/Shell";
 import { useToast } from "../components/Toast";
@@ -8,7 +8,7 @@ import { useI18n } from "../i18n";
 import { errorMessage } from "../lib/api";
 import { commonTitle, joinPath } from "../lib/labels";
 import { NO_FILTER, useStore, type FindingsFilter } from "../lib/store";
-import type { Finding, FixKind, Severity } from "../lib/types";
+import type { Finding, FixKind, LocalPhp, Severity } from "../lib/types";
 
 const PAGE = 300;
 
@@ -33,7 +33,20 @@ export function filterFindings(findings: Finding[], { fix, severity, rule, query
 
 export function Findings() {
   const { t, loc } = useI18n();
-  const { scan, setView, project, api, runScan, scanning, findingsFilter: filter, setFindingsFilter, ignoreFinding, unignoreFinding, pruneIgnores, importRuntimeLog, clearRuntimeLog } = useStore();
+  const { scan, setView, project, api, runScan, scanning, findingsFilter: filter, setFindingsFilter, ignoreFinding, unignoreFinding, pruneIgnores, importRuntimeLog, clearRuntimeLog, runLocalCheck, target } = useStore();
+  const [localPhp, setLocalPhp] = useState<LocalPhp[]>([]);
+  const [checking, setChecking] = useState<"lint" | "tests" | null>(null);
+  const [confirmTests, setConfirmTests] = useState(false);
+  useEffect(() => {
+    api?.localPhpVersions().then(setLocalPhp).catch(() => {});
+  }, [api]);
+  const local = localPhp.find((p) => p.line === target);
+  const check = async (kind: "lint" | "tests") => {
+    setChecking(kind);
+    await runLocalCheck(kind);
+    setChecking(null);
+    setConfirmTests(false);
+  };
   const [onlyRuntime, setOnlyRuntime] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showIgnored, setShowIgnored] = useState(false);
@@ -219,9 +232,21 @@ export function Findings() {
                   </Button>
                 )}
                 {ignoredToggle}
+              </div>
+              <div className="toolbar__actions">
                 <Button variant="ghost" size="sm" icon={<Activity size={13} />} onClick={() => void importRuntimeLog()}>
                   {t.findings.importLog}
                 </Button>
+                {local && (
+                  <>
+                    <Button variant="ghost" size="sm" icon={<FileCheck2 size={13} />} loading={checking === "lint"} disabled={!!checking} onClick={() => void check("lint")}>
+                      {t.findings.lintWith(local.version)}
+                    </Button>
+                    <Button variant="ghost" size="sm" icon={<FlaskConical size={13} />} disabled={!!checking} onClick={() => setConfirmTests(true)}>
+                      {t.findings.testWith(local.version)}
+                    </Button>
+                  </>
+                )}
               </div>
             </div>
 
@@ -375,6 +400,17 @@ export function Findings() {
           </aside>
         </div>
       )}
+      <ConfirmDialog
+        open={confirmTests}
+        icon={<FlaskConical size={20} />}
+        title={t.findings.testTitle}
+        confirmLabel={t.findings.testRun}
+        loading={checking === "tests"}
+        onConfirm={() => void check("tests")}
+        onCancel={() => setConfirmTests(false)}
+      >
+        {t.findings.testText(local?.version ?? target)}
+      </ConfirmDialog>
       <ConfirmDialog
         open={!!ignoring}
         icon={<EyeOff size={20} />}
