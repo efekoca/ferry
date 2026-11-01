@@ -462,7 +462,7 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
       const gen = generation.current;
       try {
         const result = await change(project.root);
-        if (gen === generation.current) setScan(result);
+        if (gen === generation.current) setScan((prev) => ({ ...result, progress: result.progress ?? prev?.progress ?? null }));
         return true;
       } catch (e) {
         fail(t.toast.ignoreFailed, e);

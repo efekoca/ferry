@@ -23,7 +23,7 @@ import { useI18n } from "../i18n";
 import { commonTitle, dependencyBlockers, FRAMEWORK_LABEL, formatDuration, formatNumber, scoreHeadline, scoreTone } from "../lib/labels";
 import { useStore } from "../lib/store";
 import { BLOCKED_TARGETS, PATCHED, PHP2SHELL_CVES, isBlockedTarget } from "../lib/security";
-import { TARGETS, type Finding, type FixKind, type Target } from "../lib/types";
+import { TARGETS, type Finding, type FixKind, type HistoryEntry, type ScanHistory, type Target } from "../lib/types";
 
 function topRules(findings: Finding[], loc: (f: Finding) => string) {
   const map = new Map<string, { titles: string[]; fix: Finding["fix"]; since: string; count: number }>();
@@ -184,6 +184,8 @@ export function Overview() {
                   </Callout>
                 );
               })}
+
+              {scan.progress && <ProgressCard progress={scan.progress} />}
 
               <div className="grid-4">
                 <Metric label={t.severity.breaking} value={s.breaking} hint={t.overview.metrics.breakingHint} tone="danger" onClick={() => showFindings({ severity: "breaking" })} />
@@ -350,6 +352,67 @@ function FixTile({ kind, n, total, onClick }: { kind: FixKind; n: number; total:
         {new Intl.NumberFormat(t.locale, { style: "percent" }).format(share)}
       </span>
     </button>
+  );
+}
+
+function ProgressCard({ progress }: { progress: ScanHistory }) {
+  const { t } = useI18n();
+  const { history, newSinceLast, fixedSinceLast } = progress;
+  const date = (at: number) => new Date(at * 1000).toLocaleString(t.locale, { dateStyle: "medium", timeStyle: "short" });
+  const changed = (newSinceLast ?? 0) > 0 || (fixedSinceLast ?? 0) > 0;
+  return (
+    <Card bodyClassName="progress-card">
+      <div className="progress-card__text">
+        <div className="metric__label">{t.progress.since}</div>
+        {newSinceLast === null || fixedSinceLast === null ? (
+          <p className="muted">{t.progress.first}</p>
+        ) : changed ? (
+          <div className="progress-card__delta">
+            <span className="progress-card__good">{t.progress.resolved(fixedSinceLast)}</span>
+            <span className="progress-card__sep" aria-hidden>
+              ·
+            </span>
+            <span>{t.progress.added(newSinceLast)}</span>
+          </div>
+        ) : (
+          <div className="progress-card__delta">{t.progress.unchanged}</div>
+        )}
+      </div>
+      {history.length > 1 && <Sparkline points={history} label={t.progress.trend(history.map((h) => h.score).join(", "))} describe={(h) => t.progress.point(date(h.at), h.score, h.total)} />}
+    </Card>
+  );
+}
+
+function Sparkline({ points, label, describe }: { points: HistoryEntry[]; label: string; describe: (h: HistoryEntry) => string }) {
+  const [hover, setHover] = useState<number | null>(null);
+  const width = 200;
+  const height = 48;
+  const pad = 6;
+  const x = (i: number) => pad + (i * (width - pad * 2)) / Math.max(1, points.length - 1);
+  const y = (score: number) => pad + ((100 - score) * (height - pad * 2)) / 100;
+  const path = points.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p.score).toFixed(1)}`).join(" ");
+  const last = points.length - 1;
+  const shown = hover ?? last;
+  return (
+    <div className="sparkline" onMouseLeave={() => setHover(null)}>
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        width={width}
+        height={height}
+        role="img"
+        aria-label={label}
+        onMouseMove={(e) => {
+          const box = e.currentTarget.getBoundingClientRect();
+          const rel = ((e.clientX - box.left) / box.width) * width;
+          setHover(Math.max(0, Math.min(last, Math.round(((rel - pad) / (width - pad * 2)) * last))));
+        }}
+      >
+        <path d={path} className="sparkline__line" />
+        {hover !== null && <line x1={x(hover)} x2={x(hover)} y1={0} y2={height} className="sparkline__cross" />}
+        <circle cx={x(shown)} cy={y(points[shown].score)} r={4} className="sparkline__dot" />
+      </svg>
+      <div className="sparkline__caption">{describe(points[shown])}</div>
+    </div>
   );
 }
 

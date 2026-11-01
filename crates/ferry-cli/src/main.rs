@@ -1,4 +1,5 @@
 use ferry_core::analyzer::{self, Finding};
+use ferry_core::history;
 use ferry_core::i18n::{Lang, Localized};
 use ferry_core::ignore::{self, IgnoredFinding};
 use ferry_core::rules::{FixKind, Severity};
@@ -12,8 +13,11 @@ const USAGE: &str = "Usage: ferry-cli scan <project> --target <8.2|8.3|8.4|8.5> 
 Options:
   --format <text|json|sarif|github>  Output format (default: text)
   --output <file>                    Write the report to a file instead of stdout
-  --fail-on <breaking|deprecated|any|none>
-                                     Exit with code 1 when findings at this level remain (default: breaking)
+  --fail-on <breaking|deprecated|any|new|none>
+                                     Exit with code 1 when findings at this level remain (default: breaking);
+                                     with --baseline only findings missing from the baseline count
+  --baseline <file>                  Compare with a baseline written by --write-baseline
+  --write-baseline <file>            Save the current findings as a baseline
   --lang <en|tr>                     Language of messages (default: en)
   -h, --help                         Show this help";
 
@@ -30,6 +34,7 @@ enum FailOn {
     Breaking,
     Deprecated,
     Any,
+    New,
     None,
 }
 
@@ -41,6 +46,8 @@ struct Options {
     output: Option<PathBuf>,
     fail_on: FailOn,
     lang: Lang,
+    baseline: Option<PathBuf>,
+    write_baseline: Option<PathBuf>,
 }
 
 fn parse(args: &[String]) -> Result<Options, String> {
@@ -52,6 +59,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
     }
     let (mut root, mut target, mut format, mut output, mut fail_on, mut lang) =
         (None, None, Format::Text, None, FailOn::Breaking, Lang::En);
+    let (mut baseline, mut write_baseline) = (None, None);
     while let Some(arg) = it.next() {
         let mut value = |name: &str| it.next().cloned().ok_or_else(|| format!("{name} needs a value"));
         match arg.as_str() {
@@ -72,10 +80,13 @@ fn parse(args: &[String]) -> Result<Options, String> {
                     "breaking" => FailOn::Breaking,
                     "deprecated" => FailOn::Deprecated,
                     "any" => FailOn::Any,
+                    "new" => FailOn::New,
                     "none" => FailOn::None,
                     other => return Err(format!("unknown --fail-on level: {other}")),
                 }
             }
+            "--baseline" => baseline = Some(PathBuf::from(value("--baseline")?)),
+            "--write-baseline" => write_baseline = Some(PathBuf::from(value("--write-baseline")?)),
             "--lang" => {
                 lang = match value("--lang")?.as_str() {
                     "en" => Lang::En,
@@ -97,7 +108,10 @@ fn parse(args: &[String]) -> Result<Options, String> {
         let list: Vec<String> = PhpVersion::TARGETS.iter().filter(|v| **v != PhpVersion::new(8, 1)).map(ToString::to_string).collect();
         return Err(format!("unsupported target {target}; use one of {}", list.join(", ")));
     }
-    Ok(Options { root, target, format, output, fail_on, lang })
+    if fail_on == FailOn::New && baseline.is_none() {
+        return Err("--fail-on new needs --baseline".into());
+    }
+    Ok(Options { root, target, format, output, fail_on, lang, baseline, write_baseline })
 }
 
 fn text(l: &Localized, lang: Lang) -> &str {
@@ -119,7 +133,7 @@ fn fails(f: &Finding, fail_on: FailOn) -> bool {
     match fail_on {
         FailOn::Breaking => f.severity == Severity::Breaking,
         FailOn::Deprecated => f.severity != Severity::Behavior,
-        FailOn::Any => true,
+        FailOn::Any | FailOn::New => true,
         FailOn::None => false,
     }
 }
@@ -300,17 +314,41 @@ fn run(o: &Options) -> Result<bool, String> {
         eprintln!("ferry-cli: .ferry/ignore.json entry for {} in {} no longer matches any code", stale.rule_id, stale.file);
     }
     let summary = report::summarize(&findings);
-    let rendered = match o.format {
+    let baseline: Option<Vec<String>> = match &o.baseline {
+        Some(path) => {
+            let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+            let value: Value = serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+            let list = value["fingerprints"].as_array().ok_or_else(|| format!("{}: not a ferry-cli baseline", path.display()))?;
+            Some(list.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        }
+        None => None,
+    };
+    let fresh: Vec<Finding> = match &baseline {
+        Some(b) => history::new_findings(b, &findings).into_iter().cloned().collect(),
+        None => findings.clone(),
+    };
+    if let Some(path) = &o.write_baseline {
+        let value =
+            json!({ "target": o.target.to_string(), "fingerprints": findings.iter().map(history::fingerprint).collect::<Vec<_>>() });
+        std::fs::write(path, serde_json::to_string_pretty(&value).unwrap() + "\n").map_err(|e| format!("{}: {e}", path.display()))?;
+    }
+    let mut rendered = match o.format {
         Format::Text => render_text(&findings, &ignored, &summary, o),
         Format::Json => render_json(&findings, &ignored, &summary, scan.files_scanned, o),
         Format::Sarif => render_sarif(&findings, o),
-        Format::Github => render_github(&findings, o) + &render_text(&[], &ignored, &summary, o),
+        Format::Github => render_github(&fresh, o) + &render_text(&[], &ignored, &summary, o),
     };
+    if baseline.is_some() && matches!(o.format, Format::Text | Format::Github) {
+        rendered.push_str(&match o.lang {
+            Lang::Tr => format!("Baseline'a göre {} yeni bulgu\n", fresh.len()),
+            Lang::En => format!("{} new since the baseline\n", fresh.len()),
+        });
+    }
     match &o.output {
         Some(path) => std::fs::write(path, rendered).map_err(|e| format!("{}: {e}", path.display()))?,
         None => print!("{rendered}"),
     }
-    Ok(findings.iter().any(|f| fails(f, o.fail_on)))
+    Ok(fresh.iter().any(|f| fails(f, o.fail_on)))
 }
 
 fn main() -> ExitCode {
@@ -353,6 +391,7 @@ mod tests {
         assert!(parse(&args("scan ./site --target 7.4")).unwrap_err().contains("unsupported target 7.4"));
         assert_eq!(parse(&args("scan ./site --target 8.4 --format xml")).unwrap_err(), "unknown format: xml");
         assert_eq!(parse(&args("--help")).unwrap_err(), "");
+        assert_eq!(parse(&args("scan . --target 8.4 --fail-on new")).unwrap_err(), "--fail-on new needs --baseline");
     }
 
     #[test]
@@ -367,6 +406,8 @@ mod tests {
             output: Some(out.clone()),
             fail_on,
             lang: Lang::En,
+            baseline: None,
+            write_baseline: None,
         };
         assert!(run(&options(FailOn::Breaking)).unwrap());
         let report: Value = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
@@ -381,6 +422,27 @@ mod tests {
         let report: Value = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
         assert_eq!(report["ignored"][0]["reason"], "dead code");
         assert_eq!(report["summary"]["breaking"], 0);
+    }
+
+    #[test]
+    fn baselines_only_fail_on_new_findings() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.php"), "<?php\neach($a);\n").unwrap();
+        let base = dir.path().join("base.json");
+        let options = |baseline: Option<PathBuf>, write: Option<PathBuf>| Options {
+            root: dir.path().to_path_buf(),
+            target: PhpVersion::new(8, 2),
+            format: Format::Json,
+            output: Some(dir.path().join("out.json")),
+            fail_on: if baseline.is_some() { FailOn::New } else { FailOn::None },
+            lang: Lang::En,
+            baseline,
+            write_baseline: write,
+        };
+        assert!(!run(&options(None, Some(base.clone()))).unwrap());
+        assert!(!run(&options(Some(base.clone()), None)).unwrap());
+        std::fs::write(dir.path().join("a.php"), "<?php\neach($a);\nsplit($b);\n").unwrap();
+        assert!(run(&options(Some(base), None)).unwrap());
     }
 
     #[test]
