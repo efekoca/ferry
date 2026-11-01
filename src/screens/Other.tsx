@@ -17,6 +17,7 @@ import {
   RefreshCw,
   RotateCcw,
   Search,
+  Server,
   Sun,
   Trash2,
   ShieldAlert,
@@ -31,7 +32,8 @@ import { LANGS, useI18n, type Lang } from "../i18n";
 import { errorMessage } from "../lib/api";
 import { formatBytes, formatRelative } from "../lib/labels";
 import { useStore, type Theme } from "../lib/store";
-import type { BackupUsage, DependencyReport, DependencyStatus, FileChange, Settings, Snapshot, VersionSuggestion, WpLatest } from "../lib/types";
+import { compareProbe, parseProbe } from "../lib/probe";
+import type { BackupUsage, DependencyReport, DependencyStatus, ExtensionUse, FileChange, Settings, Snapshot, VersionSuggestion, WpLatest } from "../lib/types";
 
 const DEP_TONE: Record<DependencyStatus, "danger" | "auto" | "neutral"> = {
   incompatible: "danger",
@@ -281,6 +283,8 @@ export function Dependencies() {
             </Card>
           )}
 
+          <ServerProbe target={deps.target} extensions={deps.extensions} />
+
           {deps.extensions.length > 0 && (
             <Card title={t.deps.extensions} bodyClassName="">
               <p className="card__intro muted">{t.deps.extensionsText}</p>
@@ -319,6 +323,115 @@ export function Dependencies() {
         </div>
       </div>
     </>
+  );
+}
+
+function ServerProbe({ target, extensions }: { target: string; extensions: ExtensionUse[] }) {
+  const { t } = useI18n();
+  const { api, project } = useStore();
+  const toast = useToast();
+  const key = project ? `ferry.probe:${project.root}` : null;
+  const [token, setToken] = useState<string | null>(null);
+  const [text, setText] = useState(() => {
+    try {
+      return (key && localStorage.getItem(key)) || "";
+    } catch {
+      return "";
+    }
+  });
+  const probe = text.trim() ? parseProbe(text) : null;
+  const report = probe && compareProbe(probe, target, extensions);
+  const remember = (value: string) => {
+    setText(value);
+    try {
+      if (key) localStorage.setItem(key, value);
+    } catch {
+      /* storage can be unavailable */
+    }
+  };
+  const create = async () => {
+    if (!api) return;
+    try {
+      const dest = await api.pickProbeFile("ferry-probe.php");
+      if (!dest) return;
+      setToken(await api.writeProbe(dest));
+    } catch (e) {
+      toast.push({ tone: "error", title: t.deps.probeFailed, description: errorMessage(e, t.common.genericError) });
+    }
+  };
+  return (
+    <Card title={t.deps.probeTitle} bodyClassName="card__body stack">
+      <p className="muted">{t.deps.probeText}</p>
+      <div>
+        <Button size="sm" variant="secondary" icon={<Server size={13} />} onClick={create}>
+          {t.deps.probeCreate}
+        </Button>
+      </div>
+      {token && (
+        <div className="stack stack--tight">
+          <span className="subtle">{t.deps.probeOpen}</span>
+          <CommandLine command={`https://example.com/ferry-probe.php?token=${token}`} />
+        </div>
+      )}
+      <label className="field">
+        <span className="field__label">{t.deps.probePaste}</span>
+        <textarea className="input mono" rows={3} value={text} placeholder={t.deps.probePlaceholder} onChange={(e) => remember(e.target.value)} />
+      </label>
+      {text.trim() && !probe && <Callout tone="warn" icon={<CircleAlert size={15} />}>{t.deps.probeInvalid}</Callout>}
+      {report && (
+        <>
+          <table className="table" aria-label={t.deps.probeTitle}>
+            <tbody>
+              <tr>
+                <th scope="row">{t.deps.probePhp}</th>
+                <td>
+                  <span className="mono">{report.php}</span>{" "}
+                  {report.belowTarget && <Badge tone="danger">{t.deps.probeBelow(target)}</Badge>}{" "}
+                  {report.vulnerable && <Badge tone="danger">{t.deps.probeVulnerable}</Badge>}
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">{t.deps.probeSapi}</th>
+                <td>
+                  <span className="mono">{report.sapi}</span>
+                  {report.server && <span className="subtle"> · {report.server}</span>}
+                  {report.fpm && <div className="dep-note">{t.deps.probeFpm}</div>}
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">{t.deps.probeMissing}</th>
+                <td>
+                  {report.missing.length ? (
+                    <span className="row row--wrap">
+                      {report.missing.map((m) => (
+                        <Badge key={m} tone="danger">
+                          {m}
+                        </Badge>
+                      ))}
+                    </span>
+                  ) : (
+                    <span className="subtle">{t.deps.probeNone}</span>
+                  )}
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">{t.deps.probeDisabled}</th>
+                <td className="mono">{report.disabled.length ? report.disabled.join(", ") : <span className="subtle">{t.deps.probeNone}</span>}</td>
+              </tr>
+              <tr>
+                <th scope="row">{t.deps.probeMemory}</th>
+                <td className="mono">{report.memoryLimit ?? "—"}</td>
+              </tr>
+            </tbody>
+          </table>
+          <div>
+            <Button size="sm" variant="ghost" onClick={() => remember("")}>
+              {t.deps.probeClear}
+            </Button>
+          </div>
+        </>
+      )}
+    </Card>
   );
 }
 

@@ -120,6 +120,8 @@ Her paket **Uyumlu**, **Uyumsuz** ya da **Belirsiz** (paket bir PHP gereksinimi 
 
 WordPress projelerinde **WordPress eklentileri ve temaları** her eklentiyi ve temayı kurulu sürümü, `Requires PHP` başlığı ve kendi kodunda bulunan kritik sorunlarla listeler. **En son sürümleri bul** her biri için api.wordpress.org'dan güncel sürümü sorar ve orada kaldırılmış eklentileri işaretler.
 
+**Sunucu**, geçeceğiniz makineyi kontrol eder. **Yoklama dosyası oluştur** yalnızca rastgele anahtarıyla yanıt veren tek dosyalık bir `ferry-probe.php` kaydeder. Bu dosyayı sunucunun web klasörüne yükleyip `https://siteniz/ferry-probe.php?token=…` adresini açın ve yazdırdığı JSON'u yapıştırın. Ferry bunu hedefle karşılaştırır: sunucudaki PHP sürümü (ve güvenlik açığı olan bir sürüm olup olmadığı), çalışma biçimi (`.htaccess` içindeki `php_value` satırlarının bozulduğu PHP-FPM), kodun kullanıp sunucuda olmayan eklentiler, `disable_functions` ve `memory_limit`. İşiniz bitince dosyayı sunucudan silin.
+
 **PHP eklentileri**, kodun kullandığı her eklentiyi (`mysqli`, `gd`, `intl` gibi) kaç kez ve ilk nerede kullanıldığıyla listeler. `composer.json`'da `ext-*` olarak belirtilip belirtilmediğini ve bu bilgisayardaki PHP'de olup olmadığını gösterir. PHP'den çıkarılan eklentiler (8.4'te `imap` gibi) işaretlenir. `composer.json`'da belirtilmeyenler için yapıştırmaya hazır `ext-*` satırları önerilir; böylece Composer yeni sunucuda da bunları kontrol eder.
 
 ### Her şeyi Geçmiş'ten geri alın

@@ -18,6 +18,7 @@ pub mod index;
 pub mod lexer;
 pub mod localcheck;
 pub mod packagist;
+pub mod probe;
 pub mod project;
 pub mod rector;
 pub mod report;

@@ -143,6 +143,15 @@ fn messages_follow_the_ui_language() {
 }
 
 #[test]
+fn writes_a_probe_with_its_token() {
+    let h = harness();
+    let dest = Path::new(&h.root).join("ferry-probe.php");
+    let token = h.ok("write_probe", json!({ "destination": dest }));
+    let text = std::fs::read_to_string(&dest).unwrap();
+    assert!(text.contains(&format!("'{}'", token.as_str().unwrap())));
+}
+
+#[test]
 fn reports_uncommitted_files_in_git_projects() {
     let h = harness();
     let none = h.ok("git_status", json!({ "path": h.root, "files": ["src/db.php"] }));
