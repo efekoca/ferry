@@ -287,6 +287,7 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
       const known: Record<string, [string, boolean]> = { "phpmailer/phpmailer": ["v6.9.1", true], "illuminate/database": ["v10.0.0", true], "phpunit/phpunit": ["9.6.0", true] };
       return packages.filter((p) => known[p.name]).map((p) => ({ name: p.name, version: known[p.name][0], majorChange: known[p.name][1] }));
     },
+    gitStatus: async (_path, files) => ({ repo: true, dirty: files.filter((f) => f === "includes/class-cart.php") }),
     compareTargets: async () => {
       await sleep(delay);
       return (["8.2", "8.3", "8.4", "8.5"] as const).map((target) => {

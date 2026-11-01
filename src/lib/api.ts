@@ -31,6 +31,7 @@ export interface Api {
   scanProject(path: string, target: string, run: number): Promise<ScanResult>;
   onScanProgress(handler: (p: ScanProgress) => void): Promise<() => void>;
   checkDependencies(path: string, target: string): Promise<DependencyReport>;
+  gitStatus(path: string, files: string[]): Promise<{ repo: boolean; dirty: string[] }>;
   compareTargets(path: string): Promise<TargetSummary[]>;
   findCompatibleVersions(target: string, packages: { name: string; version: string }[]): Promise<VersionSuggestion[]>;
   toolchainStatus(): Promise<ToolchainStatus>;
@@ -83,6 +84,7 @@ async function tauriApi(): Promise<Api> {
     scanProject: (path, target, run) => invoke("scan_project", { path, target, run }),
     onScanProgress: (handler) => listen<ScanProgress>("scan://progress", (e) => handler(e.payload)),
     checkDependencies: (path, target) => invoke("check_dependencies", { path, target }),
+    gitStatus: (path, files) => invoke("git_status", { path, files }),
     compareTargets: (path) => invoke("compare_targets", { path }),
     findCompatibleVersions: (target, packages) => invoke("find_compatible_versions", { target, packages }),
     toolchainStatus: () => invoke("toolchain_status"),
