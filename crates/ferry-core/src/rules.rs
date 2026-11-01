@@ -239,7 +239,8 @@ pub const NULL_STRING_ARGS: &[(&str, &[usize])] = &[
     ("strtotime", &[0]),
 ];
 
-pub const DEPRECATED_INI: [(&str, u32, u32); 13] = [
+pub const DEPRECATED_INI: [(&str, u32, u32); 18] = [
+    ("allow_url_include", 7, 4),
     ("mbstring.func_overload", 8, 0),
     ("track_errors", 8, 0),
     ("filter.default", 8, 1),
@@ -253,6 +254,24 @@ pub const DEPRECATED_INI: [(&str, u32, u32); 13] = [
     ("session.sid_length", 8, 4),
     ("session.sid_bits_per_character", 8, 4),
     ("session.use_trans_sid", 8, 4),
+    ("session.trans_sid_hosts", 8, 4),
+    ("session.trans_sid_tags", 8, 4),
+    ("session.referer_check", 8, 4),
+    ("report_memleaks", 8, 5),
+];
+
+pub const REMOVED_INI: [(&str, u32, u32); 11] = [
+    ("allow_call_time_pass_reference", 7, 0),
+    ("asp_tags", 7, 0),
+    ("define_syslog_variables", 7, 0),
+    ("magic_quotes_gpc", 7, 0),
+    ("magic_quotes_runtime", 7, 0),
+    ("magic_quotes_sybase", 7, 0),
+    ("register_globals", 7, 0),
+    ("register_long_arrays", 7, 0),
+    ("safe_mode", 7, 0),
+    ("zend.ze1_compatibility_mode", 7, 0),
+    ("track_errors", 8, 0),
 ];
 
 use FixKind::{Auto as A, Likely as L, Manual as M};
