@@ -719,10 +719,16 @@ impl<'a> Ctx<'a> {
             if self.index.declares_function(crate::index::namespace_at(&self.namespaces, i), &lower, rooted) {
                 return;
             }
+            let args = call_args(tokens, i + 1);
             if self.index.framework == Some(crate::project::Framework::Laravel) && crate::rules::LARAVEL_HELPERS.contains(&lower.as_str()) {
+                if matches!(lower.as_str(), "array_first" | "array_last") && self.applies(PhpVersion::new(8, 5)) {
+                    if args.len() > 1 {
+                        self.pattern(&patterns::LARAVEL_NATIVE_ARRAY_FIRST, tok, None);
+                    }
+                    return;
+                }
                 return self.symbol(&crate::rules::LARAVEL_HELPER, tok, true);
             }
-            let args = call_args(tokens, i + 1);
             let single = |n: usize| args.get(n).filter(|a| a.len() == 1).map(|a| &a[0]);
             let named = args.iter().any(|a| a.len() > 1 && a[1].is_punct(":") && a[0].kind == TokenKind::Ident);
             let spread = args.iter().any(|a| a.first().is_some_and(|t| t.is_punct("...")));
@@ -3651,5 +3657,40 @@ mod fatal_tests {
         let src = "<?php\nfunction random_int($a, $b) {}";
         assert!(analyze_source_in("lib/random_int.php", src, "8.4".parse().unwrap(), &index).is_empty());
         assert_eq!(analyze_source_in("lib/helpers.php", src, "8.4".parse().unwrap(), &index).len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod suspect_rule_tests {
+    use super::*;
+
+    fn laravel(src: &str, target: &str) -> Vec<String> {
+        let mut index = crate::index::ProjectIndex::default();
+        index.framework = Some(crate::project::Framework::Laravel);
+        analyze_source_in("t.php", src, target.parse().unwrap(), &index).into_iter().map(|f| f.rule_id).collect()
+    }
+
+    #[test]
+    fn laravel_array_first_depends_on_native_function() {
+        let one = "<?php\narray_first($items);";
+        let callback = "<?php\narray_first($items, fn ($i) => $i > 1);";
+        assert_eq!(laravel(one, "8.4"), ["framework.laravel_helper"]);
+        assert!(laravel(one, "8.5").is_empty());
+        assert_eq!(laravel(callback, "8.5"), ["framework.laravel_native_array_first"]);
+        assert_eq!(laravel("<?php\narray_pluck($a, 'x');", "8.5"), ["framework.laravel_helper"]);
+    }
+
+    #[test]
+    fn pdo_pgsql_transaction_constants_are_not_moved_to_pgsql_class() {
+        let found =
+            analyze_source("t.php", "<?php\necho PDO::PGSQL_TRANSACTION_IDLE, PDO::PGSQL_ATTR_DISABLE_PREPARES;", "8.5".parse().unwrap());
+        let ids: Vec<_> = found.iter().map(|f| (f.rule_id.as_str(), f.fix)).collect();
+        assert_eq!(
+            ids,
+            [
+                ("deprecated.pgsql_transaction_constant", crate::rules::FixKind::Manual),
+                ("deprecated.pdo_driver_constant", crate::rules::FixKind::Auto)
+            ]
+        );
     }
 }
