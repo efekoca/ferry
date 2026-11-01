@@ -429,6 +429,19 @@ async fn find_compatible_versions(target: String, packages: Vec<LockedPackage>) 
 }
 
 #[tauri::command]
+async fn write_probe(destination: String) -> CmdResult<String> {
+    blocking(move || {
+        let token = ferry_core::probe::token();
+        std::fs::write(&destination, ferry_core::probe::script(&token)).map_err(|e| {
+            let e = ferry_core::i18n::io_error(&e);
+            t!("Yoklama dosyası kaydedilemedi: {e}", "Couldn't save the probe file: {e}")
+        })?;
+        Ok(token)
+    })
+    .await
+}
+
+#[tauri::command]
 async fn toolchain_status(state: State<'_, AppState>) -> CmdResult<ToolchainStatus> {
     let tools = state.tools_dir();
     let php = state.php_override();
@@ -767,6 +780,7 @@ pub fn with_commands<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R
         inspect_project,
         scan_project,
         check_dependencies,
+        write_probe,
         find_compatible_versions,
         toolchain_status,
         install_rector,

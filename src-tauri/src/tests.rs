@@ -143,6 +143,15 @@ fn messages_follow_the_ui_language() {
 }
 
 #[test]
+fn writes_a_probe_with_its_token() {
+    let h = harness();
+    let dest = Path::new(&h.root).join("ferry-probe.php");
+    let token = h.ok("write_probe", json!({ "destination": dest }));
+    let text = std::fs::read_to_string(&dest).unwrap();
+    assert!(text.contains(&format!("'{}'", token.as_str().unwrap())));
+}
+
+#[test]
 fn settings_round_trip() {
     let h = harness();
     assert_eq!(h.ok("get_settings", json!({})), json!({ "phpPath": null, "snapshotLimit": null, "editor": null }));

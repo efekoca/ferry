@@ -7,7 +7,8 @@ import { commonTitle, dependencyBlockers, formatBytes, formatDuration, formatRel
 import { NO_FILTER, type FindingsFilter } from "../lib/store";
 import { filterFindings } from "../screens/Findings";
 import { isVulnerable, patchedFor } from "../lib/security";
-import type { FileDiff, Finding } from "../lib/types";
+import type { ExtensionUse, FileDiff, Finding } from "../lib/types";
+import { compareProbe, parseProbe } from "../lib/probe";
 
 const { tr, en } = DICTS;
 
@@ -152,5 +153,18 @@ describe("formatBytes", () => {
     expect(formatBytes(1536, "en-US")).toBe("1.5 kB");
     expect(formatBytes(5 * 1024 * 1024, "en-US")).toBe("5 MB");
     expect(formatBytes(3 * 1024 ** 3, "tr-TR")).toBe("3 GB");
+  });
+});
+
+describe("server probe", () => {
+  const output = `{"ferryProbe":1,"php":"8.2.10","sapi":"fpm-fcgi","os":"Linux","server":"nginx","extensions":["Core","curl","mysqli"],"ini":{"memory_limit":"256M","disable_functions":"exec, shell_exec"}}`;
+  const ext = (name: string): ExtensionUse => ({ name, uses: 1, file: "a.php", line: 1, symbol: `${name}()`, declared: false, removed: false, available: null });
+
+  it("parses the probe output and compares it with the target", () => {
+    expect(parseProbe("garbage")).toBeNull();
+    const probe = parseProbe(`HTTP/1.1 200 OK\n\n${output}`)!;
+    const report = compareProbe(probe, "8.4", [ext("curl"), ext("intl"), ext("gd")]);
+    expect(report).toMatchObject({ php: "8.2.10", belowTarget: true, vulnerable: true, fpm: true, missing: ["intl", "gd"], disabled: ["exec", "shell_exec"], memoryLimit: "256M" });
+    expect(compareProbe({ ...probe, php: "8.4.27" }, "8.4", []).belowTarget).toBe(false);
   });
 });
