@@ -450,14 +450,24 @@ fn version_compare_call(cond: &[Token]) -> Option<(u32, Option<&str>)> {
 
 fn function_exists(cond: &[Token], target: PhpVersion) -> Option<bool> {
     let head = cond.first()?;
-    if !name(head).eq_ignore_ascii_case("function_exists") || !cond.get(1)?.is_punct("(") {
+    let check = name(head).to_ascii_lowercase();
+    if !matches!(check.as_str(), "function_exists" | "class_exists" | "interface_exists") || !cond.get(1)?.is_punct("(") {
         return None;
     }
     let a = args(cond)?;
-    let func = match a.as_slice() {
-        [[t]] => strip_quotes(t)?.trim_start_matches('\\').to_ascii_lowercase(),
+    let symbol = match a.first().map(|a| &a[..]) {
+        Some([t]) => strip_quotes(t)?.trim_start_matches('\\').to_ascii_lowercase(),
         _ => return None,
     };
+    let added = if check == "function_exists" { crate::rules::added_function(&symbol) } else { crate::rules::added_class(&symbol) };
+    let optional_extension = ["mb_", "bc", "curl_", "openssl_", "mysqli_", "libxml_"].iter().any(|p| symbol.starts_with(p));
+    if added.is_some_and(|v| v <= target) && !optional_extension {
+        return Some(true);
+    }
+    if check != "function_exists" || a.len() != 1 {
+        return None;
+    }
+    let func = symbol;
     let rule = FUNCTIONS.iter().find(|r| r.matches(&func))?;
     let gone = rule.change == Change::Removed && rule.since() <= target && !PECL.contains(&rule.id);
     gone.then_some(false)
@@ -504,5 +514,18 @@ mod tests {
     fn removed_functions_guarded_by_function_exists() {
         let src = "<?php\nif (function_exists('mysql_connect')) { mysql_connect(); }\nif (!function_exists('each')) { function each($a) {} }\nif (function_exists('mcrypt_encrypt')) { mcrypt_encrypt(); }\nif (function_exists('utf8_encode')) { utf8_encode($s); }";
         assert_eq!(ids(src, (8, 4)), ["removed.mcrypt", "deprecated.utf8_encode"]);
+    }
+}
+
+#[cfg(test)]
+mod added_tests {
+    use crate::analyzer::analyze_source;
+    use crate::version::PhpVersion;
+
+    #[test]
+    fn checks_for_functions_php_now_has() {
+        let src = "<?php\nfunction a($n) {\n    if (function_exists('random_bytes')) {\n        return random_bytes($n);\n    }\n    return mcrypt_create_iv($n);\n}\nfunction b($s) {\n    if (function_exists('mb_str_pad')) {\n        return mb_str_pad($s, 3);\n    }\n    return each($s);\n}";
+        let lines: Vec<usize> = analyze_source("a.php", src, PhpVersion::new(8, 4)).iter().map(|f| f.line).collect();
+        assert_eq!(lines, [12]);
     }
 }
