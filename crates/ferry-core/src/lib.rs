@@ -5,6 +5,7 @@ pub mod deps;
 pub mod diff;
 pub mod framework;
 mod guards;
+pub mod history;
 pub mod i18n;
 pub mod ignore;
 pub mod index;

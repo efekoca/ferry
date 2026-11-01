@@ -42,6 +42,8 @@ Every number is a shortcut: click **Breaking**, **Manual** or one of the most co
 
 Framework code you don't maintain is skipped automatically: `wp-admin` and `wp-includes` in WordPress, `storage` and `bootstrap/cache` in Laravel, `var` in Symfony, Drupal core, and `vendor` and `node_modules` everywhere. The overview names the skipped folders.
 
+After the second scan, **Since the last scan** shows how many findings were resolved and how many are new, with the readiness score of every scan for that target as a trend line. Ferry keeps the last 30 scans per target in its own data folder, never in the project.
+
 **Export report** saves the results as a Markdown file you can attach to a ticket or share with your team.
 
 ### Every finding, explained
@@ -135,6 +137,19 @@ target/release/ferry-cli scan . --target 8.4 --format github
 - `--format text|json|sarif|github`: plain text, JSON with the summary and ignored findings, SARIF 2.1.0 for GitHub code scanning and other viewers, or GitHub Actions annotations on the changed lines.
 - `--fail-on breaking|deprecated|any|none`: the lowest severity that makes the command exit with code 1 (default `breaking`). Errors such as a missing folder exit with code 2.
 - `--output <file>` writes the report to a file, and `--lang tr` switches the messages to Turkish.
+- `--write-baseline <file>` saves today's findings, and `--baseline <file>` compares with them: only findings that aren't in the baseline count toward `--fail-on`, and `--fail-on new` fails on any of them. This lets a project with hundreds of old findings stop new ones from coming in.
+
+The repository is also a GitHub Action that builds `ferry-cli` and annotates pull requests:
+
+```yaml
+- uses: efekoca/ferry@main
+  with:
+    target: "8.4"
+    baseline: .ferry/baseline.json
+    fail-on: new
+```
+
+Set `sarif: "true"` to also write `ferry.sarif` for `github/codeql-action/upload-sarif`.
 
 ## Supported projects
 

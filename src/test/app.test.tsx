@@ -195,6 +195,15 @@ describe("Ferry app", () => {
     await waitFor(() => expect(screen.queryByText(/artık hiçbir kodla eşleşmiyor/)).not.toBeInTheDocument());
   });
 
+  it("shows progress since the previous scan", async () => {
+    const user = setup();
+    await openAndScan(user);
+    expect(screen.getByText(/İlk tarama/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Tekrar tara/ }));
+    expect(await screen.findByText("Değişiklik yok")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /Hazırlık puanının taramalar boyunca değişimi/ })).toBeInTheDocument();
+  });
+
   it("saves the editor used to open findings", async () => {
     const user = userEvent.setup();
     const api = mockApi({ delay: 0 });

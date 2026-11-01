@@ -42,6 +42,8 @@ Her sayı bir kısayoldur: **Kritik**'e, **Elle düzelt**'e ya da en sık görü
 
 Bakımını sizin yapmadığınız framework kodu kendiliğinden atlanır: WordPress'te `wp-admin` ve `wp-includes`, Laravel'de `storage` ve `bootstrap/cache`, Symfony'de `var`, Drupal çekirdeği; her projede de `vendor` ve `node_modules`. Atlanan klasörler genel bakışta yazılıdır.
 
+İkinci taramadan sonra **Son taramadan beri** kaç bulgunun çözüldüğünü, kaçının yeni olduğunu ve o hedef için her taramanın hazırlık puanını bir eğri olarak gösterir. Ferry her hedef için son 30 taramayı projede değil, kendi veri klasöründe tutar.
+
 **Rapor al** ile sonuçları bir Markdown dosyasına kaydedebilir, bir iş kaydına ekleyebilir ya da ekibinizle paylaşabilirsiniz.
 
 ### Her bulgu, açıklamasıyla
@@ -135,6 +137,19 @@ target/release/ferry-cli scan . --target 8.4 --format github
 - `--format text|json|sarif|github`: düz metin, özet ve yok sayılan bulgularla birlikte JSON, GitHub code scanning ve benzeri araçlar için SARIF 2.1.0 ya da değişen satırlarda GitHub Actions uyarıları.
 - `--fail-on breaking|deprecated|any|none`: komutun 1 koduyla çıkması için gereken en düşük önem derecesi (varsayılanı `breaking`). Klasörün bulunamaması gibi hatalarda çıkış kodu 2'dir.
 - `--output <dosya>` raporu bir dosyaya yazar, `--lang tr` mesajları Türkçe yapar.
+- `--write-baseline <dosya>` bugünkü bulguları kaydeder, `--baseline <dosya>` ise onlarla karşılaştırır: `--fail-on` için yalnızca baseline'da olmayan bulgular sayılır, `--fail-on new` bunlardan herhangi biri varsa başarısız olur. Böylece yüzlerce eski bulgusu olan bir projede yenilerin eklenmesi engellenebilir.
+
+Depo aynı zamanda `ferry-cli`'ı derleyip pull request'lere uyarı ekleyen bir GitHub Action'dır:
+
+```yaml
+- uses: efekoca/ferry@main
+  with:
+    target: "8.4"
+    baseline: .ferry/baseline.json
+    fail-on: new
+```
+
+`sarif: "true"` verirseniz `github/codeql-action/upload-sarif` için `ferry.sarif` de yazılır.
 
 ## Desteklenen projeler
 
