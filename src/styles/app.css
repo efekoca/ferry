@@ -952,6 +952,31 @@ button.metric {
   transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
 }
 
+textarea.input {
+  height: auto;
+  padding: var(--space-2) var(--space-3);
+  resize: vertical;
+  line-height: 1.45;
+}
+
+select.input {
+  width: auto;
+  min-width: 180px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-top: var(--space-3);
+  text-align: left;
+}
+
+.field__label {
+  font-weight: 600;
+  color: var(--text-1);
+}
+
 .input::placeholder {
   color: var(--text-3);
 }

@@ -57,7 +57,9 @@ Bir bulguyu seçtiğinizde şunları görürsünüz:
 - yerine ne kullanmanız gerektiği
 - otomatik olarak düzeltilip düzeltilemeyeceği
 
-**Dosyayı göster** dosyanın bulunduğu klasörü açar. Listede ok tuşlarıyla gezinebilirsiniz.
+**Dosyayı göster** dosyanın bulunduğu klasörü açar. **Editörde aç** ise dosyayı **Ayarlar**'da seçtiğiniz editörde (Visual Studio Code, Cursor, PhpStorm, Sublime Text, Zed ya da sistem varsayılanı) ilgili satırda açar. Listede ok tuşlarıyla gezinebilirsiniz.
+
+Bir bulgunun sizin için geçerli olmadığına karar verdiyseniz (örneğin yalnızca eski sunucuda çalışan bir kod) **Yok say** onu listeden ve puandan çıkarır. Ferry bir gerekçe ister ve bunu projedeki `.ferry/ignore.json` dosyasına yazar; bu dosyayı depoya eklerseniz karar kodla birlikte taşınır. Eşleştirme kural, dosya ve kod üzerinden yapılır, bu yüzden üstteki satırlar kaysa da bulgu yok sayılmaya devam eder. Bulgular sayfasındaki **Yok sayılanlar** bunları gerekçeleriyle listeler, **Yeniden göster** bir bulguyu geri getirir.
 
 Ferry'nin kendi PHP sözcük çözümleyicisi ve kural seti vardır; kodu PHP'nin okuduğu gibi okur. `$db->each()` gibi metot çağrıları, kendi namespace'inizdeki fonksiyonlar, metinlerin ve yorumların içindekiler kaldırılmış fonksiyon sanılmaz. Kurallar şunları kapsar:
 
@@ -68,6 +70,7 @@ Ferry'nin kendi PHP sözcük çözümleyicisi ve kural seti vardır; kodu PHP'ni
 - yerleşik bir sınıfın ya da arayüzün metodunu PHP 8'in kabul etmediği bir imzayla ezen ve sınıfın hiç yüklenmemesine yol açan metotlar; örneğin Drupal 7'nin bir `PDO` alt sınıfındaki `query($query, array $args = array(), $options = array())` metodu
 - projedeki bir üst sınıfın, trait'in ya da arayüzün metodunu PHP 8'in kabul etmediği bir imzayla ezen metotlar; örneğin phpBB 3.2'nin üst sınıfta isteğe bağlı olan parametreyi zorunlu yapan `create_insert_array($user, $pre_create_data)` metodu. PHP 7 bunu yalnızca uyarıyla geçiyordu
 - `PDO::query()` ya da `Iterator::current()` gibi yerleşik bir sınıfın ya da arayüzün metodunu dönüş tipi olmadan ezen ve PHP 8.1'den itibaren `#[\ReturnTypeWillChange]` isteyen metotlar
+- yeni sürümde çalışmayı bırakan kodlar: PHP'ye sonradan eklenen bir fonksiyonu ya da sınıfı (`str_contains()`, `JsonException`) `function_exists()` kontrolü olmadan tanımlamak, statik olmayan bir metodu `Sinif::metot()` ile çağırmak, eksik argümanla yapılan çağrılar, `preg_replace()` içindeki `/e` belirteci ve artık nesne olan curl, GD ya da pgsql değerleri için `is_resource()`
 - `eval()`, `extract()` ve değişken değişkenler gibi elle kontrol edilmesi gereken kodlar
 
 Ferry, hangi PHP'nin gerçekten çalışacağını belirleyen ve kodun çevresinde duran dosyaları da okur:
@@ -117,6 +120,19 @@ Ferry her uygulamadan önce değiştireceği dosyaları yedekler. **Geçmiş** s
 - Proje klasörünü pencereye **sürükleyip bırakın** ya da başlangıç ekranından son projelerinizi yeniden açın.
 - **Klavye kısayolları:** **⌘O** proje açar, **⌘1**–**⌘5** sayfalar arasında geçiş yapar, **⌘,** **Ayarlar**'ı açar, **⌘+** / **⌘−** arayüzü yakınlaştırır ya da uzaklaştırır. Windows ve Linux'ta **⌘** yerine **Ctrl** kullanın.
 - **Erişilebilir:** Her şey klavyeyle yapılabilir, odak her zaman görünür ve arayüz WCAG 2.1 AA kontrast ölçütlerini karşılar. Yüksek yakınlaştırmada paneller alt alta dizilir, kenar çubuğu simgelere iner.
+
+### CI için komut satırı
+
+`ferry-cli` aynı taramayı pencere açmadan yapar. Böylece hedef sürümde çalışmayacak kod ekleyen bir değişiklik, CI hattında birleştirilmeden durdurulabilir. `.ferry/ignore.json` dosyasını okuduğu için uygulamada yok saydığınız bulgular CI'da da yok sayılır.
+
+```bash
+cargo build --release -p ferry-cli
+target/release/ferry-cli scan . --target 8.4 --format github
+```
+
+- `--format text|json|sarif|github`: düz metin, özet ve yok sayılan bulgularla birlikte JSON, GitHub code scanning ve benzeri araçlar için SARIF 2.1.0 ya da değişen satırlarda GitHub Actions uyarıları.
+- `--fail-on breaking|deprecated|any|none`: komutun 1 koduyla çıkması için gereken en düşük önem derecesi (varsayılanı `breaking`). Klasörün bulunamaması gibi hatalarda çıkış kodu 2'dir.
+- `--output <dosya>` raporu bir dosyaya yazar, `--lang tr` mesajları Türkçe yapar.
 
 ## Desteklenen projeler
 
@@ -211,12 +227,12 @@ Her şey kendi bilgisayarınızda çalışır:
 
 ## Bilinen sınırlamalar
 
-- **Statik analiz:** Tarama kodu çalıştırmadan okur. Bu yüzden çalışma anındaki değerlere bağlı davranışlar (örneğin adı bir metinden gelen fonksiyon çağrıları) her zaman bulunamaz. Bu tür durumlar mümkün olduğunda **Riskli** olarak işaretlenir. Yalnızca eski sürümlerde çalışan kod atlanır: `if (PHP_VERSION_ID < 80100)` ya da `version_compare(PHP_VERSION, '8.0', '<')` bloklarının içi, sürüm kontrolü yapan bir ternary'nin ya da `&&`'nin hiç çalışmayacak tarafı, `if (PHP_VERSION_ID >= 80000) { return …; }` sonrasındaki kod ve `if (function_exists('mysql_connect'))` gibi bloklar. PHP'nin derlerken reddettiği ya da kullanımdan kalkmış saydığı `$str{0}` ya da `(double)` gibi yazımlar ise bu bloklarda da bildirilir, çünkü PHP o dal hiç çalışmasa bile dosyanın tamamını derler. Kaldırılmış bir adla kendi tanımladığınız fonksiyonlar da raporlanmaz; örneğin bir `each()` polyfill'i ya da Composer ile yüklenen bir `mysql_*` uyumluluk katmanı.
+- **Statik analiz:** Tarama kodu çalıştırmadan okur. Bu yüzden çalışma anındaki değerlere bağlı davranışlar (örneğin adı bir metinden gelen fonksiyon çağrıları) her zaman bulunamaz. Bu tür durumlar mümkün olduğunda **Riskli** olarak işaretlenir. Yalnızca eski sürümlerde çalışan kod atlanır: `if (PHP_VERSION_ID < 80100)` ya da `version_compare(PHP_VERSION, '8.0', '<')` bloklarının içi, sürüm kontrolü yapan bir ternary'nin ya da `&&`'nin hiç çalışmayacak tarafı, `if (PHP_VERSION_ID >= 80000) { return …; }` sonrasındaki kod ve `if (function_exists('mysql_connect'))` gibi bloklar. PHP'nin derlerken reddettiği ya da kullanımdan kalkmış saydığı `$str{0}` ya da `(double)` gibi yazımlar ise bu bloklarda da bildirilir, çünkü PHP o dal hiç çalışmasa bile dosyanın tamamını derler. Kaldırılmış bir adla kendi tanımladığınız fonksiyonlar da raporlanmaz; örneğin bir `each()` polyfill'i ya da Composer ile yüklenen bir `mysql_*` uyumluluk katmanı. Tersi ise raporlanır: PHP'ye sonradan eklenen `str_contains()` ya da `JsonException` gibi bir fonksiyonu veya sınıfı `function_exists()` ya da `class_exists()` kontrolü olmadan tanımlamak dosyanın hiç yüklenmemesine yol açar. Yalnızca bir sürüm kontrolünün içinden yüklenen dosyalar atlanır.
 - **Davranış değişiklikleri:** Bazı değişiklikler ancak kod çalışınca ortaya çıkar, bu yüzden hiçbir statik araç bunları bulamaz. Uygulamanızı yeni sürümde çalıştırarak test edin:
   - `0 == "foo"` artık `false` döner; bu `in_array()`, `array_search()` ve `switch`'i de etkiler.
   - Sayı olmayan metinlerle yapılan aritmetik işlemler `TypeError` fırlatır.
   - Birçok uyarı exception'a dönüştü; örneğin sayılamayan bir değere `count()`.
-  - curl, GD ve XML gibi resource'lar artık nesne, bu yüzden `is_resource()` kontrolleri bozulur.
+  - curl, GD ve XML gibi resource'lar artık nesne, bu yüzden `is_resource()` kontrolleri bozulur. Değer aynı dosyada atanıyorsa Ferry bu kontrolü bildirir (örneğin `$ch = curl_init()` ve ardından `is_resource($ch)`); başka bir yerden geliyorsa bildiremez.
   - PDO MySQL ve SQLite artık gerçek sayı döndürür, bu yüzden `=== "1"` karşılaştırmaları bozulur.
   - Yerleşik fonksiyonlara değişken üzerinden `null` vermek kullanımdan kalktı. Ferry doğrudan yazılmış `null`'u bildirir ama bir değişkenin ne tuttuğunu göremez.
   - Dinamik property'ler kullanımdan kalktı. Ferry projenizdeki üst sınıfları ve trait'leri izler; ancak `vendor/` içindeki bir framework sınıfı gibi göremediği bir sınıftan türeyenleri atlar, çünkü property orada tanımlanmış olabilir.
@@ -250,6 +266,7 @@ Testleri gerçek Rector'la çalıştırmak için `FERRY_TEST_TOOLS` değişkenin
 | Klasör | İçerik |
 |---|---|
 | `crates/ferry-core` | Motor: sözcük çözümleyici, kurallar ve analiz, Rector entegrasyonu, farklar, yedekler ve Composer kontrolleri |
+| `crates/ferry-cli` | CI için komut satırı tarayıcısı; metin, JSON, SARIF ve GitHub uyarısı çıktısı verir |
 | `src-tauri` | Masaüstü kabuğu: komutlar, pencere ve platform ayarları |
 | `src` | React ve TypeScript arayüzü (tasarım sistemi: [docs/DESIGN.md](docs/DESIGN.md)) |
 | `demo` | Uygulamayı denemek ve testler için örnek projeler |
