@@ -57,6 +57,8 @@ export const tr = {
     toolsChecking: "Araçlar kontrol ediliyor…",
     phpMissing: "PHP bulunamadı",
     rectorMissing: "Rector kurulu değil",
+    phpVulnerable: (v: string) => `PHP ${v} güvenlik açığı içeriyor`,
+    phpVulnerableHint: "Ayrıntılar için Ayarlar'ı açın",
   },
   welcome: {
     title: "Kodunuz yeni sürüme hazır olsun",

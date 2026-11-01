@@ -62,7 +62,7 @@ Select a finding to see:
 Ferry has its own PHP lexer and rule set, so it reads code the way PHP does: method calls such as `$db->each()`, functions in your own namespace, and text inside strings and comments are not mistaken for removed functions. Its rules cover:
 
 - removed extensions and functions, such as `mysql_*`, `ereg*`, `each()`, `create_function()`, and `money_format()`
-- syntax that no longer parses or compiles, such as `$str{0}`, `(real)` and `(unset)` casts, `$obj = &new Foo`, `unset($this)`, `break` outside a loop, and PHP 7 `#[` comments, which PHP 8 reads as attributes
+- syntax that no longer parses or compiles, such as `$str{0}`, `(real)` and `(unset)` casts, `$obj = &new Foo`, `$args = &func_get_args()`, `unset($this)`, writes to the whole `$GLOBALS` array, reserved names such as `Object` used as import aliases, `break` outside a loop, and PHP 7 `#[` comments, which PHP 8 reads as attributes
 - deprecations, such as `"${var}"` interpolation, implicit nullable parameters, `utf8_encode()`, `FILTER_SANITIZE_STRING`, and `E_STRICT`
 - parameter and call patterns, such as an optional parameter before a required one, a literal `null` passed to built-in string functions, and `"self::method"` style callables
 - methods that override a built-in class or interface method with a signature PHP 8 rejects, such as Drupal 7's `query($query, array $args = array(), $options = array())` on a `PDO` subclass, which stops the class from loading
@@ -81,7 +81,7 @@ The **Fixes** page runs Rector on your project in dry-run mode. No files change.
 - Pick the files you want and press **Apply**. Files marked **Review** carry a note to check them first.
 - After applying, Ferry checks the changed files with `php -l` and warns you if a change left one that no longer parses, so you can roll it back from **History** right away.
 
-Ferry handles cases Rector cannot on its own. For example, a file that uses `$str{0}` makes Rector skip the whole file. Ferry rewrites those offsets to `$str[0]` first, and does the same for `= &new` and `default;`, so the rest of the file is still fixed.
+Ferry handles cases Rector cannot on its own. For example, a file that uses `$str{0}` makes Rector skip the whole file. Ferry rewrites those offsets to `$str[0]` first, and does the same for `= &new`, `= &func_get_args()` and `default;`, so the rest of the file is still fixed.
 
 ### Dependencies that block the upgrade
 
@@ -119,14 +119,18 @@ Before every apply, Ferry backs up the files it is about to change. The **Histor
 | **WordPress** | `wp-config.php`, `wp-config-sample.php`, or a `wp-includes` folder | `wp-admin`, `wp-includes` (core); your themes and plugins are scanned |
 | **Laravel** | the `artisan` file, or `laravel/framework` in `composer.json` | `storage`, `bootstrap/cache` |
 | **Symfony** | `symfony/framework-bundle` in `composer.json`, or `bin/console` | `var` |
-| **Drupal** | `drupal/core` in `composer.json`, or `core/lib/Drupal.php` (also under `web/`, `docroot/`, `html/`, or `public/`) | Drupal core, `sites/default/files` |
+| **Drupal** | `drupal/core` in `composer.json`, `core/lib/Drupal.php` (also under `web/`, `docroot/`, `html/`, or `public/`), or Drupal 7's `includes/bootstrap.inc` | Drupal core, `sites/default/files` |
+| **Magento** | `app/Mage.php` (Magento 1), `bin/magento`, or a `magento/product-*` package in `composer.json` | `generated`, `var`, `pub/static`, `setup`, `dev`; in Magento 1, `app/code/core` and `lib` |
+| **PrestaShop** | `config/settings.inc.php`, `app/AppKernel.php`, or `classes/PrestaShopAutoload.php` | core folders such as `classes`, `controllers`, `src`, `app`; `modules`, `override` and `themes` are scanned |
 | **Plain PHP** | any folder with PHP files | — |
 
-For WordPress, Laravel, Drupal, and Symfony, Ferry also checks the framework itself:
+For WordPress, Laravel, Drupal, Magento, PrestaShop, and Symfony, Ferry also checks the platform itself:
 
 - **WordPress:** the core version in `wp-includes/version.php` against the oldest WordPress release that supports your target PHP version (for example, PHP 8.4 needs WordPress 6.7).
 - **Laravel:** the `laravel/framework` version in `composer.lock` against Laravel's supported PHP range, plus the `str_*` and `array_*` helpers and the `Input` facade that Laravel 6 removed. PHP 8 needs Laravel 6.20 or newer, so these break too unless `laravel/helpers` is installed.
-- **Drupal:** the core version against Drupal's PHP requirements (for example, PHP 8.5 needs Drupal 11.3).
+- **Drupal:** the core version against Drupal's PHP requirements (for example, PHP 8.5 needs Drupal 11.3). Drupal 7 is checked too: PHP 8.2 needs 7.94 and PHP 8.3 needs 7.103, and no Drupal 7 release runs on PHP 8.4.
+- **Magento:** Magento 2's version in `composer.lock` against Adobe's system requirements (for example, PHP 8.4 needs 2.4.8). Magento 1 never supported PHP 8, so it's flagged unless the project uses the OpenMage LTS fork.
+- **PrestaShop:** the core version against PrestaShop's requirements: 1.6 and 1.7 don't support PHP 8, 8.0–8.2 go up to PHP 8.1, and 9.x goes up to PHP 8.5.
 - **Symfony:** Symfony doesn't publish a maximum PHP version, so a release whose maintenance ended before your target PHP version came out is marked **Risky**.
 
 `vendor` and `node_modules` are always skipped. Files larger than 2 MB are skipped and listed in the scan results, so nothing is left out silently.

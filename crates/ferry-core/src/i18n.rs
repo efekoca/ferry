@@ -110,9 +110,28 @@ pub fn io_error(e: &std::io::Error) -> String {
     text.get(lang()).to_string()
 }
 
+pub fn tr_accusative(version: &str) -> String {
+    let suffix = match version.chars().last() {
+        Some('0') => "ı",
+        Some('2' | '7') => "yi",
+        Some('3' | '4') => "ü",
+        Some('6') => "yı",
+        Some('9') => "u",
+        _ => "i",
+    };
+    format!("{version}'{suffix}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn turkish_accusative_follows_the_spoken_number() {
+        let forms: Vec<String> =
+            ["8.0", "8.1", "8.2", "8.3", "8.4", "8.5", "7.6", "7.7", "8.8", "7.9"].iter().map(|v| tr_accusative(v)).collect();
+        assert_eq!(forms, ["8.0'ı", "8.1'i", "8.2'yi", "8.3'ü", "8.4'ü", "8.5'i", "7.6'yı", "7.7'yi", "8.8'i", "7.9'u"]);
+    }
 
     #[test]
     fn switches_language() {
