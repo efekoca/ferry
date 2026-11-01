@@ -47,6 +47,13 @@ fn read_json(path: &Path) -> Option<serde_json::Value> {
 }
 
 pub fn check(root: &Path, target: PhpVersion) -> DependencyReport {
+    let mut report = check_packages(root, target);
+    let excluded = crate::project::inspect(root).map(|i| i.excluded_dirs).unwrap_or_default();
+    report.extensions = crate::extensions::used(root, &crate::project::collect_php_files(root, &excluded));
+    report
+}
+
+pub fn check_packages(root: &Path, target: PhpVersion) -> DependencyReport {
     let root_constraint =
         read_json(&root.join("composer.json")).and_then(|j| j.pointer("/require/php").and_then(|v| v.as_str()).map(str::to_string));
     let lock = read_json(&root.join("composer.lock"));
@@ -98,10 +105,7 @@ pub fn check(root: &Path, target: PhpVersion) -> DependencyReport {
         root_constraint,
         packages,
         has_lock_file: lock.is_some(),
-        extensions: {
-            let excluded = crate::project::inspect(root).map(|i| i.excluded_dirs).unwrap_or_default();
-            crate::extensions::used(root, &crate::project::collect_php_files(root, &excluded))
-        },
+        extensions: Vec::new(),
     }
 }
 
