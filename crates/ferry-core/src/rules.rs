@@ -167,6 +167,7 @@ pub const COMPILE_TIME: &[&str] = &[
     "removed.reserved_name",
     "removed.assign_new_by_ref",
     "removed.unset_this",
+    "removed.builtin_result_by_ref",
     "removed.break_outside_loop",
     "deprecated.dollar_brace_interpolation",
     "deprecated.implicit_nullable",
@@ -1085,6 +1086,18 @@ pub mod patterns {
         note: Text::new(
             "new ile oluşturulan nesneyi referansla atamak PHP 7.0'da kaldırıldı ve ayrıştırma hatası verir. Nesneler zaten referans gibi davrandığı için & işaretini silmek yeterli.",
             "Assigning the result of new by reference was removed in PHP 7.0 and is a parse error. Objects already behave like references, so dropping the & is enough.",
+        ),
+    };
+    pub const BUILTIN_RESULT_BY_REF: PatternRule = PatternRule {
+        id: "removed.builtin_result_by_ref",
+        title: Text::new("Yerleşik fonksiyon sonucu referansla atanıyor", "Built-in function result assigned by reference"),
+        severity: Severity::Breaking,
+        since: (7, 0),
+        replacement: None,
+        fix: FixKind::Auto,
+        note: Text::new(
+            "func_get_args(), strlen(), count() gibi fonksiyonları PHP derleme sırasında özel olarak işler; sonuçlarını referansla atamak ölümcül hataya yol açar ve dosya hiç çalışmaz. Sonuç zaten yeni bir değer olduğu için & işaretini silmek yeterli.",
+            "PHP compiles functions such as func_get_args(), strlen() and count() specially, so assigning their result by reference is a fatal error and the file never runs. The result is a fresh value anyway, so dropping the & is enough.",
         ),
     };
     pub const UNSET_THIS: PatternRule = PatternRule {
