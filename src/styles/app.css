@@ -2852,6 +2852,13 @@ select.input {
   font-size: var(--text-sm);
 }
 
+.toolbar__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  margin-left: calc(-1 * var(--space-2));
+}
+
 .compare__intro {
   display: flex;
   align-items: center;

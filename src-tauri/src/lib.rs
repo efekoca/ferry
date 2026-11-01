@@ -215,6 +215,47 @@ async fn import_runtime_log(state: State<'_, AppState>, path: String, log: Strin
     Ok(respond(&root, scan, Some(&entry)))
 }
 
+fn selectable_lines() -> Vec<String> {
+    PhpVersion::TARGETS.iter().filter(|v| **v != PhpVersion::new(8, 1)).map(ToString::to_string).collect()
+}
+
+#[tauri::command]
+async fn local_php_versions() -> CmdResult<Vec<toolchain::LocalPhp>> {
+    blocking(|| Ok(toolchain::local_php(&selectable_lines()))).await
+}
+
+#[tauri::command]
+async fn run_local_check(state: State<'_, AppState>, path: String, target: String, kind: String) -> CmdResult<ScanResponse> {
+    let path = normalize_path(path);
+    let target = parse_target(&target)?;
+    let scan = state.scans.lock().unwrap().get(&path).cloned().ok_or_else(|| t!("Önce projeyi tarayın.", "Scan the project first."))?;
+    let (root, entry) = blocking(move || {
+        let root = project_root(&path)?;
+        let local = toolchain::local_php(&[target.to_string()]).into_iter().next().ok_or_else(|| {
+            t!(
+                "Bu bilgisayarda PHP {target} bulunamadı. Homebrew, Herd ya da paket yöneticinizle kurun.",
+                "PHP {target} wasn't found on this computer. Install it with Homebrew, Herd or your package manager."
+            )
+        })?;
+        let (label, output) = match kind.as_str() {
+            "lint" => {
+                let info = project::inspect(&root).map_err(|e| e.to_string())?;
+                let files = project::collect_php_files(&root, &info.excluded_dirs);
+                (format!("php -l · PHP {}", local.version), ferry_core::localcheck::lint(&local.path, &files))
+            }
+            "tests" => (
+                format!("PHPUnit · PHP {}", local.version),
+                ferry_core::localcheck::run_tests(&local.path, &root, Duration::from_secs(20 * 60))?,
+            ),
+            _ => return Err(t!("Bilinmeyen kontrol.", "Unknown check.")),
+        };
+        Ok((root, RuntimeLog { file: label, events: runtime::parse(&output) }))
+    })
+    .await?;
+    state.runtime.lock().unwrap().insert(root.to_string_lossy().to_string(), entry.clone());
+    Ok(respond(&root, scan, Some(&entry)))
+}
+
 #[tauri::command]
 async fn clear_runtime_log(state: State<'_, AppState>, path: String) -> CmdResult<ScanResponse> {
     let path = normalize_path(path);
@@ -800,6 +841,8 @@ pub fn with_commands<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R
         prune_ignores,
         import_runtime_log,
         clear_runtime_log,
+        local_php_versions,
+        run_local_check,
         open_in_editor,
         get_settings,
         save_settings,

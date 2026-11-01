@@ -384,3 +384,18 @@ fn runtime_logs_confirm_and_add_findings() {
     std::fs::write(&empty, "nothing here\n").unwrap();
     assert!(h.invoke("import_runtime_log", json!({ "path": root, "log": empty })).is_err());
 }
+
+#[test]
+fn lints_with_a_local_php_of_the_target() {
+    let _lang = turkish();
+    let h = harness();
+    let root = h.root.clone();
+    let local = h.ok("local_php_versions", json!({}));
+    let Some(line) = local.as_array().unwrap().first().map(|l| l["line"].as_str().unwrap().to_string()) else { return };
+    h.ok("scan_project", json!({ "path": root, "target": line, "run": 1 }));
+    let merged = h.ok("run_local_check", json!({ "path": root, "target": line, "kind": "lint" }));
+    assert!(merged["runtime"]["file"].as_str().unwrap().starts_with("php -l · PHP "));
+    assert!(merged["runtime"]["events"].as_u64().unwrap() > 0);
+    let err = h.invoke("run_local_check", json!({ "path": root, "target": line, "kind": "tests" })).unwrap_err();
+    assert_eq!(err, json!("Projede vendor/bin/phpunit yok."));
+}
