@@ -103,12 +103,30 @@ export interface Dependency {
   note?: Localized | null;
 }
 
+export interface ExtensionUse {
+  name: string;
+  uses: number;
+  file: string;
+  line: number;
+  symbol: string;
+  declared: boolean;
+  removed: boolean;
+  available: boolean | null;
+}
+
 export interface DependencyReport {
   target: string;
   rootConstraint: string | null;
   rootStatus: DependencyStatus;
   packages: Dependency[];
   hasLockFile: boolean;
+  extensions: ExtensionUse[];
+}
+
+export interface VersionSuggestion {
+  name: string;
+  version: string;
+  majorChange: boolean;
 }
 
 export interface ToolInfo {

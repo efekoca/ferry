@@ -300,10 +300,57 @@ async fn open_in_editor<R: Runtime>(app: AppHandle<R>, path: String, file: Strin
 }
 
 #[tauri::command]
-async fn check_dependencies(path: String, target: String) -> CmdResult<DependencyReport> {
+async fn check_dependencies(state: State<'_, AppState>, path: String, target: String) -> CmdResult<DependencyReport> {
     let path = normalize_path(path);
     let target = parse_target(&target)?;
-    blocking(move || Ok(deps::check(&project_root(&path)?, target))).await
+    let php = state.php_override();
+    blocking(move || {
+        let mut report = deps::check(&project_root(&path)?, target);
+        let modules = toolchain::find_php(php.as_deref())
+            .and_then(|php| toolchain::command(php).arg("-m").output().ok())
+            .map(|out| ferry_core::extensions::parse_modules(&String::from_utf8_lossy(&out.stdout)));
+        if let Some(modules) = modules.filter(|m| !m.is_empty()) {
+            for e in &mut report.extensions {
+                e.available = Some(modules.contains(&e.name));
+            }
+        }
+        Ok(report)
+    })
+    .await
+}
+
+#[derive(Deserialize)]
+struct LockedPackage {
+    name: String,
+    version: String,
+}
+
+#[tauri::command]
+async fn find_compatible_versions(target: String, packages: Vec<LockedPackage>) -> CmdResult<Vec<ferry_core::packagist::Suggestion>> {
+    let target = parse_target(&target)?;
+    let curl = toolchain::find_executable("curl").ok_or_else(|| t!("curl bulunamadı.", "curl was not found."))?;
+    blocking(move || {
+        let fetch = |p: &LockedPackage| {
+            let url = ferry_core::packagist::url(&p.name)?;
+            let out = toolchain::command(&curl).args(["-fsSL", "--max-time", "20", &url]).output().ok().filter(|o| o.status.success())?;
+            ferry_core::packagist::lowest_compatible(&String::from_utf8_lossy(&out.stdout), &p.name, &p.version, target)
+        };
+        let mut out = Vec::new();
+        for chunk in packages.chunks(8) {
+            let results: Vec<Option<ferry_core::packagist::Suggestion>> = std::thread::scope(|s| {
+                chunk.iter().map(|p| s.spawn(move || fetch(p))).collect::<Vec<_>>().into_iter().map(|h| h.join().ok().flatten()).collect()
+            });
+            out.extend(results.into_iter().flatten());
+        }
+        if !packages.is_empty() && out.is_empty() {
+            let probe = toolchain::command(&curl).args(["-fsSI", "--max-time", "10", "https://repo.packagist.org/"]).output();
+            if !probe.is_ok_and(|o| o.status.success()) {
+                return Err(t!("packagist.org'a ulaşılamadı.", "Couldn't reach packagist.org."));
+            }
+        }
+        Ok(out)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -644,6 +691,7 @@ pub fn with_commands<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R
         inspect_project,
         scan_project,
         check_dependencies,
+        find_compatible_versions,
         toolchain_status,
         install_rector,
         rector_preview,
