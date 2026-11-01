@@ -277,6 +277,13 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
       const known: Record<string, [string, boolean]> = { "phpmailer/phpmailer": ["v6.9.1", true], "illuminate/database": ["v10.0.0", true], "phpunit/phpunit": ["9.6.0", true] };
       return packages.filter((p) => known[p.name]).map((p) => ({ name: p.name, version: known[p.name][0], majorChange: known[p.name][1] }));
     },
+    compareTargets: async () => {
+      await sleep(delay);
+      return (["8.2", "8.3", "8.4", "8.5"] as const).map((target) => {
+        const findings = SEEDS.filter((s) => versionLte(s.since, target)).map((s) => ({ ...s, id: s.file + s.line, column: 1, runtimeHits: 0 }));
+        return { target, summary: summarize(findings), blockingPackages: target === "8.2" ? 2 : 3, rootBlocks: false };
+      });
+    },
     checkDependencies: async (_path, target) => {
       await sleep(delay / 3);
       return { ...DEPS, target, rootStatus: "compatible" };

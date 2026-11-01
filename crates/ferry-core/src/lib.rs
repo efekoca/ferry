@@ -3,6 +3,7 @@ pub mod analyzer;
 mod builtin;
 #[rustfmt::skip]
 mod arity;
+pub mod compare;
 pub mod deps;
 pub mod diff;
 pub mod extensions;
