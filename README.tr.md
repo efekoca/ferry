@@ -283,6 +283,8 @@ Testleri gerçek Rector'la çalıştırmak için `FERRY_TEST_TOOLS` değişkenin
 
 `scripts/fetch-corpus.sh` WordPress, Drupal, CodeIgniter, phpBB, Joomla, Magento, PrestaShop ve Laravel'in eski sürümlerini indirir; `CORPUS=<klasör> CORPUS_PHP=$(which php) cargo test -p ferry-core --test corpus -- --ignored --nocapture` tarayıcının bulduklarını o PHP'nin kendisinin bu projeler için bildirdikleriyle karşılaştırır.
 
+`scripts/runtime-benchmark.sh <proje> <test-klasörü> [hedef]` bir projenin PHPUnit testlerini Docker'da hedef PHP sürümüyle çalıştırır ve bildirdikleri kullanımdan kalkmaları statik taramayla birleştirir; son sonuçlar [docs/ROADMAP.md](docs/ROADMAP.md) içinde.
+
 `pnpm e2e:native`, uygulamanın debug sürümünü demo projeler ve Unicode yol, symlink döngüsü ya da boş proje gibi uç durumlar üzerinde baştan sona çalıştırır ve her senaryonun sonucunu bildirir.
 
 **Demo projeleri.** `demo/` klasöründe üç örnek proje var: her kuralı tetikleyen düz PHP bir mağaza, WordPress bir blog ve neredeyse hazır bir Laravel API'si. `pnpm demo` bunları `.demo/` klasörüne sıfırdan kopyalar; böylece asıllarına dokunmadan değişiklik uygulayabilirsiniz. Ayrıntılar için [demo/README.md](demo/README.md).
