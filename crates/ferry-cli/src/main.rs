@@ -11,7 +11,9 @@ use std::process::ExitCode;
 const USAGE: &str = "Usage: ferry-cli scan <project> --target <8.2|8.3|8.4|8.5> [options]
 
 Options:
-  --format <text|json|sarif|github>  Output format (default: text)
+  --format <text|json|sarif|github|junit|checkstyle|csv>
+                                     Output format (default: text)
+  --blame                            With --format csv, add the git blame author of each line
   --output <file>                    Write the report to a file instead of stdout
   --fail-on <breaking|deprecated|any|new|none>
                                      Exit with code 1 when findings at this level remain (default: breaking);
@@ -28,6 +30,9 @@ enum Format {
     Json,
     Sarif,
     Github,
+    Junit,
+    Checkstyle,
+    Csv,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,6 +55,7 @@ struct Options {
     baseline: Option<PathBuf>,
     write_baseline: Option<PathBuf>,
     runtime_log: Option<PathBuf>,
+    blame: bool,
 }
 
 fn parse(args: &[String]) -> Result<Options, String> {
@@ -61,7 +67,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
     }
     let (mut root, mut target, mut format, mut output, mut fail_on, mut lang) =
         (None, None, Format::Text, None, FailOn::Breaking, Lang::En);
-    let (mut baseline, mut write_baseline, mut runtime_log) = (None, None, None);
+    let (mut baseline, mut write_baseline, mut runtime_log, mut blame) = (None, None, None, false);
     while let Some(arg) = it.next() {
         let mut value = |name: &str| it.next().cloned().ok_or_else(|| format!("{name} needs a value"));
         match arg.as_str() {
@@ -73,6 +79,9 @@ fn parse(args: &[String]) -> Result<Options, String> {
                     "json" => Format::Json,
                     "sarif" => Format::Sarif,
                     "github" => Format::Github,
+                    "junit" => Format::Junit,
+                    "checkstyle" => Format::Checkstyle,
+                    "csv" => Format::Csv,
                     other => return Err(format!("unknown format: {other}")),
                 }
             }
@@ -90,6 +99,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
             "--baseline" => baseline = Some(PathBuf::from(value("--baseline")?)),
             "--write-baseline" => write_baseline = Some(PathBuf::from(value("--write-baseline")?)),
             "--runtime-log" => runtime_log = Some(PathBuf::from(value("--runtime-log")?)),
+            "--blame" => blame = true,
             "--lang" => {
                 lang = match value("--lang")?.as_str() {
                     "en" => Lang::En,
@@ -114,7 +124,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
     if fail_on == FailOn::New && baseline.is_none() {
         return Err("--fail-on new needs --baseline".into());
     }
-    Ok(Options { root, target, format, output, fail_on, lang, baseline, write_baseline, runtime_log })
+    Ok(Options { root, target, format, output, fail_on, lang, baseline, write_baseline, runtime_log, blame })
 }
 
 fn text(l: &Localized, lang: Lang) -> &str {
@@ -285,6 +295,144 @@ fn escape_property(s: &str) -> String {
     escape_data(s).replace(':', "%3A").replace(',', "%2C")
 }
 
+fn xml(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&apos;")
+}
+
+fn render_junit(findings: &[Finding], o: &Options) -> String {
+    let mut by_file: std::collections::BTreeMap<&str, Vec<&Finding>> = std::collections::BTreeMap::new();
+    for f in findings {
+        by_file.entry(f.file.as_str()).or_default().push(f);
+    }
+    let failures = findings.iter().filter(|f| f.severity != Severity::Behavior).count();
+    let mut out = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<testsuites name=\"Ferry PHP {}\" tests=\"{}\" failures=\"{failures}\">\n",
+        o.target,
+        findings.len()
+    );
+    for (file, list) in by_file {
+        let failing = list.iter().filter(|f| f.severity != Severity::Behavior).count();
+        out.push_str(&format!("  <testsuite name=\"{}\" tests=\"{}\" failures=\"{failing}\">\n", xml(file), list.len()));
+        for f in list {
+            out.push_str(&format!(
+                "    <testcase classname=\"{}\" name=\"{}:{} {}\">\n",
+                xml(&f.rule_id),
+                xml(file),
+                f.line,
+                xml(text(&f.title, o.lang))
+            ));
+            let tag = if f.severity == Severity::Behavior { "system-out" } else { "failure" };
+            let body = format!("{} (PHP {}, {})", text(&f.message, o.lang), f.since, severity_name(f.severity));
+            if tag == "failure" {
+                out.push_str(&format!(
+                    "      <failure type=\"{}\" message=\"{}\">{}</failure>\n",
+                    severity_name(f.severity),
+                    xml(&body),
+                    xml(&f.snippet)
+                ));
+            } else {
+                out.push_str(&format!("      <system-out>{}</system-out>\n", xml(&body)));
+            }
+            out.push_str("    </testcase>\n");
+        }
+        out.push_str("  </testsuite>\n");
+    }
+    out + "</testsuites>\n"
+}
+
+fn render_checkstyle(findings: &[Finding], o: &Options) -> String {
+    let mut by_file: std::collections::BTreeMap<&str, Vec<&Finding>> = std::collections::BTreeMap::new();
+    for f in findings {
+        by_file.entry(f.file.as_str()).or_default().push(f);
+    }
+    let mut out = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<checkstyle version=\"4.3\">\n");
+    for (file, list) in by_file {
+        out.push_str(&format!("  <file name=\"{}\">\n", xml(&file.replace('\\', "/"))));
+        for f in list {
+            let severity = match f.severity {
+                Severity::Breaking => "error",
+                Severity::Deprecated => "warning",
+                Severity::Behavior => "info",
+            };
+            out.push_str(&format!(
+                "    <error line=\"{}\" column=\"{}\" severity=\"{severity}\" message=\"{}\" source=\"ferry.{}\"/>\n",
+                f.line,
+                f.column,
+                xml(&format!("{}: {}", text(&f.title, o.lang), text(&f.message, o.lang))),
+                xml(&f.rule_id)
+            ));
+        }
+        out.push_str("  </file>\n");
+    }
+    out + "</checkstyle>\n"
+}
+
+fn csv_field(s: &str) -> String {
+    if s.contains([',', '"', '\n', '\r']) {
+        format!("\"{}\"", s.replace('"', "\"\""))
+    } else {
+        s.to_string()
+    }
+}
+
+fn blame_authors(root: &std::path::Path, file: &str) -> std::collections::HashMap<usize, String> {
+    let mut authors = std::collections::HashMap::new();
+    let Some(git) = ferry_core::toolchain::find_executable("git") else { return authors };
+    let Ok(out) = ferry_core::toolchain::command(git).arg("-C").arg(root).args(["blame", "--line-porcelain", "--", file]).output() else {
+        return authors;
+    };
+    let mut line = 0;
+    for l in String::from_utf8_lossy(&out.stdout).lines() {
+        let mut parts = l.split(' ');
+        if let (Some(hash), Some(_), Some(final_line)) = (parts.next(), parts.next(), parts.next()) {
+            if hash.len() == 40 && hash.bytes().all(|b| b.is_ascii_hexdigit()) {
+                line = final_line.parse().unwrap_or(0);
+                continue;
+            }
+        }
+        if let Some(author) = l.strip_prefix("author ") {
+            authors.insert(line, author.to_string());
+        }
+    }
+    authors
+}
+
+fn render_csv(root: &std::path::Path, findings: &[Finding], o: &Options) -> String {
+    let mut out = String::from("file,line,column,rule,severity,fix,since,title,message,replacement");
+    if o.blame {
+        out.push_str(",author");
+    }
+    out.push('\n');
+    let mut blames: std::collections::HashMap<&str, std::collections::HashMap<usize, String>> = std::collections::HashMap::new();
+    for f in findings {
+        let fix = match f.fix {
+            FixKind::Auto => "auto",
+            FixKind::Likely => "review",
+            FixKind::Manual => "manual",
+        };
+        let fields = [
+            f.file.clone(),
+            f.line.to_string(),
+            f.column.to_string(),
+            f.rule_id.clone(),
+            severity_name(f.severity).to_string(),
+            fix.to_string(),
+            f.since.to_string(),
+            text(&f.title, o.lang).to_string(),
+            text(&f.message, o.lang).to_string(),
+            f.replacement.as_ref().map(|r| text(r, o.lang).to_string()).unwrap_or_default(),
+        ];
+        out.push_str(&fields.iter().map(|v| csv_field(v)).collect::<Vec<_>>().join(","));
+        if o.blame {
+            let authors = blames.entry(f.file.as_str()).or_insert_with(|| blame_authors(root, &f.file));
+            out.push(',');
+            out.push_str(&csv_field(authors.get(&f.line).map(String::as_str).unwrap_or("")));
+        }
+        out.push('\n');
+    }
+    out
+}
+
 fn render_github(findings: &[Finding], o: &Options) -> String {
     findings
         .iter()
@@ -353,6 +501,9 @@ fn run(o: &Options) -> Result<bool, String> {
         Format::Json => render_json(&findings, &ignored, &summary, scan.files_scanned, o),
         Format::Sarif => render_sarif(&findings, o),
         Format::Github => render_github(&fresh, o) + &render_text(&[], &ignored, &summary, o),
+        Format::Junit => render_junit(&findings, o),
+        Format::Checkstyle => render_checkstyle(&findings, o),
+        Format::Csv => render_csv(&root, &findings, o),
     };
     if baseline.is_some() && matches!(o.format, Format::Text | Format::Github) {
         rendered.push_str(&match o.lang {
@@ -425,6 +576,7 @@ mod tests {
             baseline: None,
             write_baseline: None,
             runtime_log: None,
+            blame: false,
         };
         assert!(run(&options(FailOn::Breaking)).unwrap());
         let report: Value = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
@@ -456,11 +608,56 @@ mod tests {
             baseline,
             write_baseline: write,
             runtime_log: None,
+            blame: false,
         };
         assert!(!run(&options(None, Some(base.clone()))).unwrap());
         assert!(!run(&options(Some(base.clone()), None)).unwrap());
         std::fs::write(dir.path().join("a.php"), "<?php\neach($a);\nsplit($b);\n").unwrap();
         assert!(run(&options(Some(base), None)).unwrap());
+    }
+
+    #[test]
+    fn junit_checkstyle_and_csv_outputs() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.php"), "<?php\neach($a);\n$x = \"${y}\";\n").unwrap();
+        let git = |args: &[&str]| std::process::Command::new("git").arg("-C").arg(dir.path()).args(args).output();
+        let has_git = git(&["init", "-q"]).is_ok_and(|o| o.status.success());
+        if has_git {
+            git(&["-c", "user.email=ada@example.com", "-c", "user.name=Ada Lovelace", "add", "."]).unwrap();
+            git(&["-c", "user.email=ada@example.com", "-c", "user.name=Ada Lovelace", "commit", "-qm", "init"]).unwrap();
+        }
+        let out = dir.path().join("out.txt");
+        let render = |format, blame| {
+            let o = Options {
+                root: dir.path().to_path_buf(),
+                target: PhpVersion::new(8, 2),
+                format,
+                output: Some(out.clone()),
+                fail_on: FailOn::None,
+                lang: Lang::En,
+                baseline: None,
+                write_baseline: None,
+                runtime_log: None,
+                blame,
+            };
+            run(&o).unwrap();
+            std::fs::read_to_string(&out).unwrap()
+        };
+        let junit = render(Format::Junit, false);
+        assert!(junit.contains(r#"<testsuites name="Ferry PHP 8.2" tests="2" failures="2">"#), "{junit}");
+        assert!(junit.contains("<failure type=\"breaking\""));
+        let checkstyle = render(Format::Checkstyle, false);
+        assert!(checkstyle.contains(r#"<error line="2" column="1" severity="error""#), "{checkstyle}");
+        assert!(checkstyle.contains(r#"source="ferry.removed.each""#));
+        let csv = render(Format::Csv, true);
+        let mut lines = csv.lines();
+        assert_eq!(lines.next().unwrap(), "file,line,column,rule,severity,fix,since,title,message,replacement,author");
+        let first = lines.next().unwrap();
+        assert!(first.starts_with("a.php,2,1,removed.each,breaking,"), "{first}");
+        if has_git {
+            assert!(first.ends_with(",Ada Lovelace"), "{first}");
+        }
+        assert_eq!(csv_field("a,\"b\""), "\"a,\"\"b\"\"\"");
     }
 
     #[test]

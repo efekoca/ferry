@@ -141,7 +141,7 @@ cargo build --release -p ferry-cli
 target/release/ferry-cli scan . --target 8.4 --format github
 ```
 
-- `--format text|json|sarif|github`: düz metin, özet ve yok sayılan bulgularla birlikte JSON, GitHub code scanning ve benzeri araçlar için SARIF 2.1.0 ya da değişen satırlarda GitHub Actions uyarıları.
+- `--format text|json|sarif|github|junit|checkstyle|csv`: düz metin, özet ve yok sayılan bulgularla birlikte JSON, GitHub code scanning ve benzeri araçlar için SARIF 2.1.0, değişen satırlarda GitHub Actions uyarıları, Jenkins ve GitLab test raporları için JUnit XML, Checkstyle XML ya da tablolar için CSV. `--blame` CSV'ye her satırın `git blame` yazarını ekler; böylece iş ekip içinde paylaştırılabilir.
 - `--fail-on breaking|deprecated|any|none`: komutun 1 koduyla çıkması için gereken en düşük önem derecesi (varsayılanı `breaking`). Klasörün bulunamaması gibi hatalarda çıkış kodu 2'dir.
 - `--output <dosya>` raporu bir dosyaya yazar, `--lang tr` mesajları Türkçe yapar.
 - `--write-baseline <dosya>` bugünkü bulguları kaydeder, `--baseline <dosya>` ise onlarla karşılaştırır: `--fail-on` için yalnızca baseline'da olmayan bulgular sayılır, `--fail-on new` bunlardan herhangi biri varsa başarısız olur. Böylece yüzlerce eski bulgusu olan bir projede yenilerin eklenmesi engellenebilir.
