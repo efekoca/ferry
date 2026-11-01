@@ -154,6 +154,18 @@ export const tr = {
     message: "Önerilen commit mesajı",
     subject: (target: string, n: number) => `PHP ${target} uyumluluğu: Rector ile ${n} dosya`,
   },
+  compare: {
+    title: "Hedefleri karşılaştır",
+    text: "Projeyi PHP 8.2, 8.3, 8.4 ve 8.5 için ayrı ayrı tarar; hangi hedefin ne kadar iş çıkaracağını yan yana gösterir.",
+    run: "Karşılaştır",
+    failed: "Karşılaştırma yapılamadı",
+    target: "Hedef",
+    score: "Puan",
+    packages: "Engelleyen paket",
+    plusRoot: "+ composer.json",
+    current: "Seçili",
+    pick: "Bu hedefe geç",
+  },
   progress: {
     title: "İlerleme",
     first: "İlk tarama. Bir sonraki taramada nelerin değiştiğini burada göreceksiniz.",
@@ -208,6 +220,12 @@ export const tr = {
     runtimeSummary: (file: string, events: number, confirmed: number, added: number, outside: number) =>
       `${file}: ${events} farklı mesaj. ${confirmed} bulgu çalışırken doğrulandı, ${added} mesaj statik taramanın bulmadığı yeni bulgu olarak eklendi, ${outside} mesaj proje dışındaki dosyalardan.`,
     clearLog: "Log'u kaldır",
+    lintWith: (v: string) => `PHP ${v} ile lint et`,
+    testWith: (v: string) => `Testleri PHP ${v} ile çalıştır`,
+    testTitle: "Projenin testleri çalıştırılsın mı?",
+    testText: (v: string) =>
+      `vendor/bin/phpunit bu bilgisayarda PHP ${v} ile çalıştırılır ve bildirdiği kullanımdan kalkmalar bulgulara eklenir. Testler projenin kodunu çalıştırır; yalnızca güvendiğiniz projelerde kullanın. En fazla 20 dakika sürer.`,
+    testRun: "Testleri çalıştır",
     runtimeDetail: (n: number) => `Bu kod çalışma anı log'unda ${n} kez uyarı verdi.`,
   },
   changes: {
@@ -408,6 +426,7 @@ export const tr = {
     reportSaved: "Rapor kaydedildi",
     reportFailed: "Rapor kaydedilemedi",
     runtimeFailed: "Log içe aktarılamadı",
+    localCheckFailed: "Yerel kontrol çalıştırılamadı",
     ignoreFailed: "Yok sayma listesi güncellenemedi",
     editorFailed: "Dosya editörde açılamadı",
     phpSaved: "PHP yolu kaydedildi",

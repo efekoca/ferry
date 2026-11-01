@@ -71,6 +71,28 @@ pub fn parse(log: &str) -> Vec<Event> {
                 }
             }
         }
+        if let Some(location) = text.strip_prefix("Location:") {
+            let message = k.checked_sub(1).and_then(|p| lines[p].trim().strip_prefix("Message:")).map(str::trim);
+            if let (Some(message), Some((path, line))) = (message, location.trim().rsplit_once(':')) {
+                if let (Some(level), Ok(line)) = (level_of(message), line.parse::<usize>()) {
+                    add(path.to_string(), line, level, message.to_string());
+                }
+            }
+            continue;
+        }
+        let bare = text
+            .rsplit_once(':')
+            .filter(|(p, n)| p.starts_with('/') && p.ends_with(".php") && !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()));
+        if let Some((path, line)) = bare {
+            let previous = (0..k).rev().map(|p| lines[p].trim()).find(|l| !l.is_empty());
+            let first_frame = previous.is_some_and(|p| !p.ends_with(|c: char| c.is_ascii_digit()) || !p.contains(".php:"));
+            if let (true, Some(message)) = (first_frame, previous) {
+                if let Some(level) = level_of(message) {
+                    add(path.to_string(), line.parse().unwrap_or(0), level, message.to_string());
+                }
+            }
+            continue;
+        }
         let numbered = text.split_once(") ").filter(|(n, _)| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()));
         if let Some((_, location)) = numbered {
             let Some((path, line)) = location.rsplit_once(':') else { continue };
@@ -176,6 +198,19 @@ each() is deprecated
 Undefined array key \"total\"
 
 ";
+
+    #[test]
+    fn phpunit_9_and_bootstrap_errors() {
+        let log = "1) OAuthTest::testOptions\nMethod ReflectionProperty::setAccessible() is deprecated since 8.5\n\n/app/test/OAuth/OAuthTest.php:39\n/app/vendor/phpunit/phpunit/src/Framework/TestCase.php:1200\n\nAn error occurred inside PHPUnit.\n\nMessage:  Tests\\Base::wrap(): Implicitly marking parameter $dt as nullable is deprecated\nLocation: /app/tests/AbstractTestCase.php:228\n\n2) FooTest::testBar\nFailed asserting that false is true.\n\n/app/tests/FooTest.php:12\n";
+        let events: Vec<(String, usize, Level)> = parse(log).into_iter().map(|e| (e.path, e.line, e.level)).collect();
+        assert_eq!(
+            events,
+            [
+                ("/app/test/OAuth/OAuthTest.php".to_string(), 39, Level::Deprecated),
+                ("/app/tests/AbstractTestCase.php".to_string(), 228, Level::Deprecated)
+            ]
+        );
+    }
 
     #[test]
     fn parses_logs_and_merges_with_findings() {
