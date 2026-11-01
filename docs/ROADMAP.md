@@ -38,12 +38,6 @@ Ferry covers roughly half of the PHP 7.0–8.5 change catalog. Function, constan
 - Sort callbacks that return a bool (8.0 deprecation, plus stable sorting).
 - Literal regex patterns that PCRE2 rejects (`[\w-.]` in 7.3, invalid escapes in 8.0, `{,3}` in 8.4).
 
-### Fixes to existing rules
-
-- `PDO::PGSQL_TRANSACTION_*` suggests `Pdo\Pgsql::*`, but those constants are deprecated in 8.5 too. *(verify the right replacement)*
-- `intlcal_set` and `intlgregcal_create_instance` are flagged on every call; 8.4 may only deprecate some forms. *(verify)*
-- `array_first` and `array_last` in `LARAVEL_HELPERS`: PHP 8.5 adds built-in functions with these names. With `laravel/helpers` the built-in wins and `array_first($array, $callback)` throws `ArgumentCountError`, so "install laravel/helpers" is the wrong advice for an 8.5 target. *(verify)*
-
 ### Out of reach for static analysis
 
 String-to-number comparisons with `==` (8.0), `null` passed to built-ins from variables, dynamic properties on objects of unknown classes, autovivification from `false`, undefined variables and keys, and data stored in serialized form. These need runtime evidence; see section 3.
