@@ -12,11 +12,6 @@ Ferry covers roughly half of the PHP 7.0–8.5 change catalog. Function, constan
 
 | Change | Version | Detection | Size |
 |---|---|---|---|
-| Too few arguments to project methods and constructors (`ArgumentCountError`); plain functions are done | 7.1 | Compare positional argument counts with required parameter counts from the index | M |
-| Wrong argument count for built-in functions, such as `mktime()` with no arguments, `crypt($pw)`, extra arguments | 8.0 | An arity table generated from stubs | M |
-| Error handlers written for PHP 7: `if (error_reporting() == 0)` to detect `@`, and handlers with a required fifth `$errcontext` parameter | 8.0 | Pattern plus resolving the callable passed to `set_error_handler` | S |
-| `set_exception_handler` callbacks typed `Exception` (an `Error` gives a TypeError) | 7.0 | Resolve the callable | S |
-| `parent::` in a class without a parent (Rector already fixes it, but Ferry doesn't report it) | 8.0 | Index | S |
 | `fn` and `match` as class names; `use ... as Match` | 7.4, 8.0 | Extend `RESERVED_CLASS_NAMES` | S |
 
 ### Cheap additions to existing tables
@@ -60,11 +55,8 @@ Competing tools each cover part of an upgrade: PHPCompatibility (detection only;
 | # | Feature | Why | Size |
 |---|---|---|---|
 | 1 | **Project config (`.ferry/`)**: target, excluded paths, ignores, baseline, editor, test command; committed to git | Foundation for most items below | S |
-| 2 | **Inline ignores and stale entries**: a `// ferry-ignore rule-id` comment next to the code, and a report of `.ferry/ignore.json` entries that no longer match (file ignores with a reason are done) | Keeps the ignore list honest as code changes | S |
 | 3 | **Custom editor command or URL** for editors outside the built-in list (VS Code, Cursor, PhpStorm, Sublime Text and Zed are done) | Covers Neovim, Emacs and in-house setups | S |
-| 4 | **Command-line extras**: `--fail-on new` against a baseline and a ready-made GitHub Action (`ferry-cli scan` with text, JSON, SARIF and GitHub output is done) | Easier adoption in pipelines | S |
 | 5 | **JUnit, Checkstyle and CSV output** with stable fingerprints | GitLab, Jenkins, spreadsheets | S |
-| 6 | **Baseline and progress over time**: compact snapshots per scan, new/unchanged/fixed between scans, a score trend chart | A ratchet for CI and something to show management | M |
 | 7 | **Import runtime deprecations**: PHP error logs, PHPUnit and Symfony bridge output, Monolog JSON. Merge them with static findings, mark matches "confirmed at runtime" with a hit count, and separate own code from vendor code | No tool merges runtime evidence with static findings; it covers what static analysis can't see (section 1) | M |
 | 8 | **CSV with a `git blame` owner column** | Assign work across a team | S |
 | 9 | **Git integration**: refuse to apply on a dirty tree, optional branch per batch, generated commit message listing the Rector rules | Small, reviewable commits | M |

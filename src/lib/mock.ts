@@ -8,6 +8,7 @@ import type {
   FixKind,
   ProjectInfo,
   ScanProgress,
+  IgnoreEntry,
   ScanResult,
   Settings,
   Severity,
@@ -154,18 +155,31 @@ const DEPS: Omit<DependencyReport, "target" | "rootStatus"> = {
   ],
 };
 
-export function mockApi(opts: { delay?: number; scale?: number } = {}): Api {
+export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: IgnoreEntry[] } = {}): Api {
   const delay = opts.delay ?? 450;
   const listeners = new Set<(p: ScanProgress) => void>();
   let settings: Settings = { phpPath: null, snapshotLimit: null, editor: null };
   const ignores = new Map<string, string>();
+  let stale = opts.staleIgnores ?? [];
   let lastScan: ScanResult | null = null;
+  const history = new Map<string, { at: number; score: number; total: number; ids: string[] }[]>();
+  const track = (scan: ScanResult): ScanResult => {
+    const list = history.get(scan.target) ?? [];
+    const prev = list[list.length - 1];
+    const ids = scan.findings.map((f) => f.id);
+    const added = prev ? ids.filter((id) => !prev.ids.includes(id)).length : null;
+    const fixed = prev ? prev.ids.filter((id) => !ids.includes(id)).length : null;
+    list.push({ at: Math.floor(Date.now() / 1000), score: scan.summary.score, total: scan.summary.total, ids });
+    history.set(scan.target, list);
+    const entries = list.slice(-30).map(({ at, score, total }) => ({ at, target: scan.target, score, total }));
+    return { ...scan, progress: { history: entries, newSinceLast: added, fixedSinceLast: fixed } };
+  };
   const withIgnores = (scan: ScanResult): ScanResult => {
     lastScan = scan;
     const all = [...scan.findings, ...scan.ignored.map((i) => i.finding)];
     const findings = all.filter((f) => !ignores.has(f.id));
     const ignored = all.filter((f) => ignores.has(f.id)).map((finding) => ({ finding, reason: ignores.get(finding.id)! }));
-    return { ...scan, findings, ignored, summary: summarize(findings) };
+    return { ...scan, findings, ignored, staleIgnores: stale, summary: summarize(findings) };
   };
   let pending = [...CHANGES];
   let cancelled = false;
@@ -218,7 +232,7 @@ export function mockApi(opts: { delay?: number; scale?: number } = {}): Api {
           return { ...s, file, column: 9, id: `${file}:${s.line}:9:${s.ruleId}` };
         }),
       ).flat();
-      return withIgnores({ target, filesScanned: total, linesScanned: 18432, findings, errors: [], durationMs: 184, summary: summarize(findings), ignored: [] });
+      return track(withIgnores({ target, filesScanned: total, linesScanned: 18432, findings, errors: [], durationMs: 184, summary: summarize(findings), ignored: [], staleIgnores: [] }));
     },
     onScanProgress: async (handler) => {
       listeners.add(handler);
@@ -303,6 +317,11 @@ export function mockApi(opts: { delay?: number; scale?: number } = {}): Api {
       return withIgnores(lastScan);
     },
     openInEditor: async () => {},
+    pruneIgnores: async () => {
+      if (!lastScan) throw new Error("Scan the project first.");
+      stale = [];
+      return withIgnores(lastScan);
+    },
     getSettings: async () => settings,
     saveSettings: async (s) => {
       settings = s;

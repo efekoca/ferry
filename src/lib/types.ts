@@ -54,6 +54,26 @@ export interface IgnoredFinding {
   reason: string;
 }
 
+export interface IgnoreEntry {
+  ruleId: string;
+  file: string;
+  snippet: string;
+  reason: string;
+}
+
+export interface HistoryEntry {
+  at: number;
+  target: string;
+  score: number;
+  total: number;
+}
+
+export interface ScanHistory {
+  history: HistoryEntry[];
+  newSinceLast: number | null;
+  fixedSinceLast: number | null;
+}
+
 export interface ScanResult {
   target: string;
   filesScanned: number;
@@ -63,6 +83,8 @@ export interface ScanResult {
   durationMs: number;
   summary: Summary;
   ignored: IgnoredFinding[];
+  staleIgnores: IgnoreEntry[];
+  progress?: ScanHistory | null;
 }
 
 export interface ScanProgress {

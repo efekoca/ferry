@@ -235,7 +235,7 @@ fn branch(tokens: &[Token], kw: usize) -> Option<((usize, usize), usize, usize)>
     Some(((open + 1, close), body, end))
 }
 
-fn matching(tokens: &[Token], open: usize) -> Option<usize> {
+pub(crate) fn matching(tokens: &[Token], open: usize) -> Option<usize> {
     let mut depth = 0usize;
     for (k, t) in tokens.iter().enumerate().skip(open) {
         if t.is_punct("(") || t.is_punct("[") || t.is_punct("{") || t.is_punct("#[") {
