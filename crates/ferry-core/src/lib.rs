@@ -27,5 +27,6 @@ pub mod server;
 pub mod snapshot;
 pub mod toolchain;
 pub mod version;
+pub mod wordpress;
 
 pub use version::PhpVersion;
