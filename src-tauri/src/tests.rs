@@ -422,6 +422,11 @@ fn lints_with_a_local_php_of_the_target() {
     let merged = h.ok("run_local_check", json!({ "path": root, "target": line, "kind": "lint" }));
     assert!(merged["runtime"]["file"].as_str().unwrap().starts_with("php -l · PHP "));
     assert!(merged["runtime"]["events"].as_u64().unwrap() > 0);
+    let check = &merged["runtime"]["check"];
+    assert_eq!(check["kind"], "lint");
+    assert!(check["files"].as_u64().unwrap() > 0);
+    assert_eq!(check["notRun"], 0);
+    assert!(check.get("output").is_none(), "only the trimmed log is sent");
     let err = h.invoke("run_local_check", json!({ "path": root, "target": line, "kind": "tests" })).unwrap_err();
     assert_eq!(err, json!("Projede vendor/bin/phpunit yok."));
 }

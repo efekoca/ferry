@@ -1813,6 +1813,37 @@ select.input {
   color: var(--danger-fg);
 }
 
+.check-log {
+  margin-top: var(--space-2);
+}
+
+.check-log summary {
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.check-log__command {
+  display: block;
+  margin-top: var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+
+.check-log pre {
+  max-height: 240px;
+  margin: var(--space-2) 0 0;
+  padding: var(--space-2) var(--space-3);
+  overflow: auto;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .change-list {
   flex: 1;
   overflow: auto;

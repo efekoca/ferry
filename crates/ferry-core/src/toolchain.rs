@@ -245,55 +245,164 @@ pub fn php_version(php: &Path) -> Option<String> {
     String::from_utf8_lossy(&out.stdout).lines().map(str::trim).rfind(|l| !l.is_empty()).map(str::to_string)
 }
 
-pub fn lint_source(php: &Path, src: &str) -> Option<String> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Lint {
+    Clean,
+    Error(String),
+    NotRun,
+}
+
+pub fn lint_source(php: &Path, src: &str) -> Lint {
     use std::io::Write;
-    let mut child = command(php)
+    let Ok(mut child) = command(php)
         .args(["-n", "-d", "display_errors=1", "-l"])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
-        .ok()?;
-    let mut stdin = child.stdin.take()?;
+    else {
+        return Lint::NotRun;
+    };
+    let Some(mut stdin) = child.stdin.take() else { return Lint::NotRun };
     let input = src.to_string();
     let writer = std::thread::spawn(move || stdin.write_all(input.as_bytes()));
-    let out = child.wait_with_output().ok()?;
+    let Ok(out) = child.wait_with_output() else { return Lint::NotRun };
     let _ = writer.join();
     if out.status.success() {
-        return None;
+        return Lint::Clean;
     }
     let text = format!("{}\n{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
     let line = text
         .lines()
         .map(str::trim)
         .find(|l| l.to_ascii_lowercase().contains("error") && !l.starts_with("Errors parsing"))
-        .or_else(|| text.lines().map(str::trim).find(|l| !l.is_empty()))?;
-    Some(line.trim_start_matches("PHP ").to_string())
+        .or_else(|| text.lines().map(str::trim).find(|l| !l.is_empty()));
+    match line {
+        Some(line) => Lint::Error(line.trim_start_matches("PHP ").to_string()),
+        None => Lint::NotRun,
+    }
 }
 
-pub fn new_syntax_errors<'a>(php: &Path, files: impl IntoIterator<Item = (&'a str, Option<&'a str>, &'a str)>) -> Vec<String> {
+fn without_line(message: &str) -> &str {
+    message.rsplit_once(" on line ").map_or(message, |(head, _)| head)
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct LintReport {
+    pub errors: Vec<String>,
+    pub not_run: Vec<String>,
+}
+
+pub fn new_syntax_errors<'a>(php: &Path, files: impl IntoIterator<Item = (&'a str, Option<&'a str>, &'a str)>) -> LintReport {
     let files: Vec<_> = files.into_iter().collect();
     let workers = std::thread::available_parallelism().map_or(4, |n| n.get()).clamp(1, 8);
     let chunk = files.len().div_ceil(workers).max(1);
-    std::thread::scope(|scope| {
+    let results: Vec<(String, Option<String>)> = std::thread::scope(|scope| {
         let handles: Vec<_> = files
             .chunks(chunk)
             .map(|part| {
                 scope.spawn(move || {
                     part.iter()
-                        .filter_map(|&(rel, before, after)| {
-                            let error = lint_source(php, after)?;
-                            if before.is_some_and(|b| lint_source(php, b).is_some()) {
-                                return None;
+                        .filter_map(|&(rel, before, after)| match lint_source(php, after) {
+                            Lint::Clean => None,
+                            Lint::NotRun => Some((rel.to_string(), None)),
+                            Lint::Error(error) => {
+                                let existing = before.map(|b| lint_source(php, b));
+                                if matches!(&existing, Some(Lint::Error(old)) if without_line(old) == without_line(&error)) {
+                                    return None;
+                                }
+                                Some((rel.to_string(), Some(format!("{rel} — {}", error.replace("Standard input code", rel)))))
                             }
-                            Some(format!("{rel} — {}", error.replace("Standard input code", rel)))
                         })
                         .collect::<Vec<_>>()
                 })
             })
             .collect();
         handles.into_iter().flat_map(|h| h.join().unwrap_or_default()).collect()
+    });
+    let mut report = LintReport::default();
+    for (rel, error) in results {
+        match error {
+            Some(e) => report.errors.push(e),
+            None => report.not_run.push(rel),
+        }
+    }
+    report
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Stop {
+    Cancelled,
+    TimedOut,
+}
+
+pub struct Finished {
+    pub status: Option<std::process::ExitStatus>,
+    pub stdout: Vec<u8>,
+    pub stderr: Vec<u8>,
+    pub stopped: Option<Stop>,
+    pub duration: std::time::Duration,
+}
+
+pub fn run_process(
+    mut cmd: Command,
+    program: &Path,
+    cancel: &std::sync::atomic::AtomicBool,
+    timeout: std::time::Duration,
+) -> Result<Finished, ToolError> {
+    use std::process::Stdio;
+    cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
+    let mut child = cmd.spawn().map_err(|source| ToolError::Spawn { program: program.display().to_string(), source })?;
+    let read = |pipe: Option<Box<dyn std::io::Read + Send>>| {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(mut pipe) = pipe {
+                let _ = pipe.read_to_end(&mut buf);
+            }
+            buf
+        })
+    };
+    let stdout = read(child.stdout.take().map(|p| Box::new(p) as _));
+    let stderr = read(child.stderr.take().map(|p| Box::new(p) as _));
+    let started = std::time::Instant::now();
+    let mut stopped = None;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break Some(status),
+            Ok(None) => {}
+            Err(_) => break None,
+        }
+        if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            stopped = Some(Stop::Cancelled);
+        } else if started.elapsed() >= timeout {
+            stopped = Some(Stop::TimedOut);
+        }
+        if stopped.is_some() {
+            kill_tree(&mut child);
+            let _ = child.wait();
+            break None;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    };
+    Ok(Finished {
+        status,
+        stdout: stdout.join().unwrap_or_default(),
+        stderr: stderr.join().unwrap_or_default(),
+        stopped,
+        duration: started.elapsed(),
     })
+}
+
+fn kill_tree(child: &mut std::process::Child) {
+    #[cfg(unix)]
+    let _ = Command::new("kill")
+        .args(["-KILL", &format!("-{}", child.id())])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+    let _ = child.kill();
 }
 
 pub fn find_composer() -> Option<PathBuf> {
@@ -415,17 +524,28 @@ mod tests {
         };
         let ok = "<?php\necho 1;\n";
         let broken = "<?php\nfunction f( {\n";
-        let errors = new_syntax_errors(
+        let other = "<?php\n$x = ;\n";
+        let report = new_syntax_errors(
             &php,
-            [("src/ok.php", Some(ok), ok), ("src/new.php", Some(ok), broken), ("src/old.php", Some(broken), broken)],
+            [
+                ("src/ok.php", Some(ok), ok),
+                ("src/new.php", Some(ok), broken),
+                ("src/old.php", Some(broken), broken),
+                ("src/moved.php", Some(broken), &format!("<?php\n\n{}", &broken[6..])),
+                ("src/different.php", Some(broken), other),
+            ],
         );
-        assert_eq!(errors.len(), 1, "{errors:?}");
-        assert!(errors[0].starts_with("src/new.php — "), "{errors:?}");
-        assert!(errors[0].contains("in src/new.php on line 2"), "{errors:?}");
+        let files: Vec<&str> = report.errors.iter().map(|e| e.split(" — ").next().unwrap()).collect();
+        assert_eq!(files, ["src/new.php", "src/different.php"], "{report:?}");
+        assert!(report.errors[0].contains("in src/new.php on line 2"), "{report:?}");
+        assert!(report.not_run.is_empty());
         let many: Vec<(String, &str)> = (0..20).map(|i| (format!("src/f{i:02}.php"), if i % 7 == 0 { broken } else { ok })).collect();
-        let errors = new_syntax_errors(&php, many.iter().map(|(rel, after)| (rel.as_str(), Some(ok), *after)));
-        let files: Vec<&str> = errors.iter().map(|e| e.split(" — ").next().unwrap()).collect();
+        let report = new_syntax_errors(&php, many.iter().map(|(rel, after)| (rel.as_str(), Some(ok), *after)));
+        let files: Vec<&str> = report.errors.iter().map(|e| e.split(" — ").next().unwrap()).collect();
         assert_eq!(files, ["src/f00.php", "src/f07.php", "src/f14.php"], "results keep the input order");
+
+        let missing = Path::new("/nonexistent/php");
+        assert_eq!(new_syntax_errors(missing, [("a.php", None, ok)]).not_run, ["a.php"]);
     }
 
     #[cfg(unix)]

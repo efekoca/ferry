@@ -102,12 +102,26 @@ export interface LocalPhp {
   path: string;
 }
 
+export interface CheckRun {
+  kind: "lint" | "tests";
+  command: string;
+  exitCode: number | null;
+  timedOut: boolean;
+  passed: boolean;
+  durationMs: number;
+  files: number;
+  failed: number;
+  notRun: number;
+  log: string;
+}
+
 export interface RuntimeSummary {
   file: string;
   events: number;
   confirmed: number;
   added: number;
   outside: number;
+  check?: CheckRun | null;
 }
 
 export interface ScanProgress {
@@ -240,6 +254,7 @@ export interface ApplyResult {
   snapshot: Snapshot;
   written: string[];
   lintErrors: string[];
+  lintChecked: boolean;
 }
 
 export interface BackupUsage {
