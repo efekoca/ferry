@@ -177,15 +177,23 @@ Depo aynı zamanda `ferry-cli`'ı derleyip pull request'lere uyarı ekleyen bir 
 | **Drupal** | `composer.json`'da `drupal/core`, `core/lib/Drupal.php` (`web/`, `docroot/`, `html/` veya `public/` altında da) ya da Drupal 7'nin `includes/bootstrap.inc` dosyası | Drupal çekirdeği, `sites/default/files` |
 | **Magento** | `app/Mage.php` (Magento 1), `bin/magento` ya da `composer.json`'da bir `magento/product-*` paketi | `generated`, `var`, `pub/static`, `setup`, `dev`; Magento 1'de `app/code/core` ve `lib` |
 | **PrestaShop** | `config/settings.inc.php`, `app/AppKernel.php` ya da `classes/PrestaShopAutoload.php` | `classes`, `controllers`, `src`, `app` gibi çekirdek klasörleri; `modules`, `override` ve `themes` taranır |
+| **Joomla** | `administrator` klasörüyle birlikte `libraries/src/Version.php` ya da Joomla 3'ün `libraries/cms/version/version.php` dosyası | `cache`, `tmp`, `administrator/cache`, `libraries/vendor`, `media` |
+| **Moodle** | `lib/moodlelib.php` ile birlikte `version.php` (5.1'den itibaren `public/version.php`) | `vendor` klasörleri |
+| **MediaWiki** | `includes/Defines.php` içindeki `MW_VERSION` ya da `includes/DefaultSettings.php` içindeki `$wgVersion` | `includes`, `languages`, `maintenance`, `resources` gibi çekirdek klasörler; `extensions` ve `skins` taranır |
+| **phpBB** | `includes/constants.php` içindeki `PHPBB_VERSION` (`phpBB/` altında da aranır) | `phpbb`, `includes`, `cache`, `install` gibi çekirdek klasörler; `ext` ve `styles` taranır |
 | **Düz PHP** | PHP dosyası içeren her klasör | — |
 
-WordPress, Laravel, Drupal, Magento, PrestaShop ve Symfony projelerinde Ferry platformun kendisini de kontrol eder:
+WordPress, Laravel, Drupal, Magento, PrestaShop, Joomla, Moodle, MediaWiki, phpBB ve Symfony projelerinde Ferry platformun kendisini de kontrol eder:
 
 - **WordPress:** `wp-includes/version.php`'deki çekirdek sürümü, hedef PHP sürümünü destekleyen en eski WordPress sürümüyle karşılaştırılır (örneğin PHP 8.4 için en az WordPress 6.7 gerekir).
 - **Laravel:** `composer.lock`'taki `laravel/framework` sürümü Laravel'in desteklediği PHP aralığıyla karşılaştırılır. Ayrıca Laravel 6'nın kaldırdığı `str_*` ve `array_*` yardımcıları ile `Input` facade'ı işaretlenir; PHP 8 en az Laravel 6.20 gerektirdiği için `laravel/helpers` kurulu değilse bunlar da bozulur.
 - **Drupal:** Çekirdek sürümü Drupal'ın PHP gereksinimleriyle karşılaştırılır (örneğin PHP 8.5 için en az Drupal 11.3 gerekir). Drupal 7 de kontrol edilir: PHP 8.2 için en az 7.94, PHP 8.3 için en az 7.103 gerekir; hiçbir Drupal 7 sürümü PHP 8.4'te çalışmaz.
 - **Magento:** Magento 2'nin `composer.lock`'taki sürümü Adobe'nin sistem gereksinimleriyle karşılaştırılır (örneğin PHP 8.4 için en az 2.4.8 gerekir). Magento 1 PHP 8'i hiç desteklemediği için, proje OpenMage LTS kullanmıyorsa işaretlenir.
 - **PrestaShop:** Çekirdek sürümü PrestaShop'un gereksinimleriyle karşılaştırılır: 1.6 ve 1.7 PHP 8'i desteklemez, 8.0–8.2 en fazla PHP 8.1'i, 9.x en fazla PHP 8.5'i destekler.
+- **Joomla:** Çekirdek sürümü, Joomla kılavuzunun her sürüm için listelediği PHP sürümleriyle karşılaştırılır: 3.x en fazla PHP 8.0'ı destekler, 4.0.5 8.1'i, 4.3 8.2'yi ekler, 5.0 8.3'ü destekler, 5.3 8.4'ü ve 5.4 8.5'i ekler. Joomla 5.x ve 6.x için yalnızca önerilen sürümleri yayımladığından bu bulgular **Riskli** olarak işaretlenir.
+- **Moodle:** `version.php`'deki `$release` değeri, Moodle'ın PHP politikasıyla yama sürümüne kadar karşılaştırılır (örneğin PHP 8.2 için en az 4.2.3, PHP 8.4 için en az 5.0 gerekir).
+- **MediaWiki:** Sürüm, mediawiki.org'daki uyumluluk tablosuyla karşılaştırılır (örneğin PHP 8.4 için en az 1.46 gerekir). Tabloda boşluklar olduğu için bulgular **Riskli** olarak işaretlenir.
+- **phpBB:** `PHPBB_VERSION`, her sürümün `INSTALL.html` dosyasındaki PHP aralığıyla karşılaştırılır: 3.3.6 PHP 8.0 ve 8.1'i, 3.3.12 8.2 ve 8.3'ü ekler; 8.4'ü destekleyen kararlı bir sürüm henüz yok.
 - **Symfony:** Symfony en yüksek PHP sürümünü yayımlamadığı için, bakımı hedef PHP sürümü çıkmadan biten bir sürüm **Riskli** olarak işaretlenir.
 
 `vendor` ve `node_modules` her zaman atlanır. 2 MB'tan büyük dosyalar atlanır ve tarama sonuçlarında listelenir; hiçbir dosya sessizce dışarıda kalmaz.

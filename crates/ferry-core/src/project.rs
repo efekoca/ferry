@@ -12,6 +12,10 @@ pub enum Framework {
     Drupal,
     Magento,
     PrestaShop,
+    Joomla,
+    Moodle,
+    MediaWiki,
+    Phpbb,
     Generic,
 }
 
@@ -50,6 +54,27 @@ pub fn detect_framework(root: &Path) -> Framework {
     if root.join("app/Mage.php").is_file() || root.join("bin/magento").is_file() {
         return Framework::Magento;
     }
+    if root.join("libraries/src/Version.php").is_file() && root.join("administrator").is_dir()
+        || root.join("libraries/cms/version/version.php").is_file()
+    {
+        return Framework::Joomla;
+    }
+    if ["version.php", "public/version.php"].iter().any(|v| std::fs::read_to_string(root.join(v)).is_ok_and(|t| t.contains("$release")))
+        && (root.join("lib/moodlelib.php").is_file() || root.join("public/lib/moodlelib.php").is_file())
+    {
+        return Framework::Moodle;
+    }
+    if std::fs::read_to_string(root.join("includes/Defines.php")).is_ok_and(|t| t.contains("MW_VERSION"))
+        || std::fs::read_to_string(root.join("includes/DefaultSettings.php")).is_ok_and(|t| t.contains("$wgVersion"))
+    {
+        return Framework::MediaWiki;
+    }
+    if ["includes/constants.php", "phpBB/includes/constants.php"]
+        .iter()
+        .any(|c| std::fs::read_to_string(root.join(c)).is_ok_and(|t| t.contains("PHPBB_VERSION")))
+    {
+        return Framework::Phpbb;
+    }
     let composer = std::fs::read_to_string(root.join("composer.json")).unwrap_or_default();
     if composer.contains("\"laravel/framework\"") {
         return Framework::Laravel;
@@ -76,6 +101,23 @@ pub fn framework_excludes(framework: Framework) -> Vec<String> {
         Framework::PrestaShop => {
             &["classes", "controllers", "src", "Core", "Adapter", "app", "cache", "var", "install", "install-dev", "tests"]
         }
+        Framework::Joomla => &["cache", "tmp", "administrator/cache", "libraries/vendor", "media"],
+        Framework::Moodle => &["vendor", "lib/vendor", "public/lib/vendor"],
+        Framework::MediaWiki => &["includes", "languages", "maintenance", "resources", "tests", "vendor", "cache"],
+        Framework::Phpbb => &[
+            "phpbb",
+            "includes",
+            "cache",
+            "store",
+            "install",
+            "vendor",
+            "phpBB/phpbb",
+            "phpBB/includes",
+            "phpBB/cache",
+            "phpBB/store",
+            "phpBB/install",
+            "phpBB/vendor",
+        ],
         Framework::Generic => &[],
     };
     dirs.iter().map(|d| d.to_string()).collect()
