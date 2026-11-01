@@ -38,6 +38,7 @@ export interface Api {
   exportReport(path: string, destination: string): Promise<void>;
   ignoreFinding(path: string, id: string, reason: string): Promise<ScanResult>;
   unignoreFinding(path: string, id: string): Promise<ScanResult>;
+  pruneIgnores(path: string): Promise<ScanResult>;
   openInEditor(path: string, file: string, line: number, column: number): Promise<void>;
   revealPath(path: string): Promise<void>;
   getSettings(): Promise<Settings>;
@@ -82,6 +83,7 @@ async function tauriApi(): Promise<Api> {
     exportReport: (path, destination) => invoke("export_report", { path, destination }),
     ignoreFinding: (path, id, reason) => invoke("ignore_finding", { path, id, reason }),
     unignoreFinding: (path, id) => invoke("unignore_finding", { path, id }),
+    pruneIgnores: (path) => invoke("prune_ignores", { path }),
     openInEditor: (path, file, line, column) => invoke("open_in_editor", { path, file, line, column }),
     revealPath: (path) => opener.revealItemInDir(path),
     getSettings: () => invoke("get_settings"),
