@@ -64,6 +64,7 @@ fn kuzey_magaza_triggers_every_rule() {
         patterns::PARTIAL_CALLABLE.id,
         patterns::INCOMPATIBLE_OVERRIDE.id,
         patterns::INCOMPATIBLE_USER_OVERRIDE.id,
+        patterns::BUILTIN_RESULT_BY_REF.id,
         patterns::ASSIGN_NEW_BY_REF.id,
         patterns::UNSET_THIS.id,
         patterns::BREAK_OUTSIDE_LOOP.id,

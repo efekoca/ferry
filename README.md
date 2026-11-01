@@ -62,7 +62,7 @@ Select a finding to see:
 Ferry has its own PHP lexer and rule set, so it reads code the way PHP does: method calls such as `$db->each()`, functions in your own namespace, and text inside strings and comments are not mistaken for removed functions. Its rules cover:
 
 - removed extensions and functions, such as `mysql_*`, `ereg*`, `each()`, `create_function()`, and `money_format()`
-- syntax that no longer parses or compiles, such as `$str{0}`, `(real)` and `(unset)` casts, `$obj = &new Foo`, `unset($this)`, `break` outside a loop, and PHP 7 `#[` comments, which PHP 8 reads as attributes
+- syntax that no longer parses or compiles, such as `$str{0}`, `(real)` and `(unset)` casts, `$obj = &new Foo`, `$args = &func_get_args()`, `unset($this)`, writes to the whole `$GLOBALS` array, reserved names such as `Object` used as import aliases, `break` outside a loop, and PHP 7 `#[` comments, which PHP 8 reads as attributes
 - deprecations, such as `"${var}"` interpolation, implicit nullable parameters, `utf8_encode()`, `FILTER_SANITIZE_STRING`, and `E_STRICT`
 - parameter and call patterns, such as an optional parameter before a required one, a literal `null` passed to built-in string functions, and `"self::method"` style callables
 - methods that override a built-in class or interface method with a signature PHP 8 rejects, such as Drupal 7's `query($query, array $args = array(), $options = array())` on a `PDO` subclass, which stops the class from loading
@@ -81,7 +81,7 @@ The **Fixes** page runs Rector on your project in dry-run mode. No files change.
 - Pick the files you want and press **Apply**. Files marked **Review** carry a note to check them first.
 - After applying, Ferry checks the changed files with `php -l` and warns you if a change left one that no longer parses, so you can roll it back from **History** right away.
 
-Ferry handles cases Rector cannot on its own. For example, a file that uses `$str{0}` makes Rector skip the whole file. Ferry rewrites those offsets to `$str[0]` first, and does the same for `= &new` and `default;`, so the rest of the file is still fixed.
+Ferry handles cases Rector cannot on its own. For example, a file that uses `$str{0}` makes Rector skip the whole file. Ferry rewrites those offsets to `$str[0]` first, and does the same for `= &new`, `= &func_get_args()` and `default;`, so the rest of the file is still fixed.
 
 ### Dependencies that block the upgrade
 
