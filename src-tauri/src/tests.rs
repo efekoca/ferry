@@ -143,6 +143,16 @@ fn messages_follow_the_ui_language() {
 }
 
 #[test]
+fn compares_every_selectable_target() {
+    let h = harness();
+    let rows = h.ok("compare_targets", json!({ "path": h.root }));
+    let targets: Vec<&str> = rows.as_array().unwrap().iter().map(|r| r["target"].as_str().unwrap()).collect();
+    assert_eq!(targets, ["8.2", "8.3", "8.4", "8.5"]);
+    assert!(rows[0]["summary"]["breaking"].as_u64().unwrap() > 0);
+    assert_eq!(rows[3]["rootBlocks"], true);
+}
+
+#[test]
 fn settings_round_trip() {
     let h = harness();
     assert_eq!(h.ok("get_settings", json!({})), json!({ "phpPath": null, "snapshotLimit": null, "editor": null }));

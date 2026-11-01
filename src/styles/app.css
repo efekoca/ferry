@@ -973,7 +973,8 @@ select.input {
   padding-bottom: var(--space-4);
 }
 
-.table__num {
+.table__num,
+.table th.table__num {
   text-align: right;
 }
 
@@ -2849,4 +2850,21 @@ select.input {
   margin-top: var(--space-2);
   color: var(--accent);
   font-size: var(--text-sm);
+}
+
+.compare__intro {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  padding: var(--space-4) var(--space-5);
+}
+
+.compare__intro p {
+  max-width: 60ch;
+}
+
+.compare__current td {
+  background: var(--accent-soft);
 }
