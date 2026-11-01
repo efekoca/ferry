@@ -33,7 +33,7 @@ export function filterFindings(findings: Finding[], { fix, severity, rule, query
 
 export function Findings() {
   const { t, loc } = useI18n();
-  const { scan, setView, project, api, runScan, scanning, findingsFilter: filter, setFindingsFilter, ignoreFinding, unignoreFinding } = useStore();
+  const { scan, setView, project, api, runScan, scanning, findingsFilter: filter, setFindingsFilter, ignoreFinding, unignoreFinding, pruneIgnores } = useStore();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showIgnored, setShowIgnored] = useState(false);
   const [ignoring, setIgnoring] = useState<{ id: string; reason: string } | null>(null);
@@ -131,6 +131,17 @@ export function Findings() {
     </Button>
   );
   const selectedReason = selected ? reasons.get(selected.id) : undefined;
+  const stale = scan?.staleIgnores ?? [];
+  const staleNotice = stale.length > 0 && (
+    <Callout tone="warn" icon={<EyeOff size={15} />}>
+      <div className="row row--wrap">
+        <span>{t.findings.staleIgnores(stale.length)}</span>
+        <Button size="sm" variant="secondary" onClick={() => void pruneIgnores()}>
+          {t.findings.pruneIgnores}
+        </Button>
+      </div>
+    </Callout>
+  );
 
   const countFix = (k: FixKind) => findings.filter((f) => f.fix === k).length;
   const countSev = (k: Severity) => findings.filter((f) => f.severity === k).length;
@@ -178,6 +189,7 @@ export function Findings() {
                   </button>
                 )}
               </div>
+              {staleNotice}
               <div className="toolbar__summary">
                 <span aria-live="polite">{t.findings.showing(visible.length, findings.length)}</span>
                 {filtered && (

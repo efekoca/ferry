@@ -139,13 +139,14 @@ struct ScanResponse {
     scan: ScanResult,
     summary: report::Summary,
     ignored: Vec<IgnoredFinding>,
+    stale_ignores: Vec<Ignore>,
 }
 
 fn respond(root: &Path, mut scan: ScanResult) -> ScanResponse {
-    let (kept, ignored) = ignore::split(std::mem::take(&mut scan.findings), &ignore::load(root));
-    scan.findings = kept;
+    let applied = ignore::apply(root, std::mem::take(&mut scan.findings), &ignore::load(root));
+    scan.findings = applied.kept;
     let summary = report::summarize(&scan.findings);
-    ScanResponse { scan, summary, ignored }
+    ScanResponse { scan, summary, ignored: applied.ignored, stale_ignores: applied.stale }
 }
 
 #[tauri::command]
@@ -221,6 +222,24 @@ async fn unignore_finding(state: State<'_, AppState>, path: String, id: String) 
         let mut ignores = ignore::load(&root);
         ignores.retain(|i| !i.matches(finding));
         ignore::save(&root, &ignores).map_err(|e| {
+            let e = ferry_core::i18n::io_error(&e);
+            t!("Yok sayma listesi kaydedilemedi: {e}", "Couldn't save the ignore list: {e}")
+        })?;
+        Ok(respond(&root, scan))
+    })
+    .await
+}
+
+#[tauri::command]
+async fn prune_ignores(state: State<'_, AppState>, path: String) -> CmdResult<ScanResponse> {
+    let path = normalize_path(path);
+    let scan = state.scans.lock().unwrap().get(&path).cloned().ok_or_else(|| t!("Önce projeyi tarayın.", "Scan the project first."))?;
+    blocking(move || {
+        let root = project_root(&path)?;
+        let ignores = ignore::load(&root);
+        let stale = ignore::apply(&root, Vec::new(), &ignores).stale;
+        let kept: Vec<Ignore> = ignores.into_iter().filter(|i| !stale.contains(i)).collect();
+        ignore::save(&root, &kept).map_err(|e| {
             let e = ferry_core::i18n::io_error(&e);
             t!("Yok sayma listesi kaydedilemedi: {e}", "Couldn't save the ignore list: {e}")
         })?;
@@ -631,6 +650,7 @@ pub fn with_commands<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R
         export_report,
         ignore_finding,
         unignore_finding,
+        prune_ignores,
         open_in_editor,
         get_settings,
         save_settings,

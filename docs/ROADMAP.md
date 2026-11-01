@@ -62,7 +62,6 @@ Competing tools each cover part of an upgrade: PHPCompatibility (detection only;
 | # | Feature | Why | Size |
 |---|---|---|---|
 | 1 | **Project config (`.ferry/`)**: target, excluded paths, ignores, baseline, editor, test command; committed to git | Foundation for most items below | S |
-| 2 | **Inline ignores and stale entries**: a `// ferry-ignore rule-id` comment next to the code, and a report of `.ferry/ignore.json` entries that no longer match (file ignores with a reason are done) | Keeps the ignore list honest as code changes | S |
 | 3 | **Custom editor command or URL** for editors outside the built-in list (VS Code, Cursor, PhpStorm, Sublime Text and Zed are done) | Covers Neovim, Emacs and in-house setups | S |
 | 4 | **Command-line extras**: `--fail-on new` against a baseline and a ready-made GitHub Action (`ferry-cli scan` with text, JSON, SARIF and GitHub output is done) | Easier adoption in pipelines | S |
 | 5 | **JUnit, Checkstyle and CSV output** with stable fingerprints | GitLab, Jenkins, spreadsheets | S |

@@ -126,6 +126,7 @@ interface AppStore {
   exportReport(): Promise<void>;
   ignoreFinding(id: string, reason: string): Promise<boolean>;
   unignoreFinding(id: string): Promise<boolean>;
+  pruneIgnores(): Promise<boolean>;
 }
 
 const StoreContext = createContext<AppStore | null>(null);
@@ -479,18 +480,23 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
     [api, updateIgnores],
   );
 
+  const pruneIgnores = useCallback(
+    () => (api ? updateIgnores((root) => api.pruneIgnores(root)) : Promise.resolve(false)),
+    [api, updateIgnores],
+  );
+
   const value = useMemo<AppStore>(
     () => ({
       api, view, setView, findingsFilter, setFindingsFilter, showFindings, theme, setTheme, recent, forgetRecent, project, opening, openProject, closeProject,
       target, setTarget, scan, scanning, progress, runScan, deps, toolchain, refreshToolchain, installingRector,
       installRector, preview, previewMode, previewing, loadPreview, cancelPreview, applying, applyChanges, snapshots,
-      refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport, ignoreFinding, unignoreFinding,
+      refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport, ignoreFinding, unignoreFinding, pruneIgnores,
     }),
     [
       api, view, findingsFilter, showFindings, theme, setTheme, recent, forgetRecent, project, opening, openProject, closeProject, target,
       setTarget, scan, scanning, progress, runScan, deps, toolchain, refreshToolchain, installingRector,
       installRector, preview, previewMode, previewing, loadPreview, cancelPreview, applying, applyChanges, snapshots,
-      refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport, ignoreFinding, unignoreFinding,
+      refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport, ignoreFinding, unignoreFinding, pruneIgnores,
     ],
   );
 
