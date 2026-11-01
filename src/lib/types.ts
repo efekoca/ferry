@@ -89,6 +89,12 @@ export interface ScanResult {
   runtime?: RuntimeSummary | null;
 }
 
+export interface LocalPhp {
+  line: string;
+  version: string;
+  path: string;
+}
+
 export interface RuntimeSummary {
   file: string;
   events: number;

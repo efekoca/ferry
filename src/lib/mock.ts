@@ -231,6 +231,16 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
       runtimeLog = log.split("/").pop() ?? log;
       return withIgnores(lastScan);
     },
+    localPhpVersions: async () => [
+      { line: "8.4", version: "8.4.27", path: "/opt/homebrew/opt/php@8.4/bin/php" },
+      { line: "8.5", version: "8.5.12", path: "/opt/homebrew/bin/php" },
+    ],
+    runLocalCheck: async (_path, target, kind) => {
+      if (!lastScan) throw new Error("Scan the project first.");
+      await sleep(delay);
+      runtimeLog = kind === "lint" ? `php -l · PHP ${target}` : `PHPUnit · PHP ${target}`;
+      return withIgnores(lastScan);
+    },
     clearRuntimeLog: async () => {
       if (!lastScan) throw new Error("Scan the project first.");
       runtimeLog = null;

@@ -200,6 +200,12 @@ export const en: Dict = {
     runtimeSummary: (file, events, confirmed, added, outside) =>
       `${file}: ${events} distinct messages. ${confirmed} findings confirmed at runtime, ${added} messages added as findings the static scan missed, ${outside} from files outside the project.`,
     clearLog: "Remove log",
+    lintWith: (v) => `Lint with PHP ${v}`,
+    testWith: (v) => `Run tests on PHP ${v}`,
+    testTitle: "Run the project's tests?",
+    testText: (v) =>
+      `vendor/bin/phpunit runs on this computer with PHP ${v}, and the deprecations it reports are added to the findings. Tests run the project's code, so only do this for projects you trust. It stops after 20 minutes.`,
+    testRun: "Run tests",
     runtimeDetail: (n) => `This code raised a warning ${n} ${n === 1 ? "time" : "times"} in the runtime log.`,
   },
   changes: {
@@ -401,6 +407,7 @@ export const en: Dict = {
     reportSaved: "Report saved",
     reportFailed: "Couldn't save the report",
     runtimeFailed: "Couldn't import the log",
+    localCheckFailed: "Couldn't run the local check",
     ignoreFailed: "Couldn't update the ignore list",
     editorFailed: "Couldn't open the file in the editor",
     phpSaved: "PHP path saved",

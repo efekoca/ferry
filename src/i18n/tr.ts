@@ -198,6 +198,12 @@ export const tr = {
     runtimeSummary: (file: string, events: number, confirmed: number, added: number, outside: number) =>
       `${file}: ${events} farklı mesaj. ${confirmed} bulgu çalışırken doğrulandı, ${added} mesaj statik taramanın bulmadığı yeni bulgu olarak eklendi, ${outside} mesaj proje dışındaki dosyalardan.`,
     clearLog: "Log'u kaldır",
+    lintWith: (v: string) => `PHP ${v} ile lint et`,
+    testWith: (v: string) => `Testleri PHP ${v} ile çalıştır`,
+    testTitle: "Projenin testleri çalıştırılsın mı?",
+    testText: (v: string) =>
+      `vendor/bin/phpunit bu bilgisayarda PHP ${v} ile çalıştırılır ve bildirdiği kullanımdan kalkmalar bulgulara eklenir. Testler projenin kodunu çalıştırır; yalnızca güvendiğiniz projelerde kullanın. En fazla 20 dakika sürer.`,
+    testRun: "Testleri çalıştır",
     runtimeDetail: (n: number) => `Bu kod çalışma anı log'unda ${n} kez uyarı verdi.`,
   },
   changes: {
@@ -398,6 +404,7 @@ export const tr = {
     reportSaved: "Rapor kaydedildi",
     reportFailed: "Rapor kaydedilemedi",
     runtimeFailed: "Log içe aktarılamadı",
+    localCheckFailed: "Yerel kontrol çalıştırılamadı",
     ignoreFailed: "Yok sayma listesi güncellenemedi",
     editorFailed: "Dosya editörde açılamadı",
     phpSaved: "PHP yolu kaydedildi",
