@@ -124,6 +124,8 @@ interface AppStore {
   deleteAllSnapshots(): Promise<void>;
 
   exportReport(): Promise<void>;
+  ignoreFinding(id: string, reason: string): Promise<boolean>;
+  unignoreFinding(id: string): Promise<boolean>;
 }
 
 const StoreContext = createContext<AppStore | null>(null);
@@ -453,18 +455,42 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
     }
   }, [api, project, scan, target, toast, fail, t]);
 
+  const updateIgnores = useCallback(
+    async (change: (root: string) => Promise<ScanResult>) => {
+      if (!project) return false;
+      const gen = generation.current;
+      try {
+        const result = await change(project.root);
+        if (gen === generation.current) setScan(result);
+        return true;
+      } catch (e) {
+        fail(t.toast.ignoreFailed, e);
+        return false;
+      }
+    },
+    [project, fail, t],
+  );
+  const ignoreFinding = useCallback(
+    (id: string, reason: string) => (api ? updateIgnores((root) => api.ignoreFinding(root, id, reason)) : Promise.resolve(false)),
+    [api, updateIgnores],
+  );
+  const unignoreFinding = useCallback(
+    (id: string) => (api ? updateIgnores((root) => api.unignoreFinding(root, id)) : Promise.resolve(false)),
+    [api, updateIgnores],
+  );
+
   const value = useMemo<AppStore>(
     () => ({
       api, view, setView, findingsFilter, setFindingsFilter, showFindings, theme, setTheme, recent, forgetRecent, project, opening, openProject, closeProject,
       target, setTarget, scan, scanning, progress, runScan, deps, toolchain, refreshToolchain, installingRector,
       installRector, preview, previewMode, previewing, loadPreview, cancelPreview, applying, applyChanges, snapshots,
-      refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport,
+      refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport, ignoreFinding, unignoreFinding,
     }),
     [
       api, view, findingsFilter, showFindings, theme, setTheme, recent, forgetRecent, project, opening, openProject, closeProject, target,
       setTarget, scan, scanning, progress, runScan, deps, toolchain, refreshToolchain, installingRector,
       installRector, preview, previewMode, previewing, loadPreview, cancelPreview, applying, applyChanges, snapshots,
-      refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport,
+      refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport, ignoreFinding, unignoreFinding,
     ],
   );
 
