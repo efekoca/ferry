@@ -1,6 +1,7 @@
 use ferry_core::analyzer::{self, ScanResult};
 use ferry_core::deps::{self, DependencyReport};
 use ferry_core::i18n::{self, Lang};
+use ferry_core::ignore::{self, Ignore, IgnoredFinding};
 use ferry_core::project::{self, ProjectInfo};
 use ferry_core::rector::{self, FileChange, RectorError, RectorMode, RectorPreview};
 use ferry_core::rules::FixKind;
@@ -23,6 +24,7 @@ const WRITTEN_FILE: &str = "written.json";
 pub struct Settings {
     pub php_path: Option<String>,
     pub snapshot_limit: Option<u32>,
+    pub editor: Option<String>,
 }
 
 pub struct AppState {
@@ -136,6 +138,14 @@ struct ScanResponse {
     #[serde(flatten)]
     scan: ScanResult,
     summary: report::Summary,
+    ignored: Vec<IgnoredFinding>,
+}
+
+fn respond(root: &Path, mut scan: ScanResult) -> ScanResponse {
+    let (kept, ignored) = ignore::split(std::mem::take(&mut scan.findings), &ignore::load(root));
+    scan.findings = kept;
+    let summary = report::summarize(&scan.findings);
+    ScanResponse { scan, summary, ignored }
 }
 
 #[tauri::command]
@@ -160,11 +170,105 @@ async fn scan_project<R: Runtime>(app: AppHandle<R>, path: String, target: Strin
     .await?;
     let (path, scan) = result;
     let state = app.state::<AppState>();
-    let summary = report::summarize(&scan.findings);
     if state.latest_scan.lock().unwrap().get(&path) == Some(&run) {
-        state.scans.lock().unwrap().insert(path, scan.clone());
+        state.scans.lock().unwrap().insert(path.clone(), scan.clone());
     }
-    Ok(ScanResponse { scan, summary })
+    Ok(respond(Path::new(&path), scan))
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs())
+}
+
+#[tauri::command]
+async fn ignore_finding(state: State<'_, AppState>, path: String, id: String, reason: String) -> CmdResult<ScanResponse> {
+    let path = normalize_path(path);
+    let scan = state.scans.lock().unwrap().get(&path).cloned().ok_or_else(|| t!("Önce projeyi tarayın.", "Scan the project first."))?;
+    if reason.trim().is_empty() {
+        return Err(t!("Yok sayma için bir gerekçe yazın.", "Write a reason for ignoring it."));
+    }
+    blocking(move || {
+        let root = project_root(&path)?;
+        let finding = scan
+            .findings
+            .iter()
+            .find(|f| f.id == id)
+            .ok_or_else(|| t!("Bulgu bulunamadı; projeyi yeniden tarayın.", "Finding not found; scan the project again."))?;
+        let mut ignores = ignore::load(&root);
+        if !ignores.iter().any(|i| i.matches(finding)) {
+            ignores.push(Ignore::for_finding(finding, &reason, now_secs()));
+        }
+        ignore::save(&root, &ignores).map_err(|e| {
+            let e = ferry_core::i18n::io_error(&e);
+            t!("Yok sayma listesi kaydedilemedi: {e}", "Couldn't save the ignore list: {e}")
+        })?;
+        Ok(respond(&root, scan))
+    })
+    .await
+}
+
+#[tauri::command]
+async fn unignore_finding(state: State<'_, AppState>, path: String, id: String) -> CmdResult<ScanResponse> {
+    let path = normalize_path(path);
+    let scan = state.scans.lock().unwrap().get(&path).cloned().ok_or_else(|| t!("Önce projeyi tarayın.", "Scan the project first."))?;
+    blocking(move || {
+        let root = project_root(&path)?;
+        let finding = scan
+            .findings
+            .iter()
+            .find(|f| f.id == id)
+            .ok_or_else(|| t!("Bulgu bulunamadı; projeyi yeniden tarayın.", "Finding not found; scan the project again."))?;
+        let mut ignores = ignore::load(&root);
+        ignores.retain(|i| !i.matches(finding));
+        ignore::save(&root, &ignores).map_err(|e| {
+            let e = ferry_core::i18n::io_error(&e);
+            t!("Yok sayma listesi kaydedilemedi: {e}", "Couldn't save the ignore list: {e}")
+        })?;
+        Ok(respond(&root, scan))
+    })
+    .await
+}
+
+fn encode_path(path: &str) -> String {
+    let mut out = String::new();
+    for b in path.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'/' | b'-' | b'_' | b'.' | b'~' | b':' => out.push(b as char),
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
+fn editor_url(editor: &str, file: &Path, line: usize, column: usize) -> Option<String> {
+    let path = file.to_string_lossy().replace('\\', "/");
+    let path = if path.starts_with('/') { path } else { format!("/{path}") };
+    let encoded = encode_path(&path);
+    match editor {
+        "vscode" => Some(format!("vscode://file{encoded}:{line}:{column}")),
+        "cursor" => Some(format!("cursor://file{encoded}:{line}:{column}")),
+        "zed" => Some(format!("zed://file{encoded}:{line}:{column}")),
+        "phpstorm" => Some(format!("phpstorm://open?file={}&line={line}&column={column}", encode_path(&file.to_string_lossy()))),
+        "sublime" => Some(format!("subl://open?url=file://{encoded}&line={line}&column={column}")),
+        _ => None,
+    }
+}
+
+#[tauri::command]
+async fn open_in_editor<R: Runtime>(app: AppHandle<R>, path: String, file: String, line: usize, column: usize) -> CmdResult<()> {
+    use tauri_plugin_opener::OpenerExt;
+    let path = normalize_path(path);
+    let root = std::fs::canonicalize(project_root(&path)?).map_err(|e| e.to_string())?;
+    let full = std::fs::canonicalize(root.join(&file)).map_err(|_| t!("Dosya bulunamadı: {file}", "File not found: {file}"))?;
+    if !full.starts_with(&root) {
+        return Err(t!("Dosya proje klasörünün dışında: {file}", "The file is outside the project folder: {file}"));
+    }
+    let editor = app.state::<AppState>().settings.lock().unwrap().editor.clone().unwrap_or_default();
+    let failed = |e: &dyn std::fmt::Display| t!("Dosya editörde açılamadı: {e}", "Couldn't open the file in the editor: {e}");
+    match editor_url(&editor, &full, line, column) {
+        Some(url) => app.opener().open_url(url, None::<&str>).map_err(|e| failed(&e)),
+        None => app.opener().open_path(full.to_string_lossy(), None::<&str>).map_err(|e| failed(&e)),
+    }
 }
 
 #[tauri::command]
@@ -476,6 +580,7 @@ async fn export_report(state: State<'_, AppState>, path: String, destination: St
     blocking(move || {
         let root = project_root(&path)?;
         let info = project::inspect(&root).map_err(|e| e.to_string())?;
+        let scan = respond(&root, scan).scan;
         let deps = deps::check(&root, scan.target);
         let md = report::to_markdown(&info, &scan, Some(&deps), i18n::lang());
         std::fs::write(&destination, md).map_err(|e| {
@@ -524,6 +629,9 @@ pub fn with_commands<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R
         delete_all_snapshots,
         cancel_rector_preview,
         export_report,
+        ignore_finding,
+        unignore_finding,
+        open_in_editor,
         get_settings,
         save_settings,
         set_language,

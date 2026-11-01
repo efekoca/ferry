@@ -36,6 +36,9 @@ export interface Api {
   backupUsage(): Promise<BackupUsage>;
   deleteAllBackups(): Promise<void>;
   exportReport(path: string, destination: string): Promise<void>;
+  ignoreFinding(path: string, id: string, reason: string): Promise<ScanResult>;
+  unignoreFinding(path: string, id: string): Promise<ScanResult>;
+  openInEditor(path: string, file: string, line: number, column: number): Promise<void>;
   revealPath(path: string): Promise<void>;
   getSettings(): Promise<Settings>;
   setLanguage(lang: Lang): Promise<void>;
@@ -77,6 +80,9 @@ async function tauriApi(): Promise<Api> {
     backupUsage: () => invoke("snapshot_usage"),
     deleteAllBackups: () => invoke("delete_all_snapshots"),
     exportReport: (path, destination) => invoke("export_report", { path, destination }),
+    ignoreFinding: (path, id, reason) => invoke("ignore_finding", { path, id, reason }),
+    unignoreFinding: (path, id) => invoke("unignore_finding", { path, id }),
+    openInEditor: (path, file, line, column) => invoke("open_in_editor", { path, file, line, column }),
     revealPath: (path) => opener.revealItemInDir(path),
     getSettings: () => invoke("get_settings"),
     saveSettings: (settings) => invoke("save_settings", { settings }),

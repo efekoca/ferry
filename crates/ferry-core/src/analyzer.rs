@@ -381,6 +381,12 @@ pub fn analyze_source_in(file: &str, src: &str, target: PhpVersion, index: &crat
     for k in serializable_without_magic(&tokens) {
         ctx.pattern(&patterns::SERIALIZABLE, &tokens[k], None);
     }
+    for (k, since) in resource_checks(&tokens) {
+        ctx.pattern_since(&patterns::RESOURCE_CHECK, tokens[k].line, tokens[k].column, since);
+    }
+    for k in static_calls_to_instance_methods(&tokens, index) {
+        ctx.pattern(&patterns::STATIC_CALL_TO_INSTANCE_METHOD, &tokens[k], None);
+    }
     for k in dynamic_properties(&tokens, index) {
         ctx.pattern(&patterns::DYNAMIC_PROPERTY, &tokens[k], None);
     }
@@ -666,6 +672,17 @@ impl<'a> Ctx<'a> {
             };
             if let Some(since) = reserved {
                 self.pattern_since(&patterns::RESERVED_NAME, tok.line, tok.column, since);
+            } else if crate::index::namespace_at(&self.namespaces, i).is_empty() && !self.index.included_by_version_check(self.file) {
+                let added = if is_type_decl {
+                    crate::rules::added_class(&lower)
+                } else if is_function_decl && !self.methods.contains(&decl_idx) {
+                    crate::rules::added_function(&lower)
+                } else {
+                    None
+                };
+                if let Some(since) = added {
+                    self.pattern_since(&patterns::REDECLARED_BUILTIN, tok.line, tok.column, since);
+                }
             }
             if is_function_decl && lower == "__autoload" && !self.namespaced && !self.methods.contains(&decl_idx) {
                 self.pattern(&patterns::AUTOLOAD, tok, None);
@@ -687,16 +704,32 @@ impl<'a> Ctx<'a> {
                 _ => {}
             }
             let rooted = tok.text.starts_with('\\');
+            if prev.is_none_or(|p| !p.is_ident_ci("function")) && crate::rules::added_function(&lower).is_none() {
+                let namespace = crate::index::namespace_at(&self.namespaces, i);
+                if let Some(required) = self.index.required_args(namespace, bare, rooted) {
+                    let args = call_args(tokens, i + 1);
+                    let unpacked = args.iter().any(|a| a.first().is_some_and(|t| t.is_punct("...")) || a.len() > 1 && a[1].is_punct(":"));
+                    if !unpacked && args.len() < required && !catches_error(tokens, i) {
+                        self.pattern(&patterns::TOO_FEW_ARGUMENTS, tok, None);
+                    }
+                }
+            }
             if !rooted && self.local_functions.contains(&lower) {
                 return;
             }
             if self.index.declares_function(crate::index::namespace_at(&self.namespaces, i), &lower, rooted) {
                 return;
             }
+            let args = call_args(tokens, i + 1);
             if self.index.framework == Some(crate::project::Framework::Laravel) && crate::rules::LARAVEL_HELPERS.contains(&lower.as_str()) {
+                if matches!(lower.as_str(), "array_first" | "array_last") && self.applies(PhpVersion::new(8, 5)) {
+                    if args.len() > 1 {
+                        self.pattern(&patterns::LARAVEL_NATIVE_ARRAY_FIRST, tok, None);
+                    }
+                    return;
+                }
                 return self.symbol(&crate::rules::LARAVEL_HELPER, tok, true);
             }
-            let args = call_args(tokens, i + 1);
             let single = |n: usize| args.get(n).filter(|a| a.len() == 1).map(|a| &a[0]);
             let named = args.iter().any(|a| a.len() > 1 && a[1].is_punct(":") && a[0].kind == TokenKind::Ident);
             let spread = args.iter().any(|a| a.first().is_some_and(|t| t.is_punct("...")));
@@ -723,6 +756,16 @@ impl<'a> Ctx<'a> {
             match lower.as_str() {
                 "define" if single(2).is_some_and(|t| t.is_ident_ci("true")) => {
                     return self.pattern(&patterns::CASE_INSENSITIVE_CONSTANT, tok, None)
+                }
+                "preg_replace" | "preg_filter"
+                    if args.first().is_some_and(|a| {
+                        a.iter().enumerate().any(|(n, t)| {
+                            let joined = |m: Option<&Token>| m.is_some_and(|m| m.is_punct("."));
+                            eval_modifier(t) && !joined(n.checked_sub(1).and_then(|p| a.get(p))) && !joined(a.get(n + 1))
+                        })
+                    }) =>
+                {
+                    return self.pattern(&patterns::PREG_EVAL_MODIFIER, tok, None)
                 }
                 "parse_str" if args.len() == 1 && !spread => return self.pattern(&patterns::PARSE_STR_ONE_ARG, tok, None),
                 "assert" if single(0).is_some_and(|t| matches!(t.kind, TokenKind::Str { .. })) => {
@@ -2250,6 +2293,222 @@ fn serializable_without_magic(tokens: &[Token]) -> Vec<usize> {
         .collect()
 }
 
+const RESOURCE_OBJECTS: [(&str, u32, u32); 46] = [
+    ("curl_init", 8, 0),
+    ("curl_multi_init", 8, 0),
+    ("curl_share_init", 8, 0),
+    ("deflate_init", 8, 0),
+    ("enchant_broker_init", 8, 0),
+    ("enchant_broker_request_dict", 8, 0),
+    ("imagecreate", 8, 0),
+    ("imagecreatefrom*", 8, 0),
+    ("imagecreatetruecolor", 8, 0),
+    ("inflate_init", 8, 0),
+    ("msg_get_queue", 8, 0),
+    ("openssl_csr_new", 8, 0),
+    ("openssl_pkey_get_private", 8, 0),
+    ("openssl_pkey_get_public", 8, 0),
+    ("openssl_pkey_new", 8, 0),
+    ("openssl_x509_read", 8, 0),
+    ("sem_get", 8, 0),
+    ("shm_attach", 8, 0),
+    ("shmop_open", 8, 0),
+    ("socket_accept", 8, 0),
+    ("socket_create", 8, 0),
+    ("socket_create_listen", 8, 0),
+    ("xml_parser_create", 8, 0),
+    ("xml_parser_create_ns", 8, 0),
+    ("xmlwriter_open_memory", 8, 0),
+    ("xmlwriter_open_uri", 8, 0),
+    ("finfo_open", 8, 1),
+    ("ftp_connect", 8, 1),
+    ("ftp_ssl_connect", 8, 1),
+    ("imageloadfont", 8, 1),
+    ("imap_open", 8, 1),
+    ("ldap_connect", 8, 1),
+    ("pg_connect", 8, 1),
+    ("pg_execute", 8, 1),
+    ("pg_pconnect", 8, 1),
+    ("pg_prepare", 8, 1),
+    ("pg_query", 8, 1),
+    ("pg_query_params", 8, 1),
+    ("pspell_new", 8, 1),
+    ("dba_open", 8, 4),
+    ("dba_popen", 8, 4),
+    ("odbc_connect", 8, 4),
+    ("odbc_exec", 8, 4),
+    ("odbc_pconnect", 8, 4),
+    ("odbc_prepare", 8, 4),
+    ("odbc_execute", 8, 4),
+];
+
+fn resource_object(name: &str) -> Option<PhpVersion> {
+    let name = name.trim_start_matches('\\').to_ascii_lowercase();
+    RESOURCE_OBJECTS
+        .iter()
+        .find(|(n, _, _)| n.strip_suffix('*').map_or(*n == name, |p| name.starts_with(p)))
+        .map(|&(_, a, b)| PhpVersion::new(a, b))
+}
+
+fn handle_key(tokens: &[Token], k: usize) -> Option<(String, usize)> {
+    let t = tokens.get(k)?;
+    if t.kind != TokenKind::Variable {
+        return None;
+    }
+    if t.text == "this" && tokens.get(k + 1)?.is_punct("->") && tokens.get(k + 2)?.kind == TokenKind::Ident {
+        return Some((format!("->{}", tokens[k + 2].text), k + 3));
+    }
+    Some((format!("${}", t.text), k + 1))
+}
+
+fn resource_checks(tokens: &[Token]) -> Vec<(usize, PhpVersion)> {
+    let mut handles: std::collections::HashMap<String, PhpVersion> = std::collections::HashMap::new();
+    for k in 0..tokens.len() {
+        let Some((key, after)) = handle_key(tokens, k) else { continue };
+        if !tokens.get(after).is_some_and(|t| t.is_punct("=")) {
+            continue;
+        }
+        let mut f = after + 1;
+        if tokens.get(f).is_some_and(|t| t.is_punct("@")) {
+            f += 1;
+        }
+        let Some(func) = tokens.get(f).filter(|t| t.kind == TokenKind::Ident && tokens.get(f + 1).is_some_and(|n| n.is_punct("("))) else {
+            continue;
+        };
+        if let Some(v) = resource_object(&func.text) {
+            handles.insert(key, v);
+        }
+    }
+    if handles.is_empty() {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for k in 0..tokens.len().saturating_sub(3) {
+        let name = tokens[k].text.trim_start_matches('\\');
+        if !(name.eq_ignore_ascii_case("is_resource") || name.eq_ignore_ascii_case("get_resource_type")) || !tokens[k + 1].is_punct("(") {
+            continue;
+        }
+        if k > 0 && (tokens[k - 1].is_punct("->") || tokens[k - 1].is_punct("::") || tokens[k - 1].is_ident_ci("function")) {
+            continue;
+        }
+        let Some((key, after)) = handle_key(tokens, k + 2) else { continue };
+        if !tokens.get(after).is_some_and(|t| t.is_punct(")")) {
+            continue;
+        }
+        let boundary = |t: &Token| t.is_punct(";") || t.is_punct("{") || t.is_punct("}");
+        let start = (0..k).rev().find(|&j| boundary(&tokens[j])).map_or(0, |j| j + 1);
+        let end = (k..tokens.len()).find(|&j| boundary(&tokens[j])).unwrap_or(tokens.len());
+        let object_aware = tokens[start..end].iter().any(|t| t.is_ident_ci("instanceof") || t.is_ident_ci("is_object"));
+        if let Some(&v) = handles.get(&key).filter(|_| !object_aware) {
+            out.push((k, v));
+        }
+    }
+    out
+}
+
+fn eval_modifier(t: &Token) -> bool {
+    let TokenKind::Str { backtick: false, .. } = t.kind else { return false };
+    let inner = t.text.get(1..t.text.len().saturating_sub(1)).unwrap_or_default().trim_start();
+    let Some(open) = inner.chars().next().filter(|c| !c.is_ascii_alphanumeric() && *c != '\\' && !c.is_whitespace()) else {
+        return false;
+    };
+    let close = match open {
+        '(' => ')',
+        '[' => ']',
+        '{' => '}',
+        '<' => '>',
+        c => c,
+    };
+    let Some(end) = inner[1..].rfind(close) else { return false };
+    let modifiers = &inner[end + 2..];
+    !modifiers.is_empty() && modifiers.chars().all(|c| c.is_ascii_alphabetic()) && modifiers.contains('e')
+}
+
+fn catches_error(tokens: &[Token], at: usize) -> bool {
+    let mut depth = 0usize;
+    for j in (0..at).rev() {
+        if tokens[j].is_punct("}") {
+            depth += 1;
+        } else if tokens[j].is_punct("{") {
+            if depth > 0 {
+                depth -= 1;
+                continue;
+            }
+            if j == 0 || !tokens[j - 1].is_ident_ci("try") {
+                continue;
+            }
+            let mut d = 0usize;
+            let Some(mut k) = (j..tokens.len()).find(|&k| {
+                if tokens[k].is_punct("{") {
+                    d += 1;
+                } else if tokens[k].is_punct("}") {
+                    d -= 1;
+                }
+                d == 0
+            }) else {
+                return false;
+            };
+            while tokens.get(k + 1).is_some_and(|t| t.is_ident_ci("catch")) {
+                let Some(close) = (k + 2..tokens.len()).find(|&m| tokens[m].is_punct(")")) else { return false };
+                let caught = tokens[k + 2..close].iter().any(|t| {
+                    let name = t.text.rsplit('\\').next().unwrap_or_default();
+                    ["error", "argumentcounterror", "throwable", "typeerror"].iter().any(|n| name.eq_ignore_ascii_case(n))
+                });
+                if caught {
+                    return true;
+                }
+                let mut d = 0usize;
+                match (close..tokens.len()).find(|&m| {
+                    if tokens[m].is_punct("{") {
+                        d += 1;
+                    } else if tokens[m].is_punct("}") {
+                        d = d.saturating_sub(1);
+                        return d == 0;
+                    }
+                    false
+                }) {
+                    Some(end) => k = end,
+                    None => return false,
+                }
+            }
+        }
+    }
+    false
+}
+
+fn static_calls_to_instance_methods(tokens: &[Token], index: &crate::index::ProjectIndex) -> Vec<usize> {
+    let names = crate::index::Names::new(tokens);
+    let decls = crate::index::class_and_trait_decls(tokens);
+    let mut out = Vec::new();
+    for k in 0..tokens.len().saturating_sub(3) {
+        let (class, method) = (&tokens[k], &tokens[k + 2]);
+        if class.kind != TokenKind::Ident
+            || !tokens[k + 1].is_punct("::")
+            || method.kind != TokenKind::Ident
+            || !tokens[k + 3].is_punct("(")
+        {
+            continue;
+        }
+        if k > 0 && (tokens[k - 1].is_ident_ci("new") || tokens[k - 1].is_punct("->") || tokens[k - 1].is_punct("::")) {
+            continue;
+        }
+        if ["self", "parent", "static"].iter().any(|w| class.is_ident_ci(w)) {
+            continue;
+        }
+        let fqn = names.resolve(k, &class.text);
+        if index.instance_method(&fqn, &method.text.to_ascii_lowercase()) != Some(true) {
+            continue;
+        }
+        if let Some(decl) = decls.iter().rfind(|d| d.open < k && k < d.close) {
+            if decl.info.is_trait || index.extends_or_is(&decl.info.fqn, &fqn) != Some(false) {
+                continue;
+            }
+        }
+        out.push(k + 2);
+    }
+    out
+}
+
 fn dynamic_properties(tokens: &[Token], index: &crate::index::ProjectIndex) -> Vec<usize> {
     let mut out = Vec::new();
     for decl in crate::index::class_decls(tokens) {
@@ -3331,5 +3590,108 @@ $x = 'self::create';";
     fn review_patterns() {
         let src = "<?php eval($code); $$name = 1; extract($_POST);";
         assert_eq!(rules(src, "8.1"), vec!["review.eval", "review.variable_variable", "review.extract"]);
+    }
+}
+
+#[cfg(test)]
+mod fatal_tests {
+    use super::*;
+
+    fn lines(src: &str, target: &str) -> Vec<(usize, String)> {
+        analyze_source("t.php", src, target.parse().unwrap()).into_iter().map(|f| (f.line, f.rule_id)).collect()
+    }
+
+    #[test]
+    fn unguarded_redeclarations_of_new_builtins() {
+        let src = "<?php\nfunction str_contains($h, $n) {}\nif (!function_exists('array_find')) {\n    function array_find($a, $f) {}\n}\nclass JsonException extends Exception {}\nif (!class_exists('Override')) { class Override {} }\nclass Foo { function str_starts_with() {} }\nfunction array_first($a) {}";
+        let r = "removed.redeclared_builtin".to_string();
+        assert_eq!(lines(src, "8.4"), [(2, r.clone()), (6, r.clone())]);
+        assert_eq!(lines(src, "8.5"), [(2, r.clone()), (6, r.clone()), (9, r.clone())]);
+        assert!(lines(src, "7.2").is_empty());
+        assert!(lines("<?php\nnamespace App;\nfunction str_contains() {}\nclass Error {}", "8.4").is_empty());
+    }
+
+    #[test]
+    fn static_calls_to_instance_methods() {
+        let src = "<?php\nclass Cart {\n    public function total() {}\n    public static function make() {}\n}\nclass Shop extends Cart {\n    function a() { return Cart::total(); }\n}\nclass Report {\n    function b() { return Cart::Total(); }\n}\nCart::make();\nCart::total();\nclass Magic { function x() {} static function __callStatic($n, $a) {} }\nMagic::x();\ntrait T { function c() { Cart::total(); } }";
+        let r = "removed.static_call_to_instance_method".to_string();
+        assert_eq!(lines(src, "8.0"), [(10, r.clone()), (13, r.clone())]);
+        assert!(lines(src, "7.4").is_empty());
+    }
+
+    #[test]
+    fn calls_with_too_few_arguments() {
+        let src = "<?php\nfunction pay($amount, $currency, $note = '') {}\nfunction old($a = 1, $b) {}\nfunction rest($a, ...$more) {}\npay(10);\npay(10, 'TRY');\npay(...$args);\nold(1);\nrest();\nrest(1, 2, 3);\nPay(1);";
+        let r = "removed.too_few_arguments".to_string();
+        let found: Vec<_> = lines(src, "8.0").into_iter().filter(|(_, id)| *id == r).map(|(l, _)| l).collect();
+        assert_eq!(found, [5, 8, 9, 11]);
+        let caught = "<?php\nfunction pay($a, $b) {}\ntry {\n    pay(1);\n} catch (moodle_exception $e) {\n} catch (\\ArgumentCountError $e) {}\ntry { pay(2); } catch (Exception $e) {}";
+        let found: Vec<_> = lines(caught, "8.0").into_iter().map(|(l, _)| l).collect();
+        assert_eq!(found, [7]);
+        assert!(lines(src, "7.0").iter().all(|(_, id)| *id != r));
+    }
+
+    #[test]
+    fn resource_checks_on_handles_that_became_objects() {
+        let src = "<?php\n$ch = curl_init($url);\nif (!is_resource($ch)) { throw new Exception(); }\n$this->conn = @pg_connect($dsn);\nif (is_resource($this->conn)) {}\n$fp = fopen($f, 'r');\nis_resource($fp);\n$img = imagecreatefrompng($p);\necho get_resource_type($img);";
+        let r = "removed.resource_check".to_string();
+        assert_eq!(lines(src, "8.0"), [(3, r.clone()), (9, r.clone())]);
+        assert_eq!(lines(src, "8.1"), [(3, r.clone()), (5, r.clone()), (9, r.clone())]);
+        assert!(lines("<?php\n$ch = curl_init();\nif (!is_resource($ch) && !$ch instanceof \\CurlHandle) {}", "8.0").is_empty());
+    }
+
+    #[test]
+    fn preg_replace_eval_modifier() {
+        let src = "<?php\npreg_replace('/(\\d+)/e', 'strtoupper(\"$1\")', $s);\npreg_replace(array('#a#', '{b}ie'), $r, $s);\npreg_replace('/e/i', 'e', $s);\npreg_replace('~x~', 'e', $s);";
+        let r = "removed.preg_eval_modifier".to_string();
+        assert_eq!(lines(src, "7.0"), [(2, r.clone()), (3, r.clone())]);
+        assert!(lines("<?php\npreg_replace('/(a' . '|meta' . '|b)/i', '', $s);", "7.0").is_empty());
+    }
+
+    #[test]
+    fn polyfill_files_loaded_behind_a_version_check() {
+        let loader = crate::lexer::lex(
+            "<?php\nif (PHP_VERSION_ID < 70000) {\n    require_once $dir . '/random_int.php';\n}\nrequire 'helpers.php';",
+        )
+        .tokens;
+        let index = crate::index::ProjectIndex::from_tokens(&loader);
+        let src = "<?php\nfunction random_int($a, $b) {}";
+        assert!(analyze_source_in("lib/random_int.php", src, "8.4".parse().unwrap(), &index).is_empty());
+        assert_eq!(analyze_source_in("lib/helpers.php", src, "8.4".parse().unwrap(), &index).len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod suspect_rule_tests {
+    use super::*;
+
+    fn laravel(src: &str, target: &str) -> Vec<String> {
+        let mut index = crate::index::ProjectIndex::default();
+        index.framework = Some(crate::project::Framework::Laravel);
+        analyze_source_in("t.php", src, target.parse().unwrap(), &index).into_iter().map(|f| f.rule_id).collect()
+    }
+
+    #[test]
+    fn laravel_array_first_depends_on_native_function() {
+        let one = "<?php\narray_first($items);";
+        let callback = "<?php\narray_first($items, fn ($i) => $i > 1);";
+        assert_eq!(laravel(one, "8.4"), ["framework.laravel_helper"]);
+        assert!(laravel(one, "8.5").is_empty());
+        assert_eq!(laravel(callback, "8.5"), ["framework.laravel_native_array_first"]);
+        assert_eq!(laravel("<?php\narray_pluck($a, 'x');", "8.5"), ["framework.laravel_helper"]);
+    }
+
+    #[test]
+    fn pdo_pgsql_transaction_constants_are_not_moved_to_pgsql_class() {
+        let found =
+            analyze_source("t.php", "<?php\necho PDO::PGSQL_TRANSACTION_IDLE, PDO::PGSQL_ATTR_DISABLE_PREPARES;", "8.5".parse().unwrap());
+        let ids: Vec<_> = found.iter().map(|f| (f.rule_id.as_str(), f.fix)).collect();
+        assert_eq!(
+            ids,
+            [
+                ("deprecated.pgsql_transaction_constant", crate::rules::FixKind::Manual),
+                ("deprecated.pdo_driver_constant", crate::rules::FixKind::Auto)
+            ]
+        );
     }
 }

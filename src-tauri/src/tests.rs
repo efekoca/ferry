@@ -145,9 +145,9 @@ fn messages_follow_the_ui_language() {
 #[test]
 fn settings_round_trip() {
     let h = harness();
-    assert_eq!(h.ok("get_settings", json!({})), json!({ "phpPath": null, "snapshotLimit": null }));
-    h.ok("save_settings", json!({ "settings": { "phpPath": "/opt/php/bin/php" } }));
-    assert_eq!(h.ok("get_settings", json!({})), json!({ "phpPath": "/opt/php/bin/php", "snapshotLimit": null }));
+    assert_eq!(h.ok("get_settings", json!({})), json!({ "phpPath": null, "snapshotLimit": null, "editor": null }));
+    h.ok("save_settings", json!({ "settings": { "phpPath": "/opt/php/bin/php", "editor": "vscode" } }));
+    assert_eq!(h.ok("get_settings", json!({})), json!({ "phpPath": "/opt/php/bin/php", "snapshotLimit": null, "editor": "vscode" }));
     h.ok("save_settings", json!({ "settings": { "phpPath": null, "snapshotLimit": 10 } }));
     assert_eq!(h.ok("get_settings", json!({}))["snapshotLimit"], 10);
 }
@@ -296,4 +296,41 @@ fn backup_usage_and_delete_all_over_ipc() {
     h.ok("delete_all_snapshots", json!({}));
     assert_eq!(h.ok("snapshot_usage", json!({}))["snapshots"], 0);
     assert_eq!(h.ok("list_snapshots", json!({ "path": h.root })), json!([]));
+}
+
+#[test]
+fn ignored_findings_move_out_of_the_summary() {
+    let _lang = turkish();
+    let h = harness();
+    let root = h.root.clone();
+    let scan = h.ok("scan_project", json!({ "path": root, "target": "8.4", "run": 1 }));
+    let total = scan["summary"]["total"].as_u64().unwrap();
+    let first = scan["findings"][0].clone();
+    let err = h.invoke("ignore_finding", json!({ "path": root, "id": first["id"], "reason": "  " })).unwrap_err();
+    assert_eq!(err, json!("Yok sayma için bir gerekçe yazın."));
+
+    let after = h.ok("ignore_finding", json!({ "path": root, "id": first["id"], "reason": "Eski kopya" }));
+    assert_eq!(after["summary"]["total"].as_u64().unwrap(), total - 1);
+    assert_eq!(after["ignored"][0]["reason"], "Eski kopya");
+    assert_eq!(after["ignored"][0]["finding"]["id"], first["id"]);
+    assert!(Path::new(&root).join(".ferry/ignore.json").exists());
+
+    let rescan = h.ok("scan_project", json!({ "path": root, "target": "8.4", "run": 2 }));
+    assert_eq!(rescan["ignored"].as_array().unwrap().len(), 1);
+
+    let restored = h.ok("unignore_finding", json!({ "path": root, "id": first["id"] }));
+    assert_eq!(restored["summary"]["total"].as_u64().unwrap(), total);
+    assert_eq!(restored["ignored"], json!([]));
+}
+
+#[test]
+fn editor_links() {
+    let file = Path::new("/home/efe/My Site/index.php");
+    assert_eq!(editor_url("vscode", file, 12, 3).unwrap(), "vscode://file/home/efe/My%20Site/index.php:12:3");
+    assert_eq!(editor_url("phpstorm", file, 12, 3).unwrap(), "phpstorm://open?file=/home/efe/My%20Site/index.php&line=12&column=3");
+    assert_eq!(editor_url("vscode", Path::new("C:\\www\\a.php"), 1, 1).unwrap(), "vscode://file/C:/www/a.php:1:1");
+    assert!(editor_url("", file, 1, 1).is_none());
+    let h = harness();
+    let err = h.invoke("open_in_editor", json!({ "path": h.root, "file": "../outside.php", "line": 1, "column": 1 })).unwrap_err();
+    assert!(err.as_str().unwrap().contains("outside.php"));
 }

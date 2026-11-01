@@ -57,7 +57,9 @@ Select a finding to see:
 - what to use instead
 - whether it can be fixed automatically
 
-**Show in folder** opens the file's location. Use the arrow keys to move through the list.
+**Show in folder** opens the file's location, and **Open in editor** opens the file at that line in the editor picked in **Settings** (Visual Studio Code, Cursor, PhpStorm, Sublime Text, Zed, or the system default). Use the arrow keys to move through the list.
+
+**Ignore** takes a finding out of the list and the score once you've decided it doesn't apply, for example code that only runs on the old server. Ferry asks for a reason and saves it to `.ferry/ignore.json` in the project, so the decision travels with the code when you commit that file. The match uses the rule, the file and the code, so an ignored finding stays ignored when lines above it move. **Ignored** on the Findings page lists them with their reasons, and **Show again** brings one back.
 
 Ferry has its own PHP lexer and rule set, so it reads code the way PHP does: method calls such as `$db->each()`, functions in your own namespace, and text inside strings and comments are not mistaken for removed functions. Its rules cover:
 
@@ -68,6 +70,7 @@ Ferry has its own PHP lexer and rule set, so it reads code the way PHP does: met
 - methods that override a built-in class or interface method with a signature PHP 8 rejects, such as Drupal 7's `query($query, array $args = array(), $options = array())` on a `PDO` subclass, which stops the class from loading
 - methods that override a parent class, trait or interface method in the project with a signature PHP 8 rejects, such as phpBB 3.2's `create_insert_array($user, $pre_create_data)` making a parameter required that the parent declares optional, which was only a warning in PHP 7
 - methods that override a built-in class or interface without a return type, such as `PDO::query()` or `Iterator::current()`, which need `#[\ReturnTypeWillChange]` from PHP 8.1
+- code that stops working on a newer version, such as a function or class PHP added later (`str_contains()`, `JsonException`) declared without a `function_exists()` check, `Class::method()` on a non-static method, calls with too few arguments, the `preg_replace()` `/e` modifier, and `is_resource()` on curl, GD or pgsql handles that are now objects
 - code worth a manual check, such as `eval()`, `extract()`, and variable variables
 
 Ferry also reads the files around the code that decide which PHP actually runs:
@@ -117,6 +120,19 @@ Before every apply, Ferry backs up the files it is about to change. The **Histor
 - **Drag and drop** a project folder onto the window, or reopen a recent project from the start screen.
 - **Keyboard shortcuts:** **⌘O** opens a project, **⌘1** to **⌘5** switch between pages, **⌘,** opens **Settings**, and **⌘+** / **⌘−** zoom the interface. On Windows and Linux, use **Ctrl** instead of **⌘**.
 - **Accessible:** everything works from the keyboard, focus is always visible, and the interface meets WCAG 2.1 AA contrast. At high zoom levels the layout stacks its panes and narrows the sidebar to icons.
+
+### Command line for CI
+
+`ferry-cli` runs the same scan without the window, so a pipeline can stop a merge that adds code the target version can't run. It reads `.ferry/ignore.json`, so findings ignored in the app stay ignored in CI.
+
+```bash
+cargo build --release -p ferry-cli
+target/release/ferry-cli scan . --target 8.4 --format github
+```
+
+- `--format text|json|sarif|github`: plain text, JSON with the summary and ignored findings, SARIF 2.1.0 for GitHub code scanning and other viewers, or GitHub Actions annotations on the changed lines.
+- `--fail-on breaking|deprecated|any|none`: the lowest severity that makes the command exit with code 1 (default `breaking`). Errors such as a missing folder exit with code 2.
+- `--output <file>` writes the report to a file, and `--lang tr` switches the messages to Turkish.
 
 ## Supported projects
 
@@ -211,12 +227,12 @@ Everything runs on your computer:
 
 ## Known limitations
 
-- **Static analysis:** the scan reads code without running it, so behavior that depends on runtime values (for example, functions called by name from a string) can't always be found. Such cases are marked **Risky** where possible. Code that only runs on older versions, such as the body of `if (PHP_VERSION_ID < 80100)`, `version_compare(PHP_VERSION, '8.0', '<')`, the unreachable side of a version ternary or `&&`, code after `if (PHP_VERSION_ID >= 80000) { return …; }`, or `if (function_exists('mysql_connect'))`, is skipped. Syntax that PHP rejects or deprecates while compiling, such as `$str{0}` or `(double)`, is still reported there, because PHP compiles the whole file even if that branch never runs. Functions you define yourself with a removed name, for example an `each()` polyfill or a `mysql_*` shim loaded through Composer, are not reported.
+- **Static analysis:** the scan reads code without running it, so behavior that depends on runtime values (for example, functions called by name from a string) can't always be found. Such cases are marked **Risky** where possible. Code that only runs on older versions, such as the body of `if (PHP_VERSION_ID < 80100)`, `version_compare(PHP_VERSION, '8.0', '<')`, the unreachable side of a version ternary or `&&`, code after `if (PHP_VERSION_ID >= 80000) { return …; }`, or `if (function_exists('mysql_connect'))`, is skipped. Syntax that PHP rejects or deprecates while compiling, such as `$str{0}` or `(double)`, is still reported there, because PHP compiles the whole file even if that branch never runs. Functions you define yourself with a removed name, for example an `each()` polyfill or a `mysql_*` shim loaded through Composer, are not reported. The opposite case is: a function or class that PHP added later, such as `str_contains()` or `JsonException`, declared without a `function_exists()` or `class_exists()` check stops the file from loading. Files that are only included behind a version check are skipped.
 - **Behavior changes:** some changes only show up when the code runs, so no static tool can find them. Test these by running your app on the new version:
   - `0 == "foo"` is now `false`, which also affects `in_array()`, `array_search()` and `switch`.
   - Arithmetic on non-numeric strings throws a `TypeError`.
   - Many warnings became exceptions, for example `count()` on a non-countable value.
-  - Resources such as curl, GD and XML handles are now objects, so `is_resource()` checks fail.
+  - Resources such as curl, GD and XML handles are now objects, so `is_resource()` checks fail. Ferry reports the check when the same file assigns the handle, for example `$ch = curl_init()` followed by `is_resource($ch)`, but not when the handle comes from somewhere else.
   - PDO MySQL and SQLite return real integers and floats, so `=== "1"` comparisons fail.
   - Passing `null` through a variable to a built-in function is deprecated. Ferry reports a literal `null`, but can't see what a variable holds.
   - Dynamic properties are deprecated. Ferry follows parent classes and traits inside your project, but skips classes that extend something it can't see, such as a framework class in `vendor/`, because that parent could declare the property.
@@ -250,6 +266,7 @@ To run the tests against real Rector, point `FERRY_TEST_TOOLS` to a folder where
 | Path | Contents |
 |---|---|
 | `crates/ferry-core` | the engine: lexer, rules and analyzer, Rector integration, diffs, backups, and Composer checks |
+| `crates/ferry-cli` | command-line scanner for CI, with text, JSON, SARIF and GitHub annotation output |
 | `src-tauri` | desktop shell: commands, window, and platform settings |
 | `src` | React and TypeScript interface (design system in [docs/DESIGN.md](docs/DESIGN.md)) |
 | `demo` | sample projects for trying the app and for the tests |

@@ -58,6 +58,7 @@ export function ConfirmDialog({
   confirmLabel,
   cancelLabel,
   loading = false,
+  confirmDisabled = false,
   onConfirm,
   onCancel,
 }: {
@@ -69,6 +70,7 @@ export function ConfirmDialog({
   confirmLabel: string;
   cancelLabel?: string;
   loading?: boolean;
+  confirmDisabled?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -103,6 +105,7 @@ export function ConfirmDialog({
             ref={confirmRef}
             variant={tone === "danger" ? "danger" : "primary"}
             loading={loading}
+            disabled={confirmDisabled}
             onClick={onConfirm}
           >
             {confirmLabel}

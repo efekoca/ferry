@@ -463,12 +463,20 @@ const withIcon = (icon: ReactElement, label: string) => (
   </span>
 );
 
+const EDITORS = [
+  ["vscode", "Visual Studio Code"],
+  ["cursor", "Cursor"],
+  ["phpstorm", "PhpStorm"],
+  ["sublime", "Sublime Text"],
+  ["zed", "Zed"],
+] as const;
+
 export function SettingsScreen() {
   const { t, lang, setLang } = useI18n();
   const { theme, setTheme, toolchain, refreshToolchain, installRector, installingRector, api, refreshSnapshots } = useStore();
   const toast = useToast();
   const [checking, setChecking] = useState(false);
-  const [settings, setSettings] = useState<Settings>({ phpPath: null, snapshotLimit: null });
+  const [settings, setSettings] = useState<Settings>({ phpPath: null, snapshotLimit: null, editor: null });
   const [usage, setUsage] = useState<BackupUsage | null>(null);
   const [clearing, setClearing] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -574,6 +582,25 @@ export function SettingsScreen() {
                   <div className="setting__desc">{t.settings.themeText}</div>
                 </div>
                 <Segmented label={t.settings.theme} options={themes} value={theme} onChange={setTheme} />
+              </div>
+              <div className="setting">
+                <div className="setting__text">
+                  <div className="setting__title">{t.settings.editor}</div>
+                  <div className="setting__desc">{t.settings.editorText}</div>
+                </div>
+                <select
+                  className="input"
+                  aria-label={t.settings.editor}
+                  value={settings.editor ?? ""}
+                  onChange={(e) => void save({ ...settings, editor: e.target.value || null })}
+                >
+                  <option value="">{t.settings.editorSystem}</option>
+                  {EDITORS.map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
           </Card>
