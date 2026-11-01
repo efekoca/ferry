@@ -1,5 +1,6 @@
 import { useDeferredValue, useEffect, useMemo, useState, type ReactNode } from "react";
-import { ArrowRight, CircleCheck, ClipboardList, FileCode2, FolderSearch, Info, Lightbulb, Search, Sparkles, X } from "lucide-react";
+import { ArrowRight, CircleCheck, ClipboardList, EyeOff, FileCode2, FolderSearch, Info, Lightbulb, Search, Sparkles, SquareArrowOutUpRight, Undo2, X } from "lucide-react";
+import { ConfirmDialog } from "../components/Modal";
 import { PageHeader } from "../components/Shell";
 import { useToast } from "../components/Toast";
 import { Badge, Button, Callout, EmptyState, RiskBadge, SeverityBadge, SeverityIcon } from "../components/ui";
@@ -32,11 +33,20 @@ export function filterFindings(findings: Finding[], { fix, severity, rule, query
 
 export function Findings() {
   const { t, loc } = useI18n();
-  const { scan, setView, project, api, runScan, scanning, findingsFilter: filter, setFindingsFilter } = useStore();
+  const { scan, setView, project, api, runScan, scanning, findingsFilter: filter, setFindingsFilter, ignoreFinding, unignoreFinding } = useStore();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [showIgnored, setShowIgnored] = useState(false);
+  const [ignoring, setIgnoring] = useState<{ id: string; reason: string } | null>(null);
+  const [busy, setBusy] = useState(false);
   const toast = useToast();
 
-  const findings = useMemo(() => scan?.findings ?? [], [scan]);
+  const ignoredList = useMemo(() => scan?.ignored ?? [], [scan]);
+  const reasons = useMemo(() => new Map(ignoredList.map((i) => [i.finding.id, i.reason])), [ignoredList]);
+  const viewingIgnored = showIgnored && ignoredList.length > 0;
+  const findings = useMemo(
+    () => (viewingIgnored ? ignoredList.map((i) => i.finding) : scan?.findings ?? []),
+    [scan, viewingIgnored, ignoredList],
+  );
   const deferredFilter = useDeferredValue(filter);
   const visible = useMemo(() => filterFindings(findings, deferredFilter), [findings, deferredFilter]);
   const [limit, setLimit] = useState({ for: visible, count: PAGE });
@@ -103,14 +113,36 @@ export function Findings() {
     );
   }
 
+  const confirmIgnore = async () => {
+    if (!ignoring) return;
+    setBusy(true);
+    const done = await ignoreFinding(ignoring.id, ignoring.reason);
+    setBusy(false);
+    if (done) setIgnoring(null);
+  };
+  const openInEditor = (f: Finding) =>
+    project &&
+    api
+      ?.openInEditor(project.root, f.file, f.line, f.column)
+      .catch((e) => toast.push({ tone: "error", title: t.toast.editorFailed, description: errorMessage(e, t.common.genericError) }));
+  const ignoredToggle = ignoredList.length > 0 && (
+    <Button variant="ghost" size="sm" icon={viewingIgnored ? <Undo2 size={13} /> : <EyeOff size={13} />} onClick={() => setShowIgnored(!viewingIgnored)}>
+      {viewingIgnored ? t.findings.backToFindings : t.findings.ignored(ignoredList.length)}
+    </Button>
+  );
+  const selectedReason = selected ? reasons.get(selected.id) : undefined;
+
   const countFix = (k: FixKind) => findings.filter((f) => f.fix === k).length;
   const countSev = (k: Severity) => findings.filter((f) => f.severity === k).length;
 
   return (
     <>
-      <PageHeader title={t.findings.title} subtitle={t.findings.subtitle(scan.target, findings.length)} />
+      <PageHeader
+        title={t.findings.title}
+        subtitle={viewingIgnored ? t.findings.ignoredTitle(findings.length) : t.findings.subtitle(scan.target, findings.length)}
+      />
       {findings.length === 0 ? (
-        <EmptyState icon={<CircleCheck size={24} />} title={t.findings.clean}>
+        <EmptyState icon={<CircleCheck size={24} />} title={t.findings.clean} action={ignoredToggle || undefined}>
           {t.findings.cleanText(scan.target)}
         </EmptyState>
       ) : (
@@ -153,6 +185,7 @@ export function Findings() {
                     {t.findings.clearFilters}
                   </Button>
                 )}
+                {ignoredToggle}
               </div>
             </div>
 
@@ -249,12 +282,18 @@ export function Findings() {
                   </div>
                 )}
 
-                <Callout tone={FIX_TONE[selected.fix]} icon={FIX_ICON[selected.fix]}>
-                  <strong>{t.fix[selected.fix]}:</strong> {t.fixDesc[selected.fix]}
-                </Callout>
+                {selectedReason !== undefined ? (
+                  <Callout tone="info" icon={<EyeOff size={15} />}>
+                    <strong>{t.findings.ignoredReason}:</strong> <span className="selectable">{selectedReason}</span>
+                  </Callout>
+                ) : (
+                  <Callout tone={FIX_TONE[selected.fix]} icon={FIX_ICON[selected.fix]}>
+                    <strong>{t.fix[selected.fix]}:</strong> {t.fixDesc[selected.fix]}
+                  </Callout>
+                )}
 
                 <div className="row row--wrap">
-                  {selected.fix !== "manual" && (
+                  {selectedReason === undefined && selected.fix !== "manual" && (
                     <Button variant="primary" onClick={() => setView("changes")}>
                       {t.findings.previewFix} <ArrowRight size={14} />
                     </Button>
@@ -271,6 +310,20 @@ export function Findings() {
                       {t.findings.reveal}
                     </Button>
                   )}
+                  {project && api && (
+                    <Button variant="secondary" icon={<SquareArrowOutUpRight size={13} />} onClick={() => openInEditor(selected)}>
+                      {t.findings.openInEditor}
+                    </Button>
+                  )}
+                  {selectedReason === undefined ? (
+                    <Button variant="ghost" icon={<EyeOff size={13} />} onClick={() => setIgnoring({ id: selected.id, reason: "" })}>
+                      {t.findings.ignore}
+                    </Button>
+                  ) : (
+                    <Button variant="ghost" icon={<Undo2 size={13} />} onClick={() => void unignoreFinding(selected.id)}>
+                      {t.findings.unignore}
+                    </Button>
+                  )}
                 </div>
                 <div className="detail__rule">
                   {selected.ruleId}
@@ -280,6 +333,28 @@ export function Findings() {
           </aside>
         </div>
       )}
+      <ConfirmDialog
+        open={!!ignoring}
+        icon={<EyeOff size={20} />}
+        title={t.findings.ignoreTitle}
+        confirmLabel={t.findings.ignore}
+        loading={busy}
+        confirmDisabled={!ignoring?.reason.trim()}
+        onConfirm={confirmIgnore}
+        onCancel={() => setIgnoring(null)}
+      >
+        <p>{t.findings.ignoreText}</p>
+        <label className="field">
+          <span className="field__label">{t.findings.ignoreReason}</span>
+          <textarea
+            className="input"
+            rows={3}
+            value={ignoring?.reason ?? ""}
+            placeholder={t.findings.ignorePlaceholder}
+            onChange={(e) => setIgnoring((v) => v && { ...v, reason: e.target.value })}
+          />
+        </label>
+      </ConfirmDialog>
     </>
   );
 }
