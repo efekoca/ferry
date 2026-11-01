@@ -9,6 +9,7 @@ import type {
   ProjectInfo,
   ScanProgress,
   IgnoreEntry,
+  WpLatest,
   ScanResult,
   Settings,
   Severity,
@@ -153,6 +154,11 @@ const DEPS: Omit<DependencyReport, "target" | "rootStatus"> = {
     { name: "imap", uses: 2, file: "includes/mailbox.php", line: 8, symbol: "imap_open()", declared: false, removed: true, available: false },
     { name: "curl", uses: 3, file: "includes/http.php", line: 20, symbol: "curl_init()", declared: true, removed: false, available: true },
   ],
+  wordpress: [
+    { kind: "plugin", slug: "contact-form-7", name: "Contact Form 7", version: "5.1.6", requiresPhp: "5.6", dir: "wp-content/plugins/contact-form-7" },
+    { kind: "plugin", slug: "old-gallery", name: "Old Gallery", version: "1.0.2", requiresPhp: null, dir: "wp-content/plugins/old-gallery" },
+    { kind: "theme", slug: "twentytwenty", name: "Twenty Twenty", version: "1.2", requiresPhp: "5.2.4", dir: "wp-content/themes/twentytwenty" },
+  ],
 };
 
 export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: IgnoreEntry[] } = {}): Api {
@@ -231,6 +237,16 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
       runtimeLog = log.split("/").pop() ?? log;
       return withIgnores(lastScan);
     },
+    localPhpVersions: async () => [
+      { line: "8.4", version: "8.4.27", path: "/opt/homebrew/opt/php@8.4/bin/php" },
+      { line: "8.5", version: "8.5.12", path: "/opt/homebrew/bin/php" },
+    ],
+    runLocalCheck: async (_path, target, kind) => {
+      if (!lastScan) throw new Error("Scan the project first.");
+      await sleep(delay);
+      runtimeLog = kind === "lint" ? `php -l · PHP ${target}` : `PHPUnit · PHP ${target}`;
+      return withIgnores(lastScan);
+    },
     clearRuntimeLog: async () => {
       if (!lastScan) throw new Error("Scan the project first.");
       runtimeLog = null;
@@ -272,10 +288,27 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
       listeners.add(handler);
       return () => listeners.delete(handler);
     },
+    wordpressLatest: async (items) => {
+      await sleep(delay / 3);
+      const known: Record<string, WpLatest> = {
+        "contact-form-7": { kind: "plugin", slug: "contact-form-7", version: "6.2.4", requiresPhp: "7.4", lastUpdated: "2026-10-29", closed: false },
+        "old-gallery": { kind: "plugin", slug: "old-gallery", version: null, requiresPhp: null, lastUpdated: null, closed: true },
+        twentytwenty: { kind: "theme", slug: "twentytwenty", version: "3.3", requiresPhp: "5.2.4", lastUpdated: "2026-10-28", closed: false },
+      };
+      return items.map((i) => known[i.slug]).filter(Boolean);
+    },
     findCompatibleVersions: async (_target, packages) => {
       await sleep(delay / 3);
       const known: Record<string, [string, boolean]> = { "phpmailer/phpmailer": ["v6.9.1", true], "illuminate/database": ["v10.0.0", true], "phpunit/phpunit": ["9.6.0", true] };
       return packages.filter((p) => known[p.name]).map((p) => ({ name: p.name, version: known[p.name][0], majorChange: known[p.name][1] }));
+    },
+    gitStatus: async (_path, files) => ({ repo: true, dirty: files.filter((f) => f === "includes/class-cart.php") }),
+    compareTargets: async () => {
+      await sleep(delay);
+      return (["8.2", "8.3", "8.4", "8.5"] as const).map((target) => {
+        const findings = SEEDS.filter((s) => versionLte(s.since, target)).map((s) => ({ ...s, id: s.file + s.line, column: 1, runtimeHits: 0 }));
+        return { target, summary: summarize(findings), blockingPackages: target === "8.2" ? 2 : 3, rootBlocks: false };
+      });
     },
     checkDependencies: async (_path, target) => {
       await sleep(delay / 3);

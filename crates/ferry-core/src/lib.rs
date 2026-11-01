@@ -3,6 +3,7 @@ pub mod analyzer;
 mod builtin;
 #[rustfmt::skip]
 mod arity;
+pub mod compare;
 pub mod deps;
 pub mod diff;
 pub mod extensions;
@@ -15,6 +16,7 @@ pub mod i18n;
 pub mod ignore;
 pub mod index;
 pub mod lexer;
+pub mod localcheck;
 pub mod packagist;
 pub mod project;
 pub mod rector;
@@ -25,5 +27,6 @@ pub mod server;
 pub mod snapshot;
 pub mod toolchain;
 pub mod version;
+pub mod wordpress;
 
 pub use version::PhpVersion;

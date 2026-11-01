@@ -143,6 +143,33 @@ fn messages_follow_the_ui_language() {
 }
 
 #[test]
+fn reports_uncommitted_files_in_git_projects() {
+    let h = harness();
+    let none = h.ok("git_status", json!({ "path": h.root, "files": ["src/db.php"] }));
+    assert_eq!(none["repo"], false);
+    if toolchain::find_executable("git").is_none() {
+        return;
+    }
+    let git = |args: &[&str]| std::process::Command::new("git").arg("-C").arg(&h.root).args(args).output().unwrap();
+    git(&["init", "-q"]);
+    git(&["-c", "user.email=t@example.com", "-c", "user.name=t", "add", "."]);
+    git(&["-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-qm", "init"]);
+    std::fs::write(Path::new(&h.root).join("src/db.php"), "<?php\n// edited\n").unwrap();
+    let state = h.ok("git_status", json!({ "path": h.root, "files": ["src/db.php", "src/Greeter.php"] }));
+    assert_eq!(state, json!({ "repo": true, "dirty": ["src/db.php"] }));
+}
+
+#[test]
+fn compares_every_selectable_target() {
+    let h = harness();
+    let rows = h.ok("compare_targets", json!({ "path": h.root }));
+    let targets: Vec<&str> = rows.as_array().unwrap().iter().map(|r| r["target"].as_str().unwrap()).collect();
+    assert_eq!(targets, ["8.2", "8.3", "8.4", "8.5"]);
+    assert!(rows[0]["summary"]["breaking"].as_u64().unwrap() > 0);
+    assert_eq!(rows[3]["rootBlocks"], true);
+}
+
+#[test]
 fn settings_round_trip() {
     let h = harness();
     assert_eq!(h.ok("get_settings", json!({})), json!({ "phpPath": null, "snapshotLimit": null, "editor": null }));
@@ -373,4 +400,19 @@ fn runtime_logs_confirm_and_add_findings() {
     let empty = Path::new(&root).join("empty.log");
     std::fs::write(&empty, "nothing here\n").unwrap();
     assert!(h.invoke("import_runtime_log", json!({ "path": root, "log": empty })).is_err());
+}
+
+#[test]
+fn lints_with_a_local_php_of_the_target() {
+    let _lang = turkish();
+    let h = harness();
+    let root = h.root.clone();
+    let local = h.ok("local_php_versions", json!({}));
+    let Some(line) = local.as_array().unwrap().first().map(|l| l["line"].as_str().unwrap().to_string()) else { return };
+    h.ok("scan_project", json!({ "path": root, "target": line, "run": 1 }));
+    let merged = h.ok("run_local_check", json!({ "path": root, "target": line, "kind": "lint" }));
+    assert!(merged["runtime"]["file"].as_str().unwrap().starts_with("php -l · PHP "));
+    assert!(merged["runtime"]["events"].as_u64().unwrap() > 0);
+    let err = h.invoke("run_local_check", json!({ "path": root, "target": line, "kind": "tests" })).unwrap_err();
+    assert_eq!(err, json!("Projede vendor/bin/phpunit yok."));
 }

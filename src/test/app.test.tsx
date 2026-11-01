@@ -231,6 +231,57 @@ describe("Ferry app", () => {
     await waitFor(() => expect(screen.getAllByRole("option")).toHaveLength(all));
   });
 
+  it("lists WordPress plugins and checks wordpress.org", async () => {
+    const user = setup();
+    await openAndScan(user);
+    await user.click(nav(/Bağımlılıklar/));
+    const table = await screen.findByRole("table", { name: "WordPress eklentileri ve temaları" });
+    expect(within(table).getByText("Contact Form 7")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "En son sürümleri bul" }));
+    expect(await within(table).findByText("6.2.4")).toBeInTheDocument();
+    expect(within(table).getByText("Kaldırıldı")).toBeInTheDocument();
+  });
+
+  it("narrows the selection by rule and warns about uncommitted files", async () => {
+    const user = setup();
+    await openAndScan(user);
+    await user.click(nav(/Düzeltmeler/));
+    await user.click(await screen.findByRole("button", { name: /Değişiklikleri hesapla/ }));
+    await screen.findByRole("list", { name: "Dosyalar" });
+    await user.selectOptions(screen.getByRole("combobox", { name: "Seçimi daralt" }), "Yalnızca otomatik düzeltmeler");
+    const autoCount = screen.getByText(/ \/ 4 dosya seçili/).textContent;
+    expect(autoCount).not.toBe("4 / 4 dosya seçili");
+    await user.selectOptions(screen.getByRole("combobox", { name: "Seçimi daralt" }), "Tüm dosyalar");
+    await user.click(screen.getByRole("button", { name: "Tümünü uygula" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByText("1 dosyada commit edilmemiş değişiklik var")).toBeInTheDocument();
+    await user.click(within(dialog).getByText("Önerilen commit mesajı"));
+    expect(within(dialog).getByText(/PHP 8.4 uyumluluğu: Rector ile 4 dosya/)).toBeInTheDocument();
+  });
+
+  it("lints and runs tests with a local PHP of the target", async () => {
+    const user = setup();
+    await openAndScan(user);
+    await user.click(nav(/Bulgular/));
+    await user.click(await screen.findByRole("button", { name: "PHP 8.4.27 ile lint et" }));
+    expect(await screen.findByText(/php -l · PHP 8.4: 31 farklı mesaj/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Testleri PHP 8.4.27 ile çalıştır" }));
+    const dialog = await screen.findByRole("dialog", { name: "Projenin testleri çalıştırılsın mı?" });
+    await user.click(within(dialog).getByRole("button", { name: "Testleri çalıştır" }));
+    expect(await screen.findByText(/PHPUnit · PHP 8.4: 31 farklı mesaj/)).toBeInTheDocument();
+  });
+
+  it("compares targets and switches to one", async () => {
+    const user = setup();
+    await openAndScan(user);
+    await user.click(screen.getByRole("button", { name: "Karşılaştır" }));
+    const table = await screen.findByRole("table", { name: "Hedefleri karşılaştır" });
+    expect(within(table).getAllByRole("row")).toHaveLength(5);
+    expect(within(table).getByText("Seçili")).toBeInTheDocument();
+    await user.click(within(table).getAllByRole("button", { name: "Bu hedefe geç" })[0]);
+    await waitFor(() => expect(screen.getByRole("radio", { name: "8.2" })).toHaveAttribute("aria-checked", "true"));
+  });
+
   it("saves the editor used to open findings", async () => {
     const user = userEvent.setup();
     const api = mockApi({ delay: 0 });
