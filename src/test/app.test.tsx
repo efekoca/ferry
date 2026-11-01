@@ -231,6 +231,17 @@ describe("Ferry app", () => {
     await waitFor(() => expect(screen.getAllByRole("option")).toHaveLength(all));
   });
 
+  it("lists WordPress plugins and checks wordpress.org", async () => {
+    const user = setup();
+    await openAndScan(user);
+    await user.click(nav(/Bağımlılıklar/));
+    const table = await screen.findByRole("table", { name: "WordPress eklentileri ve temaları" });
+    expect(within(table).getByText("Contact Form 7")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "En son sürümleri bul" }));
+    expect(await within(table).findByText("6.2.4")).toBeInTheDocument();
+    expect(within(table).getByText("Kaldırıldı")).toBeInTheDocument();
+  });
+
   it("saves the editor used to open findings", async () => {
     const user = userEvent.setup();
     const api = mockApi({ delay: 0 });

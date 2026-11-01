@@ -84,6 +84,7 @@ Ferry, hangi PHP'nin gerçekten çalışacağını belirleyen ve kodun çevresin
 
 - `.htaccess`: PHP-FPM'de 500 hatası veren ve `<IfModule mod_php.c>` dışında kalan `php_value` ve `php_flag` satırları ile PHP 8'in artık eşleşmediği `<IfModule mod_php5.c>` ya da `mod_php7.c` blokları
 - `.user.ini`, `php.ini` ve `.htaccess` içinde PHP'nin kaldırdığı ya da kullanımdan kaldırdığı ayarlar: `register_globals` (açıkken PHP hiç başlamaz), `track_errors`, `allow_url_include` ve `session.trans_sid_hosts` gibi
+- `platform-check` seçeneği kapatılmış bir `composer.json` ve Composer 1 ile oluşturulmuş bir `composer.lock`
 - `Dockerfile`, Docker Compose, GitHub Actions, GitLab CI, Travis, Bitbucket Pipelines, `.tool-versions`, `.php-version` ve `composer.json`'daki `config.platform.php` içinde hedefinizin altında sabitlenmiş PHP sürümleri
 
 ### Her değişikliği uygulamadan önce inceleyin
@@ -110,6 +111,8 @@ Ferry, Rector'ın tek başına çözemediği durumları da ele alır. Örneğin 
 Her paket **Uyumlu**, **Uyumsuz** ya da **Belirsiz** (paket bir PHP gereksinimi bildirmiyorsa) olarak işaretlenir; uyumsuz paketler listenin başında yer alır. Geliştirme paketleri etiketlidir; **Sadece üretim** seçeneği onları gizler. Listenin üstündeki uyarı, geçişi engelleyen paketleri tek tek adıyla içeren, kopyalamaya hazır bir `composer update` komutu verir.
 
 **Uyumlu sürümleri bul**, engelleyen her paketin hangi sürüme geçmesi gerektiğini Packagist'e sorar. Önerilen sürüm, PHP gereksinimi (ve Ferry'nin bildiği durumlarda framework'ün kendi destek aralığı) hedefe izin veren ilk ana sürümün en yenisidir. İnternete çıkan tek özellik budur ve yalnızca siz tıkladığınızda çalışır.
+
+WordPress projelerinde **WordPress eklentileri ve temaları** her eklentiyi ve temayı kurulu sürümü, `Requires PHP` başlığı ve kendi kodunda bulunan kritik sorunlarla listeler. **En son sürümleri bul** her biri için api.wordpress.org'dan güncel sürümü sorar ve orada kaldırılmış eklentileri işaretler.
 
 **PHP eklentileri**, kodun kullandığı her eklentiyi (`mysqli`, `gd`, `intl` gibi) kaç kez ve ilk nerede kullanıldığıyla listeler. `composer.json`'da `ext-*` olarak belirtilip belirtilmediğini ve bu bilgisayardaki PHP'de olup olmadığını gösterir. PHP'den çıkarılan eklentiler (8.4'te `imap` gibi) işaretlenir. `composer.json`'da belirtilmeyenler için yapıştırmaya hazır `ext-*` satırları önerilir; böylece Composer yeni sunucuda da bunları kontrol eder.
 
@@ -237,7 +240,7 @@ Eksik bir şey olduğunda **Düzeltmeler** sayfası neyin eksik olduğunu söyle
 - **Yazılanlar:** yalnızca değişiklik uyguladığınız dosyalar. Diğer dosyalara dokunulmaz.
 - **Saklananlar:** her uygulamadan önceki dosya yedekleri (hepsi ya da bir sınır koyduysanız yalnızca en yenileri), neyin uygulandığının kaydı, Rector'ın önbelleği ve ayarlarınız. Hepsi uygulamanın veri klasöründe durur: macOS'ta `~/Library/Application Support/io.github.efekoca.ferry`, Windows'ta `%APPDATA%\io.github.efekoca.ferry`, Linux'ta `~/.local/share/io.github.efekoca.ferry`.
 - **Proje kodu:** Tarama kodunuzu hiçbir zaman çalıştırmaz. Düzeltmeleri hesaplarken Rector proje klasöründe çalışır ve projenin `vendor/autoload.php` dosyasını yükler; bu yüzden Composer'ın `autoload.files` listesindeki dosyalar çalıştırılır. Düzeltmeleri yalnızca güvendiğiniz projeler için hesaplayın.
-- **Ağ:** Ferry kendiliğinden hiçbir ağ isteği yapmaz. **Rector'ı kur**'u seçtiğinizde Composer, Rector'ı Packagist'ten indirir. **Uyumlu sürümleri bul**'u seçtiğinizde Ferry, engelleyen paketlerin adlarını ve sürümlerini `repo.packagist.org`'a gönderir.
+- **Ağ:** Ferry kendiliğinden hiçbir ağ isteği yapmaz. **Rector'ı kur**'u seçtiğinizde Composer, Rector'ı Packagist'ten indirir. **Uyumlu sürümleri bul**'u seçtiğinizde Ferry, engelleyen paketlerin adlarını ve sürümlerini `repo.packagist.org`'a; **En son sürümleri bul**'u seçtiğinizde WordPress eklenti ve tema adlarını `api.wordpress.org`'a gönderir.
 
 ## Nasıl çalışır
 

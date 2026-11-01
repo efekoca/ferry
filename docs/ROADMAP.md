@@ -41,10 +41,9 @@ String-to-number comparisons with `==` (8.0), `null` passed to built-ins from va
 
 | Addition | Why | Size |
 |---|---|---|
-| **Composer platform pitfalls.** `config.platform.ext-*` pinned below the target, `platform-check` disabled, a Composer 1 lock file (no `plugin-api-version`), plugins that need `composer-plugin-api ^1` (`config.platform.php` is done). | Each one makes Composer install packages for the wrong platform | S |
+| **Composer platform pitfalls, the rest.** `config.platform.ext-*` pinned below the target and plugins that need `composer-plugin-api ^1` (`platform-check: false`, Composer 1 lock files and `config.platform.php` are done). | Each one makes Composer install packages for the wrong platform | S |
 | **More version pins and a bump action.** DDEV, Lando, Platform.sh and versioned PHP-FPM socket paths, plus a button that updates pins to the target (Dockerfile, Compose, CI files, `.tool-versions` and `.php-version` are reported already). | The upgrade isn't done until these change | S |
 | **More platforms.** Joomla 3/4/5, Moodle (its own `admin/environment.xml`), MediaWiki, phpBB, CodeIgniter, Yii, CakePHP, OpenCart. Keep the support ranges in a data file with a source URL and a verified date for each row. *(verify each range from official pages; Drupal 7, Magento and PrestaShop are already done)* | Legacy CMS users are Ferry's core audience | M |
-| **WordPress plugins and themes.** Read plugin and theme headers (`Version`, `Requires PHP`) and, opt-in, query api.wordpress.org for the latest version, its PHP requirement and whether the plugin was closed. Say "update first" or "fix it yourself" for each. | Most breakage after a host's forced PHP upgrade comes from plugins. WP Engine's checker is unmaintained, stuck at PHP 8.0, and rated 2.7/5 | M |
 | **Polyfill cleanup.** `symfony/polyfill-php*` and `random_compat` become no-ops once the target passes their version. | Smaller dependency tree | S |
 | **Hosting probe.** A generated one-file `ferry-probe.php` the user uploads to the server; its JSON output (PHP version, SAPI, extensions, `disable_functions`, ini values) is imported into Ferry. | Covers shared hosting, which Ferry can't reach | S |
 

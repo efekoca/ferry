@@ -31,6 +31,7 @@ pub struct DependencyReport {
     pub packages: Vec<Dependency>,
     pub has_lock_file: bool,
     pub extensions: Vec<crate::extensions::ExtensionUse>,
+    pub wordpress: Vec<crate::wordpress::Component>,
 }
 
 fn status_for(constraint: Option<&str>, target: PhpVersion) -> DependencyStatus {
@@ -102,6 +103,7 @@ pub fn check(root: &Path, target: PhpVersion) -> DependencyReport {
             let excluded = crate::project::inspect(root).map(|i| i.excluded_dirs).unwrap_or_default();
             crate::extensions::used(root, &crate::project::collect_php_files(root, &excluded))
         },
+        wordpress: crate::wordpress::inventory(root),
     }
 }
 
