@@ -96,7 +96,8 @@ pub struct Merged {
 pub fn merge(root: &Path, findings: &mut Vec<Finding>, events: &[Event], target: PhpVersion) -> Merged {
     let mut merged = Merged { confirmed: 0, added: 0, outside: 0 };
     for e in events {
-        let Some(file) = relative(root, &e.path) else {
+        let skipped = |rel: &str| rel.split('/').any(|part| crate::project::ALWAYS_SKIP.contains(&part));
+        let Some(file) = relative(root, &e.path).filter(|rel| !skipped(rel)) else {
             merged.outside += 1;
             continue;
         };
@@ -184,6 +185,8 @@ each() is deprecated
         std::fs::create_dir(dir.path().join("src")).unwrap();
         let src = "<?php\neach($a);\n$cart->total = 1;\necho $row['id'];\n";
         std::fs::write(dir.path().join("src/Cart.php"), src).unwrap();
+        std::fs::create_dir_all(dir.path().join("vendor/x")).unwrap();
+        std::fs::write(dir.path().join("vendor/x/y.php"), "<?php\n").unwrap();
         let mut findings = analyze_source("src/Cart.php", src, "8.2".parse().unwrap());
         let merged = merge(dir.path(), &mut findings, &events, "8.2".parse().unwrap());
         assert_eq!((merged.confirmed, merged.added, merged.outside), (1, 3, 1));
