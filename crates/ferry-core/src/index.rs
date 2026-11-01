@@ -87,6 +87,8 @@ pub(crate) struct TypeDecl {
 pub struct ProjectIndex {
     pub framework: Option<crate::project::Framework>,
     functions: HashSet<String>,
+    function_required: HashMap<String, usize>,
+    version_includes: HashSet<String>,
     types: HashMap<String, Vec<TypeInfo>>,
     interfaces: HashMap<String, Vec<InterfaceInfo>>,
 }
@@ -119,6 +121,11 @@ impl ProjectIndex {
         index
     }
 
+    pub fn included_by_version_check(&self, file: &str) -> bool {
+        let base = file.rsplit(['/', '\\']).next().unwrap_or(file).to_ascii_lowercase();
+        self.version_includes.contains(&base)
+    }
+
     pub fn from_tokens(tokens: &[Token]) -> Self {
         let mut index = Self::default();
         index.add(tokens);
@@ -135,9 +142,18 @@ impl ProjectIndex {
             }
             let name = tokens[i + 1..].iter().find(|t| !t.is_punct("&"));
             if let Some(name) = name.filter(|n| n.kind == TokenKind::Ident) {
-                self.functions.insert(qualify(namespace_at(&spaces, i), &name.text));
+                let qualified = qualify(namespace_at(&spaces, i), &name.text);
+                let required = method_sig(tokens, i, tokens.len(), &names)
+                    .map_or(0, |(_, sig)| sig.params.iter().rposition(|p| !p.optional && !p.variadic).map_or(0, |k| k + 1));
+                let known = self.functions.contains(&qualified);
+                let entry = self.function_required.entry(qualified.clone()).or_insert(required);
+                if known {
+                    *entry = (*entry).min(required);
+                }
+                self.functions.insert(qualified);
             }
         }
+        self.version_includes.extend(version_includes(tokens));
         for decl in type_decls(tokens) {
             let name = decl.name;
             self.types.entry(name).or_default().push(decl.decl.info);
@@ -182,6 +198,41 @@ impl ProjectIndex {
         }
     }
 
+    pub(crate) fn instance_method(&self, fqn: &str, method: &str) -> Option<bool> {
+        let mut current = fqn.to_string();
+        for _ in 0..32 {
+            let t = self.type_by_fqn(&current)?;
+            if t.methods.contains("__callstatic") {
+                return None;
+            }
+            if let Some(sig) = t.signatures.get(method) {
+                return Some(!sig.is_static);
+            }
+            for tr in &t.trait_fqns {
+                let tr = self.type_by_fqn(tr)?;
+                if let Some(sig) = tr.signatures.get(method) {
+                    return Some(!sig.is_static);
+                }
+            }
+            current = t.parent_fqn.clone()?;
+        }
+        None
+    }
+
+    pub(crate) fn extends_or_is(&self, child: &str, ancestor: &str) -> Option<bool> {
+        let mut current = child.to_string();
+        for _ in 0..32 {
+            if current.eq_ignore_ascii_case(ancestor) {
+                return Some(true);
+            }
+            match self.type_by_fqn(&current)?.parent_fqn.clone() {
+                Some(p) => current = p,
+                None => return Some(false),
+            }
+        }
+        None
+    }
+
     pub(crate) fn class(&self, name: &str) -> Option<&TypeInfo> {
         self.unique(name).filter(|t| !t.is_trait)
     }
@@ -195,6 +246,16 @@ impl ProjectIndex {
             Some([only]) if !only.declares_methods => Some(&only.parents),
             _ => None,
         }
+    }
+
+    pub(crate) fn required_args(&self, namespace: &str, name: &str, rooted: bool) -> Option<usize> {
+        let name = name.trim_start_matches('\\').to_ascii_lowercase();
+        if !rooted && !namespace.is_empty() {
+            if let Some(&n) = self.function_required.get(&qualify(namespace, &name)) {
+                return Some(n);
+            }
+        }
+        self.function_required.get(&name).copied()
     }
 
     pub(crate) fn declares_function(&self, namespace: &str, name: &str, rooted: bool) -> bool {
@@ -411,6 +472,10 @@ fn decl_trait_names(tokens: &[Token], open: usize, close: usize) -> Vec<(usize, 
     out
 }
 
+pub(crate) fn class_and_trait_decls(tokens: &[Token]) -> Vec<TypeDecl> {
+    type_decls(tokens).into_iter().map(|d| d.decl).collect()
+}
+
 pub(crate) fn class_decls(tokens: &[Token]) -> Vec<TypeDecl> {
     type_decls(tokens).into_iter().map(|d| d.decl).filter(|d| !d.info.is_trait).collect()
 }
@@ -501,6 +566,60 @@ fn composer_files(root: &Path) -> Vec<PathBuf> {
                     out.push(base.join(rel));
                 }
             }
+        }
+    }
+    out
+}
+
+const VERSION_CHECKS: [&str; 7] =
+    ["php_version_id", "php_version", "php_major_version", "version_compare", "function_exists", "class_exists", "interface_exists"];
+
+fn version_condition(tokens: &[Token], close: usize) -> bool {
+    let mut depth = 0usize;
+    let Some(open) = (0..=close).rev().find(|&k| {
+        if tokens[k].is_punct(")") {
+            depth += 1;
+        } else if tokens[k].is_punct("(") {
+            depth -= 1;
+        }
+        depth == 0
+    }) else {
+        return false;
+    };
+    open > 0
+        && (tokens[open - 1].is_ident_ci("if") || tokens[open - 1].is_ident_ci("elseif"))
+        && tokens[open..close].iter().any(|t| VERSION_CHECKS.iter().any(|c| t.text.trim_start_matches('\\').eq_ignore_ascii_case(c)))
+}
+
+fn version_includes(tokens: &[Token]) -> Vec<String> {
+    let mut out = Vec::new();
+    for (k, t) in tokens.iter().enumerate() {
+        if !["require", "require_once", "include", "include_once"].iter().any(|w| t.is_ident_ci(w)) {
+            continue;
+        }
+        let mut guarded = k > 0 && tokens[k - 1].is_punct(")") && version_condition(tokens, k - 1);
+        let mut depth = 0usize;
+        for j in (0..k).rev() {
+            if guarded {
+                break;
+            }
+            if tokens[j].is_punct("}") {
+                depth += 1;
+            } else if tokens[j].is_punct("{") {
+                if depth == 0 {
+                    guarded = j > 0 && tokens[j - 1].is_punct(")") && version_condition(tokens, j - 1);
+                } else {
+                    depth -= 1;
+                }
+            }
+        }
+        if !guarded {
+            continue;
+        }
+        let file = tokens[k + 1..].iter().take_while(|t| !t.is_punct(";")).filter(|t| matches!(t.kind, TokenKind::Str { .. })).last();
+        if let Some(file) = file {
+            let name = file.text.trim_matches(|c| c == '\'' || c == '"');
+            out.push(name.rsplit(['/', '\\']).next().unwrap_or(name).to_ascii_lowercase());
         }
     }
     out
