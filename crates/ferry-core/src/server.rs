@@ -1,4 +1,4 @@
-use crate::analyzer::{relative_path, Finding};
+use crate::analyzer::{relative_path, FileError, Finding};
 use crate::i18n::{Localized, Text};
 use crate::rules::{FixKind, Severity, DEPRECATED_INI, REMOVED_INI};
 use crate::version::PhpVersion;
@@ -17,7 +17,9 @@ struct Hit {
     replacement: Option<Localized>,
 }
 
-pub fn scan(root: &Path, target: PhpVersion) -> Vec<Finding> {
+const MAX_ENTRIES: usize = MAX_FILES * 20;
+
+pub fn scan(root: &Path, target: PhpVersion) -> (Vec<Finding>, Vec<FileError>) {
     let keep = |e: &walkdir::DirEntry| {
         if e.depth() == 0 || !e.file_type().is_dir() {
             return true;
@@ -26,8 +28,29 @@ pub fn scan(root: &Path, target: PhpVersion) -> Vec<Finding> {
         (e.depth() == 1 && name == ".github") || (!name.starts_with('.') && !crate::project::ALWAYS_SKIP.contains(&name.as_ref()))
     };
     let mut out = Vec::new();
-    for entry in WalkDir::new(root).max_depth(8).follow_links(false).into_iter().filter_entry(keep).flatten().take(MAX_FILES * 20) {
-        if !entry.file_type().is_file() || std::fs::metadata(entry.path()).is_ok_and(|m| m.len() > crate::project::MAX_FILE_BYTES) {
+    let mut errors = Vec::new();
+    let mut seen = 0;
+    for entry in WalkDir::new(root).max_depth(8).follow_links(false).into_iter().filter_entry(keep) {
+        seen += 1;
+        if seen > MAX_ENTRIES || out.len() > MAX_FILES {
+            errors.push(FileError {
+                file: ".".into(),
+                message: crate::t!(
+                    "Sunucu yapılandırması araması {MAX_ENTRIES} girişte durdu; daha sonraki dosyalar kontrol edilmedi.",
+                    "The server configuration search stopped after {MAX_ENTRIES} entries; later files weren't checked."
+                ),
+            });
+            break;
+        }
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(e) => {
+                let file = e.path().map_or_else(|| ".".to_string(), |p| relative_path(root, p));
+                errors.push(FileError { file, message: e.to_string() });
+                continue;
+            }
+        };
+        if !entry.file_type().is_file() {
             continue;
         }
         let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
@@ -47,7 +70,20 @@ pub fn scan(root: &Path, target: PhpVersion) -> Vec<Finding> {
             n if in_workflows && (n.ends_with(".yml") || n.ends_with(".yaml")) => Kind::Ci,
             _ => continue,
         };
-        let Ok(text) = std::fs::read_to_string(entry.path()) else { continue };
+        if std::fs::metadata(entry.path()).is_ok_and(|m| m.len() > crate::project::MAX_FILE_BYTES) {
+            errors.push(FileError {
+                file: rel,
+                message: crate::t!("Atlandı: dosya çok büyük (2 MB üstü).", "Skipped: file is too large (over 2 MB)."),
+            });
+            continue;
+        }
+        let text = match std::fs::read_to_string(entry.path()) {
+            Ok(text) => text,
+            Err(e) => {
+                errors.push(FileError { file: rel, message: crate::i18n::io_error(&e) });
+                continue;
+            }
+        };
         let hits = match kind {
             Kind::Htaccess => htaccess(&text),
             Kind::Ini => ini(&text),
@@ -73,11 +109,8 @@ pub fn scan(root: &Path, target: PhpVersion) -> Vec<Finding> {
                 runtime_hits: 0,
             });
         }
-        if out.len() > MAX_FILES {
-            break;
-        }
     }
-    out
+    (out, errors)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -393,7 +426,7 @@ mod tests {
         );
         write("composer.lock", "{\n  \"content-hash\": \"abc\",\n  \"packages\": []\n}\n");
         write("vendor/pkg/.htaccess", "php_value x 1\n");
-        let found = scan(root, PhpVersion::new(8, 4));
+        let found = scan(root, PhpVersion::new(8, 4)).0;
         let expected = [
             (".github/workflows/legacy.yml", 3, "server.php_version_pin"),
             (".htaccess", 1, "server.php_value_outside_mod_php"),
@@ -412,6 +445,14 @@ mod tests {
         assert_eq!(ids(&found), expected);
         let docker = found.iter().find(|f| f.file == "Dockerfile").unwrap();
         assert_eq!((docker.title.en.as_str(), docker.since.to_string()), ("PHP 7.4 pinned", "8.4".to_string()));
-        assert!(scan(root, PhpVersion::new(8, 2)).iter().all(|f| f.file != ".tool-versions"));
+        assert!(scan(root, PhpVersion::new(8, 2)).0.iter().all(|f| f.file != ".tool-versions"));
+    }
+
+    #[test]
+    fn oversized_config_files_are_reported() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(".htaccess"), "#".repeat(3 * 1024 * 1024)).unwrap();
+        let (_, errors) = scan(dir.path(), PhpVersion::new(8, 4));
+        assert_eq!(errors.iter().map(|e| e.file.as_str()).collect::<Vec<_>>(), [".htaccess"]);
     }
 }
