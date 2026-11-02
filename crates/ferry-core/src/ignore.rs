@@ -18,6 +18,7 @@ pub struct Ignore {
 pub struct IgnoredFinding {
     pub finding: Finding,
     pub reason: String,
+    pub inline: bool,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -65,7 +66,7 @@ pub fn split(findings: Vec<Finding>, ignores: &[Ignore]) -> (Vec<Finding>, Vec<I
     let mut ignored = Vec::new();
     for f in findings {
         match ignores.iter().find(|i| i.matches(&f)) {
-            Some(i) => ignored.push(IgnoredFinding { reason: i.reason.clone(), finding: f }),
+            Some(i) => ignored.push(IgnoredFinding { reason: i.reason.clone(), finding: f, inline: false }),
             None => kept.push(f),
         }
     }
@@ -78,9 +79,9 @@ pub struct Applied {
     pub stale: Vec<Ignore>,
 }
 
-fn inline_reason(line: &str, rule_id: &str) -> Option<String> {
-    let at = line.find("ferry-ignore")?;
-    let rest = line[at + "ferry-ignore".len()..].trim_start_matches(':').trim();
+fn directive(comment: &str, rule_id: &str) -> Option<String> {
+    let at = comment.find("ferry-ignore")?;
+    let rest = comment[at + "ferry-ignore".len()..].trim_start_matches(':').trim();
     let rest = rest.split("*/").next().unwrap_or_default().split("-->").next().unwrap_or_default().trim();
     let (first, tail) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
     let names_rule = first.contains('.') || first.ends_with('*');
@@ -92,34 +93,78 @@ fn inline_reason(line: &str, rule_id: &str) -> Option<String> {
     }
 }
 
+struct Source {
+    lines: Vec<String>,
+    trimmed: std::collections::HashSet<String>,
+    comments: std::collections::HashMap<usize, Vec<String>>,
+}
+
+impl Source {
+    fn read(path: &Path) -> Option<Self> {
+        let text = String::from_utf8_lossy(&std::fs::read(path).ok()?).into_owned();
+        let lexed = crate::lexer::lex(&text);
+        let mut starts = vec![0];
+        starts.extend(text.match_indices('\n').map(|(i, _)| i + 1));
+        let line_of = |pos: usize| starts.partition_point(|&s| s <= pos);
+        let mut comments: std::collections::HashMap<usize, Vec<String>> = std::collections::HashMap::new();
+        let mut add = |start: usize, end: usize| {
+            let body = &text[start..end];
+            if body.contains("ferry-ignore") {
+                for line in line_of(start)..=line_of(end.saturating_sub(1).max(start)) {
+                    comments.entry(line).or_default().push(body.to_string());
+                }
+            }
+        };
+        for &(start, end) in &lexed.comments {
+            add(start, end);
+        }
+        for &(start, end) in &lexed.html {
+            let mut from = start;
+            while let Some(open) = text[from..end].find("<!--") {
+                let open = from + open;
+                let close = text[open..end].find("-->").map_or(end, |c| open + c + 3);
+                add(open, close);
+                from = close;
+            }
+        }
+        let lines: Vec<String> = text.lines().map(str::to_string).collect();
+        let trimmed = lines.iter().map(|l| l.trim().to_string()).collect();
+        Some(Self { lines, trimmed, comments })
+    }
+
+    fn inline_reason(&self, line: usize, rule_id: &str) -> Option<String> {
+        let on = |l: usize| self.comments.get(&l).and_then(|cs| cs.iter().find_map(|c| directive(c, rule_id)));
+        on(line).or_else(|| line.checked_sub(1).filter(|&l| l > 0).and_then(on))
+    }
+
+    fn has_snippet(&self, snippet: &str) -> bool {
+        match snippet.strip_suffix('…') {
+            Some(prefix) => self.lines.iter().any(|l| l.trim().starts_with(prefix)),
+            None => self.trimmed.contains(snippet),
+        }
+    }
+}
+
 pub fn apply(root: &Path, findings: Vec<Finding>, ignores: &[Ignore]) -> Applied {
-    let mut sources: std::collections::HashMap<String, Option<Vec<String>>> = std::collections::HashMap::new();
-    let mut lines_of = |file: &str| -> Option<Vec<String>> {
-        sources
-            .entry(file.to_string())
-            .or_insert_with(|| {
-                std::fs::read(root.join(file)).ok().map(|b| String::from_utf8_lossy(&b).lines().map(str::to_string).collect())
-            })
-            .clone()
-    };
+    let mut sources: std::collections::HashMap<String, Option<Source>> = std::collections::HashMap::new();
     let (mut kept, mut ignored) = (Vec::new(), Vec::new());
     for f in findings {
         if let Some(i) = ignores.iter().find(|i| i.matches(&f)) {
-            ignored.push(IgnoredFinding { reason: i.reason.clone(), finding: f });
+            ignored.push(IgnoredFinding { reason: i.reason.clone(), finding: f, inline: false });
             continue;
         }
-        let inline = lines_of(&f.file).and_then(|lines| {
-            let here = lines.get(f.line.wrapping_sub(1)).and_then(|l| inline_reason(l, &f.rule_id));
-            here.or_else(|| f.line.checked_sub(2).and_then(|k| lines.get(k)).and_then(|l| inline_reason(l, &f.rule_id)))
-        });
-        match inline {
-            Some(reason) => ignored.push(IgnoredFinding { reason, finding: f }),
+        let source = sources.entry(f.file.clone()).or_insert_with(|| Source::read(&root.join(&f.file)));
+        match source.as_ref().and_then(|s| s.inline_reason(f.line, &f.rule_id)) {
+            Some(reason) => ignored.push(IgnoredFinding { reason, finding: f, inline: true }),
             None => kept.push(f),
         }
     }
     let stale = ignores
         .iter()
-        .filter(|i| !lines_of(&i.file).is_some_and(|lines| lines.iter().any(|l| l.trim() == i.snippet || l.contains(i.snippet.as_str()))))
+        .filter(|i| {
+            let source = sources.entry(i.file.clone()).or_insert_with(|| Source::read(&root.join(&i.file)));
+            !source.as_ref().is_some_and(|s| s.has_snippet(&i.snippet))
+        })
         .cloned()
         .collect();
     Applied { kept, ignored, stale }
@@ -164,5 +209,44 @@ mod tests {
         assert_eq!(reasons, [(3, "only runs on the PHP 5 server"), (4, ""), (5, "legacy")]);
         assert_eq!(applied.kept.iter().map(|f| f.line).collect::<Vec<_>>(), [7]);
         assert_eq!(applied.stale, [gone, missing]);
+    }
+
+    #[test]
+    fn only_real_comments_are_directives() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = "<?php\n$text = 'ferry-ignore'; each($a);\n$t = \"// ferry-ignore\";\neach($b);\n/*\n * ferry-ignore removed.each block\n */ each($c);\n?>\n<!-- ferry-ignore removed.each template -->\n<?php each($d); ?>\n";
+        std::fs::write(dir.path().join("a.php"), src).unwrap();
+        let findings = analyze_source("a.php", src, "8.2".parse().unwrap());
+        let applied = apply(dir.path(), findings, &[]);
+        assert_eq!(applied.kept.iter().map(|f| f.line).collect::<Vec<_>>(), [2, 4]);
+        let reasons: Vec<(usize, &str, bool)> = applied.ignored.iter().map(|i| (i.finding.line, i.reason.as_str(), i.inline)).collect();
+        assert_eq!(reasons, [(7, "block", true), (10, "template", true)]);
+    }
+
+    #[test]
+    fn long_lines_keep_their_ignore() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = format!("<?php\neach($a); // {}\n", "x".repeat(300));
+        std::fs::write(dir.path().join("a.php"), &src).unwrap();
+        let findings = analyze_source("a.php", &src, "8.2".parse().unwrap());
+        assert!(findings[0].snippet.ends_with('…'));
+        let ignores = [Ignore::for_finding(&findings[0], "kept", 0)];
+        let applied = apply(dir.path(), findings, &ignores);
+        assert_eq!((applied.ignored.len(), applied.stale.len()), (1, 0));
+        assert!(!applied.ignored[0].inline);
+    }
+
+    #[test]
+    fn many_findings_in_one_file_stay_fast() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = format!("<?php\n{}", "each($a);\n".repeat(4000));
+        std::fs::write(dir.path().join("a.php"), &src).unwrap();
+        let findings = analyze_source("a.php", &src, "8.2".parse().unwrap());
+        let ignores: Vec<Ignore> =
+            (0..200).map(|n| Ignore { snippet: format!("gone{n}();"), ..Ignore::for_finding(&findings[0], "x", 0) }).collect();
+        let started = std::time::Instant::now();
+        let applied = apply(dir.path(), findings, &ignores);
+        assert_eq!((applied.kept.len(), applied.stale.len()), (4000, 200));
+        assert!(started.elapsed() < std::time::Duration::from_secs(2), "{:?}", started.elapsed());
     }
 }

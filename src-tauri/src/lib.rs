@@ -166,6 +166,14 @@ struct RuntimeSummary {
     check: Option<ferry_core::localcheck::CheckRun>,
 }
 
+fn presented(root: &Path, scan: &ScanResult, log: Option<&RuntimeLog>) -> Vec<ferry_core::analyzer::Finding> {
+    let mut findings = scan.findings.clone();
+    if let Some(log) = log {
+        runtime::merge(root, &mut findings, &log.events, scan.target);
+    }
+    findings
+}
+
 fn respond(root: &Path, mut scan: ScanResult, log: Option<&RuntimeLog>) -> ScanResponse {
     let runtime = log.map(|log| {
         let merged = runtime::merge(root, &mut scan.findings, &log.events, scan.target);
@@ -317,8 +325,8 @@ async fn ignore_finding(state: State<'_, AppState>, path: String, id: String, re
     }
     blocking(move || {
         let root = project_root(&path)?;
-        let finding = scan
-            .findings
+        let shown = presented(&root, &scan, log.as_ref());
+        let finding = shown
             .iter()
             .find(|f| f.id == id)
             .ok_or_else(|| t!("Bulgu bulunamadı; projeyi yeniden tarayın.", "Finding not found; scan the project again."))?;
@@ -342,12 +350,18 @@ async fn unignore_finding(state: State<'_, AppState>, path: String, id: String) 
     let log = state.runtime_log(&path);
     blocking(move || {
         let root = project_root(&path)?;
-        let finding = scan
-            .findings
+        let shown = presented(&root, &scan, log.as_ref());
+        let finding = shown
             .iter()
             .find(|f| f.id == id)
             .ok_or_else(|| t!("Bulgu bulunamadı; projeyi yeniden tarayın.", "Finding not found; scan the project again."))?;
         let mut ignores = ignore::load(&root);
+        if !ignores.iter().any(|i| i.matches(finding)) {
+            return Err(t!(
+                "Bu bulgu kaynak koddaki bir ferry-ignore yorumuyla yok sayılıyor; yeniden görmek için yorumu kaldırın.",
+                "This finding is ignored by a ferry-ignore comment in the code; remove the comment to see it again."
+            ));
+        }
         ignores.retain(|i| !i.matches(finding));
         ignore::save(&root, &ignores).map_err(|e| {
             let e = ferry_core::i18n::io_error(&e);
