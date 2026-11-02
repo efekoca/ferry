@@ -274,6 +274,16 @@ fn sarif_level(s: Severity) -> &'static str {
     }
 }
 
+fn uri(path: &str) -> String {
+    path.replace('\\', "/")
+        .bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => (b as char).to_string(),
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
+}
+
 fn render_sarif(findings: &[Finding], errors: &[FileError], o: &Options) -> String {
     let mut rules: Vec<Value> = Vec::new();
     let mut seen = std::collections::BTreeSet::new();
@@ -300,7 +310,7 @@ fn render_sarif(findings: &[Finding], errors: &[FileError], o: &Options) -> Stri
                 "message": { "text": message },
                 "locations": [{
                     "physicalLocation": {
-                        "artifactLocation": { "uri": f.file.replace('\\', "/") },
+                        "artifactLocation": { "uri": uri(&f.file) },
                         "region": { "startLine": f.line, "startColumn": f.column },
                     }
                 }],
@@ -324,7 +334,7 @@ fn render_sarif(findings: &[Finding], errors: &[FileError], o: &Options) -> Stri
                 "toolExecutionNotifications": errors.iter().map(|e| json!({
                     "level": "error",
                     "message": { "text": e.message },
-                    "locations": [{ "physicalLocation": { "artifactLocation": { "uri": e.file.replace('\\', "/") } } }],
+                    "locations": [{ "physicalLocation": { "artifactLocation": { "uri": uri(&e.file) } } }],
                 })).collect::<Vec<_>>(),
             }],
         }],
@@ -768,5 +778,11 @@ mod tests {
         run(&parse(&args(&sarif)).unwrap()).unwrap();
         let report: Value = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
         assert_eq!(report["runs"][0]["invocations"][0]["executionSuccessful"], false);
+    }
+
+    #[test]
+    fn sarif_locations_are_valid_uris() {
+        assert_eq!(uri("src\\my file#1.php"), "src/my%20file%231.php");
+        assert_eq!(uri("şablon/100%.php"), "%C5%9Fablon/100%25.php");
     }
 }
