@@ -140,6 +140,7 @@ Ferry her uygulamadan önce değiştireceği dosyaları yedekler. **Geçmiş** s
 - **Türkçe ve İngilizce** arayüz. Seçtiğiniz dil dışa aktarılan raporlarda da kullanılır.
 - **Açık ve koyu** tema ya da sistemin teması.
 - Proje klasörünü pencereye **sürükleyip bırakın** ya da başlangıç ekranından son projelerinizi yeniden açın.
+- **Yeniden boyutlandırılabilir paneller:** **Bulgular** ve **Düzeltmeler** sayfalarında liste ile ayrıntı arasındaki çizgiyi sürükleyin ya da çizgiye odaklanıp ok tuşlarını kullanın. Boyut hatırlanır; sıfırlamak için çizgiye çift tıklayın.
 - **Klavye kısayolları:** **⌘O** proje açar, **⌘1**–**⌘5** sayfalar arasında geçiş yapar, **⌘,** **Ayarlar**'ı açar, **⌘+** / **⌘−** arayüzü yakınlaştırır ya da uzaklaştırır. Windows ve Linux'ta **⌘** yerine **Ctrl** kullanın.
 - **Erişilebilir:** Her şey klavyeyle yapılabilir, odak her zaman görünür ve arayüz WCAG 2.1 AA kontrast ölçütlerini karşılar. Yüksek yakınlaştırmada paneller alt alta dizilir, kenar çubuğu simgelere iner.
 
