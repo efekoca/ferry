@@ -2934,3 +2934,25 @@ select.input {
 .compare__current td {
   background: var(--accent-soft);
 }
+
+.findings-empty {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-6) 0;
+  overflow: auto;
+}
+
+.findings-empty__actions {
+  justify-content: center;
+  margin-top: var(--space-3);
+}
+
+.findings-empty__actions .toolbar__actions {
+  margin-left: 0;
+  justify-content: center;
+}
+
+.findings-empty__actions .btn {
+  margin-top: 0;
+}
