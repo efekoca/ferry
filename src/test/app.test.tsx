@@ -368,6 +368,8 @@ describe("Ferry app", () => {
     expect(await screen.findByText("3 dosya güncellendi")).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(within(screen.getByRole("list", { name: "Dosyalar" })).getAllByRole("listitem")).toHaveLength(1);
+    expect(screen.getByRole("checkbox", { name: "includes/helpers.php dosyasını seçin" })).not.toBeChecked();
+    expect(screen.getByText("0 / 1 dosya seçili")).toBeInTheDocument();
 
     await user.click(nav(/Geçmiş/));
     const row = (await screen.findByText(/Uyumluluk düzeltmeleri · PHP 8.4/)).closest("tr")!;
