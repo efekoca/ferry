@@ -161,7 +161,7 @@ impl<'a> Lexer<'a> {
                 self.pos += 3;
                 return;
             }
-            if self.starts_with("<?") && self.peek(2).is_none_or(|c| c.is_ascii_whitespace()) {
+            if self.starts_with("<?") && !self.src[self.pos + 2..].get(..3).is_some_and(|w| w.eq_ignore_ascii_case("xml")) {
                 self.pos += 2;
                 return;
             }
@@ -508,6 +508,15 @@ mod tests {
 
     fn kinds(src: &str) -> Vec<(TokenKind, String)> {
         tokenize(src).into_iter().map(|t| (t.kind, t.text)).collect()
+    }
+
+    #[test]
+    fn short_open_tags_without_a_space_are_code() {
+        let idents = |src: &str| tokenize(src).into_iter().filter(|t| t.kind == TokenKind::Ident).map(|t| t.text).collect::<Vec<_>>();
+        assert_eq!(idents("<?each($a);?>"), ["each"]);
+        assert_eq!(idents("<p><?echo $x?></p><?if ($y):?>a<?endif?>"), ["echo", "if", "endif"]);
+        assert_eq!(idents("<?xml version=\"1.0\"?><root/><?php foo(); ?>"), ["foo"]);
+        assert_eq!(idents("<?XML version=\"1.0\"?><? bar(); ?>"), ["bar"]);
     }
 
     #[test]

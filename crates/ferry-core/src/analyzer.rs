@@ -2982,6 +2982,12 @@ mod tests {
     }
 
     #[test]
+    fn short_open_tags_are_scanned() {
+        assert_eq!(rule_ids("<?each($a);?>"), ["removed.each"]);
+        assert!(rule_ids("<?xml version=\"1.0\"?><feed/>").is_empty());
+    }
+
+    #[test]
     fn dynamic_properties_respect_case_and_private_parents() {
         let count = |src: &str| rule_ids(src).iter().filter(|r| *r == "deprecated.dynamic_property").count();
         assert_eq!(count("<?php class A { public $name; function f() { $this->Name = 1; } }"), 1);
