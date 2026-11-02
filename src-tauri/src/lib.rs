@@ -231,8 +231,9 @@ fn selectable_lines() -> Vec<String> {
 }
 
 #[tauri::command]
-async fn local_php_versions() -> CmdResult<Vec<toolchain::LocalPhp>> {
-    blocking(|| Ok(toolchain::local_php(&selectable_lines()))).await
+async fn local_php_versions(state: State<'_, AppState>) -> CmdResult<Vec<toolchain::LocalPhp>> {
+    let chosen = state.php_override();
+    blocking(move || Ok(toolchain::local_php_with(&selectable_lines(), chosen.as_deref()))).await
 }
 
 #[tauri::command]
@@ -241,9 +242,10 @@ async fn run_local_check(state: State<'_, AppState>, path: String, target: Strin
     let target = parse_target(&target)?;
     let scan = state.scans.lock().unwrap().get(&path).cloned().ok_or_else(|| t!("Önce projeyi tarayın.", "Scan the project first."))?;
     let shutdown = state.shutdown.clone();
+    let chosen = state.php_override();
     let (root, entry) = blocking(move || {
         let root = project_root(&path)?;
-        let local = toolchain::local_php(&[target.to_string()]).into_iter().next().ok_or_else(|| {
+        let local = toolchain::local_php_with(&[target.to_string()], chosen.as_deref()).into_iter().next().ok_or_else(|| {
             t!(
                 "Bu bilgisayarda PHP {target} bulunamadı. Homebrew, Herd ya da paket yöneticinizle kurun.",
                 "PHP {target} wasn't found on this computer. Install it with Homebrew, Herd or your package manager."
