@@ -52,6 +52,32 @@ describe("Ferry app", () => {
     expect(screen.getByText("WordPress sürümünü yükseltin")).toBeInTheDocument();
   });
 
+  it("shows what still stands between the project and the target", async () => {
+    const user = setup();
+    await openAndScan(user);
+    const list = screen.getByRole("list", { name: "Hazırlık durumu" });
+    expect(within(list).getByText("Geçişi engelleyenler").parentElement).toHaveAttribute("data-state", "bad");
+    expect(within(list).getByText("Tüm dosyalar")).toBeInTheDocument();
+    expect(within(list).getByRole("button", { name: "3 engel" })).toBeInTheDocument();
+    expect(within(list).getByRole("button", { name: "Çalıştırılmadı" })).toBeInTheDocument();
+    await user.click(within(list).getByRole("button", { name: "3 engel" }));
+    expect(await screen.findByRole("heading", { name: "Bağımlılıklar" })).toBeInTheDocument();
+  });
+
+  it("does not call a clean scan ready while dependencies block it", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    const real = api.scanProject;
+    api.scanProject = async (...args) => {
+      const result = await real(...args);
+      return { ...result, findings: [], summary: { ...result.summary, total: 0, breaking: 0, deprecated: 0, behavior: 0, auto: 0, likely: 0, manual: 0, filesAffected: 0, score: 100 } };
+    };
+    render(<App api={api} />);
+    await openAndScan(user);
+    expect(await screen.findByRole("heading", { name: "Kodda uyumsuzluk bulunmadı" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Hedef sürüme hazır" })).not.toBeInTheDocument();
+  });
+
   it("drops the framework warning for targets the framework supports", async () => {
     const user = setup();
     await openAndScan(user);
@@ -291,6 +317,20 @@ describe("Ferry app", () => {
     await waitFor(() => expect(within(list).getAllByRole("option").filter((o) => o.tabIndex === 0)).toHaveLength(1));
   });
 
+  it("resizes the findings panels from the keyboard and remembers it", async () => {
+    const user = setup();
+    await openAndScan(user);
+    await user.click(nav(/Bulgular/));
+    const splitter = await screen.findByRole("separator", { name: "Panelleri yeniden boyutlandır" });
+    splitter.focus();
+    await user.keyboard("{ArrowLeft}");
+    expect(splitter.parentElement!.style.getPropertyValue("--split-col")).toMatch(/px$/);
+    expect(localStorage.getItem("ferry.split.findings.cols")).not.toBeNull();
+    await user.dblClick(splitter);
+    expect(splitter.parentElement!.style.getPropertyValue("--split-col")).toBe("");
+    expect(localStorage.getItem("ferry.split.findings.cols")).toBeNull();
+  });
+
   it("puts focus in the reason field of the ignore dialog", async () => {
     const user = setup();
     await openAndScan(user);
@@ -327,6 +367,23 @@ describe("Ferry app", () => {
     await user.click(screen.getByRole("button", { name: "En son sürümleri bul" }));
     expect(await within(table).findByText("6.2.4")).toBeInTheDocument();
     expect(within(table).getByText("Kaldırıldı")).toBeInTheDocument();
+  });
+
+  it("leaves files to review unselected and notes the ones not viewed", async () => {
+    const user = setup();
+    await openAndScan(user);
+    await user.click(nav(/Düzeltmeler/));
+    await user.click(await screen.findByRole("button", { name: /Değişiklikleri hesapla/ }));
+    const files = await screen.findByRole("list", { name: "Dosyalar" });
+    const box = (file: string) => screen.getByRole("checkbox", { name: `${file} dosyasını seçin` });
+    expect(box("includes/class-mailer.php")).not.toBeChecked();
+    expect(box("includes/helpers.php")).toBeChecked();
+    expect(within(files).getAllByText("Bakılmadı")).toHaveLength(1);
+    await user.click(box("includes/class-mailer.php"));
+    await user.click(screen.getByRole("button", { name: /dosyayı uygula/ }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/otomatik, 1 gözden geçirilecek dosya\./)).toBeInTheDocument();
+    expect(within(dialog).getByText("Gözden geçirilecek 1 dosyanın farkına henüz bakmadınız.")).toBeInTheDocument();
   });
 
   it("narrows the selection by rule and warns about uncommitted files", async () => {
@@ -442,6 +499,7 @@ describe("Ferry app", () => {
     await user.click(await screen.findByRole("button", { name: /Değişiklikleri hesapla/ }));
     const files = await screen.findByRole("list", { name: "Dosyalar" });
     expect(within(files).getAllByRole("listitem")).toHaveLength(4);
+    await user.click(screen.getByRole("checkbox", { name: "Tümünü seç" }));
     expect(screen.getByText("4 / 4 dosya seçili")).toBeInTheDocument();
 
     await user.click(screen.getByRole("checkbox", { name: "includes/helpers.php dosyasını seçin" }));
@@ -532,6 +590,7 @@ describe("Ferry app", () => {
     await openAndScan(user);
     await user.click(nav(/Düzeltmeler/));
     await user.click(await screen.findByRole("button", { name: /Değişiklikleri hesapla/ }));
+    await user.click(await screen.findByRole("checkbox", { name: "Tümünü seç" }));
     await user.click(await screen.findByRole("button", { name: "Tümünü uygula" }));
     await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Uygula" }));
     const alert = await screen.findByText("4 dosya güncellendi, 1 dosyada yeni sözdizimi hatası var");
@@ -666,6 +725,7 @@ describe("Ferry app", () => {
     await openAndScan(user);
     await user.click(nav(/Düzeltmeler/));
     await user.click(await screen.findByRole("button", { name: /Değişiklikleri hesapla/ }));
+    await user.click(await screen.findByRole("checkbox", { name: "Tümünü seç" }));
     await user.click(await screen.findByRole("button", { name: "Tümünü uygula" }));
     await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Uygula" }));
     await screen.findByText("4 dosya güncellendi");

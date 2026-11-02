@@ -21,7 +21,7 @@ A desktop app for macOS, Windows and Linux that scans your PHP code, shows what 
 ## What sets it apart
 
 - **Know how much work is ahead.** A score from 0 to 100 and the split into automatic, review, and manual fixes tell you at a glance how big the migration is.
-- **Know which fixes you can trust.** Every finding and every change is labeled **Automatic** (a rule-based change that keeps behavior identical), **Review** (usually right, but worth a look), or **Manual** (it needs your decision).
+- **Know which fixes you can trust.** Every finding and every change is labeled **Automatic** (a rule-based change designed to keep behavior the same), **Review** (usually right, but worth a look), or **Manual** (it needs your decision).
 - **Fix only what is needed, or modernize too.** **Compatibility** mode makes only the changes the code needs to run on the new version. **Modernize** also adopts newer syntax such as `match`, constructor promotion, and `str_contains`.
 - **Find the packages that hold you back.** Ferry reads `composer.lock` and shows which packages do not support the target version, before you start changing code.
 - **Disk content matches the preview exactly.** Ferry applies the changes itself, exactly as you saw them, and refuses to touch a file that changed after the preview.
@@ -34,7 +34,8 @@ A desktop app for macOS, Windows and Linux that scans your PHP code, shows what 
 Pick the version you are moving to (PHP 8.2 to 8.5) and Ferry scans every PHP file in seconds. The **Overview** shows:
 
 - the project's platform (WordPress, Laravel, Symfony, Drupal, or plain PHP), its number of PHP files, and its current PHP version from `composer.json`
-- a readiness score from 0 to 100, and how many issues fall into each fix type
+- a readiness score from 0 to 100, and how many issues fall into each fix type; the score is an estimate of the work left, not a guarantee the app runs
+- next to the score, what still stands in the way: issues that block the upgrade, files the scan couldn't cover, dependencies that block it or couldn't be confirmed, and whether lint or tests ran on the target. The headline only says the project is ready when all of these are clear
 - how many findings are **Breaking** (the code won't run), **Deprecated** (it warns now and will be removed later), or **Risky** (it may behave differently at runtime)
 - the most common issues and the next steps to take
 
@@ -99,8 +100,8 @@ The **Fixes** page runs Rector on your project in dry-run mode. No files change.
 
 - **Compatibility** makes only the changes needed to run on the new version. It is the best place to start.
 - **Modernize** also adopts newer syntax for the target version.
-- Pick the files you want and press **Apply**. Files marked **Review** carry a note to check them first.
-- **Narrow the selection** picks only the automatic fixes, or only the files a given Rector rule changed, so you can apply and commit one kind of change at a time.
+- Pick the files you want and press **Apply**. Automatic files start selected; files marked **Review** start unselected and carry a note to check them first. Until you open one, it is labeled **Not viewed**, and the confirmation says how many automatic and review files you are applying and whether you skipped any diffs.
+- **Narrow the selection** picks only the automatic fixes, or only the files a given Rector rule changed, so you can apply and commit one kind of change at a time. Selection works per file: other changes in those files are applied too.
 - In a Git project, the confirmation lists selected files that already have uncommitted changes and offers a ready-to-copy commit message that names the rules being applied.
 - After applying, Ferry checks the changed files with `php -l` and warns you if a change left one that no longer parses, so you can roll it back from **History** right away.
 
@@ -140,6 +141,7 @@ Before every apply, Ferry backs up the files it is about to change. The **Histor
 - **Turkish and English** interface. The language also applies to exported reports.
 - **Light and dark** themes, or follow the system.
 - **Drag and drop** a project folder onto the window, or reopen a recent project from the start screen.
+- **Resizable panels:** drag the line between a list and its details on **Findings** and **Fixes**, or focus it and use the arrow keys. The size is remembered; double-click the line to reset it.
 - **Keyboard shortcuts:** **⌘O** opens a project, **⌘1** to **⌘5** switch between pages, **⌘,** opens **Settings**, and **⌘+** / **⌘−** zoom the interface. On Windows and Linux, use **Ctrl** instead of **⌘**.
 - **Accessible:** everything works from the keyboard and focus is always visible. Every screen and dialog is checked with axe in the tests, and the native e2e measures WCAG 2.1 AA text contrast in the real app window in both themes. Screen reader behavior isn't tested automatically. At high zoom levels the layout stacks its panes and narrows the sidebar to icons.
 
