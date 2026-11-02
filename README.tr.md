@@ -34,7 +34,8 @@ Ferry, macOS, Windows ve Linux'ta çalışan bir masaüstü uygulamasıdır. PHP
 Geçmek istediğiniz sürümü seçin (PHP 8.2 ile 8.5 arası); Ferry tüm PHP dosyalarını saniyeler içinde tarar. **Genel bakış** ekranında şunları görürsünüz:
 
 - projenin platformu (WordPress, Laravel, Symfony, Drupal ya da düz PHP), PHP dosyası sayısı ve `composer.json`'a göre şu anki PHP sürümü
-- 0 ile 100 arasında bir hazırlık puanı ve her düzeltme türüne düşen sorun sayısı
+- 0 ile 100 arasında bir hazırlık puanı ve her düzeltme türüne düşen sorun sayısı; puan kalan işin bir tahminidir, uygulamanın çalışacağının garantisi değildir
+- puanın yanında hâlâ önünüzde duranlar: geçişi engelleyen sorunlar, taramanın kapsayamadığı dosyalar, engel çıkaran ya da doğrulanamayan bağımlılıklar ve hedef sürümde lint ya da testin çalışıp çalışmadığı. Başlık ancak bunların hepsi temizse projenin hazır olduğunu söyler
 - bulguların kaçının **Kritik** (kod çalışmaz), **Eskimiş** (şimdilik uyarı verir, ileride kaldırılır) ya da **Riskli** (çalışırken farklı davranabilir) olduğu
 - en sık görülen sorunlar ve atmanız gereken sonraki adımlar
 
