@@ -186,6 +186,7 @@ export function Changes() {
                 <h2>{t.changes.introTitle(target)}</h2>
               </div>
               <p className="muted">{t.changes.introText}</p>
+              <p className="hint">{t.changes.introTrust}</p>
               <div className="mode-cards" role="radiogroup" aria-label={t.changes.mode}>
                 {modes.map((m) => (
                   <label key={m.value} className="mode-card" data-checked={mode === m.value}>

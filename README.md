@@ -21,7 +21,7 @@ A desktop app for macOS, Windows and Linux that scans your PHP code, shows what 
 ## What sets it apart
 
 - **Know how much work is ahead.** A score from 0 to 100 and the split into automatic, review, and manual fixes tell you at a glance how big the migration is.
-- **Know which fixes you can trust.** Every finding and every change is labeled **Automatic** (a rule-based change that keeps behavior identical), **Review** (usually right, but worth a look), or **Manual** (it needs your decision).
+- **Know which fixes you can trust.** Every finding and every change is labeled **Automatic** (a rule-based change designed to keep behavior the same), **Review** (usually right, but worth a look), or **Manual** (it needs your decision).
 - **Fix only what is needed, or modernize too.** **Compatibility** mode makes only the changes the code needs to run on the new version. **Modernize** also adopts newer syntax such as `match`, constructor promotion, and `str_contains`.
 - **Find the packages that hold you back.** Ferry reads `composer.lock` and shows which packages do not support the target version, before you start changing code.
 - **Disk content matches the preview exactly.** Ferry applies the changes itself, exactly as you saw them, and refuses to touch a file that changed after the preview.

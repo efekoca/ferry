@@ -21,6 +21,7 @@ import {
   Sun,
   Trash2,
   ShieldAlert,
+  Activity,
 } from "lucide-react";
 import { DiffViewer } from "../components/DiffViewer";
 import { ConfirmDialog, Sheet } from "../components/Modal";
@@ -997,6 +998,7 @@ export function SettingsScreen() {
 
 export function Roadmap({ kind }: { kind: "runtime" | "ai" }) {
   const { t } = useI18n();
+  const { scan, showFindings } = useStore();
   const content = t.roadmap[kind];
   return (
     <>
@@ -1015,6 +1017,18 @@ export function Roadmap({ kind }: { kind: "runtime" | "ai" }) {
               </li>
             ))}
           </ul>
+          {kind === "runtime" && (
+            <div className="roadmap__today">
+              <Callout tone="info" icon={<Activity size={15} />}>
+                {t.roadmap.runtime.today}
+              </Callout>
+              {scan && (
+                <Button variant="secondary" size="sm" onClick={() => showFindings()}>
+                  {t.roadmap.runtime.openFindings}
+                </Button>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </>
