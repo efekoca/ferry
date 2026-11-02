@@ -784,16 +784,25 @@ export function SettingsScreen() {
     }
   };
 
-  const save = async (next: Settings) => {
-    if (!api) return false;
-    try {
-      await api.saveSettings(next);
-      setSettings(next);
-      return true;
-    } catch (e) {
-      toast.push({ tone: "error", title: t.toast.saveFailed, description: errorMessage(e, t.common.genericError) });
-      return false;
-    }
+  const latest = useRef(settings);
+  latest.current = settings;
+  const queue = useRef(Promise.resolve(true));
+  const save = (patch: Partial<Settings>) => {
+    const run = async () => {
+      if (!api) return false;
+      const next = { ...latest.current, ...patch };
+      try {
+        await api.saveSettings(next);
+        latest.current = next;
+        setSettings(next);
+        return true;
+      } catch (e) {
+        toast.push({ tone: "error", title: t.toast.saveFailed, description: errorMessage(e, t.common.genericError) });
+        return false;
+      }
+    };
+    queue.current = queue.current.then(run, run);
+    return queue.current;
   };
 
   const themes = [
@@ -817,13 +826,13 @@ export function SettingsScreen() {
       toast.push({ tone: "error", title: t.toast.saveFailed, description: errorMessage(e, t.common.genericError) });
       return;
     }
-    if (!path || !(await save({ ...settings, phpPath: path }))) return;
+    if (!path || !(await save({ phpPath: path }))) return;
     await recheck();
     toast.push({ tone: "success", title: t.toast.phpSaved, description: path });
   };
 
   const resetPhp = async () => {
-    if (await save({ ...settings, phpPath: null })) await recheck();
+    if (await save({ phpPath: null })) await recheck();
   };
 
   const limits = [
@@ -873,7 +882,7 @@ export function SettingsScreen() {
                   className="input"
                   aria-label={t.settings.editor}
                   value={settings.editor ?? ""}
-                  onChange={(e) => void save({ ...settings, editor: e.target.value || null })}
+                  onChange={(e) => void save({ editor: e.target.value || null })}
                 >
                   <option value="">{t.settings.editorSystem}</option>
                   {EDITORS.map(([value, label]) => (
@@ -945,7 +954,7 @@ export function SettingsScreen() {
                   label={t.settings.keep}
                   options={limits}
                   value={limits.some((l) => l.value === limitValue) ? limitValue : "none"}
-                  onChange={(v) => save({ ...settings, snapshotLimit: v === "none" ? null : Number(v) })}
+                  onChange={(v) => save({ snapshotLimit: v === "none" ? null : Number(v) })}
                 />
               </div>
               <div className="setting">
