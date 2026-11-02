@@ -12,6 +12,8 @@ export const tr = {
     lines: "satır",
     rules: (n: number) => `${n} kural`,
     genericError: "Bir şeyler ters gitti.",
+    screenFailed: "Bu ekran gösterilemedi",
+    tryAgain: "Tekrar dene",
     copy: "Kopyala",
     copied: "Kopyalandı",
   },
