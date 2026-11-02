@@ -12,7 +12,9 @@ class Queue
     public function restore($snapshot)
     {
         $items = unserialize($snapshot);
-        $items->__wakeup();
-        $this->items = $items;
+        if ($items instanceof SplFixedArray) {
+            $items->__wakeup();
+            $this->items = $items;
+        }
     }
 }
