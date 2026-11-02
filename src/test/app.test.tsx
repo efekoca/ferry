@@ -232,6 +232,63 @@ describe("Ferry app", () => {
     await waitFor(() => expect(screen.getAllByRole("option")).toHaveLength(all));
   });
 
+  it("clears the runtime filter with the other filters", async () => {
+    const user = setup();
+    await openAndScan(user);
+    await user.click(nav(/Bulgular/));
+    const all = (await screen.findAllByRole("option")).length;
+    await user.click(screen.getByRole("button", { name: "Log içe aktar" }));
+    await waitFor(() => expect(screen.getAllByRole("option")).toHaveLength(all + 1));
+    await user.click(screen.getByRole("button", { name: /^Çalışırken görülenler/ }));
+    expect(screen.getAllByRole("option")).toHaveLength(4);
+    await user.click(screen.getByRole("button", { name: "Filtreleri temizle" }));
+    expect(screen.getAllByRole("option")).toHaveLength(all + 1);
+  });
+
+  it("keeps the checks available when nothing is found", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    const real = api.scanProject;
+    api.scanProject = async (...args) => ({ ...(await real(...args)), findings: [] });
+    render(<App api={api} />);
+    await openAndScan(user);
+    await user.click(nav(/Bulgular/));
+    expect(await screen.findByText("Sorun yok")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Log içe aktar" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "PHP 8.4.27 ile lint et" })).toBeInTheDocument();
+  });
+
+  it("keeps one finding focusable when a filter shrinks a long list", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    const real = api.scanProject;
+    api.scanProject = async (...args) => {
+      const result = await real(...args);
+      const base = result.findings[0];
+      const findings = Array.from({ length: 420 }, (_, n) => ({ ...base, id: `f${n}`, file: `src/f${n}.php`, line: 1 }));
+      return { ...result, findings };
+    };
+    render(<App api={api} />);
+    await openAndScan(user);
+    await user.click(nav(/Bulgular/));
+    const list = await screen.findByRole("listbox", { name: "Bulgu listesi" });
+    within(list).getAllByRole("option")[0].focus();
+    await user.keyboard("{End}");
+    await user.type(screen.getByRole("searchbox", { name: "Bulgularda ara" }), "php");
+    await waitFor(() => expect(within(list).getAllByRole("option").filter((o) => o.tabIndex === 0)).toHaveLength(1));
+  });
+
+  it("puts focus in the reason field of the ignore dialog", async () => {
+    const user = setup();
+    await openAndScan(user);
+    await user.click(nav(/Bulgular/));
+    await screen.findByRole("listbox", { name: "Bulgu listesi" });
+    const detail = screen.getByRole("complementary", { name: "Bulgu ayrıntısı" });
+    await user.click(within(detail).getByRole("button", { name: "Yok say" }));
+    const dialog = await screen.findByRole("dialog", { name: "Bu bulgu yok sayılsın mı?" });
+    expect(within(dialog).getByRole("textbox", { name: "Gerekçe" })).toHaveFocus();
+  });
+
   it("creates a server probe and compares its output", async () => {
     const user = setup();
     await openAndScan(user);
