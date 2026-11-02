@@ -19,12 +19,25 @@ function signature($f)
 
 $out = array(
     'version' => PHP_VERSION,
-    'extensions' => array_map('strtolower', get_loaded_extensions()),
+    'extensions' => array_values(array_unique(array_map('strtolower', array_merge(get_loaded_extensions(), get_loaded_extensions(true))))),
     'functions' => array(),
     'classes' => array(),
     'constants' => array(),
-    'ini' => array_keys(ini_get_all(null, false)),
+    'ini' => array(),
 );
+
+foreach (array_merge(get_loaded_extensions(), get_loaded_extensions(true)) as $ext) {
+    $settings = @ini_get_all($ext, false);
+    foreach (is_array($settings) ? array_keys($settings) : array() as $name) {
+        $out['ini'][$name] = strtolower($ext);
+    }
+}
+// ini_get_all() can't look up Zend extensions such as OPcache by name.
+foreach (array_keys(ini_get_all(null, false)) as $name) {
+    if (!isset($out['ini'][$name])) {
+        $out['ini'][$name] = strpos($name, 'opcache.') === 0 ? 'zend opcache' : 'core';
+    }
+}
 
 foreach (get_defined_functions()['internal'] as $name) {
     $f = new ReflectionFunction($name);

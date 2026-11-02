@@ -30,6 +30,9 @@ foreach ($rows['REMOVED_METHODS'] as $r) {
     list($class, $method) = explode('::', $r[1]);
     if (method_exists($class, $method)) { echo "still exists: method {$r[1]}\n"; $bad++; }
 }
+foreach ($rows['REMOVED_INI'] as $r) {
+    if (ini_get($r[1]) !== false) { echo "still exists: ini {$r[1]}\n"; $bad++; }
+}
 foreach ($rows['DEPRECATED_FUNCTIONS'] as $r) {
     if (function_exists($r[1]) && !(new ReflectionFunction($r[1]))->isDeprecated()) { echo "not deprecated: function {$r[1]}\n"; $bad++; }
 }
