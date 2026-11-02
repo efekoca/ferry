@@ -621,6 +621,21 @@ describe("Ferry app", () => {
     expect(screen.queryByText(/phpunit\/phpunit/)).not.toBeInTheDocument();
   });
 
+  it("does not call unconfirmed packages compatible", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    const real = api.checkDependencies;
+    api.checkDependencies = async (...args) => {
+      const report = await real(...args);
+      return { ...report, rootStatus: "compatible", packages: report.packages.filter((p) => p.status !== "incompatible") };
+    };
+    render(<App api={api} />);
+    await openAndScan(user);
+    await user.click(nav(/Bağımlılıklar/));
+    expect(await screen.findByText(/Engel bulunmadı, ancak 1 paketin PHP 8.4 ile uyumu doğrulanamadı/)).toBeInTheDocument();
+    expect(screen.queryByText(/hepsi PHP 8.4 ile uyumlu/)).not.toBeInTheDocument();
+  });
+
   it("supports keyboard selection in the version picker", async () => {
     const user = setup();
     await user.click(await screen.findByRole("button", { name: "Proje klasörü seçin" }));

@@ -15,6 +15,37 @@ pub struct ExtensionUse {
     pub declared: bool,
     pub removed: bool,
     pub available: Option<bool>,
+    pub required_by: Vec<String>,
+    pub dev: bool,
+}
+
+pub fn normalize(name: &str) -> String {
+    let n = name.trim().to_ascii_lowercase().replace(['-', ' '], "_");
+    n.strip_prefix("zend_").map(str::to_string).unwrap_or(n)
+}
+
+fn requirements(root: &Path) -> Vec<(String, String, bool)> {
+    let read = |file: &str| std::fs::read_to_string(root.join(file)).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok());
+    let exts = |v: &serde_json::Value, key: &str| -> Vec<String> {
+        v.get(key)
+            .and_then(|o| o.as_object())
+            .map(|o| o.keys().filter_map(|k| k.strip_prefix("ext-").map(normalize)).collect())
+            .unwrap_or_default()
+    };
+    let mut out = Vec::new();
+    if let Some(manifest) = read("composer.json") {
+        out.extend(exts(&manifest, "require").into_iter().map(|e| (e, "composer.json".to_string(), false)));
+        out.extend(exts(&manifest, "require-dev").into_iter().map(|e| (e, "composer.json (require-dev)".to_string(), true)));
+    }
+    if let Some(lock) = read("composer.lock") {
+        for (key, dev) in [("packages", false), ("packages-dev", true)] {
+            for pkg in lock.get(key).and_then(|v| v.as_array()).into_iter().flatten() {
+                let name = pkg.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+                out.extend(exts(pkg, "require").into_iter().map(|e| (e, name.to_string(), dev)));
+            }
+        }
+    }
+    out
 }
 
 fn lookup<'a>(table: &'a [(&'a str, &'a str)], name: &str) -> Option<&'a str> {
@@ -29,18 +60,9 @@ fn extension_of_function(name: &str) -> Option<(&'static str, bool)> {
 }
 
 pub fn used(root: &Path, files: &[PathBuf]) -> Vec<ExtensionUse> {
-    let declared: Vec<String> = std::fs::read_to_string(root.join("composer.json"))
-        .ok()
-        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
-        .map(|j| {
-            ["require", "require-dev"]
-                .iter()
-                .filter_map(|k| j.get(k).and_then(|v| v.as_object()))
-                .flat_map(|o| o.keys().filter_map(|k| k.strip_prefix("ext-").map(|e| e.to_ascii_lowercase())).collect::<Vec<_>>())
-                .collect()
-        })
-        .unwrap_or_default();
-    let mut found: BTreeMap<&'static str, ExtensionUse> = BTreeMap::new();
+    let required = requirements(root);
+    let declared: Vec<String> = required.iter().filter(|(_, by, _)| by.starts_with("composer.json")).map(|(e, ..)| e.clone()).collect();
+    let mut found: BTreeMap<String, ExtensionUse> = BTreeMap::new();
     for path in files {
         if std::fs::metadata(path).is_ok_and(|m| m.len() > crate::project::MAX_FILE_BYTES) {
             continue;
@@ -72,7 +94,7 @@ pub fn used(root: &Path, files: &[PathBuf]) -> Vec<ExtensionUse> {
                 None
             };
             let Some((ext, removed)) = hit else { continue };
-            found.entry(ext).and_modify(|u| u.uses += 1).or_insert_with(|| ExtensionUse {
+            found.entry(ext.to_string()).and_modify(|u| u.uses += 1).or_insert_with(|| ExtensionUse {
                 name: ext.to_string(),
                 uses: 1,
                 file: rel.clone(),
@@ -81,7 +103,27 @@ pub fn used(root: &Path, files: &[PathBuf]) -> Vec<ExtensionUse> {
                 declared: declared.iter().any(|d| d == ext),
                 removed,
                 available: None,
+                required_by: Vec::new(),
+                dev: false,
             });
+        }
+    }
+    for (ext, by, dev) in required {
+        let entry = found.entry(ext.clone()).or_insert_with(|| ExtensionUse {
+            name: ext.clone(),
+            uses: 0,
+            file: if by.starts_with("composer.json") { "composer.json".into() } else { "composer.lock".into() },
+            line: 0,
+            symbol: format!("ext-{ext}"),
+            declared: declared.contains(&ext),
+            removed: false,
+            available: None,
+            required_by: Vec::new(),
+            dev: true,
+        });
+        entry.dev &= dev;
+        if !entry.required_by.contains(&by) {
+            entry.required_by.push(by);
         }
     }
     let mut out: Vec<ExtensionUse> = found.into_values().collect();
@@ -95,7 +137,7 @@ pub fn parse_modules(php_m: &str) -> Vec<String> {
         .map(str::trim)
         .take_while(|l| !l.eq_ignore_ascii_case("[Zend Modules]"))
         .filter(|l| !l.is_empty() && !l.starts_with('['))
-        .map(|l| l.to_ascii_lowercase())
+        .map(normalize)
         .collect()
 }
 
@@ -116,6 +158,31 @@ mod tests {
         let used = used(dir.path(), &files);
         let summary: Vec<_> = used.iter().map(|u| (u.name.as_str(), u.uses, u.declared, u.removed, u.line)).collect();
         assert_eq!(summary, [("curl", 2, true, false, 2), ("imap", 1, false, true, 5), ("intl", 1, false, false, 4)]);
+        assert!(used.iter().all(|u| u.required_by.is_empty() || u.name == "curl"));
+
+        std::fs::write(
+            dir.path().join("composer.json"),
+            r#"{"require":{"ext-intl":"*","ext-Zend-OPcache":"*"},"require-dev":{"ext-xdebug":"*"}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("composer.lock"),
+            r#"{"packages":[{"name":"acme/pdf","require":{"ext-gd":"*"}}],"packages-dev":[{"name":"acme/test","require":{"ext-xdebug":"*"}}]}"#,
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("a.php"), "<?php echo 1;\n").unwrap();
+        let used = super::used(dir.path(), &files);
+        let summary: Vec<_> = used.iter().map(|u| (u.name.as_str(), u.uses, u.dev, u.required_by.join(","))).collect();
+        assert_eq!(
+            summary,
+            [
+                ("gd", 0, false, "acme/pdf".to_string()),
+                ("intl", 0, false, "composer.json".to_string()),
+                ("opcache", 0, false, "composer.json".to_string()),
+                ("xdebug", 0, true, "composer.json (require-dev),acme/test".to_string()),
+            ]
+        );
+        assert_eq!(normalize("Zend OPcache"), "opcache");
         assert_eq!(parse_modules("[PHP Modules]\nCore\ncurl\nIntl\n\n[Zend Modules]\nZend OPcache\n"), ["core", "curl", "intl"]);
     }
 }

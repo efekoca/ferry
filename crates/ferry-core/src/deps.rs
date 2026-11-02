@@ -1,5 +1,5 @@
 use crate::i18n::Localized;
-use crate::version::{constraint_allows, PhpVersion};
+use crate::version::{php_allows, PhpVersion};
 use serde::Serialize;
 use std::path::Path;
 
@@ -17,6 +17,8 @@ pub struct Dependency {
     pub name: String,
     pub version: String,
     pub php_constraint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub php_conflict: Option<String>,
     pub status: DependencyStatus,
     pub dev: bool,
     pub note: Option<Localized>,
@@ -27,15 +29,21 @@ pub struct Dependency {
 pub struct DependencyReport {
     pub target: PhpVersion,
     pub root_constraint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub root_conflict: Option<String>,
     pub root_status: DependencyStatus,
     pub packages: Vec<Dependency>,
     pub has_lock_file: bool,
+    pub lock_unreadable: bool,
     pub extensions: Vec<crate::extensions::ExtensionUse>,
     pub wordpress: Vec<crate::wordpress::Component>,
 }
 
-fn status_for(constraint: Option<&str>, target: PhpVersion) -> DependencyStatus {
-    match constraint.and_then(|c| constraint_allows(c, target)) {
+fn status_for(constraint: Option<&str>, conflict: Option<&str>, target: PhpVersion) -> DependencyStatus {
+    if constraint.is_none() && conflict.is_none() {
+        return DependencyStatus::Unknown;
+    }
+    match php_allows(constraint, conflict, target) {
         Some(true) => DependencyStatus::Compatible,
         Some(false) => DependencyStatus::Incompatible,
         None => DependencyStatus::Unknown,
@@ -56,8 +64,10 @@ pub fn check(root: &Path, target: PhpVersion) -> DependencyReport {
 }
 
 pub fn check_packages(root: &Path, target: PhpVersion) -> DependencyReport {
-    let root_constraint =
-        read_json(&root.join("composer.json")).and_then(|j| j.pointer("/require/php").and_then(|v| v.as_str()).map(str::to_string));
+    let manifest = read_json(&root.join("composer.json"));
+    let field = |v: Option<&serde_json::Value>, path: &str| v.and_then(|j| j.pointer(path)).and_then(|v| v.as_str()).map(str::to_string);
+    let root_constraint = field(manifest.as_ref(), "/require/php");
+    let root_conflict = field(manifest.as_ref(), "/conflict/php");
     let lock = read_json(&root.join("composer.lock"));
     let mut packages = Vec::new();
     if let Some(lock) = &lock {
@@ -68,9 +78,19 @@ pub fn check_packages(root: &Path, target: PhpVersion) -> DependencyReport {
             for pkg in list {
                 let name = pkg.get("name").and_then(|v| v.as_str()).unwrap_or("?").to_string();
                 let version = pkg.get("version").and_then(|v| v.as_str()).unwrap_or("?").to_string();
-                let php_constraint = pkg.pointer("/require/php").and_then(|v| v.as_str()).map(str::to_string);
-                let mut status = status_for(php_constraint.as_deref(), target);
+                let php_constraint = field(Some(pkg), "/require/php");
+                let php_conflict = field(Some(pkg), "/conflict/php");
+                let mut status = status_for(php_constraint.as_deref(), php_conflict.as_deref(), target);
                 let mut note = None;
+                if status == DependencyStatus::Incompatible
+                    && status_for(php_constraint.as_deref(), None, target) == DependencyStatus::Compatible
+                {
+                    let (c, t) = (php_conflict.clone().unwrap_or_default(), target.to_string());
+                    note = Some(Localized {
+                        tr: format!("Paketin conflict alanı ({c}) PHP {t} ile kurulmasını engelliyor."),
+                        en: format!("The package's conflict field ({c}) keeps it from installing on PHP {t}."),
+                    });
+                }
                 if let Some(limit) = crate::framework::package_limit(&name, &version).filter(|l| target > l.max) {
                     let (max, t) = (limit.max.to_string(), target.to_string());
                     if limit.official {
@@ -89,7 +109,7 @@ pub fn check_packages(root: &Path, target: PhpVersion) -> DependencyReport {
                         });
                     }
                 }
-                packages.push(Dependency { name, version, php_constraint, status, dev, note });
+                packages.push(Dependency { name, version, php_constraint, php_conflict, status, dev, note });
             }
         }
     }
@@ -103,10 +123,12 @@ pub fn check_packages(root: &Path, target: PhpVersion) -> DependencyReport {
     });
     DependencyReport {
         target,
-        root_status: status_for(root_constraint.as_deref(), target),
+        root_status: status_for(root_constraint.as_deref(), root_conflict.as_deref(), target),
         root_constraint,
+        root_conflict,
         packages,
         has_lock_file: lock.is_some(),
+        lock_unreadable: lock.is_none() && root.join("composer.lock").is_file(),
         extensions: Vec::new(),
         wordpress: Vec::new(),
     }
@@ -116,6 +138,29 @@ pub fn check_packages(root: &Path, target: PhpVersion) -> DependencyReport {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn conflict_fields_block_the_target() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("composer.json"), r#"{"require":{"php":"^8.0"},"conflict":{"php":">=8.4"}}"#).unwrap();
+        fs::write(
+            dir.path().join("composer.lock"),
+            r#"{"packages": [
+                {"name": "a/blocked", "version": "1.0.0", "require": {"php": "^8.0"}, "conflict": {"php": ">=8.4"}},
+                {"name": "a/patch", "version": "1.0.0", "require": {"php": "^8.0"}, "conflict": {"php": "8.4.0"}},
+                {"name": "a/only-conflict", "version": "1.0.0", "conflict": {"php": "<8.0"}}
+            ]}"#,
+        )
+        .unwrap();
+        let report = check_packages(dir.path(), PhpVersion::new(8, 4));
+        assert_eq!((report.root_status, report.root_conflict.as_deref()), (DependencyStatus::Incompatible, Some(">=8.4")));
+        let status = |n: &str| report.packages.iter().find(|p| p.name == n).unwrap();
+        assert_eq!(status("a/blocked").status, DependencyStatus::Incompatible);
+        assert!(status("a/blocked").note.as_ref().unwrap().en.contains("conflict"));
+        assert_eq!(status("a/patch").status, DependencyStatus::Compatible);
+        assert_eq!(status("a/only-conflict").status, DependencyStatus::Compatible);
+        assert_eq!(check_packages(dir.path(), PhpVersion::new(8, 3)).root_status, DependencyStatus::Compatible);
+    }
 
     #[test]
     fn classifies_locked_packages() {

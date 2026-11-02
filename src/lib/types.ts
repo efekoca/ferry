@@ -150,6 +150,8 @@ export interface ExtensionUse {
   declared: boolean;
   removed: boolean;
   available: boolean | null;
+  requiredBy?: string[];
+  dev?: boolean;
 }
 
 export interface DependencyReport {
@@ -158,6 +160,8 @@ export interface DependencyReport {
   rootStatus: DependencyStatus;
   packages: Dependency[];
   hasLockFile: boolean;
+  lockUnreadable?: boolean;
+  rootConflict?: string | null;
   extensions: ExtensionUse[];
   wordpress: WpComponent[];
 }
