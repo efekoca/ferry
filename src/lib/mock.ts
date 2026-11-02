@@ -300,7 +300,7 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
           return { ...s, file, column: 9, id: `${file}:${s.line}:9:${s.ruleId}`, runtimeHits: 0 };
         }),
       ).flat();
-      return track(withIgnores({ target, filesScanned: total, linesScanned: 18432, findings, errors: [], durationMs: 184, summary: summarize(findings), ignored: [], staleIgnores: [] }));
+      return track(withIgnores({ target, filesFound: total, filesScanned: total, linesScanned: 18432, findings, errors: [], durationMs: 184, summary: summarize(findings), ignored: [], staleIgnores: [] }));
     },
     onScanProgress: async (handler) => {
       listeners.add(handler);

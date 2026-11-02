@@ -1,4 +1,5 @@
 import type {
+  SnapshotConflict,
   ApplyResult,
   BackupUsage,
   DependencyReport,
@@ -44,10 +45,10 @@ export interface Api {
   cancelPreview(path?: string): Promise<void>;
   applyChanges(path: string, previewId: number, files: string[], label: string): Promise<ApplyResult>;
   listSnapshots(path: string): Promise<Snapshot[]>;
-  restoreSnapshot(path: string, id: string, acknowledged: string[]): Promise<string[]>;
+  restoreSnapshot(path: string, id: string, acknowledged: SnapshotConflict[]): Promise<string[]>;
   deleteSnapshot(path: string, id: string): Promise<void>;
   snapshotChanges(path: string, id: string): Promise<FileChange[]>;
-  snapshotConflicts(path: string, id: string): Promise<string[]>;
+  snapshotConflicts(path: string, id: string): Promise<SnapshotConflict[]>;
   backupUsage(): Promise<BackupUsage>;
   deleteAllBackups(): Promise<void>;
   exportReport(path: string, destination: string): Promise<void>;
