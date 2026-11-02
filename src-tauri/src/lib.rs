@@ -330,7 +330,9 @@ async fn ignore_finding(state: State<'_, AppState>, path: String, id: String, re
     if reason.trim().is_empty() {
         return Err(t!("Yok sayma için bir gerekçe yazın.", "Write a reason for ignoring it."));
     }
+    let writes = state.writes.clone();
     blocking(move || {
+        let _guard = writes.lock().unwrap_or_else(|e| e.into_inner());
         let root = project_root(&path)?;
         let shown = presented(&root, &scan, log.as_ref());
         let finding = shown
@@ -355,7 +357,9 @@ async fn unignore_finding(state: State<'_, AppState>, path: String, id: String) 
     let path = normalize_path(path);
     let scan = state.scans.lock().unwrap().get(&path).cloned().ok_or_else(|| t!("Önce projeyi tarayın.", "Scan the project first."))?;
     let log = state.runtime_log(&path);
+    let writes = state.writes.clone();
     blocking(move || {
+        let _guard = writes.lock().unwrap_or_else(|e| e.into_inner());
         let root = project_root(&path)?;
         let shown = presented(&root, &scan, log.as_ref());
         let finding = shown
@@ -384,7 +388,9 @@ async fn prune_ignores(state: State<'_, AppState>, path: String) -> CmdResult<Sc
     let path = normalize_path(path);
     let scan = state.scans.lock().unwrap().get(&path).cloned().ok_or_else(|| t!("Önce projeyi tarayın.", "Scan the project first."))?;
     let log = state.runtime_log(&path);
+    let writes = state.writes.clone();
     blocking(move || {
+        let _guard = writes.lock().unwrap_or_else(|e| e.into_inner());
         let root = project_root(&path)?;
         let ignores = ignore::load(&root);
         let stale = ignore::apply(&root, Vec::new(), &ignores).stale;

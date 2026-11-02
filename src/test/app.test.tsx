@@ -432,6 +432,22 @@ describe("Ferry app", () => {
     expect(within(group).getByRole("radio", { name: "30" })).toHaveAttribute("aria-checked", "true");
   });
 
+  it("keeps both settings when they change in quick succession", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    const real = api.saveSettings;
+    api.saveSettings = async (next) => {
+      await new Promise((r) => setTimeout(r, 80));
+      return real(next);
+    };
+    render(<App api={api} />);
+    await user.click(await screen.findByRole("button", { name: /Ayarlar/ }));
+    const group = await screen.findByRole("radiogroup", { name: "Saklanacak yedek" });
+    await user.click(within(group).getByRole("radio", { name: "30" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "Editör" }), "vscode");
+    await waitFor(async () => expect(await api.getSettings()).toEqual({ phpPath: null, snapshotLimit: 30, editor: "vscode" }));
+  });
+
   it("shows backup disk usage and deletes every backup after confirming", async () => {
     const user = setup();
     await openAndScan(user);
