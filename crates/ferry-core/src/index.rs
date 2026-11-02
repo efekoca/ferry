@@ -14,6 +14,7 @@ pub struct TypeInfo {
     pub interfaces: Vec<String>,
     pub traits: Vec<String>,
     pub props: HashSet<String>,
+    pub private_props: HashSet<String>,
     pub methods: HashSet<String>,
     pub(crate) signatures: HashMap<String, MethodSig>,
     pub open: bool,
@@ -92,6 +93,7 @@ pub struct ProjectIndex {
     types: HashMap<String, Vec<TypeInfo>>,
     interfaces: HashMap<String, Vec<InterfaceInfo>>,
     constants: HashSet<String>,
+    target: Option<crate::version::PhpVersion>,
 }
 
 #[derive(Debug, Clone)]
@@ -106,7 +108,11 @@ struct InterfaceInfo {
 
 impl ProjectIndex {
     pub fn build(root: &Path, files: &[PathBuf]) -> Self {
-        let mut index = Self { framework: Some(crate::project::detect_framework(root)), ..Self::default() };
+        Self::build_for(root, files, None)
+    }
+
+    pub fn build_for(root: &Path, files: &[PathBuf], target: Option<crate::version::PhpVersion>) -> Self {
+        let mut index = Self { framework: Some(crate::project::detect_framework(root)), target, ..Self::default() };
         let mut seen = HashSet::new();
         for path in files.iter().cloned().chain(composer_files(root)) {
             if !seen.insert(std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone())) {
@@ -128,7 +134,11 @@ impl ProjectIndex {
     }
 
     pub fn from_tokens(tokens: &[Token]) -> Self {
-        let mut index = Self::default();
+        Self::from_tokens_for(tokens, None)
+    }
+
+    pub fn from_tokens_for(tokens: &[Token], target: Option<crate::version::PhpVersion>) -> Self {
+        let mut index = Self { target, ..Self::default() };
         index.add(tokens);
         index
     }
@@ -142,8 +152,12 @@ impl ProjectIndex {
         let methods = crate::analyzer::method_tokens(tokens);
         let spaces = namespaces(tokens);
         let names = Names::new(tokens);
+        let dead = self.target.map(|t| crate::guards::dead_spans(tokens, t)).unwrap_or_default();
         for (i, t) in tokens.iter().enumerate() {
             if !t.is_ident_ci("function") || methods.contains(&i) {
+                continue;
+            }
+            if dead.iter().any(|&(start, end)| (t.line, t.column) >= start && (t.line, t.column) <= end) {
                 continue;
             }
             let name = tokens[i + 1..].iter().find(|t| !t.is_punct("&"));
@@ -323,24 +337,28 @@ impl ProjectIndex {
     }
 
     pub(crate) fn properties(&self, info: &TypeInfo) -> Option<HashSet<String>> {
-        self.collect(info, 0)
+        self.collect(info, 0).map(|(all, _)| all)
     }
 
-    fn collect(&self, info: &TypeInfo, depth: usize) -> Option<HashSet<String>> {
+    fn collect(&self, info: &TypeInfo, depth: usize) -> Option<(HashSet<String>, HashSet<String>)> {
         if info.open || depth > 32 {
             return None;
         }
-        let mut props = info.props.clone();
+        let mut all = info.props.clone();
+        let mut private = info.private_props.clone();
         for t in &info.traits {
-            props.extend(self.collect(self.unique(t)?, depth + 1)?);
+            let (props, hidden) = self.collect(self.unique(t)?, depth + 1)?;
+            all.extend(props);
+            private.extend(hidden);
         }
         if let Some(parent) = &info.parent {
             if parent == "stdclass" {
                 return None;
             }
-            props.extend(self.collect(self.unique(parent)?, depth + 1)?);
+            let (props, hidden) = self.collect(self.unique(parent)?, depth + 1)?;
+            all.extend(props.difference(&hidden).cloned());
         }
-        Some(props)
+        Some((all, private))
     }
 }
 
@@ -566,7 +584,12 @@ fn type_decl(tokens: &[Token], kw: usize, names: &Names) -> Option<TypeDecl> {
                     .take_while(|&j| !tokens[j].is_punct("(") && !tokens[j].is_punct(","))
                     .any(|j| modifiers.iter().any(|m| tokens[j].is_ident_ci(m)));
             if depth == 1 || promoted {
-                info.props.insert(t.text.to_ascii_lowercase());
+                let stops: &[&str] = if depth == 1 { &["{", "}", ";"] } else { &["(", ","] };
+                let start = (0..k).rev().find(|&j| stops.iter().any(|p| tokens[j].is_punct(p))).map_or(0, |j| j + 1);
+                if tokens[start..k].iter().any(|m| m.is_ident_ci("private")) {
+                    info.private_props.insert(t.text.clone());
+                }
+                info.props.insert(t.text.clone());
             }
         }
         k += 1;

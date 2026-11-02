@@ -870,7 +870,7 @@ pub const MEMBERS: &[MemberRule] = &[
     ),
     member(
         Mt,
-        "reflection",
+        "reflectionfunction",
         rule!(
             "deprecated.reflection_method",
             "isdisabled",
