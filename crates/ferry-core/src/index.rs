@@ -93,6 +93,7 @@ pub struct ProjectIndex {
     types: HashMap<String, Vec<TypeInfo>>,
     interfaces: HashMap<String, Vec<InterfaceInfo>>,
     constants: HashSet<String>,
+    target: Option<crate::version::PhpVersion>,
 }
 
 #[derive(Debug, Clone)]
@@ -107,7 +108,11 @@ struct InterfaceInfo {
 
 impl ProjectIndex {
     pub fn build(root: &Path, files: &[PathBuf]) -> Self {
-        let mut index = Self { framework: Some(crate::project::detect_framework(root)), ..Self::default() };
+        Self::build_for(root, files, None)
+    }
+
+    pub fn build_for(root: &Path, files: &[PathBuf], target: Option<crate::version::PhpVersion>) -> Self {
+        let mut index = Self { framework: Some(crate::project::detect_framework(root)), target, ..Self::default() };
         let mut seen = HashSet::new();
         for path in files.iter().cloned().chain(composer_files(root)) {
             if !seen.insert(std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone())) {
@@ -129,7 +134,11 @@ impl ProjectIndex {
     }
 
     pub fn from_tokens(tokens: &[Token]) -> Self {
-        let mut index = Self::default();
+        Self::from_tokens_for(tokens, None)
+    }
+
+    pub fn from_tokens_for(tokens: &[Token], target: Option<crate::version::PhpVersion>) -> Self {
+        let mut index = Self { target, ..Self::default() };
         index.add(tokens);
         index
     }
@@ -143,8 +152,12 @@ impl ProjectIndex {
         let methods = crate::analyzer::method_tokens(tokens);
         let spaces = namespaces(tokens);
         let names = Names::new(tokens);
+        let dead = self.target.map(|t| crate::guards::dead_spans(tokens, t)).unwrap_or_default();
         for (i, t) in tokens.iter().enumerate() {
             if !t.is_ident_ci("function") || methods.contains(&i) {
+                continue;
+            }
+            if dead.iter().any(|&(start, end)| (t.line, t.column) >= start && (t.line, t.column) <= end) {
                 continue;
             }
             let name = tokens[i + 1..].iter().find(|t| !t.is_punct("&"));
