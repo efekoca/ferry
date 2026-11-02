@@ -317,6 +317,20 @@ describe("Ferry app", () => {
     await waitFor(() => expect(within(list).getAllByRole("option").filter((o) => o.tabIndex === 0)).toHaveLength(1));
   });
 
+  it("resizes the findings panels from the keyboard and remembers it", async () => {
+    const user = setup();
+    await openAndScan(user);
+    await user.click(nav(/Bulgular/));
+    const splitter = await screen.findByRole("separator", { name: "Panelleri yeniden boyutlandır" });
+    splitter.focus();
+    await user.keyboard("{ArrowLeft}");
+    expect(splitter.parentElement!.style.getPropertyValue("--split-col")).toMatch(/px$/);
+    expect(localStorage.getItem("ferry.split.findings.cols")).not.toBeNull();
+    await user.dblClick(splitter);
+    expect(splitter.parentElement!.style.getPropertyValue("--split-col")).toBe("");
+    expect(localStorage.getItem("ferry.split.findings.cols")).toBeNull();
+  });
+
   it("puts focus in the reason field of the ignore dialog", async () => {
     const user = setup();
     await openAndScan(user);

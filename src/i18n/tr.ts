@@ -13,6 +13,7 @@ export const tr = {
     rules: (n: number) => `${n} kural`,
     genericError: "Bir şeyler ters gitti.",
     screenFailed: "Bu ekran gösterilemedi",
+    resizePanes: "Panelleri yeniden boyutlandır",
     tryAgain: "Tekrar dene",
     copy: "Kopyala",
     copied: "Kopyalandı",

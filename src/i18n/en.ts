@@ -13,6 +13,7 @@ export const en: Dict = {
     rules: (n) => (n === 1 ? "1 rule" : `${n} rules`),
     genericError: "Something went wrong.",
     screenFailed: "This screen couldn't be shown",
+    resizePanes: "Resize panels",
     tryAgain: "Try again",
     copy: "Copy",
     copied: "Copied",
