@@ -918,8 +918,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Session",
   "change": "Following INIs are removed .",
-  "status": "gap",
-  "note": "session.hash_function, session.hash_bits_per_character, session.entropy_file and session.entropy_length are not reported in php.ini, .htaccess or ini_set()."
+  "status": "covered",
+  "note": "Each of the four settings is reported in php.ini, .user.ini, .htaccess and ini_set().",
+  "rules": [
+   "removed.builtin_ini"
+  ]
  },
  {
   "version": "7.1",
@@ -1271,15 +1274,21 @@
   "version": "7.2",
   "section": "Changes to INI File Handling",
   "change": "This INI directive has been removed.",
-  "status": "gap",
-  "note": "sql.safe_mode=On in php.ini is not reported (only the generic php_value rule fires in .htaccess)."
+  "status": "covered",
+  "note": "sql.safe_mode is reported in php.ini, .user.ini, .htaccess and ini_set().",
+  "rules": [
+   "removed.builtin_ini"
+  ]
  },
  {
   "version": "7.2",
   "section": "Changes to INI File Handling",
   "change": "This INI directive has been removed.",
-  "status": "gap",
-  "note": "opcache.fast_shutdown=1 in php.ini is not reported."
+  "status": "covered",
+  "note": "opcache.fast_shutdown is reported in php.ini, .user.ini, .htaccess and ini_set().",
+  "rules": [
+   "removed.builtin_ini"
+  ]
  },
  {
   "version": "7.3",
@@ -1542,8 +1551,11 @@
   "version": "7.3",
   "section": "Changes to INI File Handling",
   "change": "This INI directive has been removed.",
-  "status": "gap",
-  "note": "opcache.inherited_hack in php.ini is not reported."
+  "status": "covered",
+  "note": "opcache.inherited_hack is reported in php.ini, .user.ini, .htaccess and ini_set().",
+  "rules": [
+   "removed.builtin_ini"
+  ]
  },
  {
   "version": "7.4",
@@ -3280,12 +3292,13 @@
   "section": "Backward Incompatible Changes",
   "ext": "Standard",
   "change": "assert() will no longer evaluate string arguments, instead they will be treated like any other argument.",
-  "status": "partial",
+  "status": "covered",
   "rules": [
    "removed.assert_string",
-   "removed.assert_quiet_eval"
+   "removed.assert_quiet_eval",
+   "removed.builtin_ini"
   ],
-  "note": "assert('...') and ASSERT_QUIET_EVAL are reported, but assert.quiet_eval in php.ini or ini_set()/ini_get() is not."
+  "note": "assert(...), ASSERT_QUIET_EVAL and the assert.quiet_eval setting are reported."
  },
  {
   "version": "8.0",
@@ -3753,40 +3766,55 @@
   "section": "Deprecated Functionality",
   "ext": "Enchant",
   "change": "enchant_broker_set_dict_path and enchant_broker_get_dict_path not available in libenchant < 1.5 nor in libenchant-2",
-  "status": "gap",
-  "note": "Not reported: enchant_broker_set_dict_path() / enchant_broker_get_dict_path()."
+  "status": "covered",
+  "note": "enchant_broker_set_dict_path() and enchant_broker_get_dict_path() are reported.",
+  "rules": [
+   "deprecated.builtin_function"
+  ]
  },
  {
   "version": "8.0",
   "section": "Deprecated Functionality",
   "ext": "Enchant",
   "change": "enchant_dict_add_to_personal, use enchant_dict_add instead",
-  "status": "gap",
-  "note": "Not reported: enchant_dict_add_to_personal()."
+  "status": "covered",
+  "note": "enchant_dict_add_to_personal() is reported.",
+  "rules": [
+   "deprecated.builtin_function"
+  ]
  },
  {
   "version": "8.0",
   "section": "Deprecated Functionality",
   "ext": "Enchant",
   "change": "enchant_dict_is_in_session, use enchant_dict_is_added instead",
-  "status": "gap",
-  "note": "Not reported: enchant_dict_is_in_session()."
+  "status": "covered",
+  "note": "enchant_dict_is_in_session() is reported.",
+  "rules": [
+   "deprecated.builtin_function"
+  ]
  },
  {
   "version": "8.0",
   "section": "Deprecated Functionality",
   "ext": "Enchant",
   "change": "enchant_broker_free and enchant_broker_free_dict, unset the object instead",
-  "status": "gap",
-  "note": "Not reported: enchant_broker_free() / enchant_broker_free_dict()."
+  "status": "covered",
+  "note": "enchant_broker_free() and enchant_broker_free_dict() are reported.",
+  "rules": [
+   "deprecated.builtin_function"
+  ]
  },
  {
   "version": "8.0",
   "section": "Deprecated Functionality",
   "ext": "Enchant",
   "change": "ENCHANT_MYSPELL and ENCHANT_ISPELL constants",
-  "status": "gap",
-  "note": "Not reported: ENCHANT_MYSPELL / ENCHANT_ISPELL constants."
+  "status": "covered",
+  "note": "ENCHANT_MYSPELL and ENCHANT_ISPELL are reported.",
+  "rules": [
+   "deprecated.builtin_constant"
+  ]
  },
  {
   "version": "8.0",
@@ -4034,8 +4062,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "MySQLnd",
   "change": "The mysqlnd.fetch_data_copy ini setting has been removed.",
-  "status": "gap",
-  "note": "Removed ini mysqlnd.fetch_data_copy is not reported in php.ini/.user.ini or ini_set() (.htaccess only gets the generic php_value warning)."
+  "status": "covered",
+  "note": "mysqlnd.fetch_data_copy is reported in php.ini, .user.ini, .htaccess and ini_set().",
+  "rules": [
+   "removed.builtin_ini"
+  ]
  },
  {
   "version": "8.1",
@@ -4755,8 +4786,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Opcache",
   "change": "The opcache.consistency_checks INI directive was removed.",
-  "status": "gap",
-  "note": "Not reported: opcache.consistency_checks in php.ini/.user.ini or ini_set()."
+  "status": "covered",
+  "note": "opcache.consistency_checks is reported in php.ini, .user.ini, .htaccess and ini_set().",
+  "rules": [
+   "removed.builtin_ini"
+  ]
  },
  {
   "version": "8.3",
@@ -5909,8 +5943,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Core",
   "change": "The disable_classes INI setting has been removed as it causes various engine assumptions to be broken.",
-  "status": "gap",
-  "note": "disable_classes in php.ini/.user.ini was tested and not reported."
+  "status": "covered",
+  "note": "disable_classes is reported in php.ini, .user.ini, .htaccess and ini_set().",
+  "rules": [
+   "removed.builtin_ini"
+  ]
  },
  {
   "version": "8.5",

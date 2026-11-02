@@ -22,6 +22,7 @@ const removedMethods = new Map();
 const deprecatedMethods = new Map();
 const removedConstants = new Map();
 const deprecatedConstants = new Map();
+const removedIni = new Map();
 const first = (map, key, value) => map.has(key) || map.set(key, value);
 const latest = dumps[dumps.length - 1];
 // Functions that only exist when the build host supports them, so their absence isn't a removal.
@@ -74,6 +75,9 @@ for (let i = 1; i < dumps.length; i++) {
   for (const [name, c] of Object.entries(next.constants)) {
     if (c.deprecated && !prev.constants[name]?.deprecated && latest.constants[name]?.deprecated !== false) first(deprecatedConstants, name, [since, c.ext]);
   }
+  for (const [name, ext] of Object.entries(prev.ini)) {
+    if (!(name in next.ini) && !(name in latest.ini) && kept.has(ext)) first(removedIni, name, [since, ext]);
+  }
 }
 
 const versions = dumps.map((d) => d.version).join(", ");
@@ -112,6 +116,10 @@ const out = [
     fmt: (k, [s, e]) => `(${str(k)}, ${ver(s)}, ${str(e)})`,
   }),
   table("DEPRECATED_CONSTANTS", "(constant, deprecated in, extension)", deprecatedConstants, {
+    type: "(&str, (u32, u32), &str)",
+    fmt: (k, [s, e]) => `(${str(k)}, ${ver(s)}, ${str(e)})`,
+  }),
+  table("REMOVED_INI", "(ini setting, removed in, extension)", removedIni, {
     type: "(&str, (u32, u32), &str)",
     fmt: (k, [s, e]) => `(${str(k)}, ${ver(s)}, ${str(e)})`,
   }),

@@ -31,5 +31,10 @@ fn every_generated_symbol_is_reported() {
             missing.push(format!("method {class}::{method} {}.{}", since.0, since.1));
         }
     }
+    for (name, since, _) in REMOVED_INI {
+        if !hit(&format!("<?php\nini_set('{name}', '1');\n")) {
+            missing.push(format!("ini {name} {}.{}", since.0, since.1));
+        }
+    }
     assert!(missing.is_empty(), "{} symbols are not reported:\n{}", missing.len(), missing.join("\n"));
 }

@@ -16,17 +16,17 @@ The data lives in `docs/coverage.json`; this page is generated from it with
 | Version | Covered | Partial | Gap | Runtime only | Not applicable | Total |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | [7.0](#php-70) | 19 | 3 | 27 | 14 | 19 | 82 |
-| [7.1](#php-71) | 1 | 2 | 8 | 13 | 4 | 28 |
-| [7.2](#php-72) | 17 | 1 | 7 | 5 | 4 | 34 |
-| [7.3](#php-73) | 4 | 1 | 11 | 12 | 6 | 34 |
+| [7.1](#php-71) | 2 | 2 | 7 | 13 | 4 | 28 |
+| [7.2](#php-72) | 19 | 1 | 5 | 5 | 4 | 34 |
+| [7.3](#php-73) | 5 | 1 | 10 | 12 | 6 | 34 |
 | [7.4](#php-74) | 21 | 0 | 16 | 25 | 3 | 65 |
-| [8.0](#php-80) | 79 | 7 | 39 | 48 | 11 | 184 |
-| [8.1](#php-81) | 26 | 2 | 26 | 6 | 2 | 62 |
+| [8.0](#php-80) | 85 | 6 | 34 | 48 | 11 | 184 |
+| [8.1](#php-81) | 27 | 2 | 25 | 6 | 2 | 62 |
 | [8.2](#php-82) | 10 | 0 | 1 | 7 | 0 | 18 |
-| [8.3](#php-83) | 9 | 0 | 14 | 10 | 2 | 35 |
+| [8.3](#php-83) | 10 | 0 | 13 | 10 | 2 | 35 |
 | [8.4](#php-84) | 28 | 7 | 37 | 22 | 5 | 99 |
-| [8.5](#php-85) | 19 | 1 | 33 | 22 | 4 | 79 |
-| **All** | **233** | **24** | **219** | **184** | **60** | **720** |
+| [8.5](#php-85) | 20 | 1 | 32 | 22 | 4 | 79 |
+| **All** | **246** | **23** | **207** | **184** | **60** | **720** |
 
 ## PHP 7.0
 
@@ -146,7 +146,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-7.1/UPGRADING)
 | mbstring | mb_ereg() and mb_eregi() will now set the $regs argument to an empty array, if nothing matched. | Runtime only |  | Depends on match results at runtime. |
 | OpenSSL | Dropped sslv2 stream. | Gap |  | The literal 'sslv2://' stream transport in fopen()/stream_socket_client() is not reported. |
 | Session | Session ID is generated from CSPRNG directly. | Runtime only |  | Session ID length depends on runtime INI configuration. |
-| Session | Following INIs are removed . | Gap |  | session.hash_function, session.hash_bits_per_character, session.entropy_file and session.entropy_length are not reported in php.ini, .htaccess or ini_set(). |
+| Session | Following INIs are removed . | Covered | `removed.builtin_ini` | Each of the four settings is reported in php.ini, .user.ini, .htaccess and ini_set(). |
 | Session | New INIs and defaults . | Not applicable |  | New INI settings with defaults. |
 | Session | Length of old session ID string is determined as follows . | Not applicable |  | Explanation of old session ID length computation. |
 | Session | session_start() returns FALSE and no longer initializes $_SESSION when it failed to start session. | Runtime only |  | Depends on session_start() failing at runtime. |
@@ -190,8 +190,8 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-7.2/UPGRADING)
 | Mcrypt | The deprecated mcrypt extension has been moved to PECL. | Covered | `removed.mcrypt` | mcrypt_encrypt() is reported. |
 | Mcrypt | libmcrypt has not been maintained since 2007 and the continued use of this extension is strongly discouraged. | Covered | `removed.mcrypt` | Continuation of the mcrypt removal; mcrypt_* calls are reported. |
 | Mcrypt | Users are advised to use alternatives such as OpenSSL or libsodium. | Covered | `removed.mcrypt` | Continuation of the mcrypt removal; mcrypt_* calls are reported. |
-| Changes to INI File Handling | This INI directive has been removed. | Gap |  | sql.safe_mode=On in php.ini is not reported (only the generic php_value rule fires in .htaccess). |
-| Changes to INI File Handling | This INI directive has been removed. | Gap |  | opcache.fast_shutdown=1 in php.ini is not reported. |
+| Changes to INI File Handling | This INI directive has been removed. | Covered | `removed.builtin_ini` | sql.safe_mode is reported in php.ini, .user.ini, .htaccess and ini_set(). |
+| Changes to INI File Handling | This INI directive has been removed. | Covered | `removed.builtin_ini` | opcache.fast_shutdown is reported in php.ini, .user.ini, .htaccess and ini_set(). |
 
 ## PHP 7.3
 
@@ -232,7 +232,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-7.3/UPGRADING)
 | Deprecated Functionality | Passing a non-string needle to string search functions is deprecated. | Gap |  | strpos($h, 65) and strstr($h, 10) with literal integer needles are not reported. |
 | Deprecated Functionality | The fgetss() function and the string.strip_tags stream filter have been deprecated. | Partial | `removed.fgetss`<br>`removed.gzgetss`<br>`removed.builtin_method` | fgetss(), gzgetss() and SplFileObject::fgetss() are reported, but the 'string.strip_tags' stream filter is not. |
 | Changes to INI File Handling | This INI directive has been removed. | Gap |  | birdstep.max_links in php.ini is not reported. |
-| Changes to INI File Handling | This INI directive has been removed. | Gap |  | opcache.inherited_hack in php.ini is not reported. |
+| Changes to INI File Handling | This INI directive has been removed. | Covered | `removed.builtin_ini` | opcache.inherited_hack is reported in php.ini, .user.ini, .htaccess and ini_set(). |
 
 ## PHP 7.4
 
@@ -433,7 +433,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.0/UPGRADING)
 | SPL | SplQueue::enqueue() now returns void instead of true | Runtime only |  | Only code using the return value of enqueue() is affected, which needs the receiver type. |
 | SPL | spl_autoload_register() will now always throw a TypeError on invalid arguments, therefore the second argument $do_throw is ignored and a notice will be emitted if it is set to false. | Gap |  | Not reported: spl_autoload_register('loader', false). |
 | SPL | SplFixedArray is now an IteratorAggregate and not an Iterator. | Covered | `removed.builtin_method` | rewind()/valid()/current()/next() on a SplFixedArray are reported. |
-| Standard | assert() will no longer evaluate string arguments, instead they will be treated like any other argument. | Partial | `removed.assert_string`<br>`removed.assert_quiet_eval` | assert('...') and ASSERT_QUIET_EVAL are reported, but assert.quiet_eval in php.ini or ini_set()/ini_get() is not. |
+| Standard | assert() will no longer evaluate string arguments, instead they will be treated like any other argument. | Covered | `removed.assert_string`<br>`removed.assert_quiet_eval`<br>`removed.builtin_ini` | assert(...), ASSERT_QUIET_EVAL and the assert.quiet_eval setting are reported. |
 | Standard | parse_str() can no longer be used without specifying a result array. | Covered | `removed.parse_str_one_arg`<br>`removed.builtin_arity` | parse_str($q) with one argument is reported. |
 | Standard | fgetss() has been removed. | Covered | `removed.fgetss` | fgetss() is reported. |
 | Standard | The string.strip_tags filter has been removed. | Gap |  | Not reported: stream_filter_append($fp, 'string.strip_tags'). |
@@ -483,11 +483,11 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.0/UPGRADING)
 | Zlib | zlib.output_compression is no longer automatically disabled for Content-Type: | Not applicable |  | Output compression behavior for image content types; server-level runtime behavior. |
 | Core | Declaring a required parameter after an optional one is deprecated. | Covered | `deprecated.optional_before_required` | function f($a = 1, $b) {} is reported. |
 | Core | Calling get_defined_functions() with $exclude_disabled explicitly set to false is deprecated. | Gap |  | Not reported: get_defined_functions(false). |
-| Enchant | enchant_broker_set_dict_path and enchant_broker_get_dict_path not available in libenchant &lt; 1.5 nor in libenchant-2 | Gap |  | Not reported: enchant_broker_set_dict_path() / enchant_broker_get_dict_path(). |
-| Enchant | enchant_dict_add_to_personal, use enchant_dict_add instead | Gap |  | Not reported: enchant_dict_add_to_personal(). |
-| Enchant | enchant_dict_is_in_session, use enchant_dict_is_added instead | Gap |  | Not reported: enchant_dict_is_in_session(). |
-| Enchant | enchant_broker_free and enchant_broker_free_dict, unset the object instead | Gap |  | Not reported: enchant_broker_free() / enchant_broker_free_dict(). |
-| Enchant | ENCHANT_MYSPELL and ENCHANT_ISPELL constants | Gap |  | Not reported: ENCHANT_MYSPELL / ENCHANT_ISPELL constants. |
+| Enchant | enchant_broker_set_dict_path and enchant_broker_get_dict_path not available in libenchant &lt; 1.5 nor in libenchant-2 | Covered | `deprecated.builtin_function` | enchant_broker_set_dict_path() and enchant_broker_get_dict_path() are reported. |
+| Enchant | enchant_dict_add_to_personal, use enchant_dict_add instead | Covered | `deprecated.builtin_function` | enchant_dict_add_to_personal() is reported. |
+| Enchant | enchant_dict_is_in_session, use enchant_dict_is_added instead | Covered | `deprecated.builtin_function` | enchant_dict_is_in_session() is reported. |
+| Enchant | enchant_broker_free and enchant_broker_free_dict, unset the object instead | Covered | `deprecated.builtin_function` | enchant_broker_free() and enchant_broker_free_dict() are reported. |
+| Enchant | ENCHANT_MYSPELL and ENCHANT_ISPELL constants | Covered | `deprecated.builtin_constant` | ENCHANT_MYSPELL and ENCHANT_ISPELL are reported. |
 | LibXML | libxml_disable_entity_loader() has been deprecated. | Covered | `deprecated.libxml_disable_entity_loader` | libxml_disable_entity_loader() is reported. |
 | PGSQL / PDO PGSQL | The constant PGSQL_LIBPQ_VERSION_STR has now the same value as PGSQL_LIBPQ_VERSION, and thus is deprecated. | Covered | `removed.pgsql_libpq_version_str` | PGSQL_LIBPQ_VERSION_STR is reported. |
 | PGSQL / PDO PGSQL | Function aliases in the pgsql extension have been deprecated. | Covered | `deprecated.pg_alias` | pg_numrows() is reported. |
@@ -519,7 +519,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.1/UPGRADING)
 | MySQLi | The default error handling mode has been changed from "silent" to "exceptions". | Gap |  | Not reported: mysqli_connect()/mysqli_query() results checked with === false and no mysqli_report() call, which now throw instead. |
 | MySQLi | Classes extending mysqli_stmt::execute() will be required to specify the additional parameter now. | Covered | `removed.incompatible_override` | class S extends mysqli_stmt { function execute() {} } is reported. |
 | MySQLi | mysqli::connect() will now return true instead of null on success. | Gap |  | Not reported: if ($m->connect('h','u','p') === null) on a new mysqli object; connect() now returns true. |
-| MySQLnd | The mysqlnd.fetch_data_copy ini setting has been removed. | Gap |  | Removed ini mysqlnd.fetch_data_copy is not reported in php.ini/.user.ini or ini_set() (.htaccess only gets the generic php_value warning). |
+| MySQLnd | The mysqlnd.fetch_data_copy ini setting has been removed. | Covered | `removed.builtin_ini` | mysqlnd.fetch_data_copy is reported in php.ini, .user.ini, .htaccess and ini_set(). |
 | OpenSSL | EC private keys will now be exported in PKCS#8 format rather than traditional format, just like all other keys. | Runtime only |  | Export format depends on the key type created at runtime. |
 | OpenSSL | openssl_pkcs7_encrypt() and openssl_cms_encrypt() will now default to using AES-128-CBC rather than RC2-40. | Gap |  | Not reported: openssl_pkcs7_encrypt('in','out',$cert,[]) / openssl_cms_encrypt() without an explicit cipher argument now uses AES-128-CBC. |
 | PDO | PDO::ATTR_STRINGIFY_FETCHES now also stringifies values of type bool to "0" or "1". | Runtime only |  | Only matters when fetched column values are booleans, which depends on the database data. |
@@ -611,7 +611,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.3/UPGRADING)
 | DOM | createAttributeNS() would previously incorrectly throw a NAMESPACE_ERR when the prefix was already used for a different uri. | Runtime only |  | DOM namespace bugfix depends on runtime prefix conflicts. |
 | DOM | New methods and properties were added to some DOM classes. | Covered | `removed.incompatible_override` | DOMElement subclass declaring incompatible toggleAttribute() / contains() is reported. |
 | FFI | C functions that have a return type of void now return null instead of returning the following object object(FFI\CData:void) { } | Runtime only |  | FFI return value depends on runtime C function signatures. |
-| Opcache | The opcache.consistency_checks INI directive was removed. | Gap |  | Not reported: opcache.consistency_checks in php.ini/.user.ini or ini_set(). |
+| Opcache | The opcache.consistency_checks INI directive was removed. | Covered | `removed.builtin_ini` | opcache.consistency_checks is reported in php.ini, .user.ini, .htaccess and ini_set(). |
 | Phar | The type of Phar class constants are now declared. | Gap |  | Not reported: class P extends Phar { const SHA1 = []; } redeclaring a now-typed constant with another type. |
 | Standard | The range() function has had various changes: | Gap |  | Mostly runtime, but literal range(1, 10, 0), range(1, 10, -1), range('', 'z') and range([1], 5) are not reported. |
 | Standard | The file() flags error check now catches all invalid flags. | Gap |  | Not reported: file('x', FILE_APPEND) now throws a ValueError. |
@@ -754,7 +754,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.5/UPGRADING)
 | Core | Errors emitted during compilation and class linking are now always delayed and handled after compilation or class linking. | Runtime only |  | Delayed compile/link error handling depends on runtime error handlers. |
 | Core | Exceptions thrown by user-defined error handlers when handling class linking errors are not promoted to fatal errors anymore and do not prevent linking. | Runtime only |  | Error handler exceptions during linking depend on runtime handlers. |
 | Core | Applying #[\Attribute] to an abstract class, enum, interface, or trait triggers an error during compilation. | Gap |  | #[Attribute] on an abstract class, interface, trait and enum was tested and not reported. |
-| Core | The disable_classes INI setting has been removed as it causes various engine assumptions to be broken. | Gap |  | disable_classes in php.ini/.user.ini was tested and not reported. |
+| Core | The disable_classes INI setting has been removed as it causes various engine assumptions to be broken. | Covered | `removed.builtin_ini` | disable_classes is reported in php.ini, .user.ini, .htaccess and ini_set(). |
 | Core | Destructuring non-array values (other than NULL) using [] or list() now emits a warning. | Runtime only |  | Destructuring non-arrays usually involves variables; literal `[$a, $b] = 42` was not reported either. |
 | Core | A warning is now emitted when casting floats to int if they cannot be represented as one. | Runtime only |  | Out-of-range float to int casts depend on runtime values. |
 | Core | A warning is now emitted when casting NAN to other types. | Runtime only |  | NAN casts depend on runtime values; literal `(int) NAN` was not reported. |
