@@ -108,13 +108,13 @@ Ferry, Rector'ın tek başına çözemediği durumları da ele alır. Örneğin 
 
 ### Geçişi engelleyen bağımlılıklar
 
-**Bağımlılıklar** sayfası, kilitli her paketi `composer.lock`'ta bildirdiği PHP gereksinimine göre hedef sürümle karşılaştırır. Projenin `composer.json`'daki kendi PHP kısıtı da kontrol edilir.
+**Bağımlılıklar** sayfası, kilitli her paketi `composer.lock`'ta bildirdiği PHP gereksinimine göre hedef sürümle karşılaştırır. Projenin `composer.json`'daki kendi PHP kısıtı da kontrol edilir. `composer.json`'da ya da kilitli bir pakette `php` için yazılmış bir `conflict` kaydı da hesaba katılır.
 
 `^8.0` gibi bir gereksinim, paketin en yeni PHP'de çalıştığı anlamına gelmeyebilir. Laravel (`laravel/framework`, `illuminate/*`), Drupal çekirdeği ve Symfony'nin çekirdek paketleri için Ferry, framework'ün yayımladığı destek aralığını da kullanır ve farkı gereksinimin altında açıklar.
 
 ![PHP 8.4 ile uyumsuz üç paket, projenin PHP kısıtı ve her paketin sürümü, PHP gereksinimi ve durumunu gösteren Bağımlılıklar sayfası](assets/readme/dependencies-tr.webp)
 
-Her paket **Uyumlu**, **Uyumsuz** ya da **Belirsiz** (paket bir PHP gereksinimi bildirmiyorsa) olarak işaretlenir; uyumsuz paketler listenin başında yer alır. Geliştirme paketleri etiketlidir; **Sadece üretim** seçeneği onları gizler. Listenin üstündeki uyarı, geçişi engelleyen paketleri tek tek adıyla içeren, kopyalamaya hazır bir `composer update` komutu verir.
+Her paket **Uyumlu**, **Uyumsuz** ya da **Belirsiz** (paket bir PHP gereksinimi bildirmiyorsa ya da Ferry bunu okuyamıyorsa) olarak işaretlenir; uyumsuz paketler listenin başında yer alır. Engel yokken bazı paketler belirsizse sayfa her şeyi uyumlu saymaz, bunu ayrıca belirtir. Geliştirme paketleri etiketlidir; **Sadece üretim** seçeneği onları gizler. Listenin üstündeki uyarı, geçişi engelleyen paketleri tek tek adıyla içeren, kopyalamaya hazır bir `composer update` komutu verir.
 
 **Uyumlu sürümleri bul**, engelleyen her paketin hangi sürüme geçmesi gerektiğini Packagist'e sorar. Önerilen sürüm, PHP gereksinimi (ve Ferry'nin bildiği durumlarda framework'ün kendi destek aralığı) hedefe izin veren ilk ana sürümün en yenisidir. İnternete çıkan tek özellik budur ve yalnızca siz tıkladığınızda çalışır.
 

@@ -40,7 +40,8 @@ const minor = (v: string) => (v.match(/^(\d+)\.(\d+)/) ?? []).slice(1).map(Numbe
 export function compareProbe(probe: ProbeData, target: string, used: ExtensionUse[]): ProbeReport {
   const [pm, pn] = minor(probe.php);
   const [tm, tn] = minor(target);
-  const loaded = new Set(probe.extensions.map((e) => e.toLowerCase()));
+  const normalize = (name: string) => name.trim().toLowerCase().replace(/[- ]/g, "_").replace(/^zend_/, "");
+  const loaded = new Set(probe.extensions.map(normalize));
   const disabled = String(probe.ini.disable_functions || "")
     .split(",")
     .map((f) => f.trim())
@@ -52,7 +53,7 @@ export function compareProbe(probe: ProbeData, target: string, used: ExtensionUs
     sapi: probe.sapi,
     fpm: /fpm|cgi/i.test(probe.sapi),
     server: probe.server,
-    missing: used.filter((e) => !loaded.has(e.name)).map((e) => e.name),
+    missing: used.filter((e) => !e.dev && !loaded.has(normalize(e.name))).map((e) => e.name),
     disabled,
     memoryLimit: probe.ini.memory_limit || null,
   };
