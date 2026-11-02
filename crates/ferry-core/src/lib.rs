@@ -24,6 +24,7 @@ pub mod rector;
 pub mod report;
 pub mod rules;
 pub mod runtime;
+pub mod safefs;
 pub mod server;
 pub mod snapshot;
 pub mod toolchain;
