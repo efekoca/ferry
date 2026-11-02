@@ -1,4 +1,4 @@
-use ferry_core::analyzer::{self, Finding};
+use ferry_core::analyzer::{self, FileError, Finding};
 use ferry_core::history;
 use ferry_core::i18n::{Lang, Localized};
 use ferry_core::ignore::{self, IgnoredFinding};
@@ -21,8 +21,12 @@ Options:
   --baseline <file>                  Compare with a baseline written by --write-baseline
   --write-baseline <file>            Save the current findings as a baseline
   --runtime-log <file>               Merge a PHP error log or PHPUnit deprecation output into the results
+  --allow-incomplete                 Don't fail when some files couldn't be scanned
   --lang <en|tr>                     Language of messages (default: en)
-  -h, --help                         Show this help";
+  -h, --help                         Show this help
+
+Exit codes: 0 passed, 1 findings at the --fail-on level, 2 usage or run error,
+3 some files couldn't be scanned (unless --allow-incomplete)";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Format {
@@ -56,6 +60,14 @@ struct Options {
     write_baseline: Option<PathBuf>,
     runtime_log: Option<PathBuf>,
     blame: bool,
+    allow_incomplete: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Outcome {
+    Passed,
+    Failed,
+    Incomplete,
 }
 
 fn parse(args: &[String]) -> Result<Options, String> {
@@ -67,7 +79,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
     }
     let (mut root, mut target, mut format, mut output, mut fail_on, mut lang) =
         (None, None, Format::Text, None, FailOn::Breaking, Lang::En);
-    let (mut baseline, mut write_baseline, mut runtime_log, mut blame) = (None, None, None, false);
+    let (mut baseline, mut write_baseline, mut runtime_log, mut blame, mut allow_incomplete) = (None, None, None, false, false);
     while let Some(arg) = it.next() {
         let mut value = |name: &str| it.next().cloned().ok_or_else(|| format!("{name} needs a value"));
         match arg.as_str() {
@@ -100,6 +112,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
             "--write-baseline" => write_baseline = Some(PathBuf::from(value("--write-baseline")?)),
             "--runtime-log" => runtime_log = Some(PathBuf::from(value("--runtime-log")?)),
             "--blame" => blame = true,
+            "--allow-incomplete" => allow_incomplete = true,
             "--lang" => {
                 lang = match value("--lang")?.as_str() {
                     "en" => Lang::En,
@@ -124,7 +137,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
     if fail_on == FailOn::New && baseline.is_none() {
         return Err("--fail-on new needs --baseline".into());
     }
-    Ok(Options { root, target, format, output, fail_on, lang, baseline, write_baseline, runtime_log, blame })
+    Ok(Options { root, target, format, output, fail_on, lang, baseline, write_baseline, runtime_log, blame, allow_incomplete })
 }
 
 fn text(l: &Localized, lang: Lang) -> &str {
@@ -149,6 +162,21 @@ fn fails(f: &Finding, fail_on: FailOn) -> bool {
         FailOn::Any | FailOn::New => true,
         FailOn::None => false,
     }
+}
+
+fn render_errors_text(errors: &[FileError], o: &Options) -> String {
+    if errors.is_empty() {
+        return String::new();
+    }
+    let mut out = match (o.lang, errors.len()) {
+        (Lang::Tr, n) => format!("{n} dosya taranamadı; sonuçlar onları kapsamıyor:\n"),
+        (Lang::En, 1) => "1 file couldn't be scanned, so the results don't cover it:\n".to_string(),
+        (Lang::En, n) => format!("{n} files couldn't be scanned, so the results don't cover them:\n"),
+    };
+    for e in errors {
+        out.push_str(&format!("  {}: {}\n", e.file, e.message));
+    }
+    out
 }
 
 fn render_text(findings: &[Finding], ignored: &[IgnoredFinding], summary: &report::Summary, o: &Options) -> String {
@@ -218,10 +246,19 @@ fn finding_json(f: &Finding, lang: Lang) -> Value {
     })
 }
 
-fn render_json(findings: &[Finding], ignored: &[IgnoredFinding], summary: &report::Summary, files: usize, o: &Options) -> String {
+fn render_json(
+    findings: &[Finding],
+    ignored: &[IgnoredFinding],
+    summary: &report::Summary,
+    scan: &analyzer::ScanResult,
+    o: &Options,
+) -> String {
     let value = json!({
         "target": o.target.to_string(),
-        "filesScanned": files,
+        "complete": scan.errors.is_empty(),
+        "filesFound": scan.files_found,
+        "filesScanned": scan.files_scanned,
+        "errors": scan.errors.iter().map(|e| json!({ "file": e.file, "message": e.message })).collect::<Vec<_>>(),
         "summary": summary,
         "findings": findings.iter().map(|f| finding_json(f, o.lang)).collect::<Vec<_>>(),
         "ignored": ignored.iter().map(|i| { let mut v = finding_json(&i.finding, o.lang); v["reason"] = json!(i.reason); v }).collect::<Vec<_>>(),
@@ -237,7 +274,7 @@ fn sarif_level(s: Severity) -> &'static str {
     }
 }
 
-fn render_sarif(findings: &[Finding], o: &Options) -> String {
+fn render_sarif(findings: &[Finding], errors: &[FileError], o: &Options) -> String {
     let mut rules: Vec<Value> = Vec::new();
     let mut seen = std::collections::BTreeSet::new();
     for f in findings {
@@ -282,6 +319,14 @@ fn render_sarif(findings: &[Finding], o: &Options) -> String {
                 "rules": rules,
             }},
             "results": results,
+            "invocations": [{
+                "executionSuccessful": errors.is_empty(),
+                "toolExecutionNotifications": errors.iter().map(|e| json!({
+                    "level": "error",
+                    "message": { "text": e.message },
+                    "locations": [{ "physicalLocation": { "artifactLocation": { "uri": e.file.replace('\\', "/") } } }],
+                })).collect::<Vec<_>>(),
+            }],
         }],
     });
     serde_json::to_string_pretty(&value).unwrap() + "\n"
@@ -299,17 +344,29 @@ fn xml(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&apos;")
 }
 
-fn render_junit(findings: &[Finding], o: &Options) -> String {
+fn render_junit(findings: &[Finding], errors: &[FileError], o: &Options) -> String {
     let mut by_file: std::collections::BTreeMap<&str, Vec<&Finding>> = std::collections::BTreeMap::new();
     for f in findings {
         by_file.entry(f.file.as_str()).or_default().push(f);
     }
     let failures = findings.iter().filter(|f| f.severity != Severity::Behavior).count();
     let mut out = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<testsuites name=\"Ferry PHP {}\" tests=\"{}\" failures=\"{failures}\">\n",
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<testsuites name=\"Ferry PHP {}\" tests=\"{}\" failures=\"{failures}\" errors=\"{}\">\n",
         o.target,
-        findings.len()
+        findings.len() + errors.len(),
+        errors.len()
     );
+    if !errors.is_empty() {
+        out.push_str(&format!("  <testsuite name=\"scan\" tests=\"{0}\" failures=\"0\" errors=\"{0}\">\n", errors.len()));
+        for e in errors {
+            out.push_str(&format!(
+                "    <testcase classname=\"scan\" name=\"{}\">\n      <error message=\"{}\"/>\n    </testcase>\n",
+                xml(&e.file),
+                xml(&e.message)
+            ));
+        }
+        out.push_str("  </testsuite>\n");
+    }
     for (file, list) in by_file {
         let failing = list.iter().filter(|f| f.severity != Severity::Behavior).count();
         out.push_str(&format!("  <testsuite name=\"{}\" tests=\"{}\" failures=\"{failing}\">\n", xml(file), list.len()));
@@ -340,12 +397,19 @@ fn render_junit(findings: &[Finding], o: &Options) -> String {
     out + "</testsuites>\n"
 }
 
-fn render_checkstyle(findings: &[Finding], o: &Options) -> String {
+fn render_checkstyle(findings: &[Finding], errors: &[FileError], o: &Options) -> String {
     let mut by_file: std::collections::BTreeMap<&str, Vec<&Finding>> = std::collections::BTreeMap::new();
     for f in findings {
         by_file.entry(f.file.as_str()).or_default().push(f);
     }
     let mut out = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<checkstyle version=\"4.3\">\n");
+    for e in errors {
+        out.push_str(&format!(
+            "  <file name=\"{}\">\n    <error severity=\"error\" message=\"{}\" source=\"ferry.scan\"/>\n  </file>\n",
+            xml(&e.file.replace('\\', "/")),
+            xml(&e.message)
+        ));
+    }
     for (file, list) in by_file {
         out.push_str(&format!("  <file name=\"{}\">\n", xml(&file.replace('\\', "/"))));
         for f in list {
@@ -433,28 +497,33 @@ fn render_csv(root: &std::path::Path, findings: &[Finding], o: &Options) -> Stri
     out
 }
 
-fn render_github(findings: &[Finding], o: &Options) -> String {
-    findings
+fn render_github(findings: &[Finding], errors: &[FileError], o: &Options) -> String {
+    let unscanned: String = errors
         .iter()
-        .map(|f| {
-            let level = match f.severity {
-                Severity::Breaking => "error",
-                Severity::Deprecated => "warning",
-                Severity::Behavior => "notice",
-            };
-            format!(
-                "::{level} file={},line={},col={},title={}::{}\n",
-                escape_property(&f.file.replace('\\', "/")),
-                f.line,
-                f.column,
-                escape_property(&format!("{} (PHP {})", text(&f.title, o.lang), f.since)),
-                escape_data(text(&f.message, o.lang))
-            )
-        })
-        .collect()
+        .map(|e| format!("::error file={},title=Ferry::{}\n", escape_property(&e.file.replace('\\', "/")), escape_data(&e.message)))
+        .collect();
+    unscanned
+        + &findings
+            .iter()
+            .map(|f| {
+                let level = match f.severity {
+                    Severity::Breaking => "error",
+                    Severity::Deprecated => "warning",
+                    Severity::Behavior => "notice",
+                };
+                format!(
+                    "::{level} file={},line={},col={},title={}::{}\n",
+                    escape_property(&f.file.replace('\\', "/")),
+                    f.line,
+                    f.column,
+                    escape_property(&format!("{} (PHP {})", text(&f.title, o.lang), f.since)),
+                    escape_data(text(&f.message, o.lang))
+                )
+            })
+            .collect::<String>()
 }
 
-fn run(o: &Options) -> Result<bool, String> {
+fn run(o: &Options) -> Result<Outcome, String> {
     ferry_core::i18n::set_lang(o.lang);
     let root = std::fs::canonicalize(&o.root).map_err(|e| format!("{}: {e}", o.root.display()))?;
     let info = project::inspect(&root).map_err(|e| e.to_string())?;
@@ -472,7 +541,7 @@ fn run(o: &Options) -> Result<bool, String> {
             merged.outside
         );
     }
-    let applied = ignore::apply(&root, scan.findings, &ignore::load(&root));
+    let applied = ignore::apply(&root, std::mem::take(&mut scan.findings), &ignore::load(&root));
     let (findings, ignored) = (applied.kept, applied.ignored);
     for stale in &applied.stale {
         eprintln!("ferry-cli: .ferry/ignore.json entry for {} in {} no longer matches any code", stale.rule_id, stale.file);
@@ -497,12 +566,12 @@ fn run(o: &Options) -> Result<bool, String> {
         std::fs::write(path, serde_json::to_string_pretty(&value).unwrap() + "\n").map_err(|e| format!("{}: {e}", path.display()))?;
     }
     let mut rendered = match o.format {
-        Format::Text => render_text(&findings, &ignored, &summary, o),
-        Format::Json => render_json(&findings, &ignored, &summary, scan.files_scanned, o),
-        Format::Sarif => render_sarif(&findings, o),
-        Format::Github => render_github(&fresh, o) + &render_text(&[], &ignored, &summary, o),
-        Format::Junit => render_junit(&findings, o),
-        Format::Checkstyle => render_checkstyle(&findings, o),
+        Format::Text => render_text(&findings, &ignored, &summary, o) + &render_errors_text(&scan.errors, o),
+        Format::Json => render_json(&findings, &ignored, &summary, &scan, o),
+        Format::Sarif => render_sarif(&findings, &scan.errors, o),
+        Format::Github => render_github(&fresh, &scan.errors, o) + &render_text(&[], &ignored, &summary, o),
+        Format::Junit => render_junit(&findings, &scan.errors, o),
+        Format::Checkstyle => render_checkstyle(&findings, &scan.errors, o),
         Format::Csv => render_csv(&root, &findings, o),
     };
     if baseline.is_some() && matches!(o.format, Format::Text | Format::Github) {
@@ -515,7 +584,16 @@ fn run(o: &Options) -> Result<bool, String> {
         Some(path) => std::fs::write(path, rendered).map_err(|e| format!("{}: {e}", path.display()))?,
         None => print!("{rendered}"),
     }
-    Ok(fresh.iter().any(|f| fails(f, o.fail_on)))
+    if !scan.errors.is_empty() && !matches!(o.format, Format::Text) {
+        eprint!("ferry-cli: {}", render_errors_text(&scan.errors, o));
+    }
+    Ok(if fresh.iter().any(|f| fails(f, o.fail_on)) {
+        Outcome::Failed
+    } else if !scan.errors.is_empty() && !o.allow_incomplete {
+        Outcome::Incomplete
+    } else {
+        Outcome::Passed
+    })
 }
 
 fn main() -> ExitCode {
@@ -532,8 +610,9 @@ fn main() -> ExitCode {
         }
     };
     match run(&options) {
-        Ok(false) => ExitCode::SUCCESS,
-        Ok(true) => ExitCode::from(1),
+        Ok(Outcome::Passed) => ExitCode::SUCCESS,
+        Ok(Outcome::Failed) => ExitCode::from(1),
+        Ok(Outcome::Incomplete) => ExitCode::from(3),
         Err(e) => {
             eprintln!("ferry-cli: {e}");
             ExitCode::from(2)
@@ -577,8 +656,9 @@ mod tests {
             write_baseline: None,
             runtime_log: None,
             blame: false,
+            allow_incomplete: false,
         };
-        assert!(run(&options(FailOn::Breaking)).unwrap());
+        assert_eq!(run(&options(FailOn::Breaking)).unwrap(), Outcome::Failed);
         let report: Value = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
         let each = report["findings"].as_array().unwrap().iter().find(|f| f["ruleId"] == "removed.each").unwrap().clone();
         assert_eq!((each["file"].as_str(), each["line"].as_u64()), (Some("a.php"), Some(2)));
@@ -586,8 +666,8 @@ mod tests {
         std::fs::create_dir(dir.path().join(".ferry")).unwrap();
         let ignore = json!({ "ignores": [{ "ruleId": "removed.each", "file": "a.php", "snippet": "each($a);", "reason": "dead code" }] });
         std::fs::write(dir.path().join(".ferry/ignore.json"), ignore.to_string()).unwrap();
-        assert!(!run(&options(FailOn::Breaking)).unwrap());
-        assert!(run(&options(FailOn::Deprecated)).unwrap());
+        assert_eq!(run(&options(FailOn::Breaking)).unwrap(), Outcome::Passed);
+        assert_eq!(run(&options(FailOn::Deprecated)).unwrap(), Outcome::Failed);
         let report: Value = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
         assert_eq!(report["ignored"][0]["reason"], "dead code");
         assert_eq!(report["summary"]["breaking"], 0);
@@ -609,11 +689,12 @@ mod tests {
             write_baseline: write,
             runtime_log: None,
             blame: false,
+            allow_incomplete: false,
         };
-        assert!(!run(&options(None, Some(base.clone()))).unwrap());
-        assert!(!run(&options(Some(base.clone()), None)).unwrap());
+        assert_eq!(run(&options(None, Some(base.clone()))).unwrap(), Outcome::Passed);
+        assert_eq!(run(&options(Some(base.clone()), None)).unwrap(), Outcome::Passed);
         std::fs::write(dir.path().join("a.php"), "<?php\neach($a);\nsplit($b);\n").unwrap();
-        assert!(run(&options(Some(base), None)).unwrap());
+        assert_eq!(run(&options(Some(base), None)).unwrap(), Outcome::Failed);
     }
 
     #[test]
@@ -639,12 +720,13 @@ mod tests {
                 write_baseline: None,
                 runtime_log: None,
                 blame,
+                allow_incomplete: false,
             };
             run(&o).unwrap();
             std::fs::read_to_string(&out).unwrap()
         };
         let junit = render(Format::Junit, false);
-        assert!(junit.contains(r#"<testsuites name="Ferry PHP 8.2" tests="2" failures="2">"#), "{junit}");
+        assert!(junit.contains(r#"<testsuites name="Ferry PHP 8.2" tests="2" failures="2" errors="0">"#), "{junit}");
         assert!(junit.contains("<failure type=\"breaking\""));
         let checkstyle = render(Format::Checkstyle, false);
         assert!(checkstyle.contains(r#"<error line="2" column="1" severity="error""#), "{checkstyle}");
@@ -664,5 +746,27 @@ mod tests {
     fn github_annotations_escape_their_fields() {
         assert_eq!(escape_property("a,b:c%"), "a%2Cb%3Ac%25");
         assert_eq!(escape_data("x\ny"), "x%0Ay");
+    }
+
+    #[test]
+    fn an_incomplete_scan_is_not_a_pass() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.php"), format!("<?php each($a);\n//{}\n", "x".repeat(3 * 1024 * 1024))).unwrap();
+        std::fs::write(dir.path().join("b.php"), "<?php echo 1;\n").unwrap();
+        let out = dir.path().join("out.json");
+        let base = format!("scan {} --target 8.4 --format json --output {}", dir.path().display(), out.display());
+        assert_eq!(run(&parse(&args(&base)).unwrap()).unwrap(), Outcome::Incomplete);
+        let report: Value = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
+        assert_eq!(
+            (report["complete"].as_bool(), report["filesFound"].as_u64(), report["filesScanned"].as_u64()),
+            (Some(false), Some(2), Some(1))
+        );
+        assert_eq!(report["errors"][0]["file"], "a.php");
+        assert_eq!(run(&parse(&args(&format!("{base} --allow-incomplete"))).unwrap()).unwrap(), Outcome::Passed);
+
+        let sarif = format!("scan {} --target 8.4 --format sarif --allow-incomplete --output {}", dir.path().display(), out.display());
+        run(&parse(&args(&sarif)).unwrap()).unwrap();
+        let report: Value = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
+        assert_eq!(report["runs"][0]["invocations"][0]["executionSuccessful"], false);
     }
 }
