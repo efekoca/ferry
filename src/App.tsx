@@ -1,7 +1,10 @@
 import { useEffect } from "react";
+import { CircleAlert } from "lucide-react";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Sidebar } from "./components/Shell";
+import { Button, EmptyState } from "./components/ui";
 import { ToastProvider } from "./components/Toast";
-import { I18nProvider } from "./i18n";
+import { I18nProvider, useI18n } from "./i18n";
 import type { Api } from "./lib/api";
 import { isTauri } from "./lib/api";
 import { StoreProvider, useStore } from "./lib/store";
@@ -16,6 +19,31 @@ function detectPlatform(): "macos" | "windows" | "linux" {
   if (p.includes("mac")) return "macos";
   if (p.includes("win")) return "windows";
   return "linux";
+}
+
+function SafeScreen() {
+  const { t } = useI18n();
+  const { view, project } = useStore();
+  return (
+    <ErrorBoundary
+      key={`${view}:${project?.root ?? ""}`}
+      fallback={(error, reset) => (
+        <EmptyState
+          icon={<CircleAlert size={24} />}
+          title={t.common.screenFailed}
+          action={
+            <Button variant="secondary" onClick={reset}>
+              {t.common.tryAgain}
+            </Button>
+          }
+        >
+          <span className="selectable">{error.message}</span>
+        </EmptyState>
+      )}
+    >
+      <Screen />
+    </ErrorBoundary>
+  );
 }
 
 function Screen() {
@@ -80,7 +108,7 @@ export default function App({ api }: { api?: Api }) {
         <div className="app">
           <Sidebar />
           <main className="main">
-            <Screen />
+            <SafeScreen />
           </main>
         </div>
         </StoreProvider>
