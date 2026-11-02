@@ -2989,6 +2989,11 @@ select.input {
   margin-top: 0;
 }
 
+.change-item__unseen {
+  color: var(--risk-manual-fg);
+  font-size: var(--text-xs);
+}
+
 .score__ring {
   display: flex;
 }
