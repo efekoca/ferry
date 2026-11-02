@@ -14,7 +14,10 @@ function useModal(open: boolean, dialogRef: RefObject<HTMLElement | null>, initi
   useEffect(() => {
     if (!open) return;
     const previous = document.activeElement as HTMLElement | null;
-    initialRef.current?.focus();
+    const dialog = dialogRef.current;
+    const field = dialog?.querySelector<HTMLElement>("input:not([disabled]), textarea:not([disabled]), select:not([disabled])");
+    (field ?? initialRef.current)?.focus();
+    if (dialog && !dialog.contains(document.activeElement)) dialog.focus();
     const onKey = (e: KeyboardEvent) => {
       const dialog = dialogRef.current;
       const top = [...document.querySelectorAll('[role="dialog"][aria-modal="true"]')].pop();
@@ -87,7 +90,7 @@ export function ConfirmDialog({
   if (!open) return null;
   return (
     <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && !loading && onCancel()}>
-      <div ref={dialogRef} className="modal" role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={bodyId}>
+      <div ref={dialogRef} className="modal" role="dialog" aria-modal="true" tabIndex={-1} aria-labelledby={titleId} aria-describedby={bodyId}>
         <div className="modal__body">
           <div className={`modal__icon ${tone === "danger" ? "modal__icon--danger" : ""}`} aria-hidden>
             {icon}
