@@ -527,6 +527,20 @@ struct GitState {
     dirty: Vec<String>,
 }
 
+fn porcelain_paths(out: &[u8], prefix: &str) -> Vec<String> {
+    let mut entries = out.split(|b| *b == 0).filter(|e| !e.is_empty());
+    let mut paths = Vec::new();
+    while let Some(entry) = entries.next() {
+        let Some(path) = entry.get(3..) else { continue };
+        if matches!(entry[0], b'R' | b'C') {
+            entries.next();
+        }
+        let path = String::from_utf8_lossy(path);
+        paths.push(path.strip_prefix(prefix).unwrap_or(&path).to_string());
+    }
+    paths
+}
+
 #[tauri::command]
 async fn git_status(path: String, files: Vec<String>) -> CmdResult<GitState> {
     let path = normalize_path(path);
@@ -537,19 +551,21 @@ async fn git_status(path: String, files: Vec<String>) -> CmdResult<GitState> {
         if !inside.is_ok_and(|o| o.status.success()) {
             return Ok(GitState { repo: false, dirty: Vec::new() });
         }
+        let prefix = toolchain::command(&git)
+            .arg("-C")
+            .arg(&root)
+            .args(["rev-parse", "--show-prefix"])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_default();
         let out = toolchain::command(&git)
             .arg("-C")
             .arg(&root)
-            .args(["status", "--porcelain", "--untracked-files=no", "--"])
+            .args(["status", "--porcelain=v1", "-z", "--untracked-files=all", "--"])
             .args(&files)
             .output()
             .map_err(|e| e.to_string())?;
-        let dirty = String::from_utf8_lossy(&out.stdout)
-            .lines()
-            .filter_map(|l| l.get(3..))
-            .map(|p| p.rsplit(" -> ").next().unwrap_or(p).trim_matches('"').to_string())
-            .collect();
-        Ok(GitState { repo: true, dirty })
+        Ok(GitState { repo: true, dirty: porcelain_paths(&out.stdout, &prefix) })
     })
     .await
 }
