@@ -25,14 +25,25 @@ inputs:
 runs:
   using: composite
   steps:
+    - id: source
+      shell: bash
+      run: |
+        digest() { if command -v sha256sum >/dev/null; then sha256sum; else shasum -a 256; fi; }
+        key=$(cd "$GITHUB_ACTION_PATH" && find Cargo.toml Cargo.lock crates -type f -not -path '*/target/*' | LC_ALL=C sort | while read -r f; do printf '%s\n' "$f"; cat "$f"; done | digest | cut -c1-20)
+        echo "key=$key" >> "$GITHUB_OUTPUT"
+        echo "dir=$HOME/.ferry-action/$key" >> "$GITHUB_OUTPUT"
     - uses: actions/cache@v4
       with:
-        path: ~/.cargo/bin/ferry-cli
-        key: ferry-cli-${{ runner.os }}-${{ hashFiles(format('{0}/Cargo.lock', github.action_path)) }}-${{ github.action_ref }}
-    - shell: bash
-      run: command -v ferry-cli >/dev/null || cargo install --locked --path "$GITHUB_ACTION_PATH/crates/ferry-cli"
+        path: ${{ steps.source.outputs.dir }}
+        key: ferry-cli-${{ runner.os }}-${{ steps.source.outputs.key }}
     - shell: bash
       env:
+        DIR: ${{ steps.source.outputs.dir }}
+      run: |
+        ls "$DIR"/bin/ferry-cli* >/dev/null 2>&1 || cargo install --locked --root "$DIR" --path "$GITHUB_ACTION_PATH/crates/ferry-cli"
+    - shell: bash
+      env:
+        FERRY: ${{ steps.source.outputs.dir }}/bin/ferry-cli
         TARGET: ${{ inputs.target }}
         PROJECT: ${{ inputs.path }}
         FAIL_ON: ${{ inputs.fail-on }}
@@ -43,5 +54,5 @@ runs:
         args=(scan "$PROJECT" --target "$TARGET" --fail-on "$FAIL_ON")
         if [ -n "$BASELINE" ]; then args+=(--baseline "$BASELINE"); fi
         if [ "$ALLOW_INCOMPLETE" = "true" ]; then args+=(--allow-incomplete); fi
-        if [ "$SARIF" = "true" ]; then ferry-cli "${args[@]}" --format sarif --output ferry.sarif --fail-on none --allow-incomplete; fi
-        ferry-cli "${args[@]}" --format github
+        if [ "$SARIF" = "true" ]; then "$FERRY" "${args[@]}" --format sarif --output ferry.sarif --fail-on none --allow-incomplete; fi
+        "$FERRY" "${args[@]}" --format github
