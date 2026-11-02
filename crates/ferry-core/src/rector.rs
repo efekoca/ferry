@@ -665,6 +665,9 @@ mod tests {
         let mut perms = std::fs::metadata(root.join("locked")).unwrap().permissions();
         std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o555);
         std::fs::set_permissions(root.join("locked"), perms).unwrap();
+        if std::fs::write(root.join("locked/.probe"), "").is_ok() {
+            return;
+        }
         let mut written = Vec::new();
         let result = write_changes(root, &[&change("a.php", "a", "A"), &change("locked/b.php", "b", "B")], &mut written);
         let mut perms = std::fs::metadata(root.join("locked")).unwrap().permissions();

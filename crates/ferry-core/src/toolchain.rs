@@ -397,11 +397,11 @@ pub fn run_process(
 
 fn kill_tree(child: &mut std::process::Child) {
     #[cfg(unix)]
-    let _ = Command::new("kill")
-        .args(["-KILL", &format!("-{}", child.id())])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status();
+    if let Ok(pgid) = libc::pid_t::try_from(child.id()) {
+        if pgid > 1 {
+            unsafe { libc::kill(-pgid, libc::SIGKILL) };
+        }
+    }
     let _ = child.kill();
 }
 
