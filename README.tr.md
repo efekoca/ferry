@@ -12,7 +12,7 @@ Ferry, macOS, Windows ve Linux'ta çalışan bir masaüstü uygulamasıdır. PHP
 
 [Özellikler](#özellikler) · [Kurulum](#kurulum) · [Gizlilik](#gizlilik) · [Nasıl çalışır](#nasıl-çalışır) · [Kaynaktan derleme](#kaynaktan-derleme) · [English](README.md)
 
-![PHP 7.4'ten 8.4'e geçecek bir WordPress projesi için Ferry genel bakış ekranı: 39 puanlık hazırlık skoru, otomatik, gözden geçirilecek ve elle yapılacak düzeltmelerin dağılımı; kritik, eskimiş ve riskli bulguların sayıları](assets/readme/hero-tr.webp)
+![PHP 7.4'ten 8.4'e geçecek bir WordPress projesi için Ferry genel bakış ekranı: 39 puanlık hazırlık skoru ve geçişi hâlâ engelleyenler, otomatik, gözden geçirilecek ve elle yapılacak düzeltmelerin dağılımı ve Düzeltmeler sayfasından kurucu parametrelerini açıkça nullable yapan bir fark](assets/readme/hero-tr.webp)
 
 - **Sorunları kullanıcılarınızdan önce görün.** PHP 7.0 ile 8.5 arasında kaldırılan ya da değişen her kullanım; dosyası, satırı ve neden önemli olduğuyla listelenir.
 - **Siz onaylamadan hiçbir şey değişmez.** Rector yalnızca deneme modunda çalışır. Her değişikliği satır satır inceler, yalnızca seçtiğiniz dosyaları uygularsınız.
@@ -33,7 +33,7 @@ Ferry, macOS, Windows ve Linux'ta çalışan bir masaüstü uygulamasıdır. PHP
 
 Geçmek istediğiniz sürümü seçin (PHP 8.2 ile 8.5 arası); Ferry tüm PHP dosyalarını saniyeler içinde tarar. **Genel bakış** ekranında şunları görürsünüz:
 
-- projenin platformu (WordPress, Laravel, Symfony, Drupal ya da düz PHP), PHP dosyası sayısı ve `composer.json`'a göre şu anki PHP sürümü
+- projenin platformu ([Desteklenen projeler](#desteklenen-projeler) altındaki on platformdan biri ya da düz PHP), PHP dosyası sayısı ve `composer.json`'a göre şu anki PHP sürümü
 - 0 ile 100 arasında bir hazırlık puanı ve her düzeltme türüne düşen sorun sayısı; puan kalan işin bir tahminidir, uygulamanın çalışacağının garantisi değildir
 - puanın yanında hâlâ önünüzde duranlar: geçişi engelleyen sorunlar, taramanın kapsayamadığı dosyalar, engel çıkaran ya da doğrulanamayan bağımlılıklar ve hedef sürümde lint ya da testin çalışıp çalışmadığı. Başlık ancak bunların hepsi temizse projenin hazır olduğunu söyler
 - bulguların kaçının **Kritik** (kod çalışmaz), **Eskimiş** (şimdilik uyarı verir, ileride kaldırılır) ya da **Riskli** (çalışırken farklı davranabilir) olduğu
@@ -53,7 +53,7 @@ Bakımını sizin yapmadığınız framework kodu kendiliğinden atlanır: WordP
 
 **Bulgular** sayfası her sorunu dosyasına göre gruplar; satırını, kodunu ve düzeltme türünü gösterir. Dosyalarda ve sorunlarda arama yapabilir, düzeltme türüne ya da önem derecesine göre süzebilir ve kaç bulgunun eşleştiğini görebilirsiniz. Genel bakışta seçtiğiniz bir kural kaldırılabilir bir süzgeç olarak görünür; **Filtreleri temizle** hepsini sıfırlar. Sayfa değiştirdiğinizde süzgeçler korunur.
 
-![Dosyalara göre gruplanmış bulgular, düzeltme türü ve önem derecesi süzgeçleri ve bir mysql_connect() bulgusunun ayrıntıları: neden önemli olduğu, yerine ne kullanılacağı ve düzeltme türü](assets/readme/findings-tr.webp)
+![Dosyalara göre gruplanmış bulgular, düzeltme türü ve önem derecesi süzgeçleri, çalışma anı kontrolleri ve bir each() bulgusunun ayrıntıları: kod, neden önemli olduğu, yerine ne kullanılacağı ve düzeltme türü](assets/readme/findings-tr.webp)
 
 Bir bulguyu seçtiğinizde şunları görürsünüz:
 
@@ -75,6 +75,7 @@ Bir bulguyu kodun içinde de yok sayabilirsiniz: Aynı satıra ya da bir üst sa
 Ferry'nin kendi PHP sözcük çözümleyicisi ve kural seti vardır; kodu PHP'nin okuduğu gibi okur. `$db->each()` gibi metot çağrıları, kendi namespace'inizdeki fonksiyonlar, metinlerin ve yorumların içindekiler kaldırılmış fonksiyon sanılmaz. Kurallar şunları kapsar:
 
 - `mysql_*`, `ereg*`, `each()`, `create_function()` ve `money_format()` gibi kaldırılan eklenti ve fonksiyonlar
+- PHP 7.0'dan 8.5'e kadar kaldırılan ya da kullanımdan kalkan bütün yerleşik fonksiyon, sınıf, metot ve sabitler; tablo PHP'nin kendi reflection verisinden üretilir (örneğin 8.0'da kaldırılan DOM sınıfları, `SplFixedArray::rewind()`, eski tarz `parent::SoapClient()` kurucu çağrıları ve 8.4'te kaldırılan `MYSQLI_*` sabitleri)
 - `$str{0}`, `(real)` ve `(unset)` dönüşümleri, `$obj = &new Foo`, `$args = &func_get_args()`, `unset($this)`, `$GLOBALS` dizisinin tamamına yazma, `Object` gibi ayrılmış adların `use` takma adı olarak kullanılması, döngü dışındaki `break` ve PHP 8'in attribute olarak okuduğu PHP 7 `#[` yorumları gibi artık ayrıştırılamayan ya da derlenemeyen yazımlar
 - `"${var}"` yerleştirmesi, örtük nullable parametreler, `utf8_encode()`, `FILTER_SANITIZE_STRING` ve `E_STRICT` gibi kullanımdan kalkanlar
 - zorunlu bir parametreden önce gelen isteğe bağlı parametre, yerleşik metin fonksiyonlarına doğrudan verilen `null` ve `"self::method"` biçimindeki callable'lar gibi parametre ve çağrı kalıpları
@@ -96,7 +97,7 @@ Ferry, hangi PHP'nin gerçekten çalışacağını belirleyen ve kodun çevresin
 
 **Düzeltmeler** sayfası Rector'ı projenizde deneme modunda çalıştırır; hiçbir dosya değişmez. Değişen her dosyanın farkını satır satır, değişikliği üreten kuralları ve ona ne kadar güvenebileceğinizi görürsünüz.
 
-![Gözden geçir ya da Otomatik olarak işaretlenmiş dört dosya ve while (each()) yerine foreach, create_function() yerine closure getiren yan yana bir fark görünümü](assets/readme/fixes-tr.webp)
+![İkisi otomatik olarak seçili, biri Bakılmadı olarak işaretli dört değişen dosya ve while (each()) yerine foreach, create_function() yerine closure getiren bir fark görünümü](assets/readme/fixes-tr.webp)
 
 - **Uyumluluk** yalnızca yeni sürümde çalışmak için gerekenleri değiştirir. Başlamak için en doğru yer burasıdır.
 - **Modernleştirme** hedef sürümün yeni yazımlarını da benimser.
@@ -132,7 +133,7 @@ Ferry her uygulamadan önce değiştireceği dosyaları yedekler. **Geçmiş** s
 ![İncelemek için açılmış bir Geçmiş kaydı: solda değişen dosyalar, sağda seçili dosyanın farkı ve kuralları, altta Geri yükle düğmesi](assets/readme/history-tr.webp)
 
 - **İncele**, her uygulamanın neyi değiştirdiğini dosya dosya ve her değişikliğin ardındaki kurallarla birlikte gösterir.
-- **Geri yükle**, o uygulamadan önceki halleriyle bütün dosyaları geri getirir. Bunlardan birini sonradan düzenlediyseniz Ferry önce o dosyaları listeler; onayladıktan sonra değişen bir dosyanın üzerine ise yazmaz.
+- **Geri yükle**, o uygulamadan önceki halleriyle bütün dosyaları geri getirir. Bunlardan birini sonradan düzenlediyseniz Ferry önce o dosyaları listeler ve şu anki içeriklerini Geçmiş'e yeni bir kayıt olarak yedekler; onayladıktan sonra değişen bir dosyanın üzerine ise yazmaz.
 - **Ayarlar**'daki **Saklanacak yedek** seçeneği her projede tutulacak yedek sayısını sınırlar (10, 30 ya da 100). Varsayılanı sınırsızdır.
 - Bir uygulama yarıda kalırsa Ferry dosyaları kendiliğinden geri alır. Bu da başarısız olursa yedek Geçmiş'te kalır; oradan kendiniz geri yükleyebilirsiniz.
 
@@ -255,9 +256,9 @@ Eksik bir şey olduğunda **Düzeltmeler** sayfası neyin eksik olduğunu söyle
 
 > **Kodunuz bilgisayarınızdan çıkmaz.** Ferry yalnızca açtığınız klasördeki dosyaları okur ve değiştirir; hiçbir kullanım verisi toplamaz.
 
-- **Okunanlar:** seçtiğiniz proje klasöründeki PHP dosyaları, `composer.json` ve `composer.lock`.
-- **Yazılanlar:** yalnızca değişiklik uyguladığınız dosyalar. Diğer dosyalara dokunulmaz.
-- **Saklananlar:** her uygulamadan önceki dosya yedekleri (hepsi ya da bir sınır koyduysanız yalnızca en yenileri), neyin uygulandığının kaydı, Rector'ın önbelleği ve ayarlarınız. Hepsi uygulamanın veri klasöründe durur: macOS'ta `~/Library/Application Support/io.github.efekoca.ferry`, Windows'ta `%APPDATA%\io.github.efekoca.ferry`, Linux'ta `~/.local/share/io.github.efekoca.ferry`.
+- **Okunanlar:** seçtiğiniz proje klasöründeki PHP dosyaları; ayrıca `composer.json`, `composer.lock` ve hangi PHP'nin çalışacağını belirleyen dosyalar: `.htaccess`, `.user.ini`, `php.ini`, Dockerfile'lar, Docker Compose ve CI yapılandırması.
+- **Yazılanlar:** yalnızca değişiklik uyguladığınız dosyalar ve bir bulguyu yok saydığınızda `.ferry/ignore.json`. Diğer dosyalara dokunulmaz.
+- **Saklananlar:** her uygulamadan önceki dosya yedekleri (hepsi ya da bir sınır koyduysanız yalnızca en yenileri), neyin uygulandığının kaydı, her hedef için son 30 taramanın özeti, Rector'ın önbelleği ve ayarlarınız. Hepsi uygulamanın veri klasöründe durur: macOS'ta `~/Library/Application Support/io.github.efekoca.ferry`, Windows'ta `%APPDATA%\io.github.efekoca.ferry`, Linux'ta `~/.local/share/io.github.efekoca.ferry`.
 - **Proje kodu:** Tarama kodunuzu hiçbir zaman çalıştırmaz. Düzeltmeleri hesaplarken Rector proje klasöründe çalışır ve projenin `vendor/autoload.php` dosyasını yükler; bu yüzden Composer'ın `autoload.files` listesindeki dosyalar çalıştırılır. Düzeltmeleri yalnızca güvendiğiniz projeler için hesaplayın.
 - **Ağ:** Ferry kendiliğinden hiçbir ağ isteği yapmaz. **Rector'ı kur**'u seçtiğinizde Composer, Rector'ı Packagist'ten indirir. **Uyumlu sürümleri bul**'u seçtiğinizde Ferry, engelleyen paketlerin adlarını ve sürümlerini `repo.packagist.org`'a; **En son sürümleri bul**'u seçtiğinizde WordPress eklenti ve tema adlarını `api.wordpress.org`'a gönderir.
 
@@ -283,10 +284,10 @@ Her şey kendi bilgisayarınızda çalışır:
   - Yerleşik fonksiyonlara değişken üzerinden `null` vermek kullanımdan kalktı. Ferry doğrudan yazılmış `null`'u bildirir ama bir değişkenin ne tuttuğunu göremez.
   - Dinamik property'ler kullanımdan kalktı. Ferry projenizdeki üst sınıfları ve trait'leri izler; ancak `vendor/` içindeki bir framework sınıfı gibi göremediği bir sınıftan türeyenleri atlar, çünkü property orada tanımlanmış olabilir.
   - imap ya da mcrypt gibi gerekli eklentiler yeni sunucuda kurulu olmayabilir.
-- **Metot çağrıları:** Ferry kodu çalıştırmadan bir nesnenin sınıfını bilemez. Bu yüzden `$db->ping()` gibi bir metot çağrısı yalnızca aynı dosyada sınıfın adı geçiyorsa (`mysqli`, `Reflection…`, `SplObjectStorage`) işaretlenir. Statik çağrılar ve `PDO::MYSQL_ATTR_INIT_COMMAND` gibi sınıf sabitleri her zaman kontrol edilir.
+- **Metot çağrıları:** Ferry kodu çalıştırmadan bir nesnenin sınıfını bilemez. Bu yüzden bir değişken üzerinden yapılan `$db->ping()` gibi bir çağrı yalnızca kod değişkenin sınıfını gösteriyorsa işaretlenir: `new mysqli`, `mysqli $db` tip bildirimi ya da `instanceof` kontrolü. `$this->db->ping()` gibi özellik üzerinden yapılan çağrılar, dosyada sınıfın adı geçiyorsa işaretlenir. Statik çağrılar, `parent::` çağrıları ve `PDO::MYSQL_ATTR_INIT_COMMAND` gibi sınıf sabitleri her zaman kontrol edilir.
 - **Karakter kodlaması:** Otomatik düzeltmeler UTF-8 olmayan dosyaları (örneğin Windows-1254 ya da Latin-1) bozulmasın diye atlar. Düzeltilmeleri için önce UTF-8'e dönüştürün.
 - **Elle yapılan düzeltmeler:** `mysql_*` gibi bulgular kodun yeniden yazılmasını gerektirir. Ferry yerine ne kullanmanız gerektiğini gösterir ama bu kodu sizin yerinize yazmaz.
-- **Geri yükleme:** Dosyaları uygulamadan önceki hallerine getirdiği için sonradan yaptığınız düzenlemelerin üzerine yazılır. Ferry bu dosyaları listeler ve geri yüklemeden önce size sorar.
+- **Geri yükleme:** Dosyaları uygulamadan önceki hallerine getirdiği için sonradan yaptığınız düzenlemelerin üzerine yazılır. Ferry bu dosyaları listeler, geri yüklemeden önce size sorar ve şu anki içeriklerini Geçmiş'te saklar.
 
 ## Kaynaktan derleme
 
@@ -303,20 +304,22 @@ pnpm tauri build          # kurulum dosyaları → target/release/bundle/
 
 Testleri gerçek Rector'la çalıştırmak için `FERRY_TEST_TOOLS` değişkenini Rector'ın kurulu olduğu klasöre yönlendirin: `FERRY_TEST_TOOLS=/yol/tools cargo test --workspace`.
 
-`scripts/fetch-corpus.sh` WordPress, Drupal, CodeIgniter, phpBB, Joomla, Magento, PrestaShop ve Laravel'in eski sürümlerini indirir; `CORPUS=<klasör> CORPUS_PHP=$(which php) cargo test -p ferry-core --test corpus -- --ignored --nocapture` tarayıcının bulduklarını o PHP'nin kendisinin bu projeler için bildirdikleriyle karşılaştırır.
+`scripts/fetch-corpus.sh` WordPress, Drupal, CodeIgniter, phpBB, Joomla, Magento, PrestaShop, Laravel, Symfony, CakePHP, Yii, MediaWiki ve Moodle'ın eski sürümlerini indirir; `CORPUS=<klasör> CORPUS_PHP=$(which php) cargo test -p ferry-core --test corpus -- --ignored --nocapture` tarayıcının bulduklarını o PHP'nin kendisinin bu projeler için bildirdikleriyle karşılaştırır.
 
 `crates/ferry-core/src/symbols.rs` PHP'nin kendisinden üretilir: `scripts/php-symbols/dump.sh <klasör>` 7.0'dan 8.5'e her PHP sürümü için aynı extension'larla bir Docker imajı kurar ve reflection ile bütün yerleşik fonksiyonları, sınıfları, metotları ve sabitleri döker; `node scripts/php-symbols/generate.mjs <klasör> > crates/ferry-core/src/symbols.rs` her sürümün neyi kaldırdığını ya da kullanımdan kaldırdığını çıkarır. `scripts/php-symbols/verify.php` tabloyu bir PHP'ye karşı doğrular; `symbols` testi de tarayıcı bunlardan birini kaçırırsa başarısız olur. Yeni bir PHP sürümü çıktığında onu `dump.sh`'e ekleyip tabloyu yeniden üretin.
 
 `scripts/runtime-benchmark.sh <proje> <test-klasörü> [hedef]` bir projenin PHPUnit testlerini Docker'da hedef PHP sürümüyle çalıştırır ve bildirdikleri kullanımdan kalkmaları statik taramayla birleştirir; son sonuçlar [docs/ROADMAP.md](docs/ROADMAP.md) içinde.
 
-`pnpm e2e:native`, uygulamanın debug sürümünü demo projeler ve Unicode yol, symlink döngüsü ya da boş proje gibi uç durumlar üzerinde baştan sona çalıştırır ve her senaryonun sonucunu bildirir.
+`pnpm e2e:native`, uygulamanın debug sürümünü demo projeler ve Unicode yol, symlink döngüsü ya da boş proje gibi uç durumlar üzerinde baştan sona çalıştırır, iki temada metin kontrastını ölçer ve her senaryonun sonucunu bildirir.
+
+Bu README'deki ekran görüntüleri, `pnpm dev` çalışırken `node scripts/readme-shots.mjs` ile alınır: Betik örnek verili arayüzü headless Chrome'da gezer, her sayfayı bir pencere çerçevesine yerleştirip PNG olarak `assets/readme/`'ye yazar; bunlar sonra `cwebp` ile WebP'ye çevrilir.
 
 **Demo projeleri.** `demo/` klasöründe üç örnek proje var: her kuralı tetikleyen düz PHP bir mağaza, WordPress bir blog ve neredeyse hazır bir Laravel API'si. `pnpm demo` bunları `.demo/` klasörüne sıfırdan kopyalar; böylece asıllarına dokunmadan değişiklik uygulayabilirsiniz. Ayrıntılar için [demo/README.md](demo/README.md).
 
 | Klasör | İçerik |
 |---|---|
 | `crates/ferry-core` | Motor: sözcük çözümleyici, kurallar ve analiz, Rector entegrasyonu, farklar, yedekler ve Composer kontrolleri |
-| `crates/ferry-cli` | CI için komut satırı tarayıcısı; metin, JSON, SARIF ve GitHub uyarısı çıktısı verir |
+| `crates/ferry-cli` | CI için komut satırı tarayıcısı; metin, JSON, SARIF, GitHub uyarısı, JUnit, Checkstyle ve CSV çıktısı verir |
 | `src-tauri` | Masaüstü kabuğu: komutlar, pencere ve platform ayarları |
 | `src` | React ve TypeScript arayüzü (tasarım sistemi: [docs/DESIGN.md](docs/DESIGN.md)) |
 | `demo` | Uygulamayı denemek ve testler için örnek projeler |
