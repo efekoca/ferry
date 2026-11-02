@@ -305,6 +305,8 @@ Testleri gerçek Rector'la çalıştırmak için `FERRY_TEST_TOOLS` değişkenin
 
 `scripts/fetch-corpus.sh` WordPress, Drupal, CodeIgniter, phpBB, Joomla, Magento, PrestaShop ve Laravel'in eski sürümlerini indirir; `CORPUS=<klasör> CORPUS_PHP=$(which php) cargo test -p ferry-core --test corpus -- --ignored --nocapture` tarayıcının bulduklarını o PHP'nin kendisinin bu projeler için bildirdikleriyle karşılaştırır.
 
+`crates/ferry-core/src/symbols.rs` PHP'nin kendisinden üretilir: `scripts/php-symbols/dump.sh <klasör>` 7.0'dan 8.5'e her PHP sürümü için aynı extension'larla bir Docker imajı kurar ve reflection ile bütün yerleşik fonksiyonları, sınıfları, metotları ve sabitleri döker; `node scripts/php-symbols/generate.mjs <klasör> > crates/ferry-core/src/symbols.rs` her sürümün neyi kaldırdığını ya da kullanımdan kaldırdığını çıkarır. `scripts/php-symbols/verify.php` tabloyu bir PHP'ye karşı doğrular; `symbols` testi de tarayıcı bunlardan birini kaçırırsa başarısız olur. Yeni bir PHP sürümü çıktığında onu `dump.sh`'e ekleyip tabloyu yeniden üretin.
+
 `scripts/runtime-benchmark.sh <proje> <test-klasörü> [hedef]` bir projenin PHPUnit testlerini Docker'da hedef PHP sürümüyle çalıştırır ve bildirdikleri kullanımdan kalkmaları statik taramayla birleştirir; son sonuçlar [docs/ROADMAP.md](docs/ROADMAP.md) içinde.
 
 `pnpm e2e:native`, uygulamanın debug sürümünü demo projeler ve Unicode yol, symlink döngüsü ya da boş proje gibi uç durumlar üzerinde baştan sona çalıştırır ve her senaryonun sonucunu bildirir.

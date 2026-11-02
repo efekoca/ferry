@@ -27,6 +27,8 @@ pub mod runtime;
 pub mod safefs;
 pub mod server;
 pub mod snapshot;
+#[rustfmt::skip]
+pub mod symbols;
 pub mod toolchain;
 pub mod version;
 pub mod wordpress;
