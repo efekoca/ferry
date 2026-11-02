@@ -17,6 +17,7 @@ import type {
 } from "./types";
 import { TARGETS } from "./types";
 import { isBlockedTarget } from "./security";
+import { FRAMEWORK_LABEL } from "./labels";
 import { useToast } from "../components/Toast";
 import { useI18n } from "../i18n";
 
@@ -44,7 +45,7 @@ const THEME_KEY = "ferry.theme";
 const TARGET_KEY = "ferry.target";
 
 const THEMES: readonly Theme[] = ["system", "light", "dark"];
-const FRAMEWORKS: readonly Framework[] = ["wordpress", "laravel", "symfony", "drupal", "generic"];
+const FRAMEWORKS = Object.keys(FRAMEWORK_LABEL) as Framework[];
 
 function readStorage<T>(key: string, fallback: T, valid: (v: unknown) => boolean): T {
   try {
