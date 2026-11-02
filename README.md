@@ -12,7 +12,7 @@ A desktop app for macOS, Windows and Linux that scans your PHP code, shows what 
 
 [Features](#features) · [Install](#install) · [Privacy](#privacy) · [How it works](#how-it-works) · [Build from source](#build-from-source) · [Türkçe](README.tr.md)
 
-![The Ferry overview for a WordPress project moving from PHP 7.4 to 8.4: a readiness score of 39, the split into automatic, review and manual fixes, and counts of breaking, deprecated and risky findings](assets/readme/hero-en.webp)
+![The Ferry overview for a WordPress project moving from PHP 7.4 to 8.4: a readiness score of 39 with what still blocks the upgrade, the split into automatic, review and manual fixes, and a diff from the Fixes page making constructor parameters explicitly nullable](assets/readme/hero-en.webp)
 
 - **See the problems before your users do.** Every use of code that was removed or changed between PHP 7.0 and 8.5 is listed with its file, line, and the reason it matters.
 - **Nothing changes without your approval.** Rector runs in dry-run mode only. You review each change line by line and apply only the files you pick.
@@ -33,7 +33,7 @@ A desktop app for macOS, Windows and Linux that scans your PHP code, shows what 
 
 Pick the version you are moving to (PHP 8.2 to 8.5) and Ferry scans every PHP file in seconds. The **Overview** shows:
 
-- the project's platform (WordPress, Laravel, Symfony, Drupal, or plain PHP), its number of PHP files, and its current PHP version from `composer.json`
+- the project's platform (one of the ten listed under [Supported projects](#supported-projects), or plain PHP), its number of PHP files, and its current PHP version from `composer.json`
 - a readiness score from 0 to 100, and how many issues fall into each fix type; the score is an estimate of the work left, not a guarantee the app runs
 - next to the score, what still stands in the way: issues that block the upgrade, files the scan couldn't cover, dependencies that block it or couldn't be confirmed, and whether lint or tests ran on the target. The headline only says the project is ready when all of these are clear
 - how many findings are **Breaking** (the code won't run), **Deprecated** (it warns now and will be removed later), or **Risky** (it may behave differently at runtime)
@@ -53,7 +53,7 @@ After the second scan, **Since the last scan** shows how many findings were reso
 
 The **Findings** page lists every issue grouped by file, with the line, the code, and its fix type. Search files and issues, filter by fix type or severity, and see how many findings match. A rule picked on the overview shows up as a filter you can remove, and **Clear filters** resets everything. Filters stay put when you switch pages.
 
-![Findings page with issues grouped by file, filters for fix type and severity, and the details of a mysql_connect() finding: why it matters, what to use instead, and its fix type](assets/readme/findings-en.webp)
+![Findings page with issues grouped by file, filters for fix type and severity, the runtime checks, and the details of an each() finding: the code, why it matters, what to use instead, and its fix type](assets/readme/findings-en.webp)
 
 Select a finding to see:
 
@@ -75,6 +75,7 @@ You can also ignore a finding in the code itself: a `// ferry-ignore removed.eac
 Ferry has its own PHP lexer and rule set, so it reads code the way PHP does: method calls such as `$db->each()`, functions in your own namespace, and text inside strings and comments are not mistaken for removed functions. Its rules cover:
 
 - removed extensions and functions, such as `mysql_*`, `ereg*`, `each()`, `create_function()`, and `money_format()`
+- every built-in function, class, method and constant that PHP 7.0 to 8.5 removed or deprecated, from a table generated with PHP's own reflection data (for example the DOM classes removed in 8.0, `SplFixedArray::rewind()`, old-style `parent::SoapClient()` constructor calls and the `MYSQLI_*` constants removed in 8.4)
 - syntax that no longer parses or compiles, such as `$str{0}`, `(real)` and `(unset)` casts, `$obj = &new Foo`, `$args = &func_get_args()`, `unset($this)`, writes to the whole `$GLOBALS` array, reserved names such as `Object` used as import aliases, `break` outside a loop, and PHP 7 `#[` comments, which PHP 8 reads as attributes
 - deprecations, such as `"${var}"` interpolation, implicit nullable parameters, `utf8_encode()`, `FILTER_SANITIZE_STRING`, and `E_STRICT`
 - parameter and call patterns, such as an optional parameter before a required one, a literal `null` passed to built-in string functions, and `"self::method"` style callables
@@ -96,7 +97,7 @@ Ferry also reads the files around the code that decide which PHP actually runs:
 
 The **Fixes** page runs Rector on your project in dry-run mode. No files change. Each changed file shows its diff line by line, the rules that produced it, and how far you can trust it.
 
-![Fixes page with four changed files, each marked Review or Automatic, and a side-by-side diff replacing while (each()) with foreach and create_function() with a closure](assets/readme/fixes-en.webp)
+![Fixes page with four changed files, the two automatic ones selected and a review file marked Not viewed, and a diff replacing while (each()) with foreach and create_function() with a closure](assets/readme/fixes-en.webp)
 
 - **Compatibility** makes only the changes needed to run on the new version. It is the best place to start.
 - **Modernize** also adopts newer syntax for the target version.
@@ -132,7 +133,7 @@ Before every apply, Ferry backs up the files it is about to change. The **Histor
 ![A History entry opened for review: the changed files on the left, the diff and rules of the selected file on the right, and the Restore button](assets/readme/history-en.webp)
 
 - **Review** shows exactly what each apply changed, file by file, with the rules behind each change.
-- **Restore** puts every file back as it was before that apply. If you edited any of them since, Ferry lists them first, and it refuses to overwrite a file that changes after you confirmed.
+- **Restore** puts every file back as it was before that apply. If you edited any of them since, Ferry lists them first, backs up their current content as a new History entry, and refuses to overwrite a file that changes after you confirmed.
 - **Backups to keep** in **Settings** limits how many backups each project keeps (10, 30 or 100). It is unlimited by default.
 - If an apply fails partway, Ferry rolls the files back on its own. If even that fails, the backup stays in History so you can restore it yourself.
 
@@ -255,9 +256,9 @@ When something is missing, the **Fixes** page says what and offers **Install Rec
 
 > **Your code never leaves your computer.** Ferry reads and changes files only in the folder you open, and has no telemetry.
 
-- **Read:** the PHP files, `composer.json`, and `composer.lock` in the project folder you choose.
-- **Written:** only the files you apply changes to. Every other file stays untouched.
-- **Stored:** backups of the files before each apply (all of them, or only the newest if you set a limit), a record of what was applied, Rector's cache, and your settings, in the app's data folder: `~/Library/Application Support/io.github.efekoca.ferry` on macOS `%APPDATA%\io.github.efekoca.ferry` on Windows, and `~/.local/share/io.github.efekoca.ferry` on Linux.
+- **Read:** the PHP files in the project folder you choose, plus `composer.json`, `composer.lock`, and the files that decide which PHP runs: `.htaccess`, `.user.ini`, `php.ini`, Dockerfiles, Docker Compose and CI configuration.
+- **Written:** only the files you apply changes to, and `.ferry/ignore.json` when you ignore a finding. Every other file stays untouched.
+- **Stored:** backups of the files before each apply (all of them, or only the newest if you set a limit), a record of what was applied, the last 30 scan summaries per target, Rector's cache, and your settings, in the app's data folder: `~/Library/Application Support/io.github.efekoca.ferry` on macOS, `%APPDATA%\io.github.efekoca.ferry` on Windows, and `~/.local/share/io.github.efekoca.ferry` on Linux.
 - **Project code:** scanning never runs your code. Calculating fixes runs Rector in the project folder, and Rector loads the project's `vendor/autoload.php`, so files listed under Composer's `autoload.files` are executed. Only calculate fixes for projects you trust.
 - **Network:** Ferry makes no network requests on its own. When you choose **Install Rector**, Composer downloads Rector from Packagist. When you choose **Find compatible versions**, Ferry sends the names and versions of the blocking packages to `repo.packagist.org`, and **Find latest versions** sends WordPress plugin and theme names to `api.wordpress.org`.
 
@@ -283,10 +284,10 @@ Everything runs on your computer:
   - Passing `null` through a variable to a built-in function is deprecated. Ferry reports a literal `null`, but can't see what a variable holds.
   - Dynamic properties are deprecated. Ferry follows parent classes and traits inside your project, but skips classes that extend something it can't see, such as a framework class in `vendor/`, because that parent could declare the property.
   - Required extensions such as imap or mcrypt may be missing on the new server.
-- **Method calls:** Ferry can't know an object's class without running the code, so a method call such as `$db->ping()` is only flagged when the same file mentions the class (`mysqli`, `Reflection…`, `SplObjectStorage`). Static calls and class constants like `PDO::MYSQL_ATTR_INIT_COMMAND` are always checked.
+- **Method calls:** Ferry can't know an object's class without running the code, so a method call on a variable such as `$db->ping()` is only flagged when the code shows the variable's class (`new mysqli`, a `mysqli $db` type or an `instanceof` check). Calls on properties, such as `$this->db->ping()`, are flagged when the file mentions the class. Static calls, `parent::` calls and class constants like `PDO::MYSQL_ATTR_INIT_COMMAND` are always checked.
 - **Encodings:** automatic fixes skip files that are not UTF-8 (for example, Windows-1254 or Latin-1), so they are never corrupted. Convert them to UTF-8 to have them fixed.
 - **Manual fixes:** findings such as `mysql_*` need code to be rewritten, and Ferry shows what to use instead but doesn't rewrite them for you.
-- **Restore:** it puts back the files as they were before the apply, so edits you made to them afterwards are replaced. Ferry lists those files and asks before restoring.
+- **Restore:** it puts back the files as they were before the apply, so edits you made to them afterwards are replaced. Ferry lists those files, asks before restoring, and keeps their current content in History.
 
 ## Build from source
 
@@ -303,20 +304,22 @@ pnpm tauri build          # installers → target/release/bundle/
 
 To run the tests against real Rector, point `FERRY_TEST_TOOLS` to a folder where Rector is installed: `FERRY_TEST_TOOLS=/path/to/tools cargo test --workspace`.
 
-`scripts/fetch-corpus.sh` downloads old releases of WordPress, Drupal, CodeIgniter, phpBB, Joomla, Magento, PrestaShop and Laravel, and `CORPUS=<folder> CORPUS_PHP=$(which php) cargo test -p ferry-core --test corpus -- --ignored --nocapture` compares the scanner with what that PHP itself reports for them.
+`scripts/fetch-corpus.sh` downloads old releases of WordPress, Drupal, CodeIgniter, phpBB, Joomla, Magento, PrestaShop, Laravel, Symfony, CakePHP, Yii, MediaWiki and Moodle, and `CORPUS=<folder> CORPUS_PHP=$(which php) cargo test -p ferry-core --test corpus -- --ignored --nocapture` compares the scanner with what that PHP itself reports for them.
 
 `crates/ferry-core/src/symbols.rs` is generated from PHP itself: `scripts/php-symbols/dump.sh <folder>` builds a Docker image per PHP version from 7.0 to 8.5 with the same extensions and dumps every built-in function, class, method and constant with reflection, and `node scripts/php-symbols/generate.mjs <folder> > crates/ferry-core/src/symbols.rs` lists what each version removed or deprecated. `scripts/php-symbols/verify.php` checks the table against a PHP, and the `symbols` test fails if the scanner misses any of them. When a new PHP version comes out, add it to `dump.sh` and regenerate.
 
 `scripts/runtime-benchmark.sh <project> <test-dir> [target]` runs a project's PHPUnit tests in Docker on the target PHP and merges the deprecations they report with the static scan; the latest results are in [docs/ROADMAP.md](docs/ROADMAP.md).
 
-`pnpm e2e:native` drives a debug build of the real app through the demo projects and edge cases such as a Unicode path, a symlink loop and an empty project, and reports each scenario.
+`pnpm e2e:native` drives a debug build of the real app through the demo projects and edge cases such as a Unicode path, a symlink loop and an empty project, checks text contrast in both themes, and reports each scenario.
+
+The screenshots in this README come from `node scripts/readme-shots.mjs` while `pnpm dev` is running: it drives the sample-data interface in headless Chrome, frames each page and writes PNG files to `assets/readme/`, which are then converted to WebP with `cwebp`.
 
 **Demo projects.** The `demo/` folder holds three sample projects: a plain PHP shop that triggers every rule, a WordPress blog, and a Laravel API that is nearly ready. `pnpm demo` copies them fresh into `.demo/`, so you can apply changes without touching the originals. See [demo/README.md](demo/README.md).
 
 | Path | Contents |
 |---|---|
 | `crates/ferry-core` | the engine: lexer, rules and analyzer, Rector integration, diffs, backups, and Composer checks |
-| `crates/ferry-cli` | command-line scanner for CI, with text, JSON, SARIF and GitHub annotation output |
+| `crates/ferry-cli` | command-line scanner for CI, with text, JSON, SARIF, GitHub annotation, JUnit, Checkstyle and CSV output |
 | `src-tauri` | desktop shell: commands, window, and platform settings |
 | `src` | React and TypeScript interface (design system in [docs/DESIGN.md](docs/DESIGN.md)) |
 | `demo` | sample projects for trying the app and for the tests |
