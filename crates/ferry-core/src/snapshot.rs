@@ -258,7 +258,6 @@ impl SnapshotStore {
         let mut out = Vec::new();
         for entry in entries.flatten() {
             if entry.file_name().to_string_lossy().starts_with(".trash-") {
-                let _ = std::fs::remove_dir_all(entry.path());
                 continue;
             }
             let manifest = entry.path().join("manifest.json");
@@ -363,9 +362,14 @@ impl SnapshotStore {
 
     pub fn delete(&self, project_root: &Path, id: &str) -> Result<(), SnapshotError> {
         let (_, dir) = self.load(project_root, id)?;
-        let trash = self.project_dir(project_root).join(format!(".trash-{id}"));
+        let project_dir = self.project_dir(project_root);
+        let trash = project_dir.join(format!(".trash-{id}"));
         std::fs::rename(&dir, &trash).map_err(io_err(&dir))?;
-        let _ = std::fs::remove_dir_all(&trash);
+        for entry in std::fs::read_dir(&project_dir).into_iter().flatten().flatten() {
+            if entry.file_name().to_string_lossy().starts_with(".trash-") {
+                let _ = std::fs::remove_dir_all(entry.path());
+            }
+        }
         Ok(())
     }
 }
@@ -550,6 +554,22 @@ mod tests {
         std::os::unix::fs::symlink(outside.path().join("victim.php"), root.join("a.php")).unwrap();
         assert!(store.restore(root, &snap.id).is_err());
         assert_eq!(fs::read_to_string(outside.path().join("victim.php")).unwrap(), "victim");
+    }
+
+    #[test]
+    fn listing_never_deletes_and_deleting_sweeps_leftovers() {
+        let project = tempfile::tempdir().unwrap();
+        let store_dir = tempfile::tempdir().unwrap();
+        let store = SnapshotStore::new(store_dir.path());
+        let root = project.path();
+        fs::write(root.join("a.php"), "a").unwrap();
+        let snap = store.create(root, &["a.php".into()], "x").unwrap();
+        let leftover = store.project_dir(root).join(".trash-old");
+        fs::create_dir(&leftover).unwrap();
+        assert_eq!(store.list(root).unwrap().len(), 1);
+        assert!(leftover.exists(), "listing only reads");
+        store.delete(root, &snap.id).unwrap();
+        assert!(!leftover.exists());
     }
 
     #[test]

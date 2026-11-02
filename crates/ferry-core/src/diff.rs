@@ -107,10 +107,24 @@ fn hunk_range(part: Option<&str>) -> Option<(usize, usize)> {
     Some((start, len))
 }
 
-fn parse_unified(diff: &str) -> Result<Vec<ParsedHunk>, PatchError> {
+fn parse_unified(diff: &str) -> Result<(Vec<ParsedHunk>, Option<bool>), PatchError> {
     let mut hunks: Vec<ParsedHunk> = Vec::new();
     let mut left: Option<(usize, usize)> = Some((0, 0));
+    let (mut old_missing, mut new_missing) = (false, false);
+    let mut previous = None;
     for line in diff.lines() {
+        if line.starts_with('\\') {
+            match previous {
+                Some('-') => old_missing = true,
+                Some('+') => new_missing = true,
+                Some(_) => {
+                    old_missing = true;
+                    new_missing = true;
+                }
+                None => {}
+            }
+            continue;
+        }
         let between = left == Some((0, 0));
         if line.starts_with("@@") && (between || left.is_none()) {
             let mut parts = line.split_whitespace();
@@ -121,7 +135,7 @@ fn parse_unified(diff: &str) -> Result<Vec<ParsedHunk>, PatchError> {
             left = old.zip(new).map(|((_, o), (_, n))| (o, n));
             continue;
         }
-        if between || line.starts_with('\\') {
+        if between {
             continue;
         }
         let hunk = hunks.last_mut().unwrap();
@@ -142,11 +156,19 @@ fn parse_unified(diff: &str) -> Result<Vec<ParsedHunk>, PatchError> {
             hunk.old.push(rest.to_string());
         }
         hunk.ops.push((op, rest.to_string()));
+        previous = Some(op);
     }
     if hunks.is_empty() || left.is_some_and(|l| l != (0, 0)) {
         return Err(PatchError::Malformed);
     }
-    Ok(hunks)
+    let final_newline = if new_missing {
+        Some(false)
+    } else if old_missing {
+        Some(true)
+    } else {
+        None
+    };
+    Ok((hunks, final_newline))
 }
 
 fn split_eol(s: &str) -> (&str, &str) {
@@ -155,7 +177,7 @@ fn split_eol(s: &str) -> (&str, &str) {
 }
 
 pub fn apply_unified(original: &str, diff: &str) -> Result<String, PatchError> {
-    let hunks = parse_unified(diff)?;
+    let (hunks, final_newline) = parse_unified(diff)?;
     let default_eol = if original.contains("\r\n") && !original.replace("\r\n", "").contains('\n') { "\r\n" } else { "\n" };
     let lines: Vec<(&str, &str)> = original.split_inclusive('\n').map(split_eol).collect();
 
@@ -216,10 +238,13 @@ pub fn apply_unified(original: &str, diff: &str) -> Result<String, PatchError> {
     }
     let had_final_newline = original.is_empty() || original.ends_with('\n');
     if let Some(last) = out.last_mut() {
-        if !had_final_newline && last_added {
-            last.1.clear();
-        } else if had_final_newline && last.1.is_empty() {
-            last.1 = default_eol.to_string();
+        match final_newline {
+            Some(false) => last.1.clear(),
+            Some(true) if last.1.is_empty() => last.1 = default_eol.to_string(),
+            Some(true) => {}
+            None if !had_final_newline && last_added => last.1.clear(),
+            None if had_final_newline && last.1.is_empty() => last.1 = default_eol.to_string(),
+            None => {}
         }
     }
     Ok(out.into_iter().flat_map(|(t, e)| [t, e]).collect())
@@ -295,5 +320,16 @@ mod tests {
     fn pure_insertions_go_after_the_line() {
         assert_eq!(apply_unified("a\nb\nc\n", "@@ -2,0 +3 @@\n+X\n").unwrap(), "a\nb\nX\nc\n");
         assert_eq!(apply_unified("a", "@@ -1,0 +2 @@\n+b\n").unwrap(), "a\nb");
+    }
+
+    #[test]
+    fn no_newline_markers_decide_the_last_line() {
+        let drop = "@@ -1 +1 @@\n-one\n+two\n\\ No newline at end of file\n";
+        assert_eq!(apply_unified("one\n", drop).unwrap(), "two");
+        let add = "@@ -1 +1 @@\n-one\n\\ No newline at end of file\n+one\n";
+        assert_eq!(apply_unified("one", add).unwrap(), "one\n");
+        let both = "@@ -1,2 +1,2 @@\n-a\n+b\n c\n\\ No newline at end of file\n";
+        assert_eq!(apply_unified("a\nc", both).unwrap(), "b\nc");
+        assert_eq!(apply_unified("a\nc\n", "@@ -1,2 +1,2 @@\n-a\n+b\n c\n").unwrap(), "b\nc\n");
     }
 }

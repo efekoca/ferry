@@ -28,6 +28,19 @@ describe("Ferry app", () => {
     expect(screen.getByRole("button", { name: /Ayarlar/ })).toBeEnabled();
   });
 
+  it("keeps recent projects of every supported platform", async () => {
+    const recent = [
+      { path: "/sites/intranet", name: "intranet", framework: "joomla", openedAt: Date.now() },
+      { path: "/sites/wiki", name: "wiki", framework: "mediawiki", openedAt: Date.now() - 1000 },
+      { path: "/sites/odd", name: "odd", framework: "cobol", openedAt: Date.now() - 2000 },
+    ];
+    localStorage.setItem("ferry.recent", JSON.stringify(recent));
+    setup();
+    expect(await screen.findByText("intranet")).toBeInTheDocument();
+    expect(screen.getByText("wiki")).toBeInTheDocument();
+    expect(screen.queryByText("odd")).not.toBeInTheDocument();
+  });
+
   it("opens a project, scans it and summarizes risks", async () => {
     const user = setup();
     await openAndScan(user);
@@ -367,6 +380,22 @@ describe("Ferry app", () => {
     expect(screen.getByText(/assertion failed/)).toBeVisible();
   });
 
+  it("marks incomplete and failed targets in the comparison", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    const real = api.compareTargets;
+    api.compareTargets = async (...args) => {
+      const rows = await real(...args);
+      return rows.map((r, n) => (n === 0 ? { ...r, incomplete: true } : n === 1 ? { ...r, incomplete: true, error: "Bu hedef karşılaştırılamadı: boom" } : r));
+    };
+    render(<App api={api} />);
+    await openAndScan(user);
+    await user.click(screen.getByRole("button", { name: "Karşılaştır" }));
+    const table = await screen.findByRole("table", { name: "Hedefleri karşılaştır" });
+    expect(within(table).getByText("Bazı dosyalar taranamadı")).toBeInTheDocument();
+    expect(within(table).getByText("Bu hedef karşılaştırılamadı: boom")).toBeInTheDocument();
+  });
+
   it("compares targets and switches to one", async () => {
     const user = setup();
     await openAndScan(user);
@@ -460,6 +489,22 @@ describe("Ferry app", () => {
     await user.click(within(group).getByRole("radio", { name: "30" }));
     await waitFor(async () => expect(await api.getSettings()).toEqual({ phpPath: "/opt/php", snapshotLimit: 30, editor: null }));
     expect(within(group).getByRole("radio", { name: "30" })).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("keeps both settings when they change in quick succession", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    const real = api.saveSettings;
+    api.saveSettings = async (next) => {
+      await new Promise((r) => setTimeout(r, 80));
+      return real(next);
+    };
+    render(<App api={api} />);
+    await user.click(await screen.findByRole("button", { name: /Ayarlar/ }));
+    const group = await screen.findByRole("radiogroup", { name: "Saklanacak yedek" });
+    await user.click(within(group).getByRole("radio", { name: "30" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "Editör" }), "vscode");
+    await waitFor(async () => expect(await api.getSettings()).toEqual({ phpPath: null, snapshotLimit: 30, editor: "vscode" }));
   });
 
   it("shows backup disk usage and deletes every backup after confirming", async () => {

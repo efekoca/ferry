@@ -81,6 +81,8 @@ export interface TargetSummary {
   summary: Summary;
   blockingPackages: number;
   rootBlocks: boolean;
+  incomplete?: boolean;
+  error?: string | null;
 }
 
 export interface ScanResult {

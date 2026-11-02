@@ -40,9 +40,9 @@ pub fn save(root: &Path, ignores: &[Ignore]) -> std::io::Result<()> {
     std::fs::create_dir_all(file.parent().unwrap())?;
     let mut json = serde_json::to_vec_pretty(&IgnoreFile { ignores: ignores.to_vec() }).map_err(std::io::Error::other)?;
     json.push(b'\n');
-    let tmp = file.with_extension("json.tmp");
-    std::fs::write(&tmp, json)?;
-    std::fs::rename(tmp, file)
+    let mut tmp = tempfile::NamedTempFile::new_in(file.parent().unwrap())?;
+    std::io::Write::write_all(&mut tmp, &json)?;
+    tmp.persist(file).map(|_| ()).map_err(|e| e.error)
 }
 
 impl Ignore {

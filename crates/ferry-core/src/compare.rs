@@ -11,6 +11,8 @@ pub struct TargetSummary {
     pub summary: crate::report::Summary,
     pub blocking_packages: usize,
     pub root_blocks: bool,
+    pub incomplete: bool,
+    pub error: Option<String>,
 }
 
 pub fn compare(root: &Path, files: &[PathBuf], targets: &[PhpVersion]) -> Vec<TargetSummary> {
@@ -29,11 +31,33 @@ pub fn compare(root: &Path, files: &[PathBuf], targets: &[PhpVersion]) -> Vec<Ta
                         summary: crate::report::summarize(&kept),
                         blocking_packages: packages.packages.iter().filter(|p| p.status == DependencyStatus::Incompatible).count(),
                         root_blocks: packages.root_status == DependencyStatus::Incompatible,
+                        incomplete: !scan.errors.is_empty(),
+                        error: None,
                     }
                 })
             })
             .collect();
-        handles.into_iter().filter_map(|h| h.join().ok()).collect()
+        handles
+            .into_iter()
+            .zip(targets)
+            .map(|(h, &target)| {
+                h.join().unwrap_or_else(|panic| {
+                    let reason = panic
+                        .downcast_ref::<String>()
+                        .cloned()
+                        .or_else(|| panic.downcast_ref::<&str>().map(|s| s.to_string()))
+                        .unwrap_or_default();
+                    TargetSummary {
+                        target,
+                        summary: crate::report::Summary::default(),
+                        blocking_packages: 0,
+                        root_blocks: false,
+                        incomplete: true,
+                        error: Some(crate::t!("Bu hedef karşılaştırılamadı: {reason}", "This target couldn't be compared: {reason}")),
+                    }
+                })
+            })
+            .collect()
     })
 }
 
@@ -56,5 +80,9 @@ mod tests {
         assert_eq!(result.iter().map(|r| r.target.to_string()).collect::<Vec<_>>(), ["8.2", "8.3", "8.4", "8.5"]);
         assert!(result.windows(2).all(|w| w[0].summary.total <= w[1].summary.total));
         assert_eq!(result.iter().map(|r| r.root_blocks).collect::<Vec<_>>(), [false, false, true, true]);
+        assert!(result.iter().all(|r| !r.incomplete && r.error.is_none()));
+        std::fs::write(dir.path().join("big.php"), format!("<?php\n//{}", "x".repeat(3 * 1024 * 1024))).unwrap();
+        let files = vec![dir.path().join("a.php"), dir.path().join("big.php")];
+        assert!(compare(dir.path(), &files, &targets[..1])[0].incomplete);
     }
 }
