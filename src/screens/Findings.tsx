@@ -2,6 +2,7 @@ import { useDeferredValue, useEffect, useMemo, useState, type ReactNode } from "
 import { Activity, ArrowRight, CircleCheck, FileCheck2, FlaskConical, ClipboardList, EyeOff, FileCode2, FolderSearch, Info, Lightbulb, Search, Sparkles, SquareArrowOutUpRight, Undo2, X } from "lucide-react";
 import { ConfirmDialog } from "../components/Modal";
 import { PageHeader } from "../components/Shell";
+import { Splitter } from "../components/Splitter";
 import { useToast } from "../components/Toast";
 import { Badge, Button, Callout, EmptyState, RiskBadge, SeverityBadge, SeverityIcon } from "../components/ui";
 import { useI18n } from "../i18n";
@@ -346,6 +347,7 @@ export function Findings() {
             )}
           </div>
 
+          <Splitter id="findings" side="end" label={t.common.resizePanes} />
           <aside className="pane pane--side" aria-label={t.findings.details}>
             {selected && (
               <div className="detail" key={selected.id}>

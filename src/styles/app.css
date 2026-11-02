@@ -1504,11 +1504,31 @@ select.input {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) clamp(300px, 36%, 440px);
+  grid-template-columns: minmax(0, 1fr) 1px var(--split-col, clamp(300px, 36%, 440px));
 }
 
 .split--changes {
-  grid-template-columns: 340px minmax(0, 1fr);
+  grid-template-columns: var(--split-col, 340px) 1px minmax(0, 1fr);
+}
+
+.splitter {
+  position: relative;
+  z-index: 2;
+  background: var(--border);
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.splitter::before {
+  content: "";
+  position: absolute;
+  inset: 0 -4px;
+}
+
+.splitter:hover,
+.splitter:focus-visible {
+  background: var(--accent);
+  outline: none;
 }
 
 .pane {
@@ -1517,13 +1537,10 @@ select.input {
 }
 
 .pane--side {
-  border-left: 1px solid var(--border);
   background: var(--surface);
 }
 
 .split--changes .pane--side {
-  border-left: 0;
-  border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -2710,22 +2727,19 @@ select.input {
   .split,
   .split--changes {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr) minmax(0, 45%);
+    grid-template-rows: minmax(0, 1fr) 1px var(--split-row, minmax(0, 45%));
   }
 
   .split--changes {
-    grid-template-rows: minmax(0, 38%) minmax(0, 1fr);
+    grid-template-rows: var(--split-row, minmax(0, 38%)) 1px minmax(0, 1fr);
   }
 
-  .pane--side {
-    border-left: 0;
-    border-top: 1px solid var(--border);
+  .splitter {
+    cursor: row-resize;
   }
 
-  .split--changes .pane--side {
-    border-right: 0;
-    border-top: 0;
-    border-bottom: 1px solid var(--border);
+  .splitter::before {
+    inset: -4px 0;
   }
 }
 
