@@ -23,7 +23,7 @@ export const tr = {
     manual: "Elle düzelt",
   },
   fixDesc: {
-    auto: "Kurala dayalı, davranışı değiştirmeyen bir dönüşüm.",
+    auto: "Kurala dayalı, davranışı korumak için tasarlanmış bir dönüşüm.",
     likely: "Otomatik yapılabilir ancak yine de sonuçlarına göz atın.",
     manual: "Güvenli bir karar verilemiyor; nasıl düzeltileceğini siz seçmelisiniz.",
   },
@@ -54,7 +54,7 @@ export const tr = {
     dependencies: "Bağımlılıklar",
     history: "Geçmiş",
     comingSoon: "Yakında",
-    runtime: "Canlı test",
+    runtime: "Docker karşılaştırması",
     ai: "AI önerileri",
     settings: "Ayarlar",
     openAnother: "Başka bir proje aç",
@@ -74,7 +74,7 @@ export const tr = {
     recent: "Son açılanlar",
     forget: (name: string) => `${name} projesini listeden kaldır`,
     features: [
-      { title: "Kapsamlı tarama", text: "PHP 7.0'dan 8.5'e kadar kaldırılan ya da değişen her şeyi saniyeler içinde bulur." },
+      { title: "Kapsamlı tarama", text: "PHP 7.0'dan 8.5'e kadar kaldırılan ya da değişen kullanımları saniyeler içinde bulur." },
       { title: "Önce gör, sonra uygula", text: "Rector'ın önerdiği her değişikliği satır satır inceleyin, yalnızca istediklerinizi uygulayın." },
       { title: "Tek tıkla geri al", text: "Her değişiklikten önce yedek alınır. Git kullanmasanız da olur." },
     ],
@@ -103,7 +103,7 @@ export const tr = {
       scan: { title: "Tara", text: "Kaldırılan fonksiyonları, değişen sözdizimini ve riskli kullanımları bulur." },
       fix: { title: "Otomatik düzelt", text: "Rector'ın önerdiği değişiklikleri önizler, onayladıklarınızı uygular." },
       deps: { title: "Bağımlılıkları kontrol et", text: "composer.lock'taki paketlerin yeni sürümle çalışıp çalışmadığına bakar." },
-      live: { title: "Canlı test", text: "Projeyi iki PHP sürümünde Docker'da çalıştırıp çıktıları karşılaştırır." },
+      live: { title: "Docker karşılaştırması", text: "Projeyi iki PHP sürümünde Docker'da çalıştırıp çıktıları karşılaştırır." },
     },
     scanMeta: (files: string, lines: string, duration: string) => `${files} dosya · ${lines} satır · ${duration}`,
     headline: {
@@ -187,7 +187,7 @@ export const tr = {
     title: "Bulgular",
     subtitle: (t: string, n: number) => `PHP ${t} · ${n} bulgu`,
     noScan: "Henüz tarama yapılmadı",
-    noScanText: "Projeyi taradığınızda yeni sürümde sorun çıkaracak her şey burada listelenir.",
+    noScanText: "Projeyi taradığınızda yeni sürümde sorun çıkarabilecek kullanımlar burada listelenir.",
     clean: "Sorun yok",
     cleanText: (t: string) => `PHP ${t} ile uyumsuz bir şey bulunmadı.`,
     fixType: "Düzeltme türü",
@@ -269,6 +269,7 @@ export const tr = {
     introTitle: (t: string) => `PHP ${t} için otomatik düzeltmeler`,
     introText:
       "Rector projenizi deneme modunda çalıştırır, hiçbir dosya değişmez. Önerilen değişiklikleri dosya dosya inceler, yalnızca seçtiklerinizi uygularsınız. Her uygulamadan önce yedek alınır.",
+    introTrust: "Rector projenin vendor/autoload.php dosyasını yükler, bu yüzden Composer'ın autoload.files altındaki dosyalar çalışır. Yalnızca güvendiğiniz projelerde hesaplayın.",
     calculating: "Değişiklikler hesaplanıyor",
     calculatingHint: "Rector çalışıyor. Büyük projelerde birkaç dakika sürebilir.",
     stop: "Durdur",
@@ -443,8 +444,10 @@ export const tr = {
   },
   roadmap: {
     runtime: {
-      title: "Canlı test",
+      title: "Docker karşılaştırması",
       text: "Statik analizin göremediği sessiz davranış değişikliklerini yakalamak için projeniz eski ve yeni PHP sürümünde iki ayrı Docker container'ında çalıştırılacak. Böylece aynı istekler gönderilip sonuçlar karşılaştırılabilecek.",
+      today: "Bugün de çalışma anını kontrol edebilirsiniz: Bulgular sayfasındaki Log içe aktar, PHP ile lint et ve Testleri çalıştır düğmeleri sonuçları bulgulara ekler.",
+      openFindings: "Bulgulara git",
       items: [
         "Eski ve yeni sürüm için hazır Docker ortamı",
         "Sayfa ve uç nokta yanıtlarının karşılaştırılması",

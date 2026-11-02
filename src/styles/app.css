@@ -2956,3 +2956,12 @@ select.input {
 .findings-empty__actions .btn {
   margin-top: 0;
 }
+
+.roadmap__today {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+  text-align: left;
+}
