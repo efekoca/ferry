@@ -323,6 +323,22 @@ describe("Ferry app", () => {
     expect(screen.getByText(/assertion failed/)).toBeVisible();
   });
 
+  it("marks incomplete and failed targets in the comparison", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    const real = api.compareTargets;
+    api.compareTargets = async (...args) => {
+      const rows = await real(...args);
+      return rows.map((r, n) => (n === 0 ? { ...r, incomplete: true } : n === 1 ? { ...r, incomplete: true, error: "Bu hedef karşılaştırılamadı: boom" } : r));
+    };
+    render(<App api={api} />);
+    await openAndScan(user);
+    await user.click(screen.getByRole("button", { name: "Karşılaştır" }));
+    const table = await screen.findByRole("table", { name: "Hedefleri karşılaştır" });
+    expect(within(table).getByText("Bazı dosyalar taranamadı")).toBeInTheDocument();
+    expect(within(table).getByText("Bu hedef karşılaştırılamadı: boom")).toBeInTheDocument();
+  });
+
   it("compares targets and switches to one", async () => {
     const user = setup();
     await openAndScan(user);

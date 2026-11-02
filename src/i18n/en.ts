@@ -166,6 +166,7 @@ export const en: Dict = {
     score: "Score",
     packages: "Blocking packages",
     plusRoot: "+ composer.json",
+    incomplete: "Some files weren't scanned",
     current: "Selected",
     pick: "Switch to this target",
   },
