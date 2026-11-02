@@ -67,8 +67,13 @@ pub fn record(file: &Path, at: u64, target: &str, score: u8, findings: &[Finding
         e.fingerprints.clear();
     }
     entries.push(Entry { at, target: target.to_string(), score, total: findings.len(), fingerprints });
-    let excess = entries.len().saturating_sub(KEEP * 5);
-    entries.drain(..excess);
+    let same = entries.iter().filter(|e| e.target == target).count();
+    let mut drop = same.saturating_sub(KEEP);
+    entries.retain(|e| {
+        let old = drop > 0 && e.target == target;
+        drop -= usize::from(old);
+        !old
+    });
     if let Some(dir) = file.parent() {
         std::fs::create_dir_all(dir)?;
     }
@@ -106,5 +111,20 @@ mod tests {
         let found = analyze_source("a.php", "<?php\neach($a);\neach($a);\neach($b);", "8.2".parse().unwrap());
         let baseline = vec![fingerprint(&found[0])];
         assert_eq!(new_findings(&baseline, &found).len(), 2);
+    }
+
+    #[test]
+    fn each_target_keeps_its_own_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("h.json");
+        let findings = analyze_source("a.php", "<?php each($a);", "8.4".parse().unwrap());
+        record(&file, 1, "8.2", 90, &findings).unwrap();
+        for at in 0..(KEEP as u64 * 6) {
+            record(&file, 10 + at, "8.4", 80, &findings).unwrap();
+        }
+        let entries = load(&file);
+        assert_eq!(entries.iter().filter(|e| e.target == "8.2").count(), 1, "a busy target doesn't push others out");
+        assert_eq!(entries.iter().filter(|e| e.target == "8.4").count(), KEEP);
+        assert_eq!(entries.last().unwrap().at, 10 + KEEP as u64 * 6 - 1);
     }
 }

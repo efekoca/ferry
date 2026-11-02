@@ -264,6 +264,10 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
       };
       return withIgnores(lastScan);
     },
+    closeProject: async () => {
+      runtimeLog = null;
+      runtimeCheck = null;
+    },
     clearRuntimeLog: async () => {
       if (!lastScan) throw new Error("Scan the project first.");
       runtimeLog = null;

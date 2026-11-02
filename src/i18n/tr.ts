@@ -169,6 +169,7 @@ export const tr = {
     score: "Puan",
     packages: "Engelleyen paket",
     plusRoot: "+ composer.json",
+    incomplete: "Bazı dosyalar taranamadı",
     current: "Seçili",
     pick: "Bu hedefe geç",
   },

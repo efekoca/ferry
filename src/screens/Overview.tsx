@@ -412,15 +412,26 @@ function CompareCard({ root, current, onPick }: { root: string; current: Target;
               const target = r.target as Target;
               return (
                 <tr key={r.target} aria-current={target === current ? "true" : undefined} className={target === current ? "compare__current" : undefined}>
-                  <td className="mono">PHP {r.target}</td>
-                  <td className="table__num tabular">{r.summary.score}</td>
-                  <td className="table__num tabular">{r.summary.breaking}</td>
-                  <td className="table__num tabular">{r.summary.deprecated}</td>
-                  <td className="table__num tabular">{r.summary.manual}</td>
-                  <td className="table__num tabular">
-                    {r.blockingPackages}
-                    {r.rootBlocks && <span className="subtle"> {t.compare.plusRoot}</span>}
+                  <td className="mono">
+                    PHP {r.target}
+                    {r.incomplete && !r.error && <div className="subtle">{t.compare.incomplete}</div>}
                   </td>
+                  {r.error ? (
+                    <td colSpan={5} className="subtle">
+                      {r.error}
+                    </td>
+                  ) : (
+                    <>
+                      <td className="table__num tabular">{r.summary.score}</td>
+                      <td className="table__num tabular">{r.summary.breaking}</td>
+                      <td className="table__num tabular">{r.summary.deprecated}</td>
+                      <td className="table__num tabular">{r.summary.manual}</td>
+                      <td className="table__num tabular">
+                        {r.blockingPackages}
+                        {r.rootBlocks && <span className="subtle"> {t.compare.plusRoot}</span>}
+                      </td>
+                    </>
+                  )}
                   <td className="table__num">
                     {target === current ? (
                       <span className="subtle">{t.compare.current}</span>

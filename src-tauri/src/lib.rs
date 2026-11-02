@@ -271,6 +271,13 @@ async fn run_local_check(state: State<'_, AppState>, path: String, target: Strin
 }
 
 #[tauri::command]
+fn close_project(state: State<'_, AppState>, path: String) {
+    let path = normalize_path(path);
+    state.runtime.lock().unwrap().remove(&path);
+    state.previews.lock().unwrap().remove(&path);
+}
+
+#[tauri::command]
 async fn clear_runtime_log(state: State<'_, AppState>, path: String) -> CmdResult<ScanResponse> {
     let path = normalize_path(path);
     let scan = state.scans.lock().unwrap().get(&path).cloned().ok_or_else(|| t!("Önce projeyi tarayın.", "Scan the project first."))?;
@@ -325,7 +332,9 @@ async fn ignore_finding(state: State<'_, AppState>, path: String, id: String, re
     if reason.trim().is_empty() {
         return Err(t!("Yok sayma için bir gerekçe yazın.", "Write a reason for ignoring it."));
     }
+    let writes = state.writes.clone();
     blocking(move || {
+        let _guard = writes.lock().unwrap_or_else(|e| e.into_inner());
         let root = project_root(&path)?;
         let shown = presented(&root, &scan, log.as_ref());
         let finding = shown
@@ -350,7 +359,9 @@ async fn unignore_finding(state: State<'_, AppState>, path: String, id: String) 
     let path = normalize_path(path);
     let scan = state.scans.lock().unwrap().get(&path).cloned().ok_or_else(|| t!("Önce projeyi tarayın.", "Scan the project first."))?;
     let log = state.runtime_log(&path);
+    let writes = state.writes.clone();
     blocking(move || {
+        let _guard = writes.lock().unwrap_or_else(|e| e.into_inner());
         let root = project_root(&path)?;
         let shown = presented(&root, &scan, log.as_ref());
         let finding = shown
@@ -379,7 +390,9 @@ async fn prune_ignores(state: State<'_, AppState>, path: String) -> CmdResult<Sc
     let path = normalize_path(path);
     let scan = state.scans.lock().unwrap().get(&path).cloned().ok_or_else(|| t!("Önce projeyi tarayın.", "Scan the project first."))?;
     let log = state.runtime_log(&path);
+    let writes = state.writes.clone();
     blocking(move || {
+        let _guard = writes.lock().unwrap_or_else(|e| e.into_inner());
         let root = project_root(&path)?;
         let ignores = ignore::load(&root);
         let stale = ignore::apply(&root, Vec::new(), &ignores).stale;
@@ -529,6 +542,20 @@ struct GitState {
     dirty: Vec<String>,
 }
 
+fn porcelain_paths(out: &[u8], prefix: &str) -> Vec<String> {
+    let mut entries = out.split(|b| *b == 0).filter(|e| !e.is_empty());
+    let mut paths = Vec::new();
+    while let Some(entry) = entries.next() {
+        let Some(path) = entry.get(3..) else { continue };
+        if matches!(entry[0], b'R' | b'C') {
+            entries.next();
+        }
+        let path = String::from_utf8_lossy(path);
+        paths.push(path.strip_prefix(prefix).unwrap_or(&path).to_string());
+    }
+    paths
+}
+
 #[tauri::command]
 async fn git_status(path: String, files: Vec<String>) -> CmdResult<GitState> {
     let path = normalize_path(path);
@@ -539,19 +566,21 @@ async fn git_status(path: String, files: Vec<String>) -> CmdResult<GitState> {
         if !inside.is_ok_and(|o| o.status.success()) {
             return Ok(GitState { repo: false, dirty: Vec::new() });
         }
+        let prefix = toolchain::command(&git)
+            .arg("-C")
+            .arg(&root)
+            .args(["rev-parse", "--show-prefix"])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_default();
         let out = toolchain::command(&git)
             .arg("-C")
             .arg(&root)
-            .args(["status", "--porcelain", "--untracked-files=no", "--"])
+            .args(["status", "--porcelain=v1", "-z", "--untracked-files=all", "--"])
             .args(&files)
             .output()
             .map_err(|e| e.to_string())?;
-        let dirty = String::from_utf8_lossy(&out.stdout)
-            .lines()
-            .filter_map(|l| l.get(3..))
-            .map(|p| p.rsplit(" -> ").next().unwrap_or(p).trim_matches('"').to_string())
-            .collect();
-        Ok(GitState { repo: true, dirty })
+        Ok(GitState { repo: true, dirty: porcelain_paths(&out.stdout, &prefix) })
     })
     .await
 }
@@ -908,7 +937,12 @@ async fn snapshot_changes(state: State<'_, AppState>, path: String, id: String) 
 async fn delete_snapshot(state: State<'_, AppState>, path: String, id: String) -> CmdResult<()> {
     let path = normalize_path(path);
     let store = state.snapshots();
-    blocking(move || store.delete(Path::new(&path), &id).map_err(|e| e.to_string())).await
+    let writes = state.writes.clone();
+    blocking(move || {
+        let _guard = writes.lock().unwrap_or_else(|e| e.into_inner());
+        store.delete(Path::new(&path), &id).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
@@ -997,6 +1031,7 @@ pub fn with_commands<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R
         clear_runtime_log,
         local_php_versions,
         run_local_check,
+        close_project,
         open_in_editor,
         get_settings,
         save_settings,

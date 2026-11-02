@@ -29,6 +29,7 @@ export interface Api {
   pickLogFile(title: string): Promise<string | null>;
   importRuntimeLog(path: string, log: string): Promise<ScanResult>;
   clearRuntimeLog(path: string): Promise<ScanResult>;
+  closeProject(path: string): Promise<void>;
   localPhpVersions(): Promise<LocalPhp[]>;
   runLocalCheck(path: string, target: string, kind: "lint" | "tests"): Promise<ScanResult>;
   inspectProject(path: string): Promise<ProjectInfo>;
@@ -85,6 +86,7 @@ async function tauriApi(): Promise<Api> {
     pickLogFile: async (title) => single(await dialog.open({ multiple: false, title })),
     importRuntimeLog: (path, log) => invoke("import_runtime_log", { path, log }),
     clearRuntimeLog: (path) => invoke("clear_runtime_log", { path }),
+    closeProject: (path) => invoke("close_project", { path }),
     localPhpVersions: () => invoke("local_php_versions"),
     runLocalCheck: (path, target, kind) => invoke("run_local_check", { path, target, kind }),
     inspectProject: (path) => invoke("inspect_project", { path }),
