@@ -265,8 +265,8 @@ Her şey kendi bilgisayarınızda çalışır:
 1. Ferry proje türünü ve şu anki PHP sürümünü bulur, bakımını sizin yapmadığınız klasörleri atlar.
 2. Yerleşik tarayıcı her PHP dosyasını ayrıştırır ve şu anki sürümünüzle hedef sürüm arasındaki her sürümün kurallarına göre kontrol eder.
 3. Düzeltmeler için Rector projenizde deneme modunda çalışır; dilediğiniz an durdurabilirsiniz. Ferry önerilen farkları bir önizlemeye dönüştürür ve her dosyanın parmak izini saklar.
-4. Uyguladığınızda Ferry önce seçilen dosyaları yedekler, sonra hiçbirinin önizlemeden bu yana değişmediğini kontrol eder ve her dosyayı tek adımda yazar. Arada değişen bir dosya reddedilir, sembolik bağlantılara dokunulmaz, salt okunur dosyalar salt okunur kalır. Düzeltmeler yalnızca taramanın kapsadığı dosyalara uygulanır; `.git` ya da `.ddev` gibi gizli klasörler hiçbir zaman değişmez.
-5. Geri yükleme yedeği dosyaların üzerine kopyalar. Geçmiş'teki **İncele** ise uygulanan değişiklikleri gösterir.
+4. Uyguladığınızda Ferry önce seçilen dosyaları yedekler, sonra hiçbirinin önizlemeden bu yana değişmediğini kontrol eder ve her dosyayı tek adımda yazar. Arada değişen bir dosya reddedilir. Sembolik bağlantı üzerinden ulaşılan ya da başka adları da olan (hard link) dosyalara hiç yazılmaz, salt okunur dosyalar salt okunur kalır. Bir yazma başarısız olursa o ana kadar yazılan dosyalar eski hâline döndürülür. Düzeltmeler yalnızca taramanın kapsadığı dosyalara uygulanır; `.git` ya da `.ddev` gibi gizli klasörler hiçbir zaman değişmez.
+5. Geri yükleme önce yedekteki her kopyayı kontrol eder, sonra dosyaları geri koyar; bir yazma başarısız olursa diğerleri de önceki hâline döner. Uygulamadan sonra düzenlediğiniz dosyalar onayınıza sunulur ve şu anki içerikleri önce yedeklenir. Geçmiş'teki **İncele** ise uygulanan değişiklikleri gösterir.
 
 ## Bilinen sınırlamalar
 
