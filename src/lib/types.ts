@@ -237,6 +237,11 @@ export interface Snapshot {
   files: { path: string; existed: boolean }[];
 }
 
+export interface SnapshotConflict {
+  file: string;
+  hash: string | null;
+}
+
 export interface ApplyResult {
   snapshot: Snapshot;
   written: string[];

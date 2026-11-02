@@ -114,6 +114,12 @@ fn relative(root: &Path, path: &str) -> Option<String> {
     (0..parts.len()).map(|k| parts[k..].join("/")).find(|rel| root.join(rel).is_file())
 }
 
+fn symbol(f: &Finding) -> Option<String> {
+    let name = f.title.en.split_once('(')?.0.trim();
+    let valid = !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | ':' | '\\'));
+    valid.then(|| name.rsplit('\\').next().unwrap_or(name).to_ascii_lowercase())
+}
+
 pub struct Merged {
     pub confirmed: usize,
     pub added: usize,
@@ -128,13 +134,20 @@ pub fn merge(root: &Path, findings: &mut Vec<Finding>, events: &[Event], target:
             merged.outside += 1;
             continue;
         };
+        let message = e.message.to_ascii_lowercase();
         let close = |f: &Finding| {
-            let kind = match e.level {
-                Level::Fatal => Severity::Breaking,
-                Level::Warning => Severity::Behavior,
-                Level::Deprecated => Severity::Deprecated,
+            let compatible = match e.level {
+                Level::Fatal => f.severity == Severity::Breaking,
+                Level::Warning => matches!(f.severity, Severity::Behavior | Severity::Breaking),
+                Level::Deprecated => matches!(f.severity, Severity::Deprecated | Severity::Breaking),
             };
-            f.line == e.line || (f.line.abs_diff(e.line) == 1 && f.severity == kind)
+            let named = symbol(f).map(|s| message.contains(&s));
+            compatible
+                && match f.line.abs_diff(e.line) {
+                    0 => named != Some(false),
+                    1 => named == Some(true),
+                    _ => false,
+                }
         };
         if let Some(f) = findings.iter_mut().find(|f| f.file == file && close(f) && !f.rule_id.starts_with("runtime.")) {
             f.runtime_hits += e.count;
@@ -242,5 +255,25 @@ Undefined array key \"total\"
         assert_eq!(each.runtime_hits, 1);
         let warning = findings.iter().find(|f| f.rule_id == "runtime.warning" && f.line == 4).unwrap();
         assert_eq!((warning.line, warning.snippet.as_str()), (4, "echo $row['id'];"));
+    }
+
+    #[test]
+    fn unrelated_runtime_events_stay_separate() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = "<?php utf8_encode($s);\n$x = 1;\n";
+        std::fs::write(dir.path().join("a.php"), src).unwrap();
+        let target = "8.4".parse().unwrap();
+        let log = "PHP Fatal error:  Uncaught RuntimeException: independent failure in /srv/app/a.php on line 1
+PHP Deprecated:  Creation of dynamic property A::$b is deprecated in /srv/app/a.php on line 1
+PHP Deprecated:  Function utf8_encode() is deprecated in /srv/app/a.php on line 2
+";
+        let mut findings = analyze_source("a.php", src, target);
+        assert_eq!(findings.len(), 1);
+        let merged = merge(dir.path(), &mut findings, &parse(log), target);
+        assert_eq!((merged.confirmed, merged.added), (1, 2));
+        assert_eq!(findings.iter().find(|f| f.rule_id == "deprecated.utf8_encode").unwrap().runtime_hits, 1);
+        let fatal = findings.iter().find(|f| f.rule_id == "runtime.fatal").expect("a fatal is never folded into a deprecation");
+        assert_eq!((fatal.line, fatal.severity), (1, Severity::Breaking));
+        assert!(findings.iter().any(|f| f.rule_id == "runtime.deprecated" && f.line == 1));
     }
 }

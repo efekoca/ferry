@@ -6,7 +6,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub enum SnapshotError {
     InvalidPath(String),
     NotFound(String),
+    Corrupt(String),
     Io { path: String, source: std::io::Error },
+    Restore { path: String, source: std::io::Error, unrecovered: Vec<String> },
     Manifest(serde_json::Error),
 }
 
@@ -21,9 +23,28 @@ impl std::fmt::Display for SnapshotError {
         let msg = match self {
             SnapshotError::InvalidPath(p) => crate::t!("Geçersiz dosya yolu: {p}", "Invalid file path: {p}"),
             SnapshotError::NotFound(id) => crate::t!("Yedek bulunamadı: {id}", "Snapshot not found: {id}"),
+            SnapshotError::Corrupt(p) => crate::t!(
+                "Yedekteki {p} kopyası bozuk ya da eksik; hiçbir dosya değiştirilmedi.",
+                "The backup copy of {p} is damaged or missing; no files were changed."
+            ),
             SnapshotError::Io { path, source } => {
                 let reason = crate::i18n::io_error(source);
                 crate::t!("Dosya işlemi başarısız ({path}): {reason}", "File operation failed ({path}): {reason}")
+            }
+            SnapshotError::Restore { path, source, unrecovered } => {
+                let reason = crate::i18n::io_error(source);
+                if unrecovered.is_empty() {
+                    crate::t!(
+                        "Geri yükleme başarısız ({path}): {reason}. Dosyalar önceki hâlinde bırakıldı.",
+                        "Restore failed ({path}): {reason}. The files were left as they were."
+                    )
+                } else {
+                    let files = unrecovered.join(", ");
+                    crate::t!(
+                        "Geri yükleme başarısız ({path}): {reason}. Şu dosyalar önceki hâline döndürülemedi: {files}",
+                        "Restore failed ({path}): {reason}. These files couldn't be put back as they were: {files}"
+                    )
+                }
             }
             SnapshotError::Manifest(e) => crate::t!("Yedek bilgisi okunamadı: {e}", "Couldn't read snapshot info: {e}"),
         };
@@ -42,11 +63,15 @@ fn io_err(path: &Path) -> impl FnOnce(std::io::Error) -> SnapshotError + '_ {
 pub struct SnapshotFile {
     pub path: String,
     pub existed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hash: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
+    #[serde(default)]
+    pub version: u32,
     pub id: String,
     pub created_at: u64,
     pub project_root: String,
@@ -56,6 +81,44 @@ pub struct Snapshot {
 
 pub struct SnapshotStore {
     base: PathBuf,
+}
+
+pub const VERSION: u32 = 2;
+
+pub fn content_hash(bytes: &[u8]) -> String {
+    format!("{:016x}", fnv1a(bytes))
+}
+
+fn write_new(path: &Path, bytes: &[u8]) -> Result<(), SnapshotError> {
+    use std::io::Write;
+    let dir = path.parent().unwrap_or(Path::new("."));
+    let mut tmp = tempfile::NamedTempFile::new_in(dir).map_err(io_err(dir))?;
+    tmp.write_all(bytes).and_then(|_| tmp.as_file().sync_all()).map_err(io_err(path))?;
+    tmp.persist(path).map_err(|e| io_err(path)(e.error))?;
+    Ok(())
+}
+
+fn put(target: &Path, content: Option<&[u8]>) -> std::io::Result<()> {
+    match content {
+        Some(bytes) => {
+            if let Some(parent) = target.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            crate::safefs::replace(target, bytes)
+        }
+        None => match std::fs::remove_file(target) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            other => other,
+        },
+    }
+}
+
+fn read_optional(path: &Path) -> Result<Option<Vec<u8>>, SnapshotError> {
+    match std::fs::read(path) {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(io_err(path)(e)),
+    }
 }
 
 pub fn fnv1a(bytes: &[u8]) -> u64 {
@@ -164,21 +227,26 @@ impl SnapshotStore {
         let mut files = Vec::new();
         for rel in rel_paths {
             let rel_path = safe_relative(rel)?;
-            let src = project_root.join(&rel_path);
-            let existed = src.is_file();
-            if existed {
+            let src = crate::safefs::resolve(project_root, rel).map_err(io_err(&project_root.join(&rel_path)))?;
+            let content = read_optional(&src)?;
+            if let Some(bytes) = &content {
                 let dest = files_dir.join(&rel_path);
                 if let Some(parent) = dest.parent() {
                     std::fs::create_dir_all(parent).map_err(io_err(parent))?;
                 }
-                std::fs::copy(&src, &dest).map_err(io_err(&src))?;
+                write_new(&dest, bytes)?;
             }
-            files.push(SnapshotFile { path: rel.clone(), existed });
+            files.push(SnapshotFile { path: rel.clone(), existed: content.is_some(), hash: content.as_deref().map(content_hash) });
         }
-        let snapshot =
-            Snapshot { id, created_at: now, project_root: project_root.to_string_lossy().to_string(), label: label.to_string(), files };
-        let manifest = dir.join("manifest.json");
-        std::fs::write(&manifest, serde_json::to_vec_pretty(&snapshot)?).map_err(io_err(&manifest))?;
+        let snapshot = Snapshot {
+            version: VERSION,
+            id,
+            created_at: now,
+            project_root: project_root.to_string_lossy().to_string(),
+            label: label.to_string(),
+            files,
+        };
+        write_new(&dir.join("manifest.json"), &serde_json::to_vec_pretty(&snapshot)?)?;
         Ok(snapshot)
     }
 
@@ -224,55 +292,56 @@ impl SnapshotStore {
         self.restore_files(project_root, id, None)
     }
 
+    pub fn get(&self, project_root: &Path, id: &str) -> Result<Snapshot, SnapshotError> {
+        self.load(project_root, id).map(|(snapshot, _)| snapshot)
+    }
+
     pub fn restore_files(&self, project_root: &Path, id: &str, only: Option<&[String]>) -> Result<Vec<String>, SnapshotError> {
         let (snapshot, dir) = self.load(project_root, id)?;
-        let mut restored = Vec::new();
-        let mut first_error = None;
+        let mut plan = Vec::new();
         for file in snapshot.files.iter().filter(|f| only.is_none_or(|o| o.contains(&f.path))) {
-            let result = (|| {
-                let rel = safe_relative(&file.path)?;
-                let target = project_root.join(&rel);
-                if file.existed {
-                    let saved = dir.join("files").join(&rel);
-                    if let Some(parent) = target.parent() {
-                        std::fs::create_dir_all(parent).map_err(io_err(parent))?;
-                    }
-                    if let Ok(meta) = std::fs::metadata(&target) {
-                        let mut perms = meta.permissions();
-                        if perms.readonly() {
-                            #[allow(clippy::permissions_set_readonly_false)]
-                            perms.set_readonly(false);
-                            let _ = std::fs::set_permissions(&target, perms);
-                        }
-                    }
-                    std::fs::copy(&saved, &target).map_err(io_err(&target))?;
-                } else if target.exists() {
-                    std::fs::remove_file(&target).map_err(io_err(&target))?;
+            let rel = safe_relative(&file.path)?;
+            let target = crate::safefs::resolve(project_root, &file.path).map_err(io_err(&project_root.join(&rel)))?;
+            let backup = if file.existed {
+                let bytes = std::fs::read(dir.join("files").join(&rel)).map_err(|_| SnapshotError::Corrupt(file.path.clone()))?;
+                if file.hash.as_ref().is_some_and(|h| *h != content_hash(&bytes)) {
+                    return Err(SnapshotError::Corrupt(file.path.clone()));
                 }
-                Ok::<_, SnapshotError>(())
-            })();
-            match result {
-                Ok(()) => restored.push(file.path.clone()),
-                Err(e) => {
-                    first_error.get_or_insert(e);
-                }
+                Some(bytes)
+            } else {
+                None
+            };
+            let current = read_optional(&target)?;
+            plan.push((file.path.clone(), target, backup, current));
+        }
+        for (i, (_, target, backup, current)) in plan.iter().enumerate() {
+            if backup == current {
+                continue;
+            }
+            if let Err(e) = put(target, backup.as_deref()) {
+                let unrecovered = plan[..=i]
+                    .iter()
+                    .rev()
+                    .filter(|(_, target, _, current)| {
+                        let unchanged = read_optional(target).is_ok_and(|now| now == *current);
+                        !unchanged && put(target, current.as_deref()).is_err()
+                    })
+                    .map(|(path, ..)| path.clone())
+                    .collect();
+                return Err(SnapshotError::Restore { path: plan[i].0.clone(), source: e, unrecovered });
             }
         }
-        match first_error {
-            Some(e) => Err(e),
-            None => Ok(restored),
-        }
+        Ok(plan.into_iter().map(|(path, ..)| path).collect())
     }
 
     pub fn write_attachment(&self, project_root: &Path, id: &str, name: &str, bytes: &[u8]) -> Result<(), SnapshotError> {
         let (_, dir) = self.load(project_root, id)?;
-        let path = dir.join(safe_relative(name)?);
-        std::fs::write(&path, bytes).map_err(io_err(&path))
+        write_new(&dir.join(safe_relative(name)?), bytes)
     }
 
     pub fn read_attachment(&self, project_root: &Path, id: &str, name: &str) -> Result<Option<Vec<u8>>, SnapshotError> {
         let (_, dir) = self.load(project_root, id)?;
-        Ok(std::fs::read(dir.join(safe_relative(name)?)).ok())
+        read_optional(&dir.join(safe_relative(name)?))
     }
 
     pub fn originals(&self, project_root: &Path, id: &str) -> Result<Vec<(String, Option<String>)>, SnapshotError> {
@@ -418,6 +487,66 @@ mod tests {
             assert!(matches!(store.create(project.path(), &[bad.to_string()], "x"), Err(SnapshotError::InvalidPath(_))));
         }
         assert!(store.restore(project.path(), "../../x").is_err());
+    }
+
+    #[test]
+    fn restore_checks_every_backup_before_writing() {
+        let project = tempfile::tempdir().unwrap();
+        let store_dir = tempfile::tempdir().unwrap();
+        let store = SnapshotStore::new(store_dir.path());
+        let root = project.path();
+        fs::write(root.join("a.php"), "a").unwrap();
+        fs::write(root.join("b.php"), "b").unwrap();
+        let snap = store.create(root, &["a.php".into(), "b.php".into()], "x").unwrap();
+        fs::write(root.join("a.php"), "A").unwrap();
+        fs::write(root.join("b.php"), "B").unwrap();
+        let backup = store.project_dir(root).join(&snap.id).join("files/b.php");
+
+        fs::write(&backup, "tampered").unwrap();
+        assert!(matches!(store.restore(root, &snap.id), Err(SnapshotError::Corrupt(p)) if p == "b.php"));
+        fs::remove_file(&backup).unwrap();
+        assert!(matches!(store.restore(root, &snap.id), Err(SnapshotError::Corrupt(_))));
+        assert_eq!(fs::read_to_string(root.join("a.php")).unwrap(), "A", "nothing is written when a backup is bad");
+        assert_eq!(fs::read_to_string(root.join("b.php")).unwrap(), "B");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restore_rolls_back_when_a_write_fails() {
+        use std::os::unix::fs::PermissionsExt;
+        let project = tempfile::tempdir().unwrap();
+        let store_dir = tempfile::tempdir().unwrap();
+        let store = SnapshotStore::new(store_dir.path());
+        let root = project.path();
+        fs::create_dir(root.join("z")).unwrap();
+        fs::write(root.join("a.php"), "a").unwrap();
+        fs::write(root.join("z/b.php"), "b").unwrap();
+        let snap = store.create(root, &["a.php".into(), "z/b.php".into()], "x").unwrap();
+        fs::write(root.join("a.php"), "A").unwrap();
+        fs::write(root.join("z/b.php"), "B").unwrap();
+        fs::set_permissions(root.join("z"), fs::Permissions::from_mode(0o555)).unwrap();
+        let result = store.restore(root, &snap.id);
+        fs::set_permissions(root.join("z"), fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(matches!(&result, Err(SnapshotError::Restore { unrecovered, .. }) if unrecovered.is_empty()), "{result:?}");
+        assert_eq!(fs::read_to_string(root.join("a.php")).unwrap(), "A");
+        assert_eq!(fs::read_to_string(root.join("z/b.php")).unwrap(), "B");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restore_never_writes_through_links() {
+        let project = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let store_dir = tempfile::tempdir().unwrap();
+        let store = SnapshotStore::new(store_dir.path());
+        let root = project.path();
+        fs::write(root.join("a.php"), "backup").unwrap();
+        let snap = store.create(root, &["a.php".into()], "x").unwrap();
+        fs::remove_file(root.join("a.php")).unwrap();
+        fs::write(outside.path().join("victim.php"), "victim").unwrap();
+        std::os::unix::fs::symlink(outside.path().join("victim.php"), root.join("a.php")).unwrap();
+        assert!(store.restore(root, &snap.id).is_err());
+        assert_eq!(fs::read_to_string(outside.path().join("victim.php")).unwrap(), "victim");
     }
 
     #[test]
