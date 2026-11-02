@@ -216,9 +216,17 @@ fn php_candidates(line: &str) -> Vec<PathBuf> {
 }
 
 pub fn local_php(lines: &[String]) -> Vec<LocalPhp> {
+    local_php_with(lines, None)
+}
+
+pub fn local_php_with(lines: &[String], chosen: Option<&Path>) -> Vec<LocalPhp> {
+    let chosen = chosen.filter(|p| p.is_file()).and_then(|p| Some((p.to_path_buf(), php_version(p)?)));
     lines
         .iter()
         .filter_map(|line| {
+            if let Some((path, version)) = chosen.as_ref().filter(|(_, v)| v.starts_with(&format!("{line}."))) {
+                return Some(LocalPhp { line: line.to_string(), version: version.clone(), path: path.clone() });
+            }
             php_candidates(line).into_iter().filter(|p| p.is_file()).find_map(|path| {
                 let version = php_version(&path)?;
                 version.starts_with(&format!("{line}.")).then(|| LocalPhp { line: line.to_string(), version, path })
@@ -546,6 +554,21 @@ mod tests {
 
         let missing = Path::new("/nonexistent/php");
         assert_eq!(new_syntax_errors(missing, [("a.php", None, ok)]).not_run, ["a.php"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_chosen_php_wins_for_its_line() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let php = dir.path().join("php-custom");
+        std::fs::write(&php, "#!/bin/sh\necho 8.4.99\n").unwrap();
+        std::fs::set_permissions(&php, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let found = local_php_with(&["8.4".to_string(), "7.0".to_string()], Some(&php));
+        assert_eq!(found.first().map(|l| (l.line.as_str(), l.version.as_str(), l.path.clone())), Some(("8.4", "8.4.99", php.clone())));
+        assert!(found.iter().all(|l| l.line != "7.0" || l.path != php));
+        let missing = dir.path().join("gone");
+        assert!(local_php_with(&["8.4".to_string()], Some(&missing)).iter().all(|l| l.path != missing));
     }
 
     #[cfg(unix)]
