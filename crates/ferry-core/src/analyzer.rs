@@ -2936,6 +2936,12 @@ mod tests {
     }
 
     #[test]
+    fn short_open_tags_are_scanned() {
+        assert_eq!(rule_ids("<?each($a);?>"), ["removed.each"]);
+        assert!(rule_ids("<?xml version=\"1.0\"?><feed/>").is_empty());
+    }
+
+    #[test]
     fn method_calls_and_class_constants() {
         let src = "<?php\n$db = new mysqli('h'); $db->ping(); $r = new \\ReflectionProperty($o, 'x'); $r->setAccessible(true);\n$s = new SplObjectStorage(); $s->attach($o);\nReflectionClass::export('A'); $pdo->setAttribute(PDO::MYSQL_ATTR_INIT_COMMAND, 'x'); $x = PDO::FETCH_SERIALIZE;";
         let hits = at(src, (8, 5));
