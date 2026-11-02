@@ -104,7 +104,13 @@
     await nav("Düzeltmeler");
     await click("Değişiklikleri hesapla", undefined, 10000);
     await until(() => $(".change-item") || text().includes("Yapılacak değişiklik yok"), "preview", 300000);
-    return $$(".change-item__file").map((e) => e.textContent);
+    const files = $$(".change-item__file").map((e) => e.textContent);
+    const all = $(".change-list__header input");
+    if (all && !all.checked) {
+      all.click();
+      await until(() => text().includes(`${files.length} / ${files.length} dosya seçili`), "select every file");
+    }
+    return files;
   };
   const applyAndConfirm = async () => {
     const before = seen.length;

@@ -15,13 +15,14 @@ import {
   Wrench,
   ShieldAlert,
   Columns3,
+  CircleDashed,
 } from "lucide-react";
 import { ConfirmDialog } from "../components/Modal";
 import { PageHeader } from "../components/Shell";
 import { ScoreRing } from "../components/ScoreRing";
 import { Badge, Button, Callout, Card, Progress, RiskBadge, Segmented } from "../components/ui";
 import { useI18n } from "../i18n";
-import { commonTitle, dependencyBlockers, FRAMEWORK_LABEL, formatDuration, formatNumber, scoreHeadline, scoreTone } from "../lib/labels";
+import { commonTitle, dependencyBlockers, FRAMEWORK_LABEL, formatDuration, formatNumber, readiness, scoreHeadline, scoreTone, type Readiness } from "../lib/labels";
 import { useStore } from "../lib/store";
 import { BLOCKED_TARGETS, PATCHED, PHP2SHELL_CVES, isBlockedTarget } from "../lib/security";
 import { TARGETS, type Finding, type FixKind, type HistoryEntry, type ScanHistory, type Target, type TargetSummary } from "../lib/types";
@@ -61,6 +62,10 @@ export function Overview() {
 
   const pct = progress && progress.total > 0 ? (progress.done / progress.total) * 100 : null;
   const s = scan?.summary;
+  const ready = scan ? readiness(scan, deps) : null;
+  const settled = !!ready && ready.blockers === 0 && ready.unscanned === 0 && ready.deps.state === "verified" && ready.check.state !== "failed";
+  const baseTone = s ? scoreTone(s.score) : "auto";
+  const tone = ready && ready.blockers > 0 && baseTone === "auto" ? "manual" : baseTone;
   const blockers = dependencyBlockers(deps);
   const frameworkBlockers = scan?.findings.filter((f) => f.ruleId.startsWith("framework.") && f.ruleId.endsWith("_version")) ?? [];
   const blockerText = blockers.root
@@ -97,12 +102,12 @@ export function Overview() {
             <Fact label={t.overview.constraint} value={project.phpConstraint ?? "—"} mono />
           </Card>
 
-          <Card bodyClassName="target">
+          <Card bodyClassName={scan ? "target target--compact" : "target"}>
             <div className="target__text">
               <h2>{t.overview.targetTitle}</h2>
               <p>
                 {versionHint}
-                {skipped}
+                {!scan && skipped}
               </p>
             </div>
             <div className="target__controls">
@@ -122,10 +127,13 @@ export function Overview() {
                 </Button>
               )}
             </div>
-            <p className="target__note" id="target-blocked">
-              <ShieldAlert size={14} aria-hidden />
-              <span>{t.overview.blockedTarget(BLOCKED_TARGETS.join(", "), PHP2SHELL_CVES, Object.values(PATCHED))}</span>
-            </p>
+            <details className="target__note" id="target-blocked">
+              <summary>
+                <ShieldAlert size={14} aria-hidden />
+                <span>{t.overview.blockedShort(BLOCKED_TARGETS.join(", "))}</span> <span className="target__why">{t.overview.why}</span>
+              </summary>
+              <p>{t.overview.blockedTarget(BLOCKED_TARGETS.join(", "), PHP2SHELL_CVES, Object.values(PATCHED))}</p>
+            </details>
           </Card>
 
           {scanning && (
@@ -158,8 +166,10 @@ export function Overview() {
           {scan && s && (
             <>
               <Card className="score-card" bodyClassName="score">
-                <div className="score__glow" data-tone={scoreTone(s.score)} aria-hidden />
-                <ScoreRing score={s.score} />
+                <div className="score__glow" data-tone={tone} aria-hidden />
+                <div className="score__ring" title={t.overview.scoreNote}>
+                  <ScoreRing score={s.score} tone={tone} />
+                </div>
                 <div className="score__text">
                   <div className="score__meta">
                     <Badge tone="accent">PHP {scan.target}</Badge>
@@ -167,7 +177,7 @@ export function Overview() {
                       {t.overview.scanMeta(fmt(scan.filesScanned), fmt(scan.linesScanned), formatDuration(scan.durationMs, t.locale))}
                     </span>
                   </div>
-                  <h2>{scoreHeadline(s.score, s.total, t, scan.errors.length > 0)}</h2>
+                  <h2>{scoreHeadline(s.score, s.total, t, scan.errors.length > 0, settled)}</h2>
                   <p>
                     {s.total > 0
                       ? t.overview.summary(s.total, s.filesAffected, s.auto + s.likely)
@@ -175,6 +185,16 @@ export function Overview() {
                         ? t.overview.cleanPartial
                         : t.overview.clean}
                   </p>
+                  {ready && (
+                    <ReadinessList
+                      ready={ready}
+                      onBlockers={() => (ready.blockers > ready.deps.count ? showFindings({ severity: "breaking" }) : setView("dependencies"))}
+                      onCoverage={() => document.getElementById("unscanned")?.scrollIntoView({ block: "center" })}
+                      onDeps={() => setView("dependencies")}
+                      onCheck={() => showFindings()}
+                    />
+                  )}
+                  <p className="score__note">{t.overview.scoreNote}</p>
                 </div>
                 {s.total > 0 && (
                   <div className="fix-tiles">
@@ -186,12 +206,14 @@ export function Overview() {
               </Card>
 
               {scan.errors.length > 0 && (
+                <div id="unscanned">
                 <Callout tone="warn" icon={<CircleAlert size={16} />}>
                   {t.overview.unreadable(
                     scan.errors.length,
                     scan.errors.slice(0, 3).map((e) => e.file).join(", ") + (scan.errors.length > 3 ? "…" : ""),
                   )}
                 </Callout>
+                </div>
               )}
 
               {frameworkBlockers.map((f) => {
@@ -565,3 +587,62 @@ function Step({
     </div>
   );
 }
+
+function ReadinessList({
+  ready,
+  onBlockers,
+  onCoverage,
+  onDeps,
+  onCheck,
+}: {
+  ready: Readiness;
+  onBlockers: () => void;
+  onCoverage: () => void;
+  onDeps: () => void;
+  onCheck: () => void;
+}) {
+  const { t } = useI18n();
+  const r = t.overview.readiness;
+  const deps = {
+    blocked: r.depsBlocked(ready.deps.count),
+    unknown: r.depsUnknown(ready.deps.count),
+    verified: r.depsVerified,
+    missing: r.depsMissing,
+    pending: r.depsPending,
+  }[ready.deps.state];
+  const items: { label: string; value: string; state: "ok" | "warn" | "bad"; onClick?: () => void }[] = [
+    { label: r.blockers, value: ready.blockers ? r.blockersSome(ready.blockers) : r.blockersNone, state: ready.blockers ? "bad" : "ok", onClick: ready.blockers ? onBlockers : undefined },
+    { label: r.coverage, value: ready.unscanned ? r.coveragePartial(ready.unscanned) : r.coverageFull, state: ready.unscanned ? "warn" : "ok", onClick: ready.unscanned ? onCoverage : undefined },
+    {
+      label: r.deps,
+      value: deps,
+      state: ready.deps.state === "blocked" ? "bad" : ready.deps.state === "verified" ? "ok" : "warn",
+      onClick: onDeps,
+    },
+    {
+      label: r.check,
+      value: ready.check.state === "passed" ? r.checkPassed(ready.check.kind) : ready.check.state === "failed" ? r.checkFailed(ready.check.kind) : r.checkNone,
+      state: ready.check.state === "passed" ? "ok" : ready.check.state === "failed" ? "bad" : "warn",
+      onClick: onCheck,
+    },
+  ];
+  const icon = { ok: <Check size={13} aria-hidden />, warn: <CircleDashed size={13} aria-hidden />, bad: <CircleAlert size={13} aria-hidden /> };
+  return (
+    <ul className="readiness" aria-label={r.label}>
+      {items.map((item) => (
+        <li key={item.label} data-state={item.state}>
+          {icon[item.state]}
+          <span className="readiness__label">{item.label}</span>
+          {item.onClick ? (
+            <button type="button" className="readiness__value" onClick={item.onClick}>
+              {item.value}
+            </button>
+          ) : (
+            <span className="readiness__value">{item.value}</span>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+

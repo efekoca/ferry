@@ -40,6 +40,7 @@ describe("accessibility", () => {
     await user.click(screen.getByRole("button", { name: /Değişiklikleri hesapla/ }));
     await screen.findByRole("list", { name: "Dosyalar" });
     await check("fixes");
+    await user.click(screen.getByRole("checkbox", { name: "Tümünü seç" }));
     await user.click(screen.getByRole("button", { name: "Tümünü uygula" }));
     await screen.findByRole("dialog");
     await check("apply dialog");
@@ -148,6 +149,7 @@ describe("accessibility", () => {
     await screen.findByRole("img", { name: /Hazırlık skoru/ });
     await user.click(nav(/Düzeltmeler/));
     await user.click(await screen.findByRole("button", { name: /Değişiklikleri hesapla/ }));
+    await user.click(await screen.findByRole("checkbox", { name: "Tümünü seç" }));
     await user.click(await screen.findByRole("button", { name: "Tümünü uygula" }));
     expect(await screen.findByRole("dialog")).toHaveAccessibleDescription(/satır değişecek/);
   });
