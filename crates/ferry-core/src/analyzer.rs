@@ -58,7 +58,7 @@ pub fn relative_path(root: &Path, path: &Path) -> String {
 
 pub fn analyze_files(root: &Path, files: &[PathBuf], target: PhpVersion, mut progress: impl FnMut(usize, usize, &str)) -> ScanResult {
     let started = Instant::now();
-    let index = crate::index::ProjectIndex::build(root, files);
+    let index = crate::index::ProjectIndex::build_for(root, files, Some(target));
     let mut findings = Vec::new();
     let mut errors = Vec::new();
     let mut lines = 0;
@@ -177,27 +177,40 @@ fn class_references(tokens: &[Token]) -> std::collections::HashSet<String> {
         .collect()
 }
 
-fn local_functions(tokens: &[Token], methods: &std::collections::HashSet<usize>) -> std::collections::HashSet<String> {
-    let mut names = std::collections::HashSet::new();
+fn function_imports(tokens: &[Token]) -> std::collections::HashMap<String, String> {
+    let mut out = std::collections::HashMap::new();
     for i in 0..tokens.len() {
-        if tokens[i].is_ident_ci("function") && !methods.contains(&i) {
-            let name = tokens[i + 1..].iter().take(2).find(|t| !t.is_punct("&"));
-            if let Some(t) = name.filter(|t| t.kind == TokenKind::Ident) {
-                names.insert(t.text.to_ascii_lowercase());
-            }
+        if !(tokens[i].is_ident_ci("use") && tokens.get(i + 1).is_some_and(|t| t.is_ident_ci("function"))) {
+            continue;
         }
-        if tokens[i].is_ident_ci("use") && tokens.get(i + 1).is_some_and(|t| t.is_ident_ci("function")) {
-            let mut j = i + 2;
-            while let Some(t) = tokens.get(j).filter(|t| !t.is_punct(";")) {
-                let alias = tokens.get(j + 1).is_some_and(|n| n.is_ident_ci("as"));
-                if t.kind == TokenKind::Ident && !t.is_ident_ci("as") && !alias {
-                    names.insert(t.text.rsplit('\\').next().unwrap_or_default().to_ascii_lowercase());
+        let mut prefix = String::new();
+        let mut j = i + 2;
+        while let Some(t) = tokens.get(j).filter(|t| !t.is_punct(";")) {
+            let group = (1..=2).find(|&d| tokens.get(j + d).is_some_and(|n| n.is_punct("{")));
+            if t.kind == TokenKind::Ident && group.is_some() && (group == Some(1) || tokens[j + 1].is_punct("\\")) {
+                prefix = t.text.trim_start_matches('\\').to_string();
+                if !prefix.ends_with('\\') {
+                    prefix.push('\\');
                 }
-                j += 1;
+                j += group.unwrap_or(1) + 1;
+                continue;
             }
+            if t.kind == TokenKind::Ident && !t.is_ident_ci("as") && !t.is_ident_ci("function") {
+                let full = format!("{prefix}{}", t.text.trim_start_matches('\\')).to_ascii_lowercase();
+                let alias = tokens
+                    .get(j + 1)
+                    .filter(|n| n.is_ident_ci("as"))
+                    .and_then(|_| tokens.get(j + 2))
+                    .map_or_else(|| full.rsplit('\\').next().unwrap_or_default().to_string(), |a| a.text.to_ascii_lowercase());
+                out.insert(alias, full);
+                if tokens.get(j + 1).is_some_and(|n| n.is_ident_ci("as")) {
+                    j += 2;
+                }
+            }
+            j += 1;
         }
     }
-    names
+    out
 }
 
 pub const CURLY_FIX: &str = "Rector\\Php74\\Rector\\ArrayDimFetch\\CurlyToSquareBracketArrayStringRector";
@@ -293,7 +306,7 @@ pub fn fix_curly_offsets(src: &str) -> Option<String> {
 }
 
 pub fn analyze_source(file: &str, src: &str, target: PhpVersion) -> Vec<Finding> {
-    let index = crate::index::ProjectIndex::from_tokens(&lex(src).tokens);
+    let index = crate::index::ProjectIndex::from_tokens_for(&lex(src).tokens, Some(target));
     analyze_source_in(file, src, target, &index)
 }
 
@@ -308,7 +321,7 @@ pub fn analyze_source_in(file: &str, src: &str, target: PhpVersion, index: &crat
         src,
         line_starts,
         target,
-        local_functions: local_functions(&tokens, &methods),
+        function_imports: function_imports(&tokens),
         methods,
         namespaced: tokens.windows(2).any(|w| w[0].is_ident_ci("namespace") && (w[1].kind == TokenKind::Ident || w[1].is_punct("{"))),
         classes: class_references(&tokens),
@@ -486,7 +499,7 @@ struct Ctx<'a> {
     src: &'a str,
     line_starts: Vec<usize>,
     target: PhpVersion,
-    local_functions: std::collections::HashSet<String>,
+    function_imports: std::collections::HashMap<String, String>,
     methods: std::collections::HashSet<usize>,
     classes: std::collections::HashSet<String>,
     namespaced: bool,
@@ -726,19 +739,26 @@ impl<'a> Ctx<'a> {
                 }
                 _ => {}
             }
-            let rooted = tok.text.starts_with('\\');
+            let mut rooted = tok.text.starts_with('\\');
+            let mut lower = lower;
+            if !rooted && !bare.contains('\\') {
+                if let Some(imported) = self.function_imports.get(&lower) {
+                    if imported.contains('\\') {
+                        return;
+                    }
+                    lower = imported.clone();
+                    rooted = true;
+                }
+            }
             if prev.is_none_or(|p| !p.is_ident_ci("function")) && crate::rules::added_function(&lower).is_none() {
                 let namespace = crate::index::namespace_at(&self.namespaces, i);
-                if let Some(required) = self.index.required_args(namespace, bare, rooted) {
+                if let Some(required) = self.index.required_args(namespace, &lower, rooted) {
                     let args = call_args(tokens, i + 1);
                     let unpacked = args.iter().any(|a| a.first().is_some_and(|t| t.is_punct("...")) || a.len() > 1 && a[1].is_punct(":"));
                     if !unpacked && args.len() < required && !catches_error(tokens, i) {
                         self.pattern(&patterns::TOO_FEW_ARGUMENTS, tok, None);
                     }
                 }
-            }
-            if !rooted && self.local_functions.contains(&lower) {
-                return;
             }
             if self.index.declares_function(crate::index::namespace_at(&self.namespaces, i), &lower, rooted) {
                 return;
@@ -896,13 +916,15 @@ impl<'a> Ctx<'a> {
             return;
         };
         let receiver = (i >= 2 && tokens[i - 2].kind == TokenKind::Variable).then(|| tokens[i - 2].text.as_str());
+        let known = receiver.map(|r| receiver_types(tokens).remove(r).unwrap_or_default());
+        let is = |c: &String, family: &str| c == family || family == "reflection" && c.starts_with(family);
         let Some(m) = MEMBERS.iter().find(|m| {
             m.kind == kind
                 && m.rule.matches(&lower)
-                && match class {
-                    Some(c) => c.to_ascii_lowercase().starts_with(m.class),
-                    None if m.class == "reflectionparameter" => receiver.is_some_and(|r| reflection_parameters(tokens).contains(r)),
-                    None => self.classes.iter().any(|c| c.starts_with(m.class)),
+                && match (class, &known) {
+                    (Some(c), _) => c.to_ascii_lowercase().starts_with(m.class),
+                    (None, Some(types)) => types.iter().any(|c| is(c, m.class)),
+                    (None, None) => m.class != "reflectionparameter" && self.classes.iter().any(|c| is(c, m.class)),
                 }
         }) else {
             return;
@@ -956,9 +978,7 @@ impl<'a> Ctx<'a> {
         if name.is_empty() || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
             return;
         }
-        if self.local_functions.contains(&name)
-            || self.index.declares_function(crate::index::namespace_at(&self.namespaces, call), &name, true)
-        {
+        if self.index.declares_function(crate::index::namespace_at(&self.namespaces, call), &name, true) {
             return;
         }
         let Some(rule) = FUNCTIONS.iter().find(|r| r.matches(&name)) else { return };
@@ -1990,23 +2010,36 @@ fn case_semicolons(tokens: &[Token]) -> Vec<usize> {
     out
 }
 
-fn reflection_parameters(tokens: &[Token]) -> std::collections::HashSet<&str> {
-    let mut out = std::collections::HashSet::new();
+fn receiver_types(tokens: &[Token]) -> std::collections::HashMap<&str, std::collections::HashSet<String>> {
+    let mut out: std::collections::HashMap<&str, std::collections::HashSet<String>> = std::collections::HashMap::new();
+    let class = |t: &Token| t.text.rsplit('\\').next().unwrap_or_default().to_ascii_lowercase();
     for k in 0..tokens.len() {
         let t = &tokens[k];
         if t.kind != TokenKind::Variable {
             continue;
         }
-        let prev = k.checked_sub(1).map(|p| &tokens[p]);
-        let typed = prev.is_some_and(|p| p.text.trim_start_matches('\\').eq_ignore_ascii_case("ReflectionParameter"));
-        let looped = prev.is_some_and(|p| p.is_ident_ci("as"))
+        let mut add = |name: String| {
+            out.entry(t.text.as_str()).or_default().insert(name);
+        };
+        if let Some(p) = k.checked_sub(1).map(|p| &tokens[p]).filter(|p| p.kind == TokenKind::Ident && !p.is_ident_ci("as")) {
+            add(class(p));
+        }
+        if tokens.get(k + 1).is_some_and(|n| n.is_punct("=")) && tokens.get(k + 2).is_some_and(|n| n.is_ident_ci("new")) {
+            if let Some(c) = tokens.get(k + 3).filter(|n| n.kind == TokenKind::Ident) {
+                add(class(c));
+            }
+        }
+        if tokens.get(k + 1).is_some_and(|n| n.is_ident_ci("instanceof")) {
+            if let Some(c) = tokens.get(k + 2).filter(|n| n.kind == TokenKind::Ident) {
+                add(class(c));
+            }
+        }
+        let looped = k > 0
+            && tokens[k - 1].is_ident_ci("as")
             && (k.saturating_sub(8)..k).any(|j| tokens[j].is_ident_ci("getParameters"))
             && tokens.get(k + 1).is_some_and(|n| n.is_punct(")"));
-        let created = tokens.get(k + 1).is_some_and(|n| n.is_punct("="))
-            && tokens.get(k + 2).is_some_and(|n| n.is_ident_ci("new"))
-            && tokens.get(k + 3).is_some_and(|n| n.text.trim_start_matches('\\').eq_ignore_ascii_case("ReflectionParameter"));
-        if typed || looped || created {
-            out.insert(t.text.as_str());
+        if looped {
+            add("reflectionparameter".into());
         }
     }
     out
@@ -2933,6 +2966,36 @@ mod tests {
             .into_iter()
             .map(|f| (f.rule_id, f.title.get(crate::i18n::Lang::En).to_string()))
             .collect()
+    }
+
+    #[test]
+    fn polyfills_only_count_where_they_exist_on_the_target() {
+        let old_only = "<?php\nif (PHP_VERSION_ID < 80000) {\n    function each($x) {}\n}\neach($x);\n";
+        assert_eq!(rule_ids(old_only), ["removed.each"]);
+        let always = "<?php\nif (!function_exists('each')) {\n    function each($x) {}\n}\neach($x);\n";
+        assert!(!rule_ids(always).contains(&"removed.each".to_string()), "{:?}", rule_ids(always));
+    }
+
+    #[test]
+    fn imported_and_namespaced_functions_resolve_by_scope() {
+        let removed = |src: &str| rule_ids(src).iter().filter(|r| *r == "removed.each").count();
+        assert_eq!(removed("<?php namespace App; use function each; each($a);"), 1);
+        assert_eq!(removed("<?php namespace App; use function each as old_each; old_each($a);"), 1);
+        assert_eq!(removed("<?php namespace A { function each($x) {} } namespace B { each($x); }"), 1);
+        assert_eq!(removed("<?php namespace App; use function Lib\\each; each($a);"), 0);
+        assert_eq!(removed("<?php namespace App; use function Lib\\{each, other as more}; each($a);"), 0);
+        assert_eq!(removed("<?php namespace A; function each($x) {} each($x);"), 0);
+        assert_eq!(removed("<?php function each($x) {} each($x);"), 0);
+    }
+
+    #[test]
+    fn built_in_methods_need_evidence_of_the_receiver() {
+        let titles = |src: &str| at(src, (8, 4)).into_iter().map(|(_, t)| t).collect::<Vec<_>>();
+        assert!(titles("<?php\n$r = new ReflectionFunction('strlen');\n$mine->isDisabled();").is_empty());
+        assert_eq!(titles("<?php\n$r = new ReflectionFunction('strlen');\n$r->isDisabled();"), ["->isDisabled()"]);
+        assert_eq!(titles("<?php function f(ReflectionFunction $f) { return $f->isDisabled(); }"), ["->isDisabled()"]);
+        assert!(titles("<?php class SplObjectStorageX {} $s = new SplObjectStorageX(); $s->attach($o);").is_empty());
+        assert!(titles("<?php $s = new SplObjectStorage(); $other->attach($o);").is_empty());
     }
 
     #[test]
