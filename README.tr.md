@@ -34,7 +34,8 @@ Ferry, macOS, Windows ve Linux'ta çalışan bir masaüstü uygulamasıdır. PHP
 Geçmek istediğiniz sürümü seçin (PHP 8.2 ile 8.5 arası); Ferry tüm PHP dosyalarını saniyeler içinde tarar. **Genel bakış** ekranında şunları görürsünüz:
 
 - projenin platformu (WordPress, Laravel, Symfony, Drupal ya da düz PHP), PHP dosyası sayısı ve `composer.json`'a göre şu anki PHP sürümü
-- 0 ile 100 arasında bir hazırlık puanı ve her düzeltme türüne düşen sorun sayısı
+- 0 ile 100 arasında bir hazırlık puanı ve her düzeltme türüne düşen sorun sayısı; puan kalan işin bir tahminidir, uygulamanın çalışacağının garantisi değildir
+- puanın yanında hâlâ önünüzde duranlar: geçişi engelleyen sorunlar, taramanın kapsayamadığı dosyalar, engel çıkaran ya da doğrulanamayan bağımlılıklar ve hedef sürümde lint ya da testin çalışıp çalışmadığı. Başlık ancak bunların hepsi temizse projenin hazır olduğunu söyler
 - bulguların kaçının **Kritik** (kod çalışmaz), **Eskimiş** (şimdilik uyarı verir, ileride kaldırılır) ya da **Riskli** (çalışırken farklı davranabilir) olduğu
 - en sık görülen sorunlar ve atmanız gereken sonraki adımlar
 
@@ -99,8 +100,8 @@ Ferry, hangi PHP'nin gerçekten çalışacağını belirleyen ve kodun çevresin
 
 - **Uyumluluk** yalnızca yeni sürümde çalışmak için gerekenleri değiştirir. Başlamak için en doğru yer burasıdır.
 - **Modernleştirme** hedef sürümün yeni yazımlarını da benimser.
-- İstediğiniz dosyaları seçip **Uygula**'ya basın. **Gözden geçir** olarak işaretlenen dosyalarda önce kontrol etmeniz için bir not bulunur.
-- **Seçimi daralt** yalnızca otomatik düzeltmeleri ya da belirli bir Rector kuralının değiştirdiği dosyaları seçer; böylece her seferinde tek tür değişikliği uygulayıp commit edebilirsiniz.
+- İstediğiniz dosyaları seçip **Uygula**'ya basın. Otomatik dosyalar seçili gelir; **Gözden geçir** olarak işaretlenen dosyalar seçilmemiş gelir ve önce kontrol etmeniz için bir not taşır. Açmadığınız dosyalarda **Bakılmadı** yazar; onay penceresi kaç otomatik ve kaç gözden geçirilecek dosya uyguladığınızı ve farkına bakmadığınız dosya olup olmadığını söyler.
+- **Seçimi daralt** yalnızca otomatik düzeltmeleri ya da belirli bir Rector kuralının değiştirdiği dosyaları seçer; böylece her seferinde tek tür değişikliği uygulayıp commit edebilirsiniz. Seçim dosya bazlıdır: seçilen dosyalardaki diğer değişiklikler de uygulanır.
 - Git projelerinde onay penceresi, seçilen dosyalardan commit edilmemiş değişikliği olanları listeler ve uygulanan kuralları sayan, kopyalamaya hazır bir commit mesajı önerir.
 - Uyguladıktan sonra Ferry değişen dosyaları `php -l` ile kontrol eder; bir değişiklik dosyayı ayrıştırılamaz hâle getirdiyse sizi uyarır, böylece **Geçmiş**'ten hemen geri alabilirsiniz.
 

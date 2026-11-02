@@ -2794,8 +2794,6 @@ select.input {
 
 .target__note {
   flex-basis: 100%;
-  display: flex;
-  gap: var(--space-2);
   margin: 0;
   padding-top: var(--space-4);
   border-top: 1px solid var(--border);
@@ -2804,9 +2802,43 @@ select.input {
   line-height: var(--lh-sm);
 }
 
+.target__note summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+  list-style: none;
+}
+
+.target__note summary::-webkit-details-marker {
+  display: none;
+}
+
 .target__note svg {
   flex: none;
-  margin-top: 2px;
+}
+
+.target__why {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.target__note p {
+  margin: var(--space-2) 0 0 calc(14px + var(--space-2));
+}
+
+.target--compact {
+  padding-top: var(--space-4);
+  padding-bottom: var(--space-4);
+}
+
+.target--compact .target__text h2 {
+  font-size: var(--text-md);
+}
+
+.target--compact .target__note {
+  padding-top: var(--space-3);
 }
 
 .tool-warning {
@@ -2969,4 +3001,81 @@ select.input {
 
 .findings-empty__actions .btn {
   margin-top: 0;
+}
+
+.change-item__unseen {
+  color: var(--risk-manual-fg);
+  font-size: var(--text-xs);
+}
+
+.score__ring {
+  display: flex;
+}
+
+.score__note {
+  margin-top: var(--space-3);
+  color: var(--text-3);
+  font-size: var(--text-xs);
+  line-height: var(--lh-sm);
+  max-width: 460px;
+}
+
+.readiness {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-1) var(--space-4);
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-sm);
+}
+
+.readiness li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: var(--space-2);
+}
+
+.readiness li > svg {
+  grid-row: span 2;
+}
+
+.readiness li[data-state="ok"] > svg {
+  color: var(--risk-auto-fg);
+}
+
+.readiness li[data-state="warn"] > svg {
+  color: var(--risk-manual-fg);
+}
+
+.readiness li[data-state="bad"] > svg {
+  color: var(--danger-fg);
+}
+
+.readiness__label {
+  color: var(--text-3);
+  font-size: var(--text-xs);
+}
+
+.readiness__value {
+  justify-self: start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-weight: 500;
+  text-align: left;
+}
+
+button.readiness__value {
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: var(--border);
+  text-underline-offset: 3px;
+}
+
+button.readiness__value:hover {
+  text-decoration-color: currentColor;
 }
