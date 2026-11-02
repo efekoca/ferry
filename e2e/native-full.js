@@ -203,10 +203,15 @@
       await until(() => seen.slice(before).includes("Geri yüklendi"), "restored toast", 30000);
       await until(() => !$('[role="dialog"]'), "restore dialog closed");
 
-      emit("  deleting snapshot");
-      (await until(() => $('tbody tr button[aria-label="Yedeği sil"]'), "delete button")).click();
-      emit("  confirming delete");
-      await click("Sil", await dialog());
+      await until(() => $$("tbody tr").some((r) => r.innerText.includes("Geri yükleme öncesi")), "edited file kept in a backup");
+
+      for (let n = $$("tbody tr").length; n > 0; n--) {
+        emit("  deleting snapshot");
+        (await until(() => $('tbody tr button[aria-label="Yedeği sil"]'), "delete button")).click();
+        emit("  confirming delete");
+        await click("Sil", await dialog());
+        await until(() => $$("tbody tr").length < n, "snapshot deleted");
+      }
       emit("  waiting for empty history");
       await until(() => text().includes("Henüz bir değişiklik uygulanmadı"), "history empty after delete");
     },

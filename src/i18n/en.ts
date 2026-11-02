@@ -106,11 +106,13 @@ export const en: Dict = {
     scanMeta: (files, lines, duration) => `${files} files · ${lines} lines · ${duration}`,
     headline: {
       ready: "Ready for the target version",
+      incomplete: "The scan is incomplete",
       small: "A few small fixes to go",
       medium: "Some work ahead",
       large: "A substantial migration",
     },
     clean: "No incompatible code found. Do take a look at the dependencies.",
+    cleanPartial: "No incompatible code in the files that could be scanned, but some files couldn't be scanned.",
     summary: (total, files, fixable) => `${total} issues in ${files} files, ${fixable} can be fixed automatically.`,
     metrics: {
       breakingHint: "Won't run on the new version",

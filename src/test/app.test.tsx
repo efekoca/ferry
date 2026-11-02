@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import App from "../App";
 import { mockApi } from "../lib/mock";
+import type { SnapshotConflict } from "../lib/types";
 
 function setup() {
   const user = userEvent.setup();
@@ -519,8 +520,8 @@ describe("Ferry app", () => {
   it("warns before restoring files edited after the apply", async () => {
     const user = userEvent.setup();
     const api = mockApi({ delay: 0 });
-    api.snapshotConflicts = async () => ["includes/helpers.php"];
-    const restored: string[][] = [];
+    api.snapshotConflicts = async () => [{ file: "includes/helpers.php", hash: "00ab" }];
+    const restored: SnapshotConflict[][] = [];
     const real = api.restoreSnapshot;
     api.restoreSnapshot = (path, id, acknowledged) => {
       restored.push(acknowledged);
@@ -536,7 +537,7 @@ describe("Ferry app", () => {
     expect(within(dialog).getByText("includes/helpers.php")).toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "Geri yükle" }));
     expect(await screen.findByText("Geri yüklendi")).toBeInTheDocument();
-    expect(restored).toEqual([["includes/helpers.php"]]);
+    expect(restored).toEqual([[{ file: "includes/helpers.php", hash: "00ab" }]]);
   });
 
   it("closes the restore dialog without waiting for the rescan", async () => {

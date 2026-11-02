@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { errorMessage, getApi, type Api } from "./api";
 import type {
+  SnapshotConflict,
   DependencyReport,
   Framework,
   ProjectInfo,
@@ -119,7 +120,7 @@ interface AppStore {
 
   snapshots: Snapshot[];
   refreshSnapshots(): Promise<void>;
-  restoreSnapshot(id: string, acknowledged: string[]): Promise<void>;
+  restoreSnapshot(id: string, acknowledged: SnapshotConflict[]): Promise<void>;
   deleteSnapshot(id: string): Promise<void>;
   deleteAllSnapshots(): Promise<void>;
 
@@ -407,7 +408,7 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
   );
 
   const restoreSnapshot = useCallback(
-    async (id: string, acknowledged: string[]) => {
+    async (id: string, acknowledged: SnapshotConflict[]) => {
       if (!api || !project) return;
       try {
         const root = project.root;

@@ -106,11 +106,13 @@ export const tr = {
     scanMeta: (files: string, lines: string, duration: string) => `${files} dosya · ${lines} satır · ${duration}`,
     headline: {
       ready: "Hedef sürüme hazır",
+      incomplete: "Tarama eksik kaldı",
       small: "Birkaç küçük düzeltme kaldı",
       medium: "Biraz iş var",
       large: "Ciddi bir geçiş gerekiyor",
     },
     clean: "Uyumsuz bir kullanım bulunmadı. Yine de bağımlılıklara bir göz atın.",
+    cleanPartial: "Taranabilen dosyalarda uyumsuz bir kullanım bulunmadı, ancak bazı dosyalar taranamadı.",
     summary: (total: number, files: number, fixable: number) =>
       `${files} dosyada ${total} sorun var, ${fixable} tanesi otomatik düzeltilebilir.`,
     metrics: {

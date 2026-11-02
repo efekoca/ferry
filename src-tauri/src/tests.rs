@@ -203,7 +203,8 @@ fn snapshot_changes_fall_back_to_a_fresh_diff() {
     assert_eq!(changes[0]["rules"], json!([]));
     assert_eq!(changes[0]["diff"]["additions"], 1);
     assert!(h.invoke("snapshot_changes", json!({ "path": h.root, "id": "nope" })).is_err());
-    assert_eq!(h.ok("snapshot_conflicts", json!({ "path": h.root, "id": snap.id })), json!([]));
+    let conflicts = h.ok("snapshot_conflicts", json!({ "path": h.root, "id": snap.id }));
+    assert_eq!(conflicts[0]["file"], "src/Greeter.php", "without an apply record every edited file needs a confirmation");
 }
 
 #[test]
@@ -256,7 +257,7 @@ fn rector_preview_apply_restore_over_ipc() {
     assert!(!history[0]["rules"].as_array().unwrap().is_empty());
     assert_eq!(h.ok("snapshot_conflicts", json!({ "path": root, "id": snap_id })), json!([]));
     std::fs::write(&greeter_path, format!("{changed}// edited after apply\n")).unwrap();
-    assert_eq!(h.ok("snapshot_conflicts", json!({ "path": root, "id": snap_id })), json!(["src/Greeter.php"]));
+    assert_eq!(h.ok("snapshot_conflicts", json!({ "path": root, "id": snap_id }))[0]["file"], "src/Greeter.php");
     std::fs::write(&greeter_path, &changed).unwrap();
 
     assert!(h.invoke("apply_changes", json!({ "path": root, "previewId": id, "files": ["src/Greeter.php"], "label": "x" })).is_err());
@@ -281,13 +282,116 @@ fn restore_refuses_files_edited_after_the_confirmation() {
     let written = json!({ "src/Greeter.php": fnv1a(applied.as_bytes()) }).to_string();
     store.write_attachment(&root, &snap.id, WRITTEN_FILE, written.as_bytes()).unwrap();
 
-    std::fs::write(&file, format!("{applied}// edited later\n")).unwrap();
+    let first = format!("{applied}// edited later\n");
+    std::fs::write(&file, &first).unwrap();
     let err = h.invoke("restore_snapshot", json!({ "path": h.root, "id": snap.id })).unwrap_err();
     assert!(err.as_str().unwrap().contains("src/Greeter.php"), "{err}");
     assert!(std::fs::read_to_string(&file).unwrap().ends_with("// edited later\n"));
 
-    h.ok("restore_snapshot", json!({ "path": h.root, "id": snap.id, "acknowledged": ["src/Greeter.php"] }));
+    let reviewed = h.ok("snapshot_conflicts", json!({ "path": h.root, "id": snap.id }));
+    assert_eq!(reviewed, json!([{ "file": "src/Greeter.php", "hash": content_hash(first.as_bytes()) }]));
+    let second = format!("{first}// edited after the review\n");
+    std::fs::write(&file, &second).unwrap();
+    let err = h.invoke("restore_snapshot", json!({ "path": h.root, "id": snap.id, "acknowledged": reviewed })).unwrap_err();
+    assert!(err.as_str().unwrap().contains("onaydan sonra"), "{err}");
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), second);
+
+    let reviewed = h.ok("snapshot_conflicts", json!({ "path": h.root, "id": snap.id }));
+    h.ok("restore_snapshot", json!({ "path": h.root, "id": snap.id, "acknowledged": reviewed }));
     assert_eq!(std::fs::read_to_string(&file).unwrap(), original);
+
+    let kept = h.ok("list_snapshots", json!({ "path": h.root }));
+    assert_eq!(kept[0]["label"], "Geri yükleme öncesi · eski", "the overwritten edits stay recoverable");
+    let kept_id = kept[0]["id"].as_str().unwrap();
+    assert_eq!(h.ok("snapshot_conflicts", json!({ "path": h.root, "id": kept_id })), json!([]));
+    h.ok("restore_snapshot", json!({ "path": h.root, "id": kept_id }));
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), second);
+}
+
+#[cfg(unix)]
+fn stage_preview(h: &Harness, files: &[(&str, &str)]) -> u64 {
+    let root = PathBuf::from(normalize_path(h.root.clone()));
+    let changes = files
+        .iter()
+        .map(|(file, after)| {
+            let before = std::fs::read_to_string(root.join(file)).unwrap();
+            FileChange {
+                file: file.to_string(),
+                rules: Vec::new(),
+                fix: FixKind::Auto,
+                diff: diff::compute(&before, after, 3),
+                original_hash: fnv1a(before.as_bytes()),
+                new_content: after.to_string(),
+            }
+        })
+        .collect();
+    let preview = RectorPreview { target: "8.4".parse().unwrap(), mode: RectorMode::Compat, changes, errors: Vec::new(), duration_ms: 0 };
+    h._app.state::<AppState>().previews.lock().unwrap().insert(normalize_path(h.root.clone()), (7, preview));
+    7
+}
+
+#[cfg(unix)]
+#[test]
+fn a_failed_apply_puts_every_touched_file_back() {
+    use std::os::unix::fs::PermissionsExt;
+    let h = harness();
+    let root = PathBuf::from(normalize_path(h.root.clone()));
+    let greeter = std::fs::read_to_string(root.join("src/Greeter.php")).unwrap();
+    std::fs::create_dir(root.join("locked")).unwrap();
+    std::fs::write(root.join("locked/b.php"), "<?php // b\n").unwrap();
+    let id = stage_preview(&h, &[("src/Greeter.php", "<?php // changed\n"), ("locked/b.php", "<?php // B\n")]);
+    std::fs::set_permissions(root.join("locked"), std::fs::Permissions::from_mode(0o555)).unwrap();
+    let result =
+        h.invoke("apply_changes", json!({ "path": h.root, "previewId": id, "files": ["src/Greeter.php", "locked/b.php"], "label": "x" }));
+    std::fs::set_permissions(root.join("locked"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(result.is_err());
+    assert_eq!(std::fs::read_to_string(root.join("src/Greeter.php")).unwrap(), greeter);
+    assert_eq!(std::fs::read_to_string(root.join("locked/b.php")).unwrap(), "<?php // b\n");
+    assert_eq!(h.ok("list_snapshots", json!({ "path": h.root })), json!([]));
+}
+
+#[cfg(unix)]
+#[test]
+fn apply_refuses_hard_links_and_linked_folders() {
+    let _lang = turkish();
+    let h = harness();
+    let root = PathBuf::from(normalize_path(h.root.clone()));
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::hard_link(root.join("src/Greeter.php"), outside.path().join("alias.php")).unwrap();
+    let before = std::fs::read_to_string(root.join("src/Greeter.php")).unwrap();
+    let id = stage_preview(&h, &[("src/Greeter.php", "<?php // changed\n")]);
+    let err =
+        h.invoke("apply_changes", json!({ "path": h.root, "previewId": id, "files": ["src/Greeter.php"], "label": "x" })).unwrap_err();
+    assert!(err.as_str().unwrap().contains("hard link"), "{err}");
+    assert_eq!(std::fs::read_to_string(outside.path().join("alias.php")).unwrap(), before);
+    assert_eq!(h.ok("list_snapshots", json!({ "path": h.root })), json!([]));
+
+    std::fs::remove_file(outside.path().join("alias.php")).unwrap();
+    let id = stage_preview(&h, &[("src/Greeter.php", "<?php // changed\n")]);
+    std::fs::rename(root.join("src"), outside.path().join("src")).unwrap();
+    std::os::unix::fs::symlink(outside.path().join("src"), root.join("src")).unwrap();
+    let err =
+        h.invoke("apply_changes", json!({ "path": h.root, "previewId": id, "files": ["src/Greeter.php"], "label": "x" })).unwrap_err();
+    assert!(err.as_str().unwrap().contains("sembolik"), "{err}");
+    assert_eq!(std::fs::read_to_string(outside.path().join("src/Greeter.php")).unwrap(), before);
+}
+
+#[test]
+fn restore_stops_on_an_unreadable_apply_record() {
+    let _lang = turkish();
+    let h = harness();
+    let root = PathBuf::from(normalize_path(h.root.clone()));
+    let store = h._app.state::<AppState>().snapshots();
+    let file = root.join("src/Greeter.php");
+    let original = std::fs::read_to_string(&file).unwrap();
+    let snap = store.create(&root, &["src/Greeter.php".into()], "eski").unwrap();
+    std::fs::write(&file, "changed").unwrap();
+    store.write_attachment(&root, &snap.id, WRITTEN_FILE, b"{broken").unwrap();
+    let err = h.invoke("snapshot_conflicts", json!({ "path": h.root, "id": snap.id })).unwrap_err();
+    assert!(err.as_str().unwrap().contains("okunamadı"), "{err}");
+    assert!(h.invoke("restore_snapshot", json!({ "path": h.root, "id": snap.id })).is_err());
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "changed");
+    std::fs::write(&file, original).unwrap();
 }
 
 #[test]

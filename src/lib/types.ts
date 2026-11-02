@@ -84,6 +84,7 @@ export interface TargetSummary {
 
 export interface ScanResult {
   target: string;
+  filesFound: number;
   filesScanned: number;
   linesScanned: number;
   findings: Finding[];
@@ -248,6 +249,11 @@ export interface Snapshot {
   projectRoot: string;
   label: string;
   files: { path: string; existed: boolean }[];
+}
+
+export interface SnapshotConflict {
+  file: string;
+  hash: string | null;
 }
 
 export interface ApplyResult {

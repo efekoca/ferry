@@ -322,11 +322,19 @@ impl Staging {
         let _ = std::fs::remove_dir_all(&dir);
         let mut files = Vec::new();
         let mut scope = std::collections::HashSet::new();
+        let mut constants = std::collections::HashSet::new();
+        let mut candidates = Vec::new();
         for path in crate::project::collect_php_files(root, excluded_dirs) {
             scope.insert(crate::analyzer::relative_path(root, &path));
             let Ok(bytes) = std::fs::read(&path) else { continue };
-            let Ok(text) = std::str::from_utf8(&bytes) else { continue };
-            let Some((fixed, applied)) = crate::analyzer::fix_legacy_syntax(text) else {
+            let Ok(text) = String::from_utf8(bytes) else { continue };
+            constants.extend(crate::analyzer::constant_names(&text));
+            if crate::analyzer::fix_legacy_syntax(&text).is_some() {
+                candidates.push((path, text));
+            }
+        }
+        for (path, text) in candidates {
+            let Some((fixed, applied)) = crate::analyzer::fix_legacy_syntax_with(&text, &constants) else {
                 continue;
             };
             let rel = crate::analyzer::relative_path(root, &path);
@@ -335,7 +343,7 @@ impl Staging {
                 std::fs::create_dir_all(parent).map_err(|e| RectorError::Io(parent.display().to_string(), e))?;
             }
             std::fs::write(&dest, &fixed).map_err(|e| RectorError::Io(dest.display().to_string(), e))?;
-            files.push(StagedFile { rel, fixed, original: text.to_string(), rules: applied.into_iter().map(describe_rule).collect() });
+            files.push(StagedFile { rel, fixed, original: text, rules: applied.into_iter().map(describe_rule).collect() });
         }
         Ok(Staging { dir, files, scope: Some(scope) })
     }
@@ -510,7 +518,7 @@ pub fn parse_output(root: &Path, stdout: &str, staging: &Staging) -> Result<(Vec
             diff: diff::compute(&f.original, &f.fixed, 3),
             file: f.rel.clone(),
             rules: f.rules.clone(),
-            fix: FixKind::Auto,
+            fix: f.rules.iter().map(|r| r.fix).max().unwrap_or(FixKind::Auto),
             original_hash: fnv1a(f.original.as_bytes()),
             new_content: f.fixed.clone(),
         });
@@ -573,76 +581,34 @@ pub fn preview(
     Ok(RectorPreview { target, mode, changes, errors, duration_ms: started.elapsed().as_millis() as u64 })
 }
 
-fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    use std::io::Write;
-    let meta = std::fs::symlink_metadata(path).ok();
-    if meta.as_ref().is_some_and(|m| m.file_type().is_symlink()) {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            crate::t!("sembolik bağlantı; hedef dosya elle düzenlenmeli", "it's a symbolic link; edit the target file by hand"),
-        ));
-    }
-    #[cfg(unix)]
-    if meta.as_ref().is_some_and(|m| std::os::unix::fs::MetadataExt::nlink(m) > 1) {
-        let mut file = std::fs::OpenOptions::new().write(true).truncate(true).open(path)?;
-        file.write_all(bytes)?;
-        return file.sync_all();
-    }
-    let dir = path.parent().unwrap_or(Path::new("."));
-    let mut tmp = tempfile::NamedTempFile::new_in(dir)?;
-    tmp.write_all(bytes)?;
-    tmp.as_file().sync_all()?;
-    let readonly = meta.as_ref().is_some_and(|m| m.permissions().readonly());
-    if let Some(meta) = &meta {
-        let mut perms = meta.permissions();
-        #[allow(clippy::permissions_set_readonly_false)]
-        perms.set_readonly(false);
-        let _ = tmp.as_file().set_permissions(perms);
-    }
-    if readonly && cfg!(windows) {
-        set_readonly(path, false)?;
-    }
-    if let Err(e) = tmp.persist(path) {
-        if readonly && cfg!(windows) {
-            let _ = set_readonly(path, true);
-        }
-        return Err(e.error);
-    }
-    if readonly {
-        set_readonly(path, true)?;
-    }
-    Ok(())
-}
-
-fn set_readonly(path: &Path, readonly: bool) -> std::io::Result<()> {
-    let mut perms = std::fs::metadata(path)?.permissions();
-    #[allow(clippy::permissions_set_readonly_false)]
-    perms.set_readonly(readonly);
-    std::fs::set_permissions(path, perms)
-}
-
 pub fn check_fresh(root: &Path, changes: &[&FileChange]) -> Result<(), RectorError> {
     for change in changes {
-        let path = root.join(&change.file);
-        let current = std::fs::read(&path).map_err(|e| RectorError::Io(change.file.clone(), e))?;
-        if fnv1a(&current) != change.original_hash {
-            return Err(RectorError::Stale(change.file.clone()));
-        }
+        fresh_target(root, change)?;
     }
     Ok(())
+}
+
+fn fresh_target(root: &Path, change: &FileChange) -> Result<PathBuf, RectorError> {
+    let io = |e| RectorError::Io(change.file.clone(), e);
+    let path = crate::safefs::resolve(root, &change.file).map_err(io)?;
+    let current = std::fs::read(&path).map_err(io)?;
+    if fnv1a(&current) != change.original_hash {
+        return Err(RectorError::Stale(change.file.clone()));
+    }
+    Ok(path)
 }
 
 pub fn write_changes(root: &Path, changes: &[&FileChange], written: &mut Vec<String>) -> Result<(), RectorError> {
+    check_fresh(root, changes)?;
     for change in changes {
-        let path = root.join(&change.file);
-        write_atomic(&path, change.new_content.as_bytes()).map_err(|e| RectorError::Io(change.file.clone(), e))?;
+        let path = fresh_target(root, change)?;
         written.push(change.file.clone());
+        crate::safefs::replace(&path, change.new_content.as_bytes()).map_err(|e| RectorError::Io(change.file.clone(), e))?;
     }
     Ok(())
 }
 
 pub fn apply(root: &Path, changes: &[&FileChange]) -> Result<Vec<String>, RectorError> {
-    check_fresh(root, changes)?;
     let mut written = Vec::new();
     write_changes(root, changes, &mut written)?;
     Ok(written)
@@ -651,6 +617,63 @@ pub fn apply(root: &Path, changes: &[&FileChange]) -> Result<Vec<String>, Rector
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    fn change(file: &str, before: &str, after: &str) -> FileChange {
+        FileChange {
+            file: file.into(),
+            rules: Vec::new(),
+            fix: FixKind::Auto,
+            diff: diff::compute(before, after, 3),
+            original_hash: fnv1a(before.as_bytes()),
+            new_content: after.into(),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn writes_never_leave_the_project_or_touch_other_names() {
+        let project = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let root = project.path();
+        std::fs::create_dir(root.join("real")).unwrap();
+        std::fs::write(root.join("real/a.php"), "old").unwrap();
+        std::fs::write(outside.path().join("a.php"), "old").unwrap();
+        std::os::unix::fs::symlink(outside.path(), root.join("src")).unwrap();
+        let mut written = Vec::new();
+        assert!(write_changes(root, &[&change("src/a.php", "old", "new")], &mut written).is_err());
+        assert!(written.is_empty());
+        assert_eq!(std::fs::read_to_string(outside.path().join("a.php")).unwrap(), "old");
+
+        std::fs::hard_link(root.join("real/a.php"), root.join("b.php")).unwrap();
+        let ok = change("c.php", "", "x");
+        std::fs::write(root.join("c.php"), "").unwrap();
+        assert!(write_changes(root, &[&ok, &change("real/a.php", "old", "new")], &mut written).is_err());
+        assert!(written.is_empty(), "every file is checked before the first write");
+        assert_eq!(std::fs::read_to_string(root.join("c.php")).unwrap(), "");
+        assert_eq!(std::fs::read_to_string(root.join("b.php")).unwrap(), "old");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_write_is_listed_for_rollback() {
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path();
+        std::fs::write(root.join("a.php"), "a").unwrap();
+        std::fs::create_dir(root.join("locked")).unwrap();
+        std::fs::write(root.join("locked/b.php"), "b").unwrap();
+        let mut perms = std::fs::metadata(root.join("locked")).unwrap().permissions();
+        std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o555);
+        std::fs::set_permissions(root.join("locked"), perms).unwrap();
+        let mut written = Vec::new();
+        let result = write_changes(root, &[&change("a.php", "a", "A"), &change("locked/b.php", "b", "B")], &mut written);
+        let mut perms = std::fs::metadata(root.join("locked")).unwrap().permissions();
+        std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
+        std::fs::set_permissions(root.join("locked"), perms).unwrap();
+        assert!(result.is_err());
+        assert_eq!(written, ["a.php", "locked/b.php"]);
+        assert_eq!(std::fs::read_to_string(root.join("locked/b.php")).unwrap(), "b");
+    }
 
     #[test]
     fn edits_made_while_rector_runs_make_the_change_stale() {
@@ -771,6 +794,20 @@ mod tests {
     }
 
     #[test]
+    fn constants_defined_in_other_files_stay_constants() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("config.php"), "<?php define('active', 'actual-key'); const other_key = 1;").unwrap();
+        std::fs::write(root.join("a.php"), "<?php\nrequire 'config.php';\necho $a[active] . $a[other_key] . $a[missing];\n").unwrap();
+        let staging = Staging::prepare(root, &[], root.join(".ferry-staged")).unwrap();
+        let (changes, errors) = parse_output(root, r#"{"file_diffs": []}"#, &staging).unwrap();
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].new_content, "<?php\nrequire 'config.php';\necho $a[active] . $a[other_key] . $a['missing'];\n");
+        assert_eq!(changes[0].fix, FixKind::Likely, "a staged-only file keeps its riskiest rule");
+    }
+
+    #[test]
     fn a_staged_file_reported_twice_yields_one_change() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
@@ -800,36 +837,6 @@ mod tests {
         };
         let cfg = build_config(root, PhpVersion::new(8, 4), RectorMode::Compat, &[], &staging, Path::new("/c"));
         assert!(cfg.contains("'C:/Users/me/[[]old] site/src/a[[]1].php'"), "{cfg}");
-    }
-
-    #[test]
-    fn writes_keep_read_only_files_read_only() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("a.php");
-        std::fs::write(&path, "old").unwrap();
-        set_readonly(&path, true).unwrap();
-        write_atomic(&path, b"new").unwrap();
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "new");
-        assert!(std::fs::metadata(&path).unwrap().permissions().readonly());
-        set_readonly(&path, false).unwrap();
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn writes_refuse_symlinks_and_keep_hard_links() {
-        let dir = tempfile::tempdir().unwrap();
-        let target = dir.path().join("target.php");
-        std::fs::write(&target, "old").unwrap();
-        let link = dir.path().join("link.php");
-        std::os::unix::fs::symlink(&target, &link).unwrap();
-        assert!(write_atomic(&link, b"new").is_err());
-        assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
-        assert_eq!(std::fs::read_to_string(&target).unwrap(), "old");
-
-        let hard = dir.path().join("hard.php");
-        std::fs::hard_link(&target, &hard).unwrap();
-        write_atomic(&hard, b"new").unwrap();
-        assert_eq!(std::fs::read_to_string(&target).unwrap(), "new");
     }
 
     #[cfg(unix)]

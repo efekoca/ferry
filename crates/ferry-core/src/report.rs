@@ -111,10 +111,30 @@ pub fn to_markdown(project: &ProjectInfo, scan: &ScanResult, deps: Option<&Depen
     }
     md.push('\n');
 
-    if scan.findings.is_empty() {
+    if !scan.errors.is_empty() {
+        md.push_str(&format!(
+            "## {}\n\n{}\n\n",
+            l(Text::new("Taranamayan dosyalar", "Files not scanned")),
+            l(Text::new(
+                "Bu dosyalar analiz edilemedi; sonuçlar onları kapsamıyor.",
+                "These files couldn't be analysed, so the results don't cover them."
+            ))
+        ));
+        for e in &scan.errors {
+            md.push_str(&format!("- `{}`: {}\n", md_escape(&e.file), md_escape(&e.message)));
+        }
+        md.push('\n');
+    }
+
+    if scan.findings.is_empty() && scan.errors.is_empty() {
         md.push_str(l(Text::new(
             "Hedef sürümle uyumsuz bir şey bulunmadı.\n\n",
             "Nothing incompatible with the target version was found.\n\n",
+        )));
+    } else if scan.findings.is_empty() {
+        md.push_str(l(Text::new(
+            "Taranabilen dosyalarda hedef sürümle uyumsuz bir şey bulunmadı.\n\n",
+            "Nothing incompatible with the target version was found in the files that could be scanned.\n\n",
         )));
     } else {
         md.push_str(&format!("## {}\n\n", l(Text::new("Bulgular", "Findings"))));
@@ -217,6 +237,7 @@ mod tests {
         };
         let scan = ScanResult {
             target: "8.4".parse().unwrap(),
+            files_found: 1,
             files_scanned: 1,
             lines_scanned: 1,
             findings: findings("<?php each($a);"),
@@ -229,5 +250,17 @@ mod tests {
         let md = to_markdown(&project, &scan, None, Lang::En);
         assert!(md.starts_with("# Ferry report: demo"));
         assert!(md.contains("| Breaking | Review | foreach or key()/current()/next() |"));
+
+        let partial = ScanResult {
+            files_scanned: 0,
+            findings: vec![],
+            errors: vec![crate::analyzer::FileError { file: "big.php".into(), message: "too large".into() }],
+            ..scan
+        };
+        let md = to_markdown(&project, &partial, None, Lang::En);
+        assert!(md.contains("## Files not scanned") && md.contains("- `big.php`: too large"), "{md}");
+        assert!(
+            md.contains("in the files that could be scanned") && !md.contains("Nothing incompatible with the target version was found.\n")
+        );
     }
 }
