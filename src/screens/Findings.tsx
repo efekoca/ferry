@@ -56,6 +56,7 @@ export function Findings() {
 
   const ignoredList = useMemo(() => scan?.ignored ?? [], [scan]);
   const reasons = useMemo(() => new Map(ignoredList.map((i) => [i.finding.id, i.reason])), [ignoredList]);
+  const inlineIgnores = useMemo(() => new Set(ignoredList.filter((i) => i.inline).map((i) => i.finding.id)), [ignoredList]);
   const viewingIgnored = showIgnored && ignoredList.length > 0;
   const findings = useMemo(
     () => (viewingIgnored ? ignoredList.map((i) => i.finding) : scan?.findings ?? []),
@@ -362,7 +363,8 @@ export function Findings() {
 
                 {selectedReason !== undefined ? (
                   <Callout tone="info" icon={<EyeOff size={15} />}>
-                    <strong>{t.findings.ignoredReason}:</strong> <span className="selectable">{selectedReason}</span>
+                    <strong>{t.findings.ignoredReason}:</strong> <span className="selectable">{selectedReason || "—"}</span>
+                    {inlineIgnores.has(selected.id) && <div>{t.findings.inlineIgnore}</div>}
                   </Callout>
                 ) : (
                   <Callout tone={FIX_TONE[selected.fix]} icon={FIX_ICON[selected.fix]}>
@@ -397,7 +399,7 @@ export function Findings() {
                     <Button variant="ghost" icon={<EyeOff size={13} />} onClick={() => setIgnoring({ id: selected.id, reason: "" })}>
                       {t.findings.ignore}
                     </Button>
-                  ) : (
+                  ) : inlineIgnores.has(selected.id) ? null : (
                     <Button variant="ghost" icon={<Undo2 size={13} />} onClick={() => void unignoreFinding(selected.id)}>
                       {t.findings.unignore}
                     </Button>
