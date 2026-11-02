@@ -305,6 +305,8 @@ To run the tests against real Rector, point `FERRY_TEST_TOOLS` to a folder where
 
 `scripts/fetch-corpus.sh` downloads old releases of WordPress, Drupal, CodeIgniter, phpBB, Joomla, Magento, PrestaShop and Laravel, and `CORPUS=<folder> CORPUS_PHP=$(which php) cargo test -p ferry-core --test corpus -- --ignored --nocapture` compares the scanner with what that PHP itself reports for them.
 
+`crates/ferry-core/src/symbols.rs` is generated from PHP itself: `scripts/php-symbols/dump.sh <folder>` builds a Docker image per PHP version from 7.0 to 8.5 with the same extensions and dumps every built-in function, class, method and constant with reflection, and `node scripts/php-symbols/generate.mjs <folder> > crates/ferry-core/src/symbols.rs` lists what each version removed or deprecated. `scripts/php-symbols/verify.php` checks the table against a PHP, and the `symbols` test fails if the scanner misses any of them. When a new PHP version comes out, add it to `dump.sh` and regenerate.
+
 `scripts/runtime-benchmark.sh <project> <test-dir> [target]` runs a project's PHPUnit tests in Docker on the target PHP and merges the deprecations they report with the static scan; the latest results are in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 `pnpm e2e:native` drives a debug build of the real app through the demo projects and edge cases such as a Unicode path, a symlink loop and an empty project, and reports each scenario.

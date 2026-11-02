@@ -143,6 +143,10 @@ impl ProjectIndex {
         index
     }
 
+    pub(crate) fn declares_type(&self, short: &str) -> bool {
+        self.types.contains_key(short) || self.interfaces.contains_key(short)
+    }
+
     pub fn defines_constant(&self, name: &str) -> bool {
         self.constants.contains(name)
     }
