@@ -13,6 +13,8 @@ const syntax = spawnSync(process.execPath, ["--check", script], { stdio: "inheri
 if (syntax.status !== 0) process.exit(1);
 
 const work = mkdtempSync(join(tmpdir(), "ferry-e2e-"));
+const bundled = join(work, "e2e.js");
+writeFileSync(bundled, `${readFileSync(join(root, "node_modules", "axe-core", "axe.min.js"), "utf8")}\n${readFileSync(script, "utf8")}`);
 const demo = join(work, "demo");
 const fixtures = join(work, "fixtures");
 cpSync(join(root, "demo"), demo, { recursive: true });
@@ -77,7 +79,7 @@ const app = spawn(exe, [], {
   cwd: root,
   env: {
     ...process.env,
-    FERRY_E2E: script,
+    FERRY_E2E: bundled,
     FERRY_E2E_ROOT: JSON.stringify({ demo, fixtures }),
     FERRY_DATA_DIR: join(work, "data"),
     FERRY_TOOLS_DIR: tools,

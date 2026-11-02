@@ -141,7 +141,7 @@ Ferry her uygulamadan önce değiştireceği dosyaları yedekler. **Geçmiş** s
 - **Açık ve koyu** tema ya da sistemin teması.
 - Proje klasörünü pencereye **sürükleyip bırakın** ya da başlangıç ekranından son projelerinizi yeniden açın.
 - **Klavye kısayolları:** **⌘O** proje açar, **⌘1**–**⌘5** sayfalar arasında geçiş yapar, **⌘,** **Ayarlar**'ı açar, **⌘+** / **⌘−** arayüzü yakınlaştırır ya da uzaklaştırır. Windows ve Linux'ta **⌘** yerine **Ctrl** kullanın.
-- **Erişilebilir:** Her şey klavyeyle yapılabilir, odak her zaman görünür ve arayüz WCAG 2.1 AA kontrast ölçütlerini karşılar. Yüksek yakınlaştırmada paneller alt alta dizilir, kenar çubuğu simgelere iner.
+- **Erişilebilir:** Her şey klavyeyle yapılabilir ve odak her zaman görünür. Testlerde her ekran ve pencere axe ile kontrol edilir, native e2e de gerçek uygulama penceresinde iki temada metin kontrastını WCAG 2.1 AA ölçütüne göre ölçer. Ekran okuyucu davranışı otomatik olarak test edilmez. Yüksek yakınlaştırmada paneller alt alta dizilir, kenar çubuğu simgelere iner.
 
 ### CI için komut satırı
 

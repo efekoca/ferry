@@ -141,7 +141,7 @@ Before every apply, Ferry backs up the files it is about to change. The **Histor
 - **Light and dark** themes, or follow the system.
 - **Drag and drop** a project folder onto the window, or reopen a recent project from the start screen.
 - **Keyboard shortcuts:** **⌘O** opens a project, **⌘1** to **⌘5** switch between pages, **⌘,** opens **Settings**, and **⌘+** / **⌘−** zoom the interface. On Windows and Linux, use **Ctrl** instead of **⌘**.
-- **Accessible:** everything works from the keyboard, focus is always visible, and the interface meets WCAG 2.1 AA contrast. At high zoom levels the layout stacks its panes and narrows the sidebar to icons.
+- **Accessible:** everything works from the keyboard and focus is always visible. Every screen and dialog is checked with axe in the tests, and the native e2e measures WCAG 2.1 AA text contrast in the real app window in both themes. Screen reader behavior isn't tested automatically. At high zoom levels the layout stacks its panes and narrows the sidebar to icons.
 
 ### Command line for CI
 
