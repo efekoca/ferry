@@ -1,3 +1,5 @@
+import type { CheckRun } from "../lib/types";
+
 export const tr = {
   locale: "tr-TR",
   common: {
@@ -222,6 +224,17 @@ export const tr = {
     runtimeSummary: (file: string, events: number, confirmed: number, added: number, outside: number) =>
       `${file}: ${events} farklı mesaj. ${confirmed} bulgu çalışırken doğrulandı, ${added} mesaj statik taramanın bulmadığı yeni bulgu olarak eklendi, ${outside} mesaj proje dışındaki dosyalardan.`,
     clearLog: "Log'u kaldır",
+    checkResult: (c: CheckRun) => {
+      if (c.kind === "lint") {
+        if (c.passed) return `${c.files} dosya lint edildi, sözdizimi hatası yok.`;
+        const parts = [c.failed > 0 && `${c.failed} dosyada sözdizimi hatası var`, c.notRun > 0 && `${c.notRun} dosya kontrol edilemedi`];
+        return `${parts.filter(Boolean).join(", ")}.`;
+      }
+      if (c.timedOut) return "Testler süre sınırında bitmediği için durduruldu; sonuçlar eksik.";
+      if (c.exitCode === null) return "Testler yarıda kesildi; sonuçlar eksik.";
+      return c.passed ? "Testler geçti." : `Testler başarısız oldu (çıkış kodu ${c.exitCode}).`;
+    },
+    showOutput: "Çıktıyı göster",
     lintWith: (v: string) => `PHP ${v} ile lint et`,
     testWith: (v: string) => `Testleri PHP ${v} ile çalıştır`,
     testTitle: "Projenin testleri çalıştırılsın mı?",
@@ -454,6 +467,7 @@ export const tr = {
     applyFailed: "Değişiklikler uygulanamadı",
     appliedWithErrors: (n: number, broken: number) => `${n} dosya güncellendi, ${broken} dosyada yeni sözdizimi hatası var`,
     lintFailedText: "php -l bu hataları değişiklikten sonra buldu. Geçmiş'ten önceki hâllerine dönebilirsiniz.",
+    lintSkippedText: "Sözdizimi kontrol edilemedi: Bu bilgisayarda hedef sürümde ya da daha yeni bir PHP bulunamadı.",
     restored: "Geri yüklendi",
     restoredText: (n: number) => `${n} dosya eski hâline döndü.`,
     restoreFailed: "Geri yüklenemedi",
