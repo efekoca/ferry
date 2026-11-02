@@ -3,6 +3,7 @@ import { CircleAlert, CircleCheck, CircleStop, Download, GitBranch, GitCompareAr
 import { DiffViewer } from "../components/DiffViewer";
 import { ConfirmDialog } from "../components/Modal";
 import { PageHeader } from "../components/Shell";
+import { Splitter } from "../components/Splitter";
 import { Button, Callout, Card, CommandLine, EmptyState, Progress, RiskBadge, RuleChips, Segmented } from "../components/ui";
 import { useI18n } from "../i18n";
 import { useStore } from "../lib/store";
@@ -305,6 +306,7 @@ export function Changes() {
           </div>
         </aside>
 
+        <Splitter id="changes" side="start" label={t.common.resizePanes} />
         <section className="diff-pane" aria-label={t.changes.details}>
           {current ? (
             <>
