@@ -205,16 +205,25 @@ pub const DEFAULT_COLON_FIX: &str = "Ferry\\Php85\\DefaultColonAfterSwitch";
 pub const BUILTIN_BY_REF_FIX: &str = "Ferry\\Php70\\AssignBuiltinResultWithoutReference";
 
 pub fn fix_legacy_syntax(src: &str) -> Option<(String, Vec<&'static str>)> {
+    fix_legacy_syntax_with(src, &std::collections::HashSet::new())
+}
+
+pub fn constant_names(src: &str) -> std::collections::HashSet<String> {
+    defined_constants(&tokenize(src))
+}
+
+pub fn fix_legacy_syntax_with(src: &str, project_constants: &std::collections::HashSet<String>) -> Option<(String, Vec<&'static str>)> {
     let tokens = tokenize(src);
     let mut edits: Vec<(usize, usize, &str)> = Vec::new();
     let mut applied = Vec::new();
-    let defined = defined_constants(&tokens);
-    let mut keys = bareword_keys(&tokens);
+    let mut defined = defined_constants(&tokens);
+    defined.extend(project_constants.iter().cloned());
+    let mut keys = bareword_keys(&tokens, |name| defined.contains(name));
     for (_, pairs) in curly_offsets(&tokens) {
         for (open, close) in pairs {
             edits.push((tokens[open].start, tokens[open].end, "["));
             edits.push((tokens[close].start, tokens[close].end, "]"));
-            if close == open + 2 && is_bareword(&tokens[open + 1], &defined) {
+            if close == open + 2 && is_bareword(&tokens[open + 1]) && !defined.contains(&tokens[open + 1].text) {
                 keys.push(open + 1);
             }
         }
@@ -318,7 +327,8 @@ pub fn analyze_source_in(file: &str, src: &str, target: PhpVersion, index: &crat
     for k in php4_constructors(&tokens) {
         ctx.pattern(&patterns::PHP4_CONSTRUCTOR, &tokens[k], None);
     }
-    for k in bareword_keys(&tokens) {
+    let defined = defined_constants(&tokens);
+    for k in bareword_keys(&tokens, |name| defined.contains(name) || index.defines_constant(name)) {
         ctx.pattern(&patterns::BAREWORD_KEY, &tokens[k], None);
     }
     for over in builtin_overrides(&tokens, index) {
@@ -2754,7 +2764,7 @@ fn dynamic_properties(tokens: &[Token], index: &crate::index::ProjectIndex) -> V
     out
 }
 
-fn defined_constants(tokens: &[Token]) -> std::collections::HashSet<String> {
+pub(crate) fn defined_constants(tokens: &[Token]) -> std::collections::HashSet<String> {
     let mut names = std::collections::HashSet::new();
     for (i, t) in tokens.iter().enumerate() {
         if t.is_ident_ci("const") {
@@ -2781,20 +2791,22 @@ fn defined_constants(tokens: &[Token]) -> std::collections::HashSet<String> {
     names
 }
 
-fn is_bareword(t: &Token, defined: &std::collections::HashSet<String>) -> bool {
+fn is_bareword(t: &Token) -> bool {
     t.kind == TokenKind::Ident
         && !t.text.contains('\\')
         && t.text.bytes().any(|b| b.is_ascii_lowercase())
         && !["true", "false", "null"].iter().any(|k| t.is_ident_ci(k))
         && !(t.text.starts_with("__") && t.text.ends_with("__"))
-        && !defined.contains(&t.text)
 }
 
-fn bareword_keys(tokens: &[Token]) -> Vec<usize> {
-    let defined = defined_constants(tokens);
+fn bareword_keys(tokens: &[Token], defined: impl Fn(&str) -> bool) -> Vec<usize> {
     (2..tokens.len().saturating_sub(1))
         .filter(|&i| {
-            tokens[i - 1].is_punct("[") && tokens[i + 1].is_punct("]") && is_bareword(&tokens[i], &defined) && offset_base(tokens, i - 2)
+            tokens[i - 1].is_punct("[")
+                && tokens[i + 1].is_punct("]")
+                && is_bareword(&tokens[i])
+                && !defined(&tokens[i].text)
+                && offset_base(tokens, i - 2)
         })
         .collect()
 }
@@ -2882,6 +2894,21 @@ mod tests {
             ),
             1
         );
+    }
+
+    #[test]
+    fn bareword_keys_respect_constants_from_other_files() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("config.php"), "<?php define('active', 'actual-key');").unwrap();
+        let src = "<?php require 'config.php'; echo $a[active] . $a[missing];";
+        std::fs::write(dir.path().join("a.php"), src).unwrap();
+        let index = crate::index::ProjectIndex::build(dir.path(), &[dir.path().join("config.php"), dir.path().join("a.php")]);
+        let found: Vec<String> = analyze_source_in("a.php", src, PhpVersion::new(8, 4), &index)
+            .into_iter()
+            .filter(|f| f.rule_id == "removed.bareword_key")
+            .map(|f| f.snippet)
+            .collect();
+        assert_eq!(found.len(), 1, "{found:?}");
     }
 
     #[test]
