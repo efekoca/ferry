@@ -65,6 +65,7 @@ describe("labels", () => {
     expect(scoreTone(60)).toBe("manual");
     expect(scoreTone(10)).toBe("danger");
     expect(scoreHeadline(100, 0, tr)).toBe("Hedef sürüme hazır");
+    expect(scoreHeadline(100, 0, tr, true)).toBe("Tarama eksik kaldı");
     expect(scoreHeadline(30, 12, en)).toBe("A substantial migration");
   });
 
