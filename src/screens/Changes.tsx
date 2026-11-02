@@ -6,7 +6,7 @@ import { PageHeader } from "../components/Shell";
 import { Button, Callout, Card, CommandLine, EmptyState, Progress, RiskBadge, RuleChips, Segmented } from "../components/ui";
 import { useI18n } from "../i18n";
 import { useStore } from "../lib/store";
-import type { FileChange, RectorMode, RectorPreview } from "../lib/types";
+import type { FileChange, RectorMode } from "../lib/types";
 
 export function Changes() {
   const { t, loc } = useI18n();
@@ -14,7 +14,7 @@ export function Changes() {
     useStore();
   const [dirty, setDirty] = useState<string[]>([]);
   const [mode, setMode] = useState<RectorMode>(previewMode);
-  const [excluded, setExcluded] = useState<{ preview: RectorPreview | null; files: Set<string> }>({ preview: null, files: new Set() });
+  const [excluded, setExcluded] = useState<{ previewId: number | null; files: Set<string> }>({ previewId: null, files: new Set() });
   const [active, setActive] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [appliedAll, setAppliedAll] = useState(false);
@@ -29,7 +29,7 @@ export function Changes() {
   }, [preview]);
 
   const changes = useMemo(() => preview?.changes ?? [], [preview]);
-  const off = excluded.preview === preview ? excluded.files : null;
+  const off = preview && excluded.previewId === preview.id ? excluded.files : null;
   const selected = useMemo(() => new Set(changes.filter((c) => !off?.has(c.file)).map((c) => c.file)), [changes, off]);
   const current = changes.find((c) => c.file === active) ?? changes[0] ?? null;
   const chosen = useMemo(() => changes.filter((c) => selected.has(c.file)), [changes, selected]);
@@ -37,7 +37,7 @@ export function Changes() {
   const allSelected = changes.length > 0 && chosen.length === changes.length;
 
   const setSelected = (next: Set<string>) =>
-    setExcluded({ preview, files: new Set(changes.filter((c) => !next.has(c.file)).map((c) => c.file)) });
+    setExcluded({ previewId: preview?.id ?? null, files: new Set(changes.filter((c) => !next.has(c.file)).map((c) => c.file)) });
 
   const ruleOptions = useMemo(() => {
     const map = new Map<string, { title: string; files: string[] }>();
