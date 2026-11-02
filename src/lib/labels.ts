@@ -1,5 +1,5 @@
 import type { Dict } from "../i18n";
-import type { DependencyReport, Framework } from "./types";
+import type { DependencyReport, Framework, ScanResult } from "./types";
 
 export const formatNumber = (n: number, locale: string) => new Intl.NumberFormat(locale).format(n);
 
@@ -39,8 +39,35 @@ export function scoreTone(score: number): "auto" | "manual" | "danger" {
   return "danger";
 }
 
-export function scoreHeadline(score: number, total: number, t: Dict, incomplete = false): string {
-  if (total === 0) return incomplete ? t.overview.headline.incomplete : t.overview.headline.ready;
+export interface Readiness {
+  blockers: number;
+  unscanned: number;
+  deps: { state: "blocked" | "unknown" | "verified" | "missing" | "pending"; count: number };
+  check: { state: "passed" | "failed" | "none"; kind: "lint" | "tests" | null };
+}
+
+export function readiness(scan: ScanResult, deps: DependencyReport | null): Readiness {
+  const blocked = dependencyBlockers(deps).total;
+  const unknown = deps ? deps.packages.filter((p) => p.status === "unknown").length + (deps.rootStatus === "unknown" && deps.rootConstraint ? 1 : 0) : 0;
+  const check = scan.runtime?.check;
+  return {
+    blockers: scan.summary.breaking + blocked,
+    unscanned: scan.errors.length,
+    deps: !deps
+      ? { state: "pending", count: 0 }
+      : blocked > 0
+        ? { state: "blocked", count: blocked }
+        : deps.lockUnreadable || !deps.hasLockFile
+          ? { state: "missing", count: 0 }
+          : unknown > 0
+            ? { state: "unknown", count: unknown }
+            : { state: "verified", count: 0 },
+    check: { state: !check ? "none" : check.passed ? "passed" : "failed", kind: check?.kind ?? null },
+  };
+}
+
+export function scoreHeadline(score: number, total: number, t: Dict, incomplete = false, settled = true): string {
+  if (total === 0) return incomplete ? t.overview.headline.incomplete : settled ? t.overview.headline.ready : t.overview.headline.codeClean;
   if (score >= 80) return t.overview.headline.small;
   if (score >= 50) return t.overview.headline.medium;
   return t.overview.headline.large;
