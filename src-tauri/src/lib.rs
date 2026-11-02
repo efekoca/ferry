@@ -935,7 +935,12 @@ async fn snapshot_changes(state: State<'_, AppState>, path: String, id: String) 
 async fn delete_snapshot(state: State<'_, AppState>, path: String, id: String) -> CmdResult<()> {
     let path = normalize_path(path);
     let store = state.snapshots();
-    blocking(move || store.delete(Path::new(&path), &id).map_err(|e| e.to_string())).await
+    let writes = state.writes.clone();
+    blocking(move || {
+        let _guard = writes.lock().unwrap_or_else(|e| e.into_inner());
+        store.delete(Path::new(&path), &id).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
