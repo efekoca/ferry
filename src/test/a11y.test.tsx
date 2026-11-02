@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import axe from "axe-core";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import App from "../App";
 import { mockApi } from "../lib/mock";
 
@@ -61,6 +61,63 @@ describe("accessibility", () => {
     await check("settings");
 
     expect(Object.fromEntries(Object.entries(found).filter(([, v]) => v.length))).toEqual({});
+  });
+
+  it("has no axe violations in dialogs, empty states and the error screen", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    render(<App api={api} />);
+    const found: Record<string, string[]> = {};
+    const check = async (name: string) => {
+      found[name] = await violations();
+    };
+    await user.click(await screen.findByRole("button", { name: "Proje klasörü seçin" }));
+    await user.click(await screen.findByRole("button", { name: /Taramayı başlat/ }));
+    await screen.findByRole("img", { name: /Hazırlık skoru/ });
+    await user.click(nav(/Bulgular/));
+    const detail = await screen.findByRole("complementary", { name: "Bulgu ayrıntısı" });
+    await user.click(within(detail).getByRole("button", { name: "Yok say" }));
+    await screen.findByRole("dialog", { name: "Bu bulgu yok sayılsın mı?" });
+    await check("ignore dialog");
+    await user.keyboard("{Escape}");
+    await user.click(await screen.findByRole("button", { name: /ile çalıştır/ }));
+    await screen.findByRole("dialog", { name: "Projenin testleri çalıştırılsın mı?" });
+    await check("tests dialog");
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "Log içe aktar" }));
+    await screen.findByText(/php_errors.log: 31 farklı mesaj/);
+    await check("runtime notice");
+    await user.type(screen.getByRole("searchbox", { name: "Bulgularda ara" }), "zzzz-none");
+    await screen.findByText("Eşleşen bulgu yok");
+    await check("no matching findings");
+    await user.click(screen.getByRole("button", { name: /Docker karşılaştırması|Canlı test/ }));
+    await check("roadmap");
+    expect(Object.fromEntries(Object.entries(found).filter(([, v]) => v.length))).toEqual({});
+  });
+
+  it("has no axe violations on a clean scan and the error screen", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    const real = api.scanProject;
+    api.scanProject = async (...args) => ({ ...(await real(...args)), findings: [] });
+    render(<App api={api} />);
+    await user.click(await screen.findByRole("button", { name: "Proje klasörü seçin" }));
+    await user.click(await screen.findByRole("button", { name: /Taramayı başlat/ }));
+    await screen.findByRole("img", { name: /Hazırlık skoru/ });
+    await user.click(nav(/Bulgular/));
+    await screen.findByText("Sorun yok");
+    expect(await violations()).toEqual([]);
+
+    api.checkDependencies = async () => {
+      throw new Error("x");
+    };
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    api.compareTargets = async () => [{ target: "8.4", summary: null as never, blockingPackages: 0, rootBlocks: false }];
+    await user.click(nav(/Genel bakış/));
+    await user.click(screen.getByRole("button", { name: "Karşılaştır" }));
+    await screen.findByRole("heading", { name: "Bu ekran gösterilemedi" });
+    expect(await violations()).toEqual([]);
+    spy.mockRestore();
   });
 
   it("moves through findings with the keyboard using a single tab stop", async () => {
