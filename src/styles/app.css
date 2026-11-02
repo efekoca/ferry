@@ -2956,3 +2956,8 @@ select.input {
 .findings-empty__actions .btn {
   margin-top: 0;
 }
+
+.change-item__unseen {
+  color: var(--risk-manual-fg);
+  font-size: var(--text-xs);
+}

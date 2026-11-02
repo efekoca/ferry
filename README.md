@@ -99,8 +99,8 @@ The **Fixes** page runs Rector on your project in dry-run mode. No files change.
 
 - **Compatibility** makes only the changes needed to run on the new version. It is the best place to start.
 - **Modernize** also adopts newer syntax for the target version.
-- Pick the files you want and press **Apply**. Files marked **Review** carry a note to check them first.
-- **Narrow the selection** picks only the automatic fixes, or only the files a given Rector rule changed, so you can apply and commit one kind of change at a time.
+- Pick the files you want and press **Apply**. Automatic files start selected; files marked **Review** start unselected and carry a note to check them first. Until you open one, it is labeled **Not viewed**, and the confirmation says how many automatic and review files you are applying and whether you skipped any diffs.
+- **Narrow the selection** picks only the automatic fixes, or only the files a given Rector rule changed, so you can apply and commit one kind of change at a time. Selection works per file: other changes in those files are applied too.
 - In a Git project, the confirmation lists selected files that already have uncommitted changes and offers a ready-to-copy commit message that names the rules being applied.
 - After applying, Ferry checks the changed files with `php -l` and warns you if a change left one that no longer parses, so you can roll it back from **History** right away.
 

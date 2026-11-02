@@ -29,12 +29,24 @@ export function Changes() {
   }, [preview]);
 
   const changes = useMemo(() => preview?.changes ?? [], [preview]);
-  const off = preview && excluded.previewId === preview.id ? excluded.files : null;
+  const off = useMemo(
+    () =>
+      preview && excluded.previewId === preview.id ? excluded.files : new Set(changes.filter((c) => c.fix !== "auto").map((c) => c.file)),
+    [preview, excluded, changes],
+  );
+  const [viewed, setViewed] = useState<{ previewId: number | null; files: Set<string> }>({ previewId: null, files: new Set() });
+  const seen = preview && viewed.previewId === preview.id ? viewed.files : null;
   const selected = useMemo(() => new Set(changes.filter((c) => !off?.has(c.file)).map((c) => c.file)), [changes, off]);
   const current = changes.find((c) => c.file === active) ?? changes[0] ?? null;
+  useEffect(() => {
+    if (!preview || !current || seen?.has(current.file)) return;
+    setViewed({ previewId: preview.id, files: new Set([...(seen ?? []), current.file]) });
+  }, [preview, current, seen]);
   const chosen = useMemo(() => changes.filter((c) => selected.has(c.file)), [changes, selected]);
   const totals = chosen.reduce((sum, c) => ({ add: sum.add + c.diff.additions, del: sum.del + c.diff.deletions }), { add: 0, del: 0 });
   const allSelected = changes.length > 0 && chosen.length === changes.length;
+  const reviewChosen = chosen.filter((c) => c.fix !== "auto");
+  const unseen = reviewChosen.filter((c) => !seen?.has(c.file)).length;
 
   const setSelected = (next: Set<string>) =>
     setExcluded({ previewId: preview?.id ?? null, files: new Set(changes.filter((c) => !next.has(c.file)).map((c) => c.file)) });
@@ -267,7 +279,7 @@ export function Changes() {
             <span>{t.changes.selected(chosen.length, changes.length)}</span>
           </label>
           <div className="change-list__narrow">
-            <select className="input" aria-label={t.git.selectBy} value="" onChange={(e) => narrow(e.target.value)}>
+            <select title={t.git.byRuleNote} className="input" aria-label={t.git.selectBy} value="" onChange={(e) => narrow(e.target.value)}>
               <option value="" disabled>
                 {t.git.selectBy}
               </option>
@@ -285,6 +297,7 @@ export function Changes() {
               <ChangeItem
                 key={c.file}
                 change={c}
+                seen={!!seen?.has(c.file)}
                 checked={selected.has(c.file)}
                 active={c.file === current?.file}
                 onToggle={() => toggle(c.file)}
@@ -350,7 +363,13 @@ export function Changes() {
           }
         }}
       >
-        <span className="tabular">{t.changes.confirmText(totals.add, totals.del)}</span>
+        <span className="tabular">{t.changes.confirmText(totals.add, totals.del)}</span>{" "}
+        <span>{t.changes.confirmKinds(chosen.length - reviewChosen.length, reviewChosen.length)}</span>
+        {unseen > 0 && (
+          <Callout tone="warn" icon={<ShieldCheck size={15} />}>
+            {t.changes.unseen(unseen)}
+          </Callout>
+        )}
         {dirty.length > 0 && (
           <Callout tone="warn" icon={<GitBranch size={15} />}>
             <strong>{t.git.dirtyTitle(dirty.length)}</strong> {t.git.dirtyText}
@@ -370,12 +389,14 @@ export function Changes() {
 
 function ChangeItem({
   change,
+  seen,
   checked,
   active,
   onToggle,
   onSelect,
 }: {
   change: FileChange;
+  seen: boolean;
   checked: boolean;
   active: boolean;
   onToggle: () => void;
@@ -403,6 +424,7 @@ function ChangeItem({
           <span className="meta">
             {t.common.rules(change.rules.length)}
           </span>
+          {change.fix !== "auto" && !seen && <span className="change-item__unseen">{t.changes.notViewed}</span>}
         </div>
       </button>
     </li>
