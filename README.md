@@ -34,7 +34,8 @@ A desktop app for macOS, Windows and Linux that scans your PHP code, shows what 
 Pick the version you are moving to (PHP 8.2 to 8.5) and Ferry scans every PHP file in seconds. The **Overview** shows:
 
 - the project's platform (WordPress, Laravel, Symfony, Drupal, or plain PHP), its number of PHP files, and its current PHP version from `composer.json`
-- a readiness score from 0 to 100, and how many issues fall into each fix type
+- a readiness score from 0 to 100, and how many issues fall into each fix type; the score is an estimate of the work left, not a guarantee the app runs
+- next to the score, what still stands in the way: issues that block the upgrade, files the scan couldn't cover, dependencies that block it or couldn't be confirmed, and whether lint or tests ran on the target. The headline only says the project is ready when all of these are clear
 - how many findings are **Breaking** (the code won't run), **Deprecated** (it warns now and will be removed later), or **Risky** (it may behave differently at runtime)
 - the most common issues and the next steps to take
 

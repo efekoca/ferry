@@ -8,7 +8,7 @@ const TONE_COLOR = {
   danger: "var(--danger-fg)",
 } as const;
 
-export function ScoreRing({ score, size = 132 }: { score: number; size?: number }) {
+export function ScoreRing({ score, size = 132, tone: forced }: { score: number; size?: number; tone?: ReturnType<typeof scoreTone> }) {
   const { t } = useI18n();
   const stroke = 11;
   const r = (size - stroke) / 2;
@@ -18,7 +18,7 @@ export function ScoreRing({ score, size = 132 }: { score: number; size?: number 
     const id = requestAnimationFrame(() => setShown(score));
     return () => cancelAnimationFrame(id);
   }, [score]);
-  const tone = scoreTone(score);
+  const tone = forced ?? scoreTone(score);
 
   return (
     <div
