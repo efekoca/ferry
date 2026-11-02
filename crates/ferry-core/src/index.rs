@@ -14,6 +14,7 @@ pub struct TypeInfo {
     pub interfaces: Vec<String>,
     pub traits: Vec<String>,
     pub props: HashSet<String>,
+    pub private_props: HashSet<String>,
     pub methods: HashSet<String>,
     pub(crate) signatures: HashMap<String, MethodSig>,
     pub open: bool,
@@ -323,24 +324,28 @@ impl ProjectIndex {
     }
 
     pub(crate) fn properties(&self, info: &TypeInfo) -> Option<HashSet<String>> {
-        self.collect(info, 0)
+        self.collect(info, 0).map(|(all, _)| all)
     }
 
-    fn collect(&self, info: &TypeInfo, depth: usize) -> Option<HashSet<String>> {
+    fn collect(&self, info: &TypeInfo, depth: usize) -> Option<(HashSet<String>, HashSet<String>)> {
         if info.open || depth > 32 {
             return None;
         }
-        let mut props = info.props.clone();
+        let mut all = info.props.clone();
+        let mut private = info.private_props.clone();
         for t in &info.traits {
-            props.extend(self.collect(self.unique(t)?, depth + 1)?);
+            let (props, hidden) = self.collect(self.unique(t)?, depth + 1)?;
+            all.extend(props);
+            private.extend(hidden);
         }
         if let Some(parent) = &info.parent {
             if parent == "stdclass" {
                 return None;
             }
-            props.extend(self.collect(self.unique(parent)?, depth + 1)?);
+            let (props, hidden) = self.collect(self.unique(parent)?, depth + 1)?;
+            all.extend(props.difference(&hidden).cloned());
         }
-        Some(props)
+        Some((all, private))
     }
 }
 
@@ -566,7 +571,12 @@ fn type_decl(tokens: &[Token], kw: usize, names: &Names) -> Option<TypeDecl> {
                     .take_while(|&j| !tokens[j].is_punct("(") && !tokens[j].is_punct(","))
                     .any(|j| modifiers.iter().any(|m| tokens[j].is_ident_ci(m)));
             if depth == 1 || promoted {
-                info.props.insert(t.text.to_ascii_lowercase());
+                let stops: &[&str] = if depth == 1 { &["{", "}", ";"] } else { &["(", ","] };
+                let start = (0..k).rev().find(|&j| stops.iter().any(|p| tokens[j].is_punct(p))).map_or(0, |j| j + 1);
+                if tokens[start..k].iter().any(|m| m.is_ident_ci("private")) {
+                    info.private_props.insert(t.text.clone());
+                }
+                info.props.insert(t.text.clone());
             }
         }
         k += 1;

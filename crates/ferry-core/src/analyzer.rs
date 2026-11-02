@@ -2710,8 +2710,21 @@ fn dynamic_properties(tokens: &[Token], index: &crate::index::ProjectIndex) -> V
     for decl in crate::index::class_decls(tokens) {
         let (open, close) = (decl.open, decl.close);
         let Some(declared) = index.properties(&decl.info) else { continue };
+        let rebound = |k: usize| {
+            let before = k >= 3 && tokens[k - 1].is_punct("(") && tokens[k - 2].is_ident_ci("bind") && tokens[k - 3].is_punct("::");
+            let body = (k..close).find(|&j| tokens[j].is_punct("{"));
+            let after = body.and_then(|b| crate::guards::matching(tokens, b)).is_some_and(|end| {
+                tokens.get(end + 1).is_some_and(|t| t.is_punct(")"))
+                    && tokens.get(end + 2).is_some_and(|t| t.is_punct("->"))
+                    && tokens.get(end + 3).is_some_and(|t| t.is_ident_ci("bindTo") || t.is_ident_ci("call"))
+            });
+            before || after
+        };
         let nested: Vec<(usize, usize)> = (open..close)
-            .filter(|&k| tokens[k].is_ident_ci("class") && k > 0 && tokens[k - 1].is_ident_ci("new"))
+            .filter(|&k| {
+                tokens[k].is_ident_ci("class") && k > 0 && tokens[k - 1].is_ident_ci("new")
+                    || tokens[k].is_ident_ci("function") && tokens.get(k + 1).is_some_and(|t| t.is_punct("(")) && rebound(k)
+            })
             .filter_map(|k| {
                 let body = (k..close).find(|&j| tokens[j].is_punct("{"))?;
                 let mut d = 0;
@@ -2735,7 +2748,7 @@ fn dynamic_properties(tokens: &[Token], index: &crate::index::ProjectIndex) -> V
                 continue;
             }
             let name = &tokens[k + 2];
-            if name.kind != TokenKind::Ident || declared.contains(&name.text.to_ascii_lowercase()) {
+            if name.kind != TokenKind::Ident || declared.contains(&name.text) {
                 continue;
             }
             let mut j = k + 3;
@@ -2758,7 +2771,7 @@ fn dynamic_properties(tokens: &[Token], index: &crate::index::ProjectIndex) -> V
                 || next.is_punct("??=")
                 || ([".", "+", "-", "*", "/", "%", "|", "&", "^"].iter().any(|op| next.is_punct(op))
                     && tokens.get(j + 1).is_some_and(|n| n.is_punct("=") && n.start == next.end));
-            if assigns && seen.insert(name.text.to_ascii_lowercase()) {
+            if assigns && seen.insert(name.text.clone()) {
                 out.push(k + 2);
             }
         }
@@ -2933,6 +2946,25 @@ mod tests {
             .into_iter()
             .map(|f| (f.rule_id, f.title.get(crate::i18n::Lang::En).to_string()))
             .collect()
+    }
+
+    #[test]
+    fn dynamic_properties_respect_case_and_private_parents() {
+        let count = |src: &str| rule_ids(src).iter().filter(|r| *r == "deprecated.dynamic_property").count();
+        assert_eq!(count("<?php class A { public $name; function f() { $this->Name = 1; } }"), 1);
+        assert_eq!(count("<?php class A { public $name; function f() { $this->name = 1; } }"), 0);
+        assert_eq!(count("<?php class C { private $name; } class D extends C { function f() { $this->name = 1; } }"), 1);
+        assert_eq!(count("<?php class C { protected $name; } class D extends C { function f() { $this->name = 1; } }"), 0);
+        assert_eq!(count("<?php class C { private $a, $b; } class D extends C { function f() { $this->b = 1; } }"), 1);
+        assert_eq!(
+            count("<?php class B { public $x; } class C extends B { private $y; } class D extends C { function f() { $this->x = 1; } }"),
+            0
+        );
+        assert_eq!(count("<?php trait T { private $t; } class C { use T; function f() { $this->t = 1; } }"), 0);
+        assert_eq!(count("<?php trait T { private $t; } class C { use T; } class D extends C { function f() { $this->t = 1; } }"), 1);
+        assert_eq!(count("<?php class C { function __construct(private $p, public $q) {} } class D extends C { function f() { $this->p = 1; $this->q = 2; } }"), 1);
+        assert_eq!(count("<?php class C { private $v; } class D extends C { function f() { \\Closure::bind(function () { $this->v = 1; }, $this, C::class)(); } }"), 0);
+        assert_eq!(count("<?php class C { private $v; } class D extends C { function f() { (function () { $this->v = 1; })->bindTo($this, C::class)(); } }"), 0);
     }
 
     #[test]
