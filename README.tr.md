@@ -21,7 +21,7 @@ Ferry, macOS, Windows ve Linux'ta çalışan bir masaüstü uygulamasıdır. PHP
 ## Öne çıkan özellikler
 
 - **Önünüzdeki işin büyüklüğünü görün.** 0 ile 100 arasındaki hazırlık puanı ve düzeltmelerin otomatik, gözden geçirilecek ve elle yapılacak olarak dağılımı, geçişin ne kadar süreceğini bir bakışta gösterir.
-- **Hangi düzeltmeye güvenebileceğinizi bilin.** Her bulgu ve her değişiklik etiketlidir: **Otomatik** (davranışı değiştirmeyen, kurala dayalı bir dönüşüm), **Gözden geçir** (genellikle doğrudur ama bakmaya değer) ya da **Elle düzelt** (kararı sizin vermeniz gerekir).
+- **Hangi düzeltmeye güvenebileceğinizi bilin.** Her bulgu ve her değişiklik etiketlidir: **Otomatik** (davranışı korumak için tasarlanmış, kurala dayalı bir dönüşüm), **Gözden geçir** (genellikle doğrudur ama bakmaya değer) ya da **Elle düzelt** (kararı sizin vermeniz gerekir).
 - **Yalnızca gerekeni düzeltin ya da kodu modernleştirin.** **Uyumluluk** modu yalnızca kodun yeni sürümde çalışması için gerekenleri değiştirir. **Modernleştirme** ise `match`, constructor promotion ve `str_contains` gibi yeni yazımları da benimser.
 - **Sizi geride tutan paketleri bulun.** Ferry `composer.lock` dosyasını okur ve hedef sürümü desteklemeyen paketleri, koda dokunmaya başlamadan önce gösterir.
 - **Diske yazılan, önizlemede gördüğünüzün aynısıdır.** Değişiklikleri Ferry, sizin gördüğünüz haliyle kendisi uygular. Önizlemeden sonra değişen bir dosyaya dokunmaz.
