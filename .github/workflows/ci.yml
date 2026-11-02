@@ -4,7 +4,6 @@ on:
   push:
     branches: [main]
     tags: ["v*"]
-    paths: ["Cargo.lock", "**/Cargo.toml", "pnpm-lock.yaml", "package.json", ".github/workflows/**"]
   pull_request:
   workflow_dispatch:
     inputs:
@@ -32,14 +31,20 @@ jobs:
         with:
           fetch-depth: 2
       - id: diff
+        env:
+          BEFORE: ${{ github.event.before }}
         run: |
-          if [ "$GITHUB_EVENT_NAME" != "pull_request" ]; then
-            echo "code=true" >> "$GITHUB_OUTPUT"
-          elif git diff --name-only HEAD^1 HEAD | grep -qvE '(\.md$|^docs/|^assets/|^LICENSE$)'; then
-            echo "code=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "code=false" >> "$GITHUB_OUTPUT"
+          base=HEAD^1
+          if [ "$GITHUB_EVENT_NAME" = "push" ] && [ "$GITHUB_REF_TYPE" = "branch" ] && [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ]; then
+            git fetch -q --depth=1 origin "$BEFORE" && base=$BEFORE
           fi
+          code=true
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ] || { [ "$GITHUB_EVENT_NAME" = "push" ] && [ "$GITHUB_REF_TYPE" = "branch" ]; }; then
+            if files=$(git diff --name-only "$base" HEAD); then
+              [ -n "$files" ] && echo "$files" | grep -qvE '(\.md$|^docs/|^assets/|^LICENSE$)' || code=false
+            fi
+          fi
+          echo "code=$code" >> "$GITHUB_OUTPUT"
 
   checks:
     needs: changes
