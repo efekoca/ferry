@@ -565,6 +565,10 @@ fn runtime_logs_confirm_and_add_findings() {
     assert!(findings.iter().any(|f| f["ruleId"] == "runtime.warning" && f["file"] == "src/Greeter.php"));
     let rescan = h.ok("scan_project", json!({ "path": root, "target": "8.4", "run": 2 }));
     assert_eq!(rescan["runtime"]["added"], 1);
+    h.ok("close_project", json!({ "path": root }));
+    let reopened = h.ok("scan_project", json!({ "path": root, "target": "8.4", "run": 3 }));
+    assert_eq!(reopened["runtime"], Value::Null, "closing the project drops its log");
+    h.ok("import_runtime_log", json!({ "path": root, "log": log }));
     let cleared = h.ok("clear_runtime_log", json!({ "path": root }));
     assert_eq!(cleared["runtime"], Value::Null);
     let empty = Path::new(&root).join("empty.log");

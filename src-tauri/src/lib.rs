@@ -269,6 +269,13 @@ async fn run_local_check(state: State<'_, AppState>, path: String, target: Strin
 }
 
 #[tauri::command]
+fn close_project(state: State<'_, AppState>, path: String) {
+    let path = normalize_path(path);
+    state.runtime.lock().unwrap().remove(&path);
+    state.previews.lock().unwrap().remove(&path);
+}
+
+#[tauri::command]
 async fn clear_runtime_log(state: State<'_, AppState>, path: String) -> CmdResult<ScanResponse> {
     let path = normalize_path(path);
     let scan = state.scans.lock().unwrap().get(&path).cloned().ok_or_else(|| t!("Önce projeyi tarayın.", "Scan the project first."))?;
@@ -1011,6 +1018,7 @@ pub fn with_commands<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R
         clear_runtime_log,
         local_php_versions,
         run_local_check,
+        close_project,
         open_in_editor,
         get_settings,
         save_settings,

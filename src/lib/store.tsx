@@ -248,6 +248,7 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
       setOpening(true);
       try {
         const info = await api.inspectProject(chosen);
+        if (rootRef.current && rootRef.current !== info.root) void api.closeProject(rootRef.current).catch(() => {});
         rootRef.current = info.root;
         resetResults();
         setFindingsFilter(NO_FILTER);
@@ -279,11 +280,12 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
   }, []);
 
   const closeProject = useCallback(() => {
+    if (rootRef.current) void api?.closeProject(rootRef.current).catch(() => {});
     rootRef.current = null;
     resetResults();
     setProject(null);
     setView("overview");
-  }, [resetResults]);
+  }, [api, resetResults]);
 
   const showFindings = useCallback((f: Partial<FindingsFilter> = {}) => {
     setFindingsFilter({ ...NO_FILTER, ...f });
