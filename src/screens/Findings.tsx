@@ -197,10 +197,10 @@ export function Findings() {
       </Button>
       {local && (
         <>
-          <Button variant="ghost" size="sm" icon={<FileCheck2 size={13} />} loading={checking === "lint"} disabled={!!checking} onClick={() => void check("lint")}>
+          <Button variant="ghost" size="sm" icon={<FileCheck2 size={13} />} loading={checking === "lint"} disabled={!!checking} title={local.path} onClick={() => void check("lint")}>
             {t.findings.lintWith(local.version)}
           </Button>
-          <Button variant="ghost" size="sm" icon={<FlaskConical size={13} />} disabled={!!checking} onClick={() => setConfirmTests(true)}>
+          <Button variant="ghost" size="sm" icon={<FlaskConical size={13} />} disabled={!!checking} title={local.path} onClick={() => setConfirmTests(true)}>
             {t.findings.testWith(local.version)}
           </Button>
         </>
