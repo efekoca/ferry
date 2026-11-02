@@ -24,7 +24,7 @@ export const en: Dict = {
     manual: "Manual",
   },
   fixDesc: {
-    auto: "A rule-based change that keeps behavior identical.",
+    auto: "A rule-based change designed to keep behavior the same.",
     likely: "Can be applied automatically, but give the result a quick look.",
     manual: "This one needs your call; the tool can't decide safely.",
   },
@@ -55,7 +55,7 @@ export const en: Dict = {
     dependencies: "Dependencies",
     history: "History",
     comingSoon: "Coming soon",
-    runtime: "Live test",
+    runtime: "Docker comparison",
     ai: "AI suggestions",
     settings: "Settings",
     openAnother: "Open another project",
@@ -75,7 +75,7 @@ export const en: Dict = {
     recent: "Recent projects",
     forget: (name) => `Remove ${name} from recent projects`,
     features: [
-      { title: "Thorough scan", text: "Finds everything removed or changed from PHP 7.0 to 8.5 in seconds." },
+      { title: "Thorough scan", text: "Finds code removed or changed from PHP 7.0 to 8.5 in seconds." },
       { title: "Preview first", text: "Review every change Rector suggests line by line and apply only what you want." },
       { title: "One-click undo", text: "A backup is taken before every change. No Git required." },
     ],
@@ -104,7 +104,7 @@ export const en: Dict = {
       scan: { title: "Scan", text: "Finds removed functions, changed syntax and risky patterns." },
       fix: { title: "Auto-fix", text: "Preview Rector's changes and apply the ones you approve." },
       deps: { title: "Check dependencies", text: "Checks whether the packages in composer.lock support the new version." },
-      live: { title: "Live test", text: "Will run the project on both PHP versions in Docker and compare the output." },
+      live: { title: "Docker comparison", text: "Will run the project on both PHP versions in Docker and compare the output." },
     },
     scanMeta: (files, lines, duration) => `${files} files · ${lines} lines · ${duration}`,
     headline: {
@@ -211,7 +211,7 @@ export const en: Dict = {
     title: "Findings",
     subtitle: (t, n) => `PHP ${t} · ${n} findings`,
     noScan: "No scan yet",
-    noScanText: "Scan the project and everything that would break on the new version shows up here.",
+    noScanText: "Scan the project and the code that may break on the new version shows up here.",
     clean: "All clear",
     cleanText: (t) => `Nothing incompatible with PHP ${t}.`,
     fixType: "Fix type",
@@ -297,6 +297,7 @@ export const en: Dict = {
     introTitle: (t) => `Automatic fixes for PHP ${t}`,
     introText:
       "Rector runs on your project in dry-run mode; no files change. You review the proposed changes file by file and apply only the ones you pick. A backup is taken before every apply.",
+    introTrust: "Rector loads the project's vendor/autoload.php, so files listed under Composer's autoload.files run. Only calculate fixes for projects you trust.",
     calculating: "Calculating changes",
     calculatingHint: "Rector is running. Large projects can take a few minutes.",
     stop: "Stop",
@@ -475,8 +476,10 @@ export const en: Dict = {
   },
   roadmap: {
     runtime: {
-      title: "Live test",
+      title: "Docker comparison",
       text: "To catch silent behavior changes that static analysis can't see, your project will run in two Docker containers, one per PHP version, with the same requests sent to both and the responses compared.",
+      today: "You can already check runtime behavior: Import log, Lint with PHP and Run tests on the Findings page add their results to the findings.",
+      openFindings: "Go to Findings",
       items: [
         "Ready-made Docker setup for both versions",
         "Side-by-side comparison of page and endpoint responses",
