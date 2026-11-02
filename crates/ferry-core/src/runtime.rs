@@ -108,10 +108,41 @@ pub fn parse(log: &str) -> Vec<Event> {
     found.into_iter().map(|((path, line, message), (level, count))| Event { path, line, level, message, count }).collect()
 }
 
-fn relative(root: &Path, path: &str) -> Option<String> {
+struct Located {
+    prefix: String,
+    rel: String,
+}
+
+fn locate(root: &Path, path: &str) -> Option<Located> {
     let normalized = path.replace('\\', "/");
-    let parts: Vec<&str> = normalized.split('/').filter(|p| !p.is_empty()).collect();
-    (0..parts.len()).map(|k| parts[k..].join("/")).find(|rel| root.join(rel).is_file())
+    let parts: Vec<&str> = normalized.split('/').filter(|p| !p.is_empty() && *p != ".").collect();
+    if parts.contains(&"..") {
+        return None;
+    }
+    let k = (0..parts.len()).find(|&k| crate::safefs::resolve(root, &parts[k..].join("/")).is_ok_and(|p| p.is_file()))?;
+    Some(Located { prefix: parts[..k].join("/").to_ascii_lowercase(), rel: parts[k..].join("/") })
+}
+
+fn project_files(root: &Path, events: &[Event]) -> Vec<Option<String>> {
+    let found: Vec<Option<Located>> = events.iter().map(|e| locate(root, &e.path)).collect();
+    let mut files_by_prefix: std::collections::HashMap<&str, std::collections::HashSet<&str>> = std::collections::HashMap::new();
+    for l in found.iter().flatten() {
+        files_by_prefix.entry(l.prefix.as_str()).or_default().insert(l.rel.as_str());
+    }
+    let strong: std::collections::HashSet<&str> = files_by_prefix
+        .iter()
+        .filter(|(_, files)| files.len() > 1 || files.iter().any(|f| f.contains('/')))
+        .map(|(prefix, _)| *prefix)
+        .collect();
+    let folder = root.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    found
+        .iter()
+        .map(|l| {
+            let l = l.as_ref()?;
+            let trusted = l.rel.contains('/') || strong.contains(l.prefix.as_str()) || l.prefix.rsplit('/').next() == Some(folder.as_str());
+            trusted.then(|| l.rel.clone())
+        })
+        .collect()
 }
 
 fn symbol(f: &Finding) -> Option<String> {
@@ -128,9 +159,10 @@ pub struct Merged {
 
 pub fn merge(root: &Path, findings: &mut Vec<Finding>, events: &[Event], target: PhpVersion) -> Merged {
     let mut merged = Merged { confirmed: 0, added: 0, outside: 0 };
-    for e in events {
+    let files = project_files(root, events);
+    for (e, file) in events.iter().zip(files) {
         let skipped = |rel: &str| rel.split('/').any(|part| crate::project::ALWAYS_SKIP.contains(&part));
-        let Some(file) = relative(root, &e.path).filter(|rel| !skipped(rel)) else {
+        let Some(file) = file.filter(|rel| !skipped(rel)) else {
             merged.outside += 1;
             continue;
         };
@@ -260,8 +292,10 @@ Undefined array key \"total\"
     #[test]
     fn unrelated_runtime_events_stay_separate() {
         let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("app");
+        std::fs::create_dir(&root).unwrap();
         let src = "<?php utf8_encode($s);\n$x = 1;\n";
-        std::fs::write(dir.path().join("a.php"), src).unwrap();
+        std::fs::write(root.join("a.php"), src).unwrap();
         let target = "8.4".parse().unwrap();
         let log = "PHP Fatal error:  Uncaught RuntimeException: independent failure in /srv/app/a.php on line 1
 PHP Deprecated:  Creation of dynamic property A::$b is deprecated in /srv/app/a.php on line 1
@@ -269,11 +303,38 @@ PHP Deprecated:  Function utf8_encode() is deprecated in /srv/app/a.php on line 
 ";
         let mut findings = analyze_source("a.php", src, target);
         assert_eq!(findings.len(), 1);
-        let merged = merge(dir.path(), &mut findings, &parse(log), target);
+        let merged = merge(&root, &mut findings, &parse(log), target);
         assert_eq!((merged.confirmed, merged.added), (1, 2));
         assert_eq!(findings.iter().find(|f| f.rule_id == "deprecated.utf8_encode").unwrap().runtime_hits, 1);
         let fatal = findings.iter().find(|f| f.rule_id == "runtime.fatal").expect("a fatal is never folded into a deprecation");
         assert_eq!((fatal.line, fatal.severity), (1, Severity::Breaking));
         assert!(findings.iter().any(|f| f.rule_id == "runtime.deprecated" && f.line == 1));
+    }
+
+    #[test]
+    fn events_from_another_project_stay_outside() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("shop");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        for f in ["a.php", "b.php", "src/c.php"] {
+            std::fs::write(root.join(f), "<?php\n$x = 1;\n").unwrap();
+        }
+        let target = "8.4".parse().unwrap();
+        let merged_with = |log: &str| {
+            let mut findings = Vec::new();
+            let merged = merge(&root, &mut findings, &parse(log), target);
+            (merged.added, merged.outside, findings.into_iter().map(|f| f.file).collect::<Vec<_>>())
+        };
+        let warn = |path: &str| format!("PHP Warning:  Undefined variable $y in {path} on line 2\n");
+        assert_eq!(merged_with(&warn("/other-project/a.php")), (0, 1, vec![]));
+        assert_eq!(merged_with(&warn("/srv/shop/a.php")), (1, 0, vec!["a.php".to_string()]));
+        assert_eq!(merged_with(&format!("{}{}", warn("/srv/www/a.php"), warn("/srv/www/b.php"))).0, 2);
+        assert_eq!(merged_with(&format!("{}{}", warn("/srv/www/src/c.php"), warn("/srv/www/a.php"))).0, 2);
+        assert_eq!(
+            merged_with(&format!("{}{}", warn("/srv/www/src/c.php"), warn("/elsewhere/a.php"))),
+            (1, 1, vec!["src/c.php".to_string()])
+        );
+        assert_eq!(merged_with(&warn("/srv/shop/../shop/a.php")).1, 1);
+        assert_eq!(merged_with(&warn("C:\\inetpub\\shop\\src\\c.php")).0, 1);
     }
 }
