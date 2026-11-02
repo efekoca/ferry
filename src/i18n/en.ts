@@ -224,6 +224,20 @@ export const en: Dict = {
     runtimeSummary: (file, events, confirmed, added, outside) =>
       `${file}: ${events} distinct messages. ${confirmed} findings confirmed at runtime, ${added} messages added as findings the static scan missed, ${outside} from files outside the project.`,
     clearLog: "Remove log",
+    checkResult: (c) => {
+      if (c.kind === "lint") {
+        if (c.passed) return `Linted ${c.files === 1 ? "1 file" : `${c.files} files`}, no syntax errors.`;
+        const parts = [
+          c.failed > 0 && `${c.failed === 1 ? "1 file has" : `${c.failed} files have`} syntax errors`,
+          c.notRun > 0 && `${c.notRun === 1 ? "1 file" : `${c.notRun} files`} couldn't be checked`,
+        ];
+        return `${parts.filter(Boolean).join(", ")}.`;
+      }
+      if (c.timedOut) return "The tests were stopped at the time limit; the results are incomplete.";
+      if (c.exitCode === null) return "The tests were interrupted; the results are incomplete.";
+      return c.passed ? "The tests passed." : `The tests failed (exit code ${c.exitCode}).`;
+    },
+    showOutput: "Show output",
     lintWith: (v) => `Lint with PHP ${v}`,
     testWith: (v) => `Run tests on PHP ${v}`,
     testTitle: "Run the project's tests?",
@@ -456,6 +470,7 @@ export const en: Dict = {
     appliedWithErrors: (n, broken) =>
       `${n === 1 ? "1 file" : `${n} files`} updated; ${broken === 1 ? "1 now has a syntax error" : `${broken} now have syntax errors`}`,
     lintFailedText: "php -l found these after the change. You can roll the files back from History.",
+    lintSkippedText: "The syntax wasn't checked: no PHP at or above the target version was found on this computer.",
     applyFailed: "Couldn't apply changes",
     restored: "Restored",
     restoredText: (n) => (n === 1 ? "1 file is back to how it was." : `${n} files are back to how they were.`),

@@ -388,7 +388,11 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
             description: `${result.lintErrors.slice(0, 3).join("\n")}\n${t.toast.lintFailedText}`,
           });
         } else {
-          toast.push({ tone: "success", title: t.toast.applied(result.written.length), description: t.toast.appliedText });
+          toast.push({
+            tone: result.lintChecked ? "success" : "info",
+            title: t.toast.applied(result.written.length),
+            description: result.lintChecked ? t.toast.appliedText : `${t.toast.lintSkippedText}\n${t.toast.appliedText}`,
+          });
         }
         void refreshSnapshots();
         if (scan && rootRef.current === root) void runScan();

@@ -282,10 +282,32 @@ describe("Ferry app", () => {
     await user.click(nav(/Bulgular/));
     await user.click(await screen.findByRole("button", { name: "PHP 8.4.27 ile lint et" }));
     expect(await screen.findByText(/php -l · PHP 8.4: 31 farklı mesaj/)).toBeInTheDocument();
+    expect(screen.getByText("128 dosya lint edildi, sözdizimi hatası yok.")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Testleri PHP 8.4.27 ile çalıştır" }));
     const dialog = await screen.findByRole("dialog", { name: "Projenin testleri çalıştırılsın mı?" });
     await user.click(within(dialog).getByRole("button", { name: "Testleri çalıştır" }));
     expect(await screen.findByText(/PHPUnit · PHP 8.4: 31 farklı mesaj/)).toBeInTheDocument();
+    expect(screen.getByText("Testler geçti.")).toBeInTheDocument();
+  });
+
+  it("shows a failed test run even when it reports no PHP messages", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    const real = api.runLocalCheck;
+    api.runLocalCheck = async (...args) => {
+      const result = await real(...args);
+      const check = { ...result.runtime!.check!, passed: false, exitCode: 1, log: "There was 1 failure:\n1) assertion failed\n" };
+      return { ...result, runtime: { ...result.runtime!, check } };
+    };
+    render(<App api={api} />);
+    await openAndScan(user);
+    await user.click(nav(/Bulgular/));
+    await user.click(await screen.findByRole("button", { name: "Testleri PHP 8.4.27 ile çalıştır" }));
+    const dialog = await screen.findByRole("dialog", { name: "Projenin testleri çalıştırılsın mı?" });
+    await user.click(within(dialog).getByRole("button", { name: "Testleri çalıştır" }));
+    expect(await screen.findByText("Testler başarısız oldu (çıkış kodu 1).")).toBeInTheDocument();
+    await user.click(screen.getByText("Çıktıyı göster"));
+    expect(screen.getByText(/assertion failed/)).toBeVisible();
   });
 
   it("compares targets and switches to one", async () => {

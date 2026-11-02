@@ -341,6 +341,9 @@ fn a_failed_apply_puts_every_touched_file_back() {
     std::fs::write(root.join("locked/b.php"), "<?php // b\n").unwrap();
     let id = stage_preview(&h, &[("src/Greeter.php", "<?php // changed\n"), ("locked/b.php", "<?php // B\n")]);
     std::fs::set_permissions(root.join("locked"), std::fs::Permissions::from_mode(0o555)).unwrap();
+    if std::fs::write(root.join("locked/.probe"), "").is_ok() {
+        return;
+    }
     let result =
         h.invoke("apply_changes", json!({ "path": h.root, "previewId": id, "files": ["src/Greeter.php", "locked/b.php"], "label": "x" }));
     std::fs::set_permissions(root.join("locked"), std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -526,6 +529,11 @@ fn lints_with_a_local_php_of_the_target() {
     let merged = h.ok("run_local_check", json!({ "path": root, "target": line, "kind": "lint" }));
     assert!(merged["runtime"]["file"].as_str().unwrap().starts_with("php -l · PHP "));
     assert!(merged["runtime"]["events"].as_u64().unwrap() > 0);
+    let check = &merged["runtime"]["check"];
+    assert_eq!(check["kind"], "lint");
+    assert!(check["files"].as_u64().unwrap() > 0);
+    assert_eq!(check["notRun"], 0);
+    assert!(check.get("output").is_none(), "only the trimmed log is sent");
     let err = h.invoke("run_local_check", json!({ "path": root, "target": line, "kind": "tests" })).unwrap_err();
     assert_eq!(err, json!("Projede vendor/bin/phpunit yok."));
 }
