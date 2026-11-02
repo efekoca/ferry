@@ -95,6 +95,7 @@ export function Dependencies() {
     .sort((a, b) => DEP_ORDER[a.status] - DEP_ORDER[b.status] || Number(a.dev) - Number(b.dev) || a.name.localeCompare(b.name));
   const incompatible = packages.filter((p) => p.status === "incompatible");
   const bad = incompatible.length;
+  const unknown = packages.filter((p) => p.status === "unknown").length;
   const command = `composer update ${incompatible.map((p) => p.name).join(" ")} --with-all-dependencies`;
   const found = suggestions?.for === deps ? suggestions.list : null;
   const suggestionFor = (name: string) => found?.find((s) => s.name === name);
@@ -146,10 +147,19 @@ export function Dependencies() {
         <div className="page-body stack">
           {deps.rootStatus === "incompatible" && (
             <Callout tone="danger" icon={<CircleAlert size={16} />}>
-              <strong>{t.deps.rootBlockedTitle(deps.target)}</strong> {t.deps.rootBlockedText(deps.rootConstraint ?? "", deps.target)}
+              <strong>{t.deps.rootBlockedTitle(deps.target)}</strong>{" "}
+              {deps.rootConflict && deps.rootConstraint === null
+                ? t.deps.rootConflictText(deps.rootConflict, deps.target)
+                : deps.rootConflict
+                  ? `${t.deps.rootBlockedText(deps.rootConstraint ?? "", deps.target)} ${t.deps.rootConflictText(deps.rootConflict, deps.target)}`
+                  : t.deps.rootBlockedText(deps.rootConstraint ?? "", deps.target)}
             </Callout>
           )}
-          {!deps.hasLockFile ? (
+          {deps.lockUnreadable ? (
+            <Callout tone="warn" icon={<CircleAlert size={16} />}>
+              {t.deps.lockUnreadable}
+            </Callout>
+          ) : !deps.hasLockFile ? (
             <Callout tone="warn" icon={<CircleAlert size={16} />}>
               {t.deps.noLock}
             </Callout>
@@ -165,6 +175,10 @@ export function Dependencies() {
                   <span className="subtle">{t.deps.findVersionsNote}</span>
                 </div>
               )}
+            </Callout>
+          ) : unknown > 0 ? (
+            <Callout tone="warn" icon={<CircleAlert size={16} />}>
+              {t.deps.someUnknown(unknown, deps.target)}
             </Callout>
           ) : (
             <Callout tone="info" icon={<CircleCheck size={16} />}>
@@ -305,12 +319,19 @@ export function Dependencies() {
                         <span className="mono selectable">{e.name}</span> {e.removed && <Badge tone="danger">{t.deps.removedExt}</Badge>}
                       </td>
                       <td>
-                        <span className="mono">{e.symbol}</span>
-                        <div className="dep-note mono">
-                          {e.file}:{e.line}
-                        </div>
+                        {e.uses > 0 ? (
+                          <>
+                            <span className="mono">{e.symbol}</span>
+                            <div className="dep-note mono">
+                              {e.file}:{e.line}
+                            </div>
+                          </>
+                        ) : (
+                          <span className="subtle">{t.deps.requiredBy((e.requiredBy ?? []).join(", "))}</span>
+                        )}
+                        {e.dev && <Badge tone="neutral">{t.deps.devOnly}</Badge>}
                       </td>
-                      <td className="table__num tabular">{e.uses}</td>
+                      <td className="table__num tabular">{e.uses > 0 ? e.uses : "—"}</td>
                       <td>{e.declared ? t.deps.yes : <span className="subtle">{t.deps.no}</span>}</td>
                       <td>{e.available === null ? "—" : e.available ? t.deps.yes : <Badge tone="danger">{t.deps.no}</Badge>}</td>
                     </tr>

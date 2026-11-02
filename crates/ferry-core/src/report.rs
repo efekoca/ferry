@@ -160,16 +160,42 @@ pub fn to_markdown(project: &ProjectInfo, scan: &ScanResult, deps: Option<&Depen
 
     if let Some(deps) = deps {
         let bad: Vec<_> = deps.packages.iter().filter(|p| p.status == DependencyStatus::Incompatible).collect();
+        let unknown = deps.packages.iter().filter(|p| p.status == DependencyStatus::Unknown).count();
         md.push_str(&format!("## {}\n\n", l(Text::new("Bağımlılıklar", "Dependencies"))));
         if deps.root_status == DependencyStatus::Incompatible {
-            let constraint = deps.root_constraint.as_deref().unwrap_or("");
+            let constraint = match (&deps.root_constraint, &deps.root_conflict) {
+                (Some(r), Some(c)) => format!("require `{r}`, conflict `{c}`"),
+                (None, Some(c)) => format!("conflict `{c}`"),
+                (r, None) => format!("`{}`", r.as_deref().unwrap_or("")),
+            };
             md.push_str(&match lang {
-                Lang::Tr => format!("composer.json'daki PHP kısıtı (`{constraint}`) PHP {} ile uyumlu değil.\n\n", deps.target),
-                Lang::En => format!("The PHP constraint in composer.json (`{constraint}`) doesn't allow PHP {}.\n\n", deps.target),
+                Lang::Tr => format!("composer.json'daki PHP kısıtı ({constraint}) PHP {} ile uyumlu değil.\n\n", deps.target),
+                Lang::En => format!("The PHP constraint in composer.json ({constraint}) doesn't allow PHP {}.\n\n", deps.target),
+            });
+        } else if deps.root_status == DependencyStatus::Unknown && deps.root_constraint.is_some() {
+            md.push_str(&match lang {
+                Lang::Tr => format!("composer.json'daki PHP kısıtı okunamadığı için PHP {} ile uyumu doğrulanamadı.\n\n", deps.target),
+                Lang::En => {
+                    format!("The PHP constraint in composer.json couldn't be read, so PHP {} support isn't confirmed.\n\n", deps.target)
+                }
             });
         }
-        if !deps.has_lock_file {
+        if deps.lock_unreadable {
+            md.push_str(l(Text::new(
+                "composer.lock okunamadı; paketler kontrol edilmedi.\n\n",
+                "composer.lock couldn't be read, so packages weren't checked.\n\n",
+            )));
+        } else if !deps.has_lock_file {
             md.push_str(l(Text::new("composer.lock bulunamadı.\n\n", "No composer.lock found.\n\n")));
+        } else if bad.is_empty() && unknown > 0 {
+            md.push_str(&match lang {
+                Lang::Tr => format!("Engel bulunmadı, ancak {unknown} paketin PHP {} ile uyumu doğrulanamadı.\n\n", deps.target),
+                Lang::En => format!(
+                    "No blockers found, but {} couldn't be confirmed for PHP {}.\n\n",
+                    if unknown == 1 { "1 package".to_string() } else { format!("{unknown} packages") },
+                    deps.target
+                ),
+            });
         } else if bad.is_empty() {
             md.push_str(&match lang {
                 Lang::Tr => format!("{} paketin hepsi PHP {} ile uyumlu görünüyor.\n\n", deps.packages.len(), deps.target),
@@ -257,6 +283,15 @@ mod tests {
             errors: vec![crate::analyzer::FileError { file: "big.php".into(), message: "too large".into() }],
             ..scan
         };
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("composer.lock"), r#"{"packages":[{"name":"a/b","version":"1.0.0"}]}"#).unwrap();
+        let deps = crate::deps::check_packages(dir.path(), "8.4".parse().unwrap());
+        let md = to_markdown(&project, &scan, Some(&deps), Lang::En);
+        assert!(md.contains("No blockers found, but 1 package couldn't be confirmed") && !md.contains("look compatible"), "{md}");
+        std::fs::write(dir.path().join("composer.lock"), "{broken").unwrap();
+        let deps = crate::deps::check_packages(dir.path(), "8.4".parse().unwrap());
+        assert!(to_markdown(&project, &scan, Some(&deps), Lang::En).contains("composer.lock couldn't be read"));
+
         let md = to_markdown(&project, &partial, None, Lang::En);
         assert!(md.contains("## Files not scanned") && md.contains("- `big.php`: too large"), "{md}");
         assert!(

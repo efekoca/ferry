@@ -126,12 +126,106 @@ impl Constraint {
     }
 
     pub fn allows_line(&self, line: PhpVersion) -> bool {
-        (0..=40).chain(std::iter::once(999)).any(|patch| self.allows((line.major, line.minor, patch)))
+        !self.line_patches(line).is_empty()
+    }
+
+    fn line_patches(&self, line: PhpVersion) -> Vec<(u64, u64)> {
+        self.alternatives.iter().flat_map(|group| group_patches(group, (line.major, line.minor))).collect()
     }
 
     pub fn lowest_known_line(&self) -> Option<PhpVersion> {
         PhpVersion::KNOWN.into_iter().find(|v| self.allows_line(*v))
     }
+}
+
+fn group_patches(group: &[Bound], line: (u32, u32)) -> Vec<(u64, u64)> {
+    let (mut lo, mut hi) = (0u64, u64::MAX);
+    let mut excluded: Vec<(u64, u64)> = Vec::new();
+    let patch_floor = |v: Triple| match (v.0, v.1).cmp(&line) {
+        std::cmp::Ordering::Less => Some(0),
+        std::cmp::Ordering::Equal => Some(u64::from(v.2)),
+        std::cmp::Ordering::Greater => None,
+    };
+    for bound in group {
+        match *bound {
+            Bound::Ge(v) => match patch_floor(v) {
+                Some(p) => lo = lo.max(p),
+                None => return Vec::new(),
+            },
+            Bound::Gt(v) => match patch_floor(v) {
+                Some(p) if (v.0, v.1) == line => lo = lo.max(p + 1),
+                Some(_) => {}
+                None => return Vec::new(),
+            },
+            Bound::Le(v) => match (v.0, v.1).cmp(&line) {
+                std::cmp::Ordering::Less => return Vec::new(),
+                std::cmp::Ordering::Equal => hi = hi.min(u64::from(v.2)),
+                std::cmp::Ordering::Greater => {}
+            },
+            Bound::Lt(v) => match (v.0, v.1).cmp(&line) {
+                std::cmp::Ordering::Less => return Vec::new(),
+                std::cmp::Ordering::Equal if v.2 == 0 => return Vec::new(),
+                std::cmp::Ordering::Equal => hi = hi.min(u64::from(v.2) - 1),
+                std::cmp::Ordering::Greater => {}
+            },
+            Bound::Ne(v) if (v.0, v.1) == line => excluded.push((u64::from(v.2), u64::from(v.2))),
+            Bound::Ne(_) => {}
+            Bound::Outside(a, b) => {
+                let start = patch_floor(a);
+                let end = match (b.0, b.1).cmp(&line) {
+                    std::cmp::Ordering::Less => None,
+                    std::cmp::Ordering::Equal if b.2 == 0 => None,
+                    std::cmp::Ordering::Equal => Some(u64::from(b.2) - 1),
+                    std::cmp::Ordering::Greater => Some(u64::MAX),
+                };
+                if let (Some(start), Some(end)) = (start, end) {
+                    excluded.push((start, end));
+                }
+            }
+        }
+    }
+    subtract(&[(lo, hi)], &excluded)
+}
+
+fn subtract(allowed: &[(u64, u64)], excluded: &[(u64, u64)]) -> Vec<(u64, u64)> {
+    let mut excluded = excluded.to_vec();
+    excluded.sort_unstable();
+    let mut out = Vec::new();
+    for &(lo, hi) in allowed {
+        let mut next = lo;
+        let mut open = true;
+        for &(start, end) in &excluded {
+            if !open || start > hi {
+                break;
+            }
+            if end < next {
+                continue;
+            }
+            if start > next {
+                out.push((next, start - 1));
+            }
+            match end.checked_add(1) {
+                Some(n) => next = n,
+                None => open = false,
+            }
+        }
+        if open && next <= hi {
+            out.push((next, hi));
+        }
+    }
+    out
+}
+
+pub fn php_allows(require: Option<&str>, conflict: Option<&str>, target: PhpVersion) -> Option<bool> {
+    let allowed = match require {
+        Some(r) => Constraint::parse(r)?.line_patches(target),
+        None => vec![(0, u64::MAX)],
+    };
+    let blocked = match conflict {
+        Some(c) => Constraint::parse(c)?.line_patches(target),
+        None => Vec::new(),
+    };
+    Some(!subtract(&allowed, &blocked).is_empty())
 }
 
 pub fn constraint_allows(constraint: &str, target: PhpVersion) -> Option<bool> {
@@ -151,13 +245,18 @@ fn parse_and_group(input: &str) -> Option<Vec<Bound>> {
     let mut pending_op: Option<&str> = None;
     for t in raw {
         if matches!(t, ">=" | "<=" | ">" | "<" | "!=" | "==" | "=" | "^" | "~") {
-            pending_op = Some(t);
+            if pending_op.replace(t).is_some() {
+                return None;
+            }
             continue;
         }
         match pending_op.take() {
             Some(op) => tokens.push(format!("{op}{t}")),
             None => tokens.push(t.to_string()),
         }
+    }
+    if pending_op.is_some() || tokens.is_empty() {
+        return None;
     }
 
     let mut bounds = Vec::new();
@@ -178,7 +277,11 @@ fn parse_atom(token: &str) -> Option<Vec<Bound>> {
     let rest = rest.trim();
 
     if rest.contains('*') || rest.contains('x') || rest.contains('X') {
-        let prefix: Vec<&str> = rest.split('.').take_while(|p| !matches!(*p, "*" | "x" | "X")).collect();
+        let parts: Vec<&str> = rest.split('.').collect();
+        let prefix: Vec<&str> = parts.iter().take_while(|p| !matches!(**p, "*" | "x" | "X")).copied().collect();
+        if parts[prefix.len()..].iter().any(|p| !matches!(*p, "*" | "x" | "X")) {
+            return None;
+        }
         let (base, parts) = parse_version(&prefix.join("."))?;
         if op == "!=" {
             return Some(vec![Bound::Outside(base, bump(base, parts))]);
@@ -232,10 +335,20 @@ fn parse_version(s: &str) -> Option<(Triple, usize)> {
             continue;
         }
         let digits: String = part.chars().take_while(|c| c.is_ascii_digit()).collect();
+        let suffix = &part[digits.len()..];
+        if !suffix.is_empty() && (!s.ends_with(part) || !is_stability(suffix)) {
+            return None;
+        }
         nums[i] = digits.parse().ok()?;
         count = i + 1;
     }
     Some(((nums[0], nums[1], nums[2]), count))
+}
+
+fn is_stability(suffix: &str) -> bool {
+    let s = suffix.trim_start_matches(['-', '.', '_']).to_ascii_lowercase();
+    let word = s.trim_end_matches(|c: char| c.is_ascii_digit() || c == '.');
+    ["alpha", "beta", "a", "b", "rc", "patch", "pl", "p", "dev", "stable"].contains(&word)
 }
 
 fn bump(v: Triple, parts: usize) -> Triple {
@@ -253,6 +366,33 @@ mod tests {
 
     fn v(s: &str) -> PhpVersion {
         s.parse().unwrap()
+    }
+
+    #[test]
+    fn malformed_constraints_are_unknown_and_lines_are_checked_exactly() {
+        let t = PhpVersion::new(8, 4);
+        for bad in [">", "8.4bananas", ">=", ">= <8.5", "^~8.4", "8.4.x.y"] {
+            assert_eq!(constraint_allows(bad, t), None, "{bad}");
+        }
+        for (c, want) in [
+            (">=8.4.41 <8.4.100", true),
+            (">=8.4.41, <8.4.42", true),
+            (">8.4.99999", true),
+            (">=8.4 <8.4.0", false),
+            ("<8.4.0", false),
+            (">=8.4.0 !=8.4.*", false),
+            ("!=8.4.0", true),
+            ("8.4.*", true),
+            ("~8.4.3", true),
+            (">= 8.4", true),
+            ("^8.4@dev", true),
+            (">=8.4.0-beta1", true),
+            ("8.4.0RC1", true),
+            ("~8.3.0 || ^8.5", false),
+            ("^8.3 || ^8.5", true),
+        ] {
+            assert_eq!(constraint_allows(c, t), Some(want), "{c}");
+        }
     }
 
     #[test]
