@@ -53,6 +53,7 @@ export interface Summary {
 export interface IgnoredFinding {
   finding: Finding;
   reason: string;
+  inline?: boolean;
 }
 
 export interface IgnoreEntry {

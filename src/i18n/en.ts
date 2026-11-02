@@ -215,6 +215,7 @@ export const en: Dict = {
     ignoredTitle: (n) => (n === 1 ? "1 ignored finding" : `${n} ignored findings`),
     ignoredReason: "Why it's ignored",
     unignore: "Show again",
+    inlineIgnore: "A ferry-ignore comment in the code ignores it; remove the comment in your editor to see it again.",
     staleIgnores: (n) =>
       `${n === 1 ? "1 entry" : `${n} entries`} in .ferry/ignore.json no longer ${n === 1 ? "matches" : "match"} any code; it may have changed or been deleted.`,
     pruneIgnores: "Remove them",
