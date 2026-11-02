@@ -12,5 +12,8 @@ walkdir.workspace = true
 similar.workspace = true
 tempfile.workspace = true
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 walkdir.workspace = true

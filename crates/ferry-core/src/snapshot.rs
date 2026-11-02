@@ -525,6 +525,9 @@ mod tests {
         fs::write(root.join("a.php"), "A").unwrap();
         fs::write(root.join("z/b.php"), "B").unwrap();
         fs::set_permissions(root.join("z"), fs::Permissions::from_mode(0o555)).unwrap();
+        if fs::write(root.join("z/.probe"), "").is_ok() {
+            return;
+        }
         let result = store.restore(root, &snap.id);
         fs::set_permissions(root.join("z"), fs::Permissions::from_mode(0o755)).unwrap();
         assert!(matches!(&result, Err(SnapshotError::Restore { unrecovered, .. }) if unrecovered.is_empty()), "{result:?}");

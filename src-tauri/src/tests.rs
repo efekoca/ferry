@@ -341,6 +341,9 @@ fn a_failed_apply_puts_every_touched_file_back() {
     std::fs::write(root.join("locked/b.php"), "<?php // b\n").unwrap();
     let id = stage_preview(&h, &[("src/Greeter.php", "<?php // changed\n"), ("locked/b.php", "<?php // B\n")]);
     std::fs::set_permissions(root.join("locked"), std::fs::Permissions::from_mode(0o555)).unwrap();
+    if std::fs::write(root.join("locked/.probe"), "").is_ok() {
+        return;
+    }
     let result =
         h.invoke("apply_changes", json!({ "path": h.root, "previewId": id, "files": ["src/Greeter.php", "locked/b.php"], "label": "x" }));
     std::fs::set_permissions(root.join("locked"), std::fs::Permissions::from_mode(0o755)).unwrap();
