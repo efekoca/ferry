@@ -36,6 +36,8 @@ const MULTI_PUNCT: [&str; 22] = [
 pub struct Lexed {
     pub tokens: Vec<Token>,
     pub stray_hash_brackets: Vec<(usize, usize)>,
+    pub comments: Vec<(usize, usize)>,
+    pub html: Vec<(usize, usize)>,
 }
 
 pub fn tokenize(src: &str) -> Vec<Token> {
@@ -54,6 +56,8 @@ struct Lexer<'a> {
     cursor: (usize, usize, usize),
     tokens: Vec<Token>,
     stray_hash_brackets: Vec<(usize, usize)>,
+    comments: Vec<(usize, usize)>,
+    html: Vec<(usize, usize)>,
 }
 
 fn is_ident_start(c: u8) -> bool {
@@ -72,7 +76,17 @@ impl<'a> Lexer<'a> {
                 line_starts.push(i + 1);
             }
         }
-        Self { src, b: src.as_bytes(), pos: 0, line_starts, cursor: (0, 0, 1), tokens: Vec::new(), stray_hash_brackets: Vec::new() }
+        Self {
+            src,
+            b: src.as_bytes(),
+            pos: 0,
+            line_starts,
+            cursor: (0, 0, 1),
+            tokens: Vec::new(),
+            stray_hash_brackets: Vec::new(),
+            comments: Vec::new(),
+            html: Vec::new(),
+        }
     }
 
     fn line_col(&mut self, offset: usize) -> (usize, usize) {
@@ -118,7 +132,7 @@ impl<'a> Lexer<'a> {
                 self.pos = self.b.len();
             }
         }
-        Lexed { tokens: self.tokens, stray_hash_brackets: self.stray_hash_brackets }
+        Lexed { tokens: self.tokens, stray_hash_brackets: self.stray_hash_brackets, comments: self.comments, html: self.html }
     }
 
     fn halted(&self) -> bool {
@@ -132,6 +146,12 @@ impl<'a> Lexer<'a> {
     }
 
     fn skip_inline_html(&mut self) {
+        let start = self.pos;
+        self.skip_html_body();
+        self.html.push((start, self.pos));
+    }
+
+    fn skip_html_body(&mut self) {
         while self.pos < self.b.len() {
             if self.starts_with_ci("<?php") {
                 self.pos += 5;
@@ -174,6 +194,7 @@ impl<'a> Lexer<'a> {
         }
         if c == b'#' || self.starts_with("//") {
             self.skip_line_comment();
+            self.comments.push((start, self.pos));
             return;
         }
         if self.starts_with("/*") {
@@ -181,6 +202,7 @@ impl<'a> Lexer<'a> {
                 Some(i) => self.pos += 2 + i + 2,
                 None => self.pos = self.b.len(),
             }
+            self.comments.push((start, self.pos));
             return;
         }
         if c == b'\'' {

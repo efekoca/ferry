@@ -492,6 +492,40 @@ fn editor_links() {
 }
 
 #[test]
+fn runtime_and_inline_ignores_behave() {
+    let _lang = turkish();
+    let h = harness();
+    let root = h.root.clone();
+    h.ok("scan_project", json!({ "path": root, "target": "8.4", "run": 1 }));
+    let log = Path::new(&root).join("php_errors.log");
+    std::fs::write(&log, "PHP Warning:  Undefined variable $x in /srv/app/src/Greeter.php on line 3\n").unwrap();
+    let merged = h.ok("import_runtime_log", json!({ "path": root, "log": log }));
+    let id = merged["findings"].as_array().unwrap().iter().find(|f| f["ruleId"] == "runtime.warning").unwrap()["id"].clone();
+    let ignored = h.ok("ignore_finding", json!({ "path": root, "id": id, "reason": "known" }));
+    assert!(ignored["ignored"].as_array().unwrap().iter().any(|i| i["finding"]["id"] == id && i["inline"] == false));
+    assert!(!ignored["findings"].as_array().unwrap().iter().any(|f| f["id"] == id));
+    let shown = h.ok("unignore_finding", json!({ "path": root, "id": id }));
+    assert!(shown["findings"].as_array().unwrap().iter().any(|f| f["id"] == id));
+
+    let file = Path::new(&root).join("src/Greeter.php");
+    let src = std::fs::read_to_string(&file).unwrap();
+    std::fs::write(
+        &file,
+        src.replacen(
+            "        while (list($k, $v) = each($this->items)) {",
+            "        // ferry-ignore removed.each legacy loop\n        while (list($k, $v) = each($this->items)) {",
+            1,
+        ),
+    )
+    .unwrap();
+    let rescan = h.ok("scan_project", json!({ "path": root, "target": "8.4", "run": 2 }));
+    let inline = rescan["ignored"].as_array().unwrap().iter().find(|i| i["finding"]["ruleId"] == "removed.each").unwrap();
+    assert_eq!((inline["inline"].as_bool(), inline["reason"].as_str()), (Some(true), Some("legacy loop")));
+    let err = h.invoke("unignore_finding", json!({ "path": root, "id": inline["finding"]["id"] })).unwrap_err();
+    assert!(err.as_str().unwrap().contains("ferry-ignore yorumuyla"), "{err}");
+}
+
+#[test]
 fn runtime_logs_confirm_and_add_findings() {
     let _lang = turkish();
     let h = harness();
