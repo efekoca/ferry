@@ -497,6 +497,98 @@ struct Hit<'r> {
     replacement: Option<Localized>,
 }
 
+#[derive(Clone, Copy)]
+enum Builtin {
+    RemovedFunction,
+    DeprecatedFunction,
+    RemovedConstant,
+    DeprecatedConstant,
+    RemovedClass,
+    RemovedMethod,
+    DeprecatedMethod,
+}
+
+impl Builtin {
+    fn removed(self) -> bool {
+        matches!(self, Builtin::RemovedFunction | Builtin::RemovedConstant | Builtin::RemovedClass | Builtin::RemovedMethod)
+    }
+
+    fn rule(self) -> (&'static str, crate::i18n::Text) {
+        use crate::i18n::Text;
+        match self {
+            Builtin::RemovedFunction => (
+                "removed.builtin_function",
+                Text::new(
+                    "Bu fonksiyon PHP'den kaldırıldı; çağrısı hata verir.",
+                    "This function was removed from PHP; calling it is a fatal error.",
+                ),
+            ),
+            Builtin::DeprecatedFunction => (
+                "deprecated.builtin_function",
+                Text::new(
+                    "Bu fonksiyon kullanımdan kalktı; çağrıldığında uyarı verir ve ileride kaldırılacak.",
+                    "This function is deprecated; calling it raises a warning and it will be removed.",
+                ),
+            ),
+            Builtin::RemovedConstant => (
+                "removed.builtin_constant",
+                Text::new(
+                    "Bu sabit PHP'den kaldırıldı; kullanıldığında hata verir.",
+                    "This constant was removed from PHP; using it is an error.",
+                ),
+            ),
+            Builtin::DeprecatedConstant => (
+                "deprecated.builtin_constant",
+                Text::new("Bu sabit kullanımdan kalktı ve ileride kaldırılacak.", "This constant is deprecated and will be removed."),
+            ),
+            Builtin::RemovedClass => (
+                "removed.builtin_class",
+                Text::new(
+                    "Bu sınıf PHP'den kaldırıldı; kullanıldığında hata verir.",
+                    "This class was removed from PHP; using it is a fatal error.",
+                ),
+            ),
+            Builtin::RemovedMethod => (
+                "removed.builtin_method",
+                Text::new(
+                    "Bu metot PHP'den kaldırıldı; çağrısı hata verir.",
+                    "This method was removed from PHP; calling it is a fatal error.",
+                ),
+            ),
+            Builtin::DeprecatedMethod => (
+                "deprecated.builtin_method",
+                Text::new(
+                    "Bu metot kullanımdan kalktı; çağrıldığında uyarı verir ve ileride kaldırılacak.",
+                    "This method is deprecated; calling it raises a warning and it will be removed.",
+                ),
+            ),
+        }
+    }
+}
+
+fn generated<'t, T>(table: &'t [T], key: &str) -> Option<&'t T>
+where
+    T: GeneratedRow,
+{
+    table.binary_search_by(|row| row.key().cmp(key)).ok().map(|k| &table[k])
+}
+
+trait GeneratedRow {
+    fn key(&self) -> &str;
+}
+
+impl GeneratedRow for (&str, (u32, u32), &str) {
+    fn key(&self) -> &str {
+        self.0
+    }
+}
+
+impl GeneratedRow for (&str, (u32, u32), &str, &str) {
+    fn key(&self) -> &str {
+        self.0
+    }
+}
+
 struct Ctx<'a> {
     file: &'a str,
     src: &'a str,
@@ -572,6 +664,24 @@ impl<'a> Ctx<'a> {
             snippet: self.snippet(line),
             runtime_hits: 0,
         });
+    }
+
+    fn builtin(&mut self, kind: Builtin, title: String, since: (u32, u32), tok: &Token) {
+        let since = PhpVersion::new(since.0, since.1);
+        if !self.applies(since) {
+            return;
+        }
+        let (rule_id, note) = kind.rule();
+        let hit = Hit {
+            rule_id,
+            title: Localized::same(title),
+            message: note,
+            since,
+            severity: if kind.removed() { Severity::Breaking } else { Severity::Deprecated },
+            fix: FixKind::Manual,
+            replacement: None,
+        };
+        self.push(hit, tok.line, tok.column);
     }
 
     fn symbol(&mut self, rule: &SymbolRule, tok: &Token, is_call: bool) {
@@ -693,6 +803,14 @@ impl<'a> Ctx<'a> {
         if is_member {
             self.member(tokens, i);
             return;
+        }
+
+        let names_class = prev.is_some_and(|p| ["new", "instanceof", "extends", "implements"].iter().any(|k| p.is_ident_ci(k)))
+            || next.is_some_and(|n| n.is_punct("::"));
+        if names_class && !self.index.declares_type(&lower) {
+            if let Some(&(_, since, _, name)) = generated(crate::symbols::REMOVED_CLASSES, &lower) {
+                self.builtin(Builtin::RemovedClass, name.to_string(), since, tok);
+            }
         }
 
         if after_decl {
@@ -866,6 +984,10 @@ impl<'a> Ctx<'a> {
             }
             if let Some(rule) = FUNCTIONS.iter().find(|r| r.matches(&lower)) {
                 self.symbol(rule, tok, true);
+            } else if let Some(&(_, since, _)) = generated(crate::symbols::REMOVED_FUNCTIONS, &lower) {
+                self.builtin(Builtin::RemovedFunction, format!("{bare}()"), since, tok);
+            } else if let Some(&(_, since, _)) = generated(crate::symbols::DEPRECATED_FUNCTIONS, &lower) {
+                self.builtin(Builtin::DeprecatedFunction, format!("{bare}()"), since, tok);
             }
             return;
         }
@@ -878,6 +1000,12 @@ impl<'a> Ctx<'a> {
                 return;
             }
             self.symbol(rule, tok, false);
+        } else if !self.index.defines_constant(bare) {
+            if let Some(&(_, since, _)) = generated(crate::symbols::REMOVED_CONSTANTS, bare) {
+                self.builtin(Builtin::RemovedConstant, bare.to_string(), since, tok);
+            } else if let Some(&(_, since, _)) = generated(crate::symbols::DEPRECATED_CONSTANTS, bare) {
+                self.builtin(Builtin::DeprecatedConstant, bare.to_string(), since, tok);
+            }
         }
     }
 
@@ -930,6 +1058,9 @@ impl<'a> Ctx<'a> {
                     (None, None) => m.class != "reflectionparameter" && self.classes.iter().any(|c| is(c, m.class)),
                 }
         }) else {
+            if is_call {
+                self.generated_method(tokens, i, class, known.as_ref());
+            }
             return;
         };
         if !self.applies(m.rule.since()) {
@@ -950,6 +1081,33 @@ impl<'a> Ctx<'a> {
             replacement: m.rule.replacement.map(Into::into),
         };
         self.push(hit, tok.line, tok.column);
+    }
+
+    fn generated_method(&mut self, tokens: &[Token], i: usize, class: Option<&str>, known: Option<&std::collections::HashSet<String>>) {
+        let method = tokens[i].text.to_ascii_lowercase();
+        let classes: Vec<String> = match class {
+            Some(c) if c.eq_ignore_ascii_case("parent") => crate::index::class_decls(tokens)
+                .into_iter()
+                .filter(|d| d.open < i && i < d.close)
+                .min_by_key(|d| d.close - d.open)
+                .and_then(|d| d.info.parent)
+                .into_iter()
+                .collect(),
+            Some(c) => vec![c.to_ascii_lowercase()],
+            None => known.map(|k| k.iter().cloned().collect()).unwrap_or_default(),
+        };
+        for c in classes.iter().filter(|c| !self.index.declares_type(c)) {
+            let key = format!("{c}::{method}");
+            let (kind, found) = match generated(crate::symbols::REMOVED_METHODS, &key) {
+                Some(&(_, since, name)) => (Builtin::RemovedMethod, Some((since, name))),
+                None => {
+                    (Builtin::DeprecatedMethod, generated(crate::symbols::DEPRECATED_METHODS, &key).map(|&(_, since, name)| (since, name)))
+                }
+            };
+            if let Some((since, name)) = found {
+                return self.builtin(kind, format!("{name}::{}()", tokens[i].text), since, &tokens[i]);
+            }
+        }
     }
 
     fn arity(&mut self, tok: &Token, given: usize, required: u8, max: u8) {
@@ -3037,6 +3195,23 @@ mod tests {
         assert_eq!(titles("<?php function f(ReflectionFunction $f) { return $f->isDisabled(); }"), ["->isDisabled()"]);
         assert!(titles("<?php class SplObjectStorageX {} $s = new SplObjectStorageX(); $s->attach($o);").is_empty());
         assert!(titles("<?php $s = new SplObjectStorage(); $other->attach($o);").is_empty());
+    }
+
+    #[test]
+    fn generated_symbol_rules_respect_user_code_and_targets() {
+        let ids = |src: &str, t: (u32, u32)| at(src, t).into_iter().map(|(id, title)| format!("{id} {title}")).collect::<Vec<_>>();
+        assert_eq!(
+            ids("<?php class Client extends SoapClient { function __construct() { parent::SoapClient('x'); } }", (8, 0)),
+            ["removed.builtin_method SoapClient::SoapClient()"]
+        );
+        assert!(ids("<?php class Client extends SoapClient { function __construct() { parent::SoapClient('x'); } }", (7, 4)).is_empty());
+        assert_eq!(ids("<?php $x = new DOMLocator();", (8, 4)), ["removed.builtin_class DOMLocator"]);
+        assert!(ids("<?php class DOMLocator {} $x = new DOMLocator();", (8, 4)).is_empty());
+        assert_eq!(ids("<?php echo MYSQLI_TYPE_INTERVAL;", (8, 4)), ["removed.builtin_constant MYSQLI_TYPE_INTERVAL"]);
+        assert!(ids("<?php define('MYSQLI_TYPE_INTERVAL', 1); echo MYSQLI_TYPE_INTERVAL;", (8, 4)).is_empty());
+        assert_eq!(ids("<?php $a = new SplFixedArray(3); $a->rewind();", (8, 0)), ["removed.builtin_method SplFixedArray::rewind()"]);
+        assert!(ids("<?php $a->rewind();", (8, 0)).is_empty(), "no evidence of the receiver");
+        assert!(ids("<?php function f(ReflectionNamedType $t) { return $t->isBuiltin(); }", (8, 4)).is_empty());
     }
 
     #[test]
