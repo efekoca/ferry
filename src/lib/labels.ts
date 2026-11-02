@@ -1,5 +1,5 @@
 import type { Dict } from "../i18n";
-import type { DependencyReport } from "./types";
+import type { DependencyReport, Framework } from "./types";
 
 export const formatNumber = (n: number, locale: string) => new Intl.NumberFormat(locale).format(n);
 
@@ -58,7 +58,7 @@ export const FRAMEWORK_LABEL = {
   mediawiki: "MediaWiki",
   phpbb: "phpBB",
   generic: "PHP",
-} as const;
+} as const satisfies Record<Framework, string>;
 
 export const isMac = () =>
   typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);

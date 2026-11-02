@@ -28,6 +28,19 @@ describe("Ferry app", () => {
     expect(screen.getByRole("button", { name: /Ayarlar/ })).toBeEnabled();
   });
 
+  it("keeps recent projects of every supported platform", async () => {
+    const recent = [
+      { path: "/sites/intranet", name: "intranet", framework: "joomla", openedAt: Date.now() },
+      { path: "/sites/wiki", name: "wiki", framework: "mediawiki", openedAt: Date.now() - 1000 },
+      { path: "/sites/odd", name: "odd", framework: "cobol", openedAt: Date.now() - 2000 },
+    ];
+    localStorage.setItem("ferry.recent", JSON.stringify(recent));
+    setup();
+    expect(await screen.findByText("intranet")).toBeInTheDocument();
+    expect(screen.getByText("wiki")).toBeInTheDocument();
+    expect(screen.queryByText("odd")).not.toBeInTheDocument();
+  });
+
   it("opens a project, scans it and summarizes risks", async () => {
     const user = setup();
     await openAndScan(user);
