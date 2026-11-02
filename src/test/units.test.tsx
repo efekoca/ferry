@@ -1,5 +1,5 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { DiffViewer, wordHighlight } from "../components/DiffViewer";
 import { ScoreRing } from "../components/ScoreRing";
 import { DICTS } from "../i18n";
@@ -9,6 +9,8 @@ import { filterFindings } from "../screens/Findings";
 import { isVulnerable, patchedFor } from "../lib/security";
 import type { ExtensionUse, FileDiff, Finding } from "../lib/types";
 import { compareProbe, parseProbe } from "../lib/probe";
+import { ErrorBoundary } from "../components/ErrorBoundary";
+import { fireEvent } from "@testing-library/react";
 
 const { tr, en } = DICTS;
 
@@ -173,3 +175,36 @@ describe("server probe", () => {
     expect(compareProbe(withOpcache, "8.4", [required, devOnly, ext("opcache")]).missing).toEqual(["intl"]);
   });
 });
+
+describe("probe validation", () => {
+  it("drops values of the wrong type and rejects malformed output", () => {
+    const odd = parseProbe(JSON.stringify({ ferryProbe: 1, php: "8.4.27", extensions: [], server: { unexpected: true }, ini: { memory_limit: { x: 1 }, display_errors: false, upload_max_filesize: "8M" } }))!;
+    expect(odd.server).toBeNull();
+    expect(odd.ini).toEqual({ display_errors: false, upload_max_filesize: "8M" });
+    expect(parseProbe(JSON.stringify({ ferryProbe: 1, php: "eight", extensions: [] }))).toBeNull();
+    expect(parseProbe(JSON.stringify({ ferryProbe: 1, php: "8.4.27", extensions: [{}] }))).toBeNull();
+    expect(parseProbe(JSON.stringify({ ferryProbe: 1, php: "8.4.27", extensions: ["x".repeat(600 * 1024)] }))).toBeNull();
+    expect(parseProbe("[1,2]")).toBeNull();
+  });
+});
+
+describe("ErrorBoundary", () => {
+  it("shows the fallback and recovers", () => {
+    let broken = true;
+    const Child = () => {
+      if (broken) throw new Error("boom");
+      return <p>fine</p>;
+    };
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    render(
+      <ErrorBoundary fallback={(e, reset) => <button onClick={reset}>{e.message}</button>}>
+        <Child />
+      </ErrorBoundary>,
+    );
+    broken = false;
+    fireEvent.click(screen.getByRole("button", { name: "boom" }));
+    expect(screen.getByText("fine")).toBeInTheDocument();
+    spy.mockRestore();
+  });
+});
+

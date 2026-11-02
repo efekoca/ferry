@@ -70,10 +70,15 @@ export function Findings() {
     [findings, deferredFilter, runtimeFilter],
   );
   const [limit, setLimit] = useState({ for: visible, count: PAGE });
-  const shown = limit.for === visible ? limit.count : PAGE;
+  const selectedAt = selectedId ? visible.findIndex((f) => f.id === selectedId) : -1;
+  const shown = Math.max(limit.for === visible ? limit.count : PAGE, selectedAt + 1);
   const showMore = (count: number) => setLimit({ for: visible, count });
   const update = (patch: Partial<FindingsFilter>) => setFindingsFilter({ ...filter, ...patch });
-  const filtered = filter.fix || filter.severity || filter.rule || filter.query;
+  const filtered = filter.fix || filter.severity || filter.rule || filter.query || runtimeFilter;
+  const clearFilters = () => {
+    setFindingsFilter(NO_FILTER);
+    setOnlyRuntime(false);
+  };
   const ruleTitle = useMemo(() => {
     const titles = [...new Set(findings.filter((f) => f.ruleId === filter.rule).map((f) => loc(f.title)))];
     return titles.length ? commonTitle(titles) : null;
@@ -185,6 +190,24 @@ export function Findings() {
     </Callout>
   );
 
+  const checkActions = (
+    <div className="toolbar__actions">
+      <Button variant="ghost" size="sm" icon={<Activity size={13} />} onClick={() => void importRuntimeLog()}>
+        {t.findings.importLog}
+      </Button>
+      {local && (
+        <>
+          <Button variant="ghost" size="sm" icon={<FileCheck2 size={13} />} loading={checking === "lint"} disabled={!!checking} title={local.path} onClick={() => void check("lint")}>
+            {t.findings.lintWith(local.version)}
+          </Button>
+          <Button variant="ghost" size="sm" icon={<FlaskConical size={13} />} disabled={!!checking} title={local.path} onClick={() => setConfirmTests(true)}>
+            {t.findings.testWith(local.version)}
+          </Button>
+        </>
+      )}
+    </div>
+  );
+
   const countFix = (k: FixKind) => findings.filter((f) => f.fix === k).length;
   const countSev = (k: Severity) => findings.filter((f) => f.severity === k).length;
 
@@ -195,9 +218,22 @@ export function Findings() {
         subtitle={viewingIgnored ? t.findings.ignoredTitle(findings.length) : t.findings.subtitle(scan.target, findings.length)}
       />
       {findings.length === 0 ? (
-        <EmptyState icon={<CircleCheck size={24} />} title={t.findings.clean} action={ignoredToggle || undefined}>
-          {t.findings.cleanText(scan.target)}
-        </EmptyState>
+        <div className="findings-empty">
+          {staleNotice}
+          {runtimeNotice}
+          <EmptyState
+            icon={<CircleCheck size={24} />}
+            title={t.findings.clean}
+            action={
+              <div className="row row--wrap findings-empty__actions">
+                {ignoredToggle}
+                {checkActions}
+              </div>
+            }
+          >
+            {t.findings.cleanText(scan.target)}
+          </EmptyState>
+        </div>
       ) : (
         <div className="split">
           <div className="pane">
@@ -239,27 +275,13 @@ export function Findings() {
               <div className="toolbar__summary">
                 <span aria-live="polite">{t.findings.showing(visible.length, findings.length)}</span>
                 {filtered && (
-                  <Button variant="ghost" size="sm" onClick={() => setFindingsFilter(NO_FILTER)}>
+                  <Button variant="ghost" size="sm" onClick={clearFilters}>
                     {t.findings.clearFilters}
                   </Button>
                 )}
                 {ignoredToggle}
               </div>
-              <div className="toolbar__actions">
-                <Button variant="ghost" size="sm" icon={<Activity size={13} />} onClick={() => void importRuntimeLog()}>
-                  {t.findings.importLog}
-                </Button>
-                {local && (
-                  <>
-                    <Button variant="ghost" size="sm" icon={<FileCheck2 size={13} />} loading={checking === "lint"} disabled={!!checking} title={local.path} onClick={() => void check("lint")}>
-                      {t.findings.lintWith(local.version)}
-                    </Button>
-                    <Button variant="ghost" size="sm" icon={<FlaskConical size={13} />} disabled={!!checking} title={local.path} onClick={() => setConfirmTests(true)}>
-                      {t.findings.testWith(local.version)}
-                    </Button>
-                  </>
-                )}
-              </div>
+              {checkActions}
             </div>
 
             {visible.length === 0 ? (
@@ -267,7 +289,7 @@ export function Findings() {
                 icon={<FolderSearch size={24} />}
                 title={t.findings.noMatch}
                 action={
-                  <Button variant="secondary" onClick={() => setFindingsFilter(NO_FILTER)}>
+                  <Button variant="secondary" onClick={clearFilters}>
                     {t.findings.clearFilters}
                   </Button>
                 }
