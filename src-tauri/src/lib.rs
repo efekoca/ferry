@@ -7,7 +7,7 @@ use ferry_core::project::{self, ProjectInfo};
 use ferry_core::rector::{self, FileChange, RectorError, RectorMode, RectorPreview};
 use ferry_core::rules::FixKind;
 use ferry_core::runtime;
-use ferry_core::snapshot::{fnv1a, Snapshot, SnapshotStore};
+use ferry_core::snapshot::{content_hash, fnv1a, Snapshot, SnapshotStore};
 use ferry_core::toolchain::{self, ToolchainStatus};
 use ferry_core::{diff, report, t, PhpVersion};
 use serde::{Deserialize, Serialize};
@@ -697,23 +697,22 @@ async fn apply_changes(
         let refs: Vec<&FileChange> = selected.iter().collect();
         rector::check_fresh(&root, &refs).map_err(|e| e.to_string())?;
         let snapshot = store.create(&root, &applied_files, &label).map_err(|e| e.to_string())?;
-        if let Err(e) = rector::check_fresh(&root, &refs) {
+        let written_hashes: HashMap<&str, String> =
+            selected.iter().map(|c| (c.file.as_str(), content_hash(c.new_content.as_bytes()))).collect();
+        let metadata = serde_json::to_vec(&selected)
+            .map_err(|e| e.to_string())
+            .and_then(|json| store.write_attachment(&root, &snapshot.id, CHANGES_FILE, &json).map_err(|e| e.to_string()))
+            .and_then(|_| serde_json::to_vec(&written_hashes).map_err(|e| e.to_string()))
+            .and_then(|json| store.write_attachment(&root, &snapshot.id, WRITTEN_FILE, &json).map_err(|e| e.to_string()));
+        if let Err(e) = metadata {
             let _ = store.delete(&root, &snapshot.id);
-            return Err(e.to_string());
+            return Err(e);
         }
         let originals: HashMap<String, String> =
             refs.iter().filter_map(|c| Some((c.file.clone(), std::fs::read_to_string(root.join(&c.file)).ok()?))).collect();
         let mut written = Vec::new();
         match rector::write_changes(&root, &refs, &mut written) {
             Ok(()) => {
-                if let Ok(json) = serde_json::to_vec(&selected) {
-                    let _ = store.write_attachment(&root, &snapshot.id, CHANGES_FILE, &json);
-                }
-                let written_hashes: HashMap<&str, u64> =
-                    selected.iter().map(|c| (c.file.as_str(), fnv1a(c.new_content.as_bytes()))).collect();
-                if let Ok(json) = serde_json::to_vec(&written_hashes) {
-                    let _ = store.write_attachment(&root, &snapshot.id, WRITTEN_FILE, &json);
-                }
                 if let Some(limit) = snapshot_limit {
                     let _ = store.prune(&root, limit.max(1) as usize);
                 }
@@ -753,12 +752,19 @@ async fn list_snapshots(state: State<'_, AppState>, path: String) -> CmdResult<V
     blocking(move || store.list(Path::new(&path)).map_err(|e| e.to_string())).await
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct Conflict {
+    file: String,
+    hash: Option<String>,
+}
+
 #[tauri::command]
 async fn restore_snapshot(
     state: State<'_, AppState>,
     path: String,
     id: String,
-    acknowledged: Option<Vec<String>>,
+    acknowledged: Option<Vec<Conflict>>,
 ) -> CmdResult<Vec<String>> {
     let path = normalize_path(path);
     let store = state.snapshots();
@@ -767,13 +773,17 @@ async fn restore_snapshot(
         let _guard = writes.lock().unwrap_or_else(|e| e.into_inner());
         let root = project_root(&path)?;
         let acknowledged = acknowledged.unwrap_or_default();
-        let unseen: Vec<String> = conflicts(&store, &root, &id)?.into_iter().filter(|f| !acknowledged.contains(f)).collect();
+        let found = conflicts(&store, &root, &id)?;
+        let unseen: Vec<&str> = found.iter().filter(|c| !acknowledged.contains(c)).map(|c| c.file.as_str()).collect();
         if !unseen.is_empty() {
             let files = unseen.join(", ");
             return Err(t!(
                 "Şu dosyalar onaydan sonra değişti: {files}. Geri yüklemeden önce yeniden gözden geçirin.",
                 "These files changed after you confirmed: {files}. Review them again before restoring."
             ));
+        }
+        if !found.is_empty() {
+            keep_overwritten(&store, &root, &id, &found)?;
         }
         store.restore(&root, &id).map_err(|e| e.to_string()).map(|files| (path, files))
     })
@@ -782,22 +792,62 @@ async fn restore_snapshot(
     Ok(restored.1)
 }
 
-fn conflicts(store: &SnapshotStore, root: &Path, id: &str) -> CmdResult<Vec<String>> {
-    let Some(bytes) = store.read_attachment(root, id, WRITTEN_FILE).map_err(|e| e.to_string())? else {
-        return Ok(Vec::new());
-    };
-    let written: HashMap<String, u64> = serde_json::from_slice(&bytes).unwrap_or_default();
-    let mut changed: Vec<String> = written
+fn keep_overwritten(store: &SnapshotStore, root: &Path, id: &str, found: &[Conflict]) -> CmdResult<()> {
+    let label = store.get(root, id).map_err(|e| e.to_string())?.label;
+    let files: Vec<String> = found.iter().filter(|c| c.hash.is_some()).map(|c| c.file.clone()).collect();
+    if files.is_empty() {
+        return Ok(());
+    }
+    let backup = store.create(root, &files, &t!("Geri yükleme öncesi · {label}", "Before restore · {label}")).map_err(|e| e.to_string())?;
+    let restored: HashMap<String, Option<String>> = store
+        .get(root, id)
+        .map_err(|e| e.to_string())?
+        .files
         .into_iter()
-        .filter(|(file, hash)| std::fs::read(root.join(file)).map(|b| fnv1a(&b)).ok() != Some(*hash))
-        .map(|(file, _)| file)
+        .filter(|f| files.contains(&f.path))
+        .map(|f| (f.path, f.hash))
         .collect();
-    changed.sort();
+    let json = serde_json::to_vec(&restored).map_err(|e| e.to_string())?;
+    store.write_attachment(root, &backup.id, WRITTEN_FILE, &json).map_err(|e| {
+        let _ = store.delete(root, &backup.id);
+        e.to_string()
+    })
+}
+
+fn conflicts(store: &SnapshotStore, root: &Path, id: &str) -> CmdResult<Vec<Conflict>> {
+    let current = |file: &str| std::fs::read(root.join(file)).ok().map(|b| content_hash(&b));
+    let unreadable = || {
+        t!(
+            "Yedeğin uygulama kaydı okunamadı; değişiklik kontrolü yapılamadığı için geri yükleme durduruldu.",
+            "The backup's apply record couldn't be read; restore stopped because edits can't be checked."
+        )
+    };
+    let expected: HashMap<String, Option<String>> = match store.read_attachment(root, id, WRITTEN_FILE).map_err(|e| e.to_string())? {
+        Some(bytes) => serde_json::from_slice::<HashMap<String, serde_json::Value>>(&bytes)
+            .map_err(|_| unreadable())?
+            .into_iter()
+            .map(|(file, hash)| match hash {
+                serde_json::Value::String(h) => Ok((file, Some(h))),
+                serde_json::Value::Number(n) => n.as_u64().map(|n| (file, Some(format!("{n:016x}")))).ok_or_else(unreadable),
+                serde_json::Value::Null => Ok((file, None)),
+                _ => Err(unreadable()),
+            })
+            .collect::<CmdResult<_>>()?,
+        None => store.get(root, id).map_err(|e| e.to_string())?.files.into_iter().map(|f| (f.path, f.hash)).collect(),
+    };
+    let mut changed: Vec<Conflict> = expected
+        .into_iter()
+        .filter_map(|(file, hash)| {
+            let now = current(&file);
+            (now != hash).then_some(Conflict { file, hash: now })
+        })
+        .collect();
+    changed.sort_by(|a, b| a.file.cmp(&b.file));
     Ok(changed)
 }
 
 #[tauri::command]
-async fn snapshot_conflicts(state: State<'_, AppState>, path: String, id: String) -> CmdResult<Vec<String>> {
+async fn snapshot_conflicts(state: State<'_, AppState>, path: String, id: String) -> CmdResult<Vec<Conflict>> {
     let path = normalize_path(path);
     let store = state.snapshots();
     blocking(move || conflicts(&store, &project_root(&path)?, &id)).await
