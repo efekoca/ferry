@@ -359,6 +359,36 @@
       await emit(`  stays on welcome=${text().includes("Kodunuz yeni sürüme hazır olsun")}`);
     },
 
+    async function contrast() {
+      await openRecent(projects.kuzey);
+      await scan();
+      const still = document.createElement("style");
+      still.textContent = "*,*::before,*::after{transition:none!important;animation:none!important}";
+      document.head.appendChild(still);
+      const vibrancy = document.documentElement.dataset.vibrancy;
+      document.documentElement.dataset.vibrancy = "false";
+      const failures = [];
+      for (const [mode, label] of [["light", "Açık"], ["dark", "Koyu"]]) {
+        key(",");
+        await until(() => radio(label), "theme radio");
+        radio(label).click();
+        await until(() => document.documentElement.dataset.theme === mode, `${mode} theme`);
+        await sleep(500);
+        for (const [page, k] of [["overview", "1"], ["findings", "2"], ["fixes", "3"], ["dependencies", "4"], ["history", "5"]]) {
+          key(k);
+          await sleep(700);
+          const result = await window.axe.run(document, { runOnly: ["color-contrast"] });
+          for (const v of result.violations) for (const n of v.nodes) failures.push(`${mode}/${page} ${n.target.join(" ")} ${n.any[0]?.data?.contrastRatio}`);
+        }
+      }
+      key(",");
+      await until(() => radio("Sistem"), "system theme radio");
+      radio("Sistem").click();
+      still.remove();
+      if (vibrancy) document.documentElement.dataset.vibrancy = vibrancy;
+      check(failures.length === 0, `contrast: ${failures.slice(0, 5).join("; ")}`);
+    },
+
     async function settings() {
       key(",");
       await until(() => text().includes("Görünüm"), "settings via Cmd+,");

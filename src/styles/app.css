@@ -1632,7 +1632,7 @@ select.input {
 
 .chip__count {
   font-variant-numeric: tabular-nums;
-  opacity: 0.8;
+  font-weight: 400;
 }
 
 .file-group {
@@ -1694,6 +1694,10 @@ select.input {
 .finding[aria-selected="true"] {
   background: var(--accent-soft);
   box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.finding[aria-selected="true"] .finding__snippet {
+  color: var(--text-2);
 }
 
 .finding__line {
