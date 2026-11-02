@@ -1,4 +1,4 @@
-use crate::version::{constraint_allows, PhpVersion};
+use crate::version::{php_allows, PhpVersion};
 use serde::Serialize;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -27,7 +27,9 @@ fn normalized(v: &str) -> Option<Vec<u64>> {
     Some(parts)
 }
 
-pub fn versions(json: &str, package: &str) -> Vec<(String, Vec<u64>, Option<String>)> {
+type Release = (String, Vec<u64>, Option<String>, Option<String>);
+
+pub fn versions(json: &str, package: &str) -> Vec<Release> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else { return Vec::new() };
     let Some(list) = value.pointer(&format!("/packages/{}", package.replace('~', "~0").replace('/', "~1"))).and_then(|v| v.as_array())
     else {
@@ -47,7 +49,8 @@ pub fn versions(json: &str, package: &str) -> Vec<(String, Vec<u64>, Option<Stri
         let version = current.get("version").and_then(|v| v.as_str()).unwrap_or_default().to_string();
         let Some(norm) = current.get("version_normalized").and_then(|v| v.as_str()).and_then(normalized) else { continue };
         let php = current.get("require").and_then(|r| r.get("php")).and_then(|v| v.as_str()).map(str::to_string);
-        out.push((version, norm, php));
+        let conflict = current.get("conflict").and_then(|r| r.get("php")).and_then(|v| v.as_str()).map(str::to_string);
+        out.push((version, norm, php, conflict));
     }
     out
 }
@@ -56,14 +59,14 @@ pub fn lowest_compatible(json: &str, package: &str, installed: &str, target: Php
     let floor = normalized(installed.trim_start_matches(['v', 'V']))?;
     let candidates: Vec<_> = versions(json, package)
         .into_iter()
-        .filter(|(version, norm, php)| {
+        .filter(|(version, norm, php, conflict)| {
             *norm > floor
-                && php.as_deref().is_none_or(|c| constraint_allows(c, target) == Some(true))
+                && php_allows(php.as_deref(), conflict.as_deref(), target) == Some(true)
                 && crate::framework::package_limit(package, version).is_none_or(|l| target <= l.max)
         })
         .collect();
     let major = candidates.iter().map(|c| c.1[0]).min()?;
-    let (version, norm, _) = candidates.into_iter().filter(|c| c.1[0] == major).max_by(|a, b| a.1.cmp(&b.1))?;
+    let (version, norm, ..) = candidates.into_iter().filter(|c| c.1[0] == major).max_by(|a, b| a.1.cmp(&b.1))?;
     Some(Suggestion { name: package.to_string(), major_change: norm.first() != floor.first(), version })
 }
 
@@ -91,5 +94,15 @@ mod tests {
         assert!(lowest_compatible(SAMPLE, "acme/log", "3.2.0", "8.4".parse().unwrap()).is_none());
         assert_eq!(url("Bad/../x"), None);
         assert_eq!(url("monolog/monolog").unwrap(), "https://repo.packagist.org/p2/monolog/monolog.json");
+    }
+
+    #[test]
+    fn skips_releases_whose_conflict_blocks_the_target() {
+        let json = r#"{"packages":{"acme/x":[
+            {"version":"2.1.0","version_normalized":"2.1.0.0","require":{"php":">=7.4"}},
+            {"version":"2.0.0","version_normalized":"2.0.0.0","require":{"php":">=7.4"},"conflict":{"php":">=8.4"}}
+        ]}}"#;
+        assert_eq!(lowest_compatible(json, "acme/x", "1.0.0", "8.4".parse().unwrap()).unwrap().version, "2.1.0");
+        assert_eq!(lowest_compatible(json, "acme/x", "1.0.0", "8.3".parse().unwrap()).unwrap().version, "2.1.0");
     }
 }

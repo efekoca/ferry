@@ -108,13 +108,13 @@ Ferry handles cases Rector cannot on its own. For example, a file that uses `$st
 
 ### Dependencies that block the upgrade
 
-The **Dependencies** page checks every locked package against the target version, using the PHP requirement each package declares in `composer.lock`. The project's own PHP constraint in `composer.json` is checked too.
+The **Dependencies** page checks every locked package against the target version, using the PHP requirement each package declares in `composer.lock`. The project's own PHP constraint in `composer.json` is checked too. A `conflict` entry for `php`, in `composer.json` or in a locked package, is taken into account as well.
 
 A declared requirement like `^8.0` doesn't always mean the package works on the newest PHP. For Laravel (`laravel/framework`, `illuminate/*`), Drupal core, and Symfony's core packages, Ferry also uses the framework's published support range and explains the difference under the requirement.
 
 ![Dependencies page with three incompatible packages for PHP 8.4, the project's PHP constraint, and each package's version, PHP requirement and status](assets/readme/dependencies-en.webp)
 
-Each package is marked **Compatible**, **Incompatible**, or **Unknown** (when the package declares no PHP requirement), with incompatible packages listed first. Development packages are labeled, and **Production only** hides them. The warning above the list gives a ready-to-copy `composer update` command naming exactly the packages that block the upgrade.
+Each package is marked **Compatible**, **Incompatible**, or **Unknown** (when the package declares no PHP requirement, or one Ferry can't read), with incompatible packages listed first. When nothing blocks the upgrade but some packages are unknown, the page says so instead of calling everything compatible. Development packages are labeled, and **Production only** hides them. The warning above the list gives a ready-to-copy `composer update` command naming exactly the packages that block the upgrade.
 
 **Find compatible versions** asks Packagist which release to move each blocking package to: the newest release of the first major version whose PHP requirement, and the framework's own support range where Ferry knows it, allows the target. It's the only feature that goes online, and only when you click it.
 

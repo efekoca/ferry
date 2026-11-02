@@ -167,5 +167,9 @@ describe("server probe", () => {
     const report = compareProbe(probe, "8.4", [ext("curl"), ext("intl"), ext("gd")]);
     expect(report).toMatchObject({ php: "8.2.10", belowTarget: true, vulnerable: true, fpm: true, missing: ["intl", "gd"], disabled: ["exec", "shell_exec"], memoryLimit: "256M" });
     expect(compareProbe({ ...probe, php: "8.4.27" }, "8.4", []).belowTarget).toBe(false);
+    const required = { ...ext("intl"), uses: 0, requiredBy: ["composer.json"] };
+    const devOnly = { ...ext("xdebug"), uses: 0, dev: true, requiredBy: ["composer.json (require-dev)"] };
+    const withOpcache = { ...probe, extensions: [...probe.extensions, "Zend OPcache"] };
+    expect(compareProbe(withOpcache, "8.4", [required, devOnly, ext("opcache")]).missing).toEqual(["intl"]);
   });
 });
