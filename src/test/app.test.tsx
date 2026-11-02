@@ -52,6 +52,32 @@ describe("Ferry app", () => {
     expect(screen.getByText("WordPress sürümünü yükseltin")).toBeInTheDocument();
   });
 
+  it("shows what still stands between the project and the target", async () => {
+    const user = setup();
+    await openAndScan(user);
+    const list = screen.getByRole("list", { name: "Hazırlık durumu" });
+    expect(within(list).getByText("Geçişi engelleyenler").parentElement).toHaveAttribute("data-state", "bad");
+    expect(within(list).getByText("Tüm dosyalar")).toBeInTheDocument();
+    expect(within(list).getByRole("button", { name: "3 engel" })).toBeInTheDocument();
+    expect(within(list).getByRole("button", { name: "Çalıştırılmadı" })).toBeInTheDocument();
+    await user.click(within(list).getByRole("button", { name: "3 engel" }));
+    expect(await screen.findByRole("heading", { name: "Bağımlılıklar" })).toBeInTheDocument();
+  });
+
+  it("does not call a clean scan ready while dependencies block it", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    const real = api.scanProject;
+    api.scanProject = async (...args) => {
+      const result = await real(...args);
+      return { ...result, findings: [], summary: { ...result.summary, total: 0, breaking: 0, deprecated: 0, behavior: 0, auto: 0, likely: 0, manual: 0, filesAffected: 0, score: 100 } };
+    };
+    render(<App api={api} />);
+    await openAndScan(user);
+    expect(await screen.findByRole("heading", { name: "Kodda uyumsuzluk bulunmadı" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Hedef sürüme hazır" })).not.toBeInTheDocument();
+  });
+
   it("drops the framework warning for targets the framework supports", async () => {
     const user = setup();
     await openAndScan(user);
