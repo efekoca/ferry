@@ -265,8 +265,8 @@ Everything runs on your computer:
 1. Ferry detects the project type and the current PHP version, and skips folders you don't maintain.
 2. Its built-in scanner tokenizes every PHP file and checks it against the rules for each version between your current one and the target.
 3. For fixes, Rector runs in dry-run mode on your project, and you can stop it at any time. Ferry turns its proposed diffs into a preview and keeps a fingerprint of each file.
-4. When you apply, Ferry first backs up the selected files, then checks that none of them changed since the preview, and writes each one in a single step. A file that changed in the meantime is refused, symbolic links are left alone, and read-only files stay read-only. Fixes only ever touch files the scan covers, so hidden folders such as `.git` or `.ddev` are never changed.
-5. Restoring copies the backup over the files, and **Review** in History shows the changes that were applied.
+4. When you apply, Ferry first backs up the selected files, then checks that none of them changed since the preview, and writes each one in a single step. A file that changed in the meantime is refused. Files reached through a symbolic link, or that have other names (hard links), are never written, and read-only files stay read-only. If any write fails, every file already written is put back. Fixes only ever touch files the scan covers, so hidden folders such as `.git` or `.ddev` are never changed.
+5. Restoring first checks every backup copy, then puts the files back; if one write fails, the rest are returned to how they were. Files you edited after the apply are listed for confirmation, and their current content is backed up first. **Review** in History shows the changes that were applied.
 
 ## Known limitations
 
