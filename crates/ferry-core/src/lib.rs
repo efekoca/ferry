@@ -5,6 +5,7 @@ mod builtin;
 #[rustfmt::skip]
 mod arity;
 pub mod compare;
+mod declarations;
 pub mod deps;
 pub mod diff;
 pub mod extensions;

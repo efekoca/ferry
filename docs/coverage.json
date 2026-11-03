@@ -138,8 +138,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Changes to parameter handling",
   "change": "It is no longer possible to define two function parameters with the same name.",
-  "status": "gap",
-  "note": "function foo($a, $b, $unused, $unused) with duplicate parameter names is not reported."
+  "status": "covered",
+  "note": "function foo($a, $b, $unused, $unused) {} is reported.",
+  "rules": [
+   "removed.duplicate_parameter"
+  ]
  },
  {
   "version": "7.0",
@@ -2554,8 +2557,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Core",
   "change": "Applying the final modifier on a private method will now produce a warning unless that method is the constructor.",
-  "status": "gap",
-  "note": "Not reported: final private function f() {} in a class."
+  "status": "covered",
+  "note": "class A { final private function f() {} } is reported.",
+  "rules": [
+   "deprecated.final_private_method"
+  ]
  },
  {
   "version": "8.0",
@@ -2613,8 +2619,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Core",
   "change": "Magic Methods will now have their arguments and return types checked if they have them declared.",
-  "status": "gap",
-  "note": "Not reported: magic methods with wrong declared types, e.g. public function __get(int $name) or __clone(): int."
+  "status": "covered",
+  "note": "Magic methods whose declared parameter or return types don't match what PHP expects, such as __get(int $name) or __clone(): int, are reported.",
+  "rules": [
+   "removed.magic_method_signature"
+  ]
  },
  {
   "version": "8.0",
@@ -4314,8 +4323,11 @@
   "section": "Deprecated Functionality",
   "ext": "Core",
   "change": "Calling a static method or accessing a static property directly on a trait is deprecated.",
-  "status": "gap",
-  "note": "Not reported: trait T { static function f() {} } T::f(); or T::$p accessed directly on the trait."
+  "status": "covered",
+  "note": "trait T { static function f() {} } T::f(); is reported.",
+  "rules": [
+   "deprecated.trait_static_access"
+  ]
  },
  {
   "version": "8.1",
@@ -4330,8 +4342,11 @@
   "section": "Deprecated Functionality",
   "ext": "Core",
   "change": "Returning by reference from a void function is deprecated.",
-  "status": "gap",
-  "note": "Not reported: function &f(): void {}."
+  "status": "covered",
+  "note": "function &f(): void {} is reported.",
+  "rules": [
+   "deprecated.void_by_reference"
+  ]
  },
  {
   "version": "8.1",
@@ -4800,8 +4815,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Core",
   "change": "Class constant visibility variance is now correctly checked when inherited from interfaces.",
-  "status": "gap",
-  "note": "Not reported: interface I { const X = 1; } class C implements I { private const X = 2; }."
+  "status": "partial",
+  "note": "Reported when the interface is declared in the same file; an interface from another file is not checked.",
+  "rules": [
+   "removed.interface_constant_visibility"
+  ]
  },
  {
   "version": "8.3",
@@ -4886,8 +4904,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Phar",
   "change": "The type of Phar class constants are now declared.",
-  "status": "gap",
-  "note": "Not reported: class P extends Phar { const SHA1 = []; } redeclaring a now-typed constant with another type."
+  "status": "covered",
+  "note": "class P extends Phar { const SHA1 = []; } is reported.",
+  "rules": [
+   "removed.typed_constant_override"
+  ]
  },
  {
   "version": "8.3",
@@ -5121,56 +5142,77 @@
   "section": "Backward Incompatible Changes",
   "ext": "Extension Class constants are now typed",
   "change": "Date",
-  "status": "gap",
-  "note": "Overriding a now-typed internal constant with another type, e.g. `class D extends DateTime { const ATOM = 5; }`, is not reported."
+  "status": "covered",
+  "note": "class D extends DateTime { const ATOM = 5; } is reported.",
+  "rules": [
+   "removed.typed_constant_override"
+  ]
  },
  {
   "version": "8.4",
   "section": "Backward Incompatible Changes",
   "ext": "Extension Class constants are now typed",
   "change": "Intl",
-  "status": "gap",
-  "note": "Overriding a typed Intl class constant, e.g. `class C extends Collator { const DEFAULT_VALUE = 'x'; }`, is not reported."
+  "status": "covered",
+  "note": "class C extends Collator { const DEFAULT_VALUE = 'x'; } is reported.",
+  "rules": [
+   "removed.typed_constant_override"
+  ]
  },
  {
   "version": "8.4",
   "section": "Backward Incompatible Changes",
   "ext": "Extension Class constants are now typed",
   "change": "PDO",
-  "status": "gap",
-  "note": "Overriding a typed PDO constant, e.g. `class Q extends PDO { const PARAM_INT = 'x'; }`, is not reported."
+  "status": "covered",
+  "note": "class Q extends PDO { const PARAM_INT = 'x'; } is reported.",
+  "rules": [
+   "removed.typed_constant_override"
+  ]
  },
  {
   "version": "8.4",
   "section": "Backward Incompatible Changes",
   "ext": "Extension Class constants are now typed",
   "change": "Reflection",
-  "status": "gap",
-  "note": "Overriding a typed Reflection constant, e.g. `class R extends ReflectionMethod { const IS_PUBLIC = 'x'; }`, is not reported."
+  "status": "covered",
+  "note": "class R extends ReflectionMethod { const IS_PUBLIC = 'x'; } is reported.",
+  "rules": [
+   "removed.typed_constant_override"
+  ]
  },
  {
   "version": "8.4",
   "section": "Backward Incompatible Changes",
   "ext": "Extension Class constants are now typed",
   "change": "SPL",
-  "status": "gap",
-  "note": "Overriding a typed SPL constant, e.g. `class A extends ArrayObject { const STD_PROP_LIST = 'x'; }`, is not reported."
+  "status": "covered",
+  "note": "class A extends ArrayObject { const STD_PROP_LIST = 'x'; } is reported.",
+  "rules": [
+   "removed.typed_constant_override"
+  ]
  },
  {
   "version": "8.4",
   "section": "Backward Incompatible Changes",
   "ext": "Extension Class constants are now typed",
   "change": "Sqlite",
-  "status": "gap",
-  "note": "Overriding a typed SQLite class constant in a subclass with a different type is not reported."
+  "status": "covered",
+  "note": "class S extends SQLite3 { const OK = 'x'; } is reported.",
+  "rules": [
+   "removed.typed_constant_override"
+  ]
  },
  {
   "version": "8.4",
   "section": "Backward Incompatible Changes",
   "ext": "Extension Class constants are now typed",
   "change": "XMLReader",
-  "status": "gap",
-  "note": "Overriding a typed XMLReader constant, e.g. `class X extends XMLReader { const ELEMENT = 'x'; }`, is not reported."
+  "status": "covered",
+  "note": "class X extends XMLReader { const ELEMENT = 'x'; } is reported.",
+  "rules": [
+   "removed.typed_constant_override"
+  ]
  },
  {
   "version": "8.4",
@@ -5591,8 +5633,11 @@
   "section": "Deprecated Functionality",
   "ext": "Core",
   "change": "Using \"_\" as a class name is now deprecated.",
-  "status": "gap",
-  "note": "`class _ {}` was tested and not reported."
+  "status": "covered",
+  "note": "class _ {} is reported.",
+  "rules": [
+   "deprecated.underscore_class_name"
+  ]
  },
  {
   "version": "8.4",
@@ -6077,8 +6122,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Core",
   "change": "Applying #[\\Attribute] to an abstract class, enum, interface, or trait triggers an error during compilation.",
-  "status": "gap",
-  "note": "#[Attribute] on an abstract class, interface, trait and enum was tested and not reported."
+  "status": "covered",
+  "note": "#[Attribute] interface I {} is reported.",
+  "rules": [
+   "removed.attribute_on_non_class"
+  ]
  },
  {
   "version": "8.5",
@@ -6394,8 +6442,11 @@
   "section": "Deprecated Functionality",
   "ext": "Core",
   "change": "Returning null from __debugInfo() has been deprecated.",
-  "status": "gap",
-  "note": "`__debugInfo()` returning literal null was tested and not reported."
+  "status": "covered",
+  "note": "class A { function __debugInfo() { return null; } } is reported.",
+  "rules": [
+   "deprecated.debug_info_null"
+  ]
  },
  {
   "version": "8.5",

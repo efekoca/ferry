@@ -376,6 +376,13 @@ pub fn analyze_source_in(file: &str, src: &str, target: PhpVersion, index: &crat
             }
         }
     }
+    for d in crate::declarations::check(&tokens, |fqn| index.type_by_fqn(fqn).is_some_and(|t| t.is_trait)) {
+        let since = PhpVersion::new(d.since.0, d.since.1);
+        match d.title {
+            Some(title) => ctx.pattern_titled(d.rule, &tokens[d.at], since, title),
+            None => ctx.pattern_since(d.rule, tokens[d.at].line, tokens[d.at].column, since),
+        }
+    }
     for k in null_offsets(&tokens) {
         ctx.pattern(&patterns::NULL_OFFSET, &tokens[k], None);
     }
@@ -753,6 +760,22 @@ impl<'a> Ctx<'a> {
             replacement: rule.replacement.map(Into::into),
         };
         self.push(hit, line, column);
+    }
+
+    fn pattern_titled(&mut self, rule: &PatternRule, tok: &Token, since: PhpVersion, title: String) {
+        if !self.applies(since) {
+            return;
+        }
+        let hit = Hit {
+            rule_id: rule.id,
+            title: Localized::same(title),
+            message: rule.note,
+            since,
+            severity: rule.severity,
+            fix: rule.fix,
+            replacement: rule.replacement.map(Into::into),
+        };
+        self.push(hit, tok.line, tok.column);
     }
 
     fn pattern_replaced(&mut self, rule: &PatternRule, tok: &Token, since: PhpVersion, replacement: String) {
@@ -3383,6 +3406,30 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
             assert_eq!(count85(&format!("<?php {src}"), id), 0, "{src}");
         }
         assert_eq!(at("<?php $GLOBALS = [];", (8, 0)).iter().filter(|(r, _)| r == id).count(), 0);
+    }
+
+    #[test]
+    fn declaration_checks() {
+        let cases: &[(&str, &str, usize)] = &[
+            ("<?php function f($a, $b, $a) {} $g = fn($x, $x) => 1; function h($a, $b) {}", "removed.duplicate_parameter", 2),
+            ("<?php function &f(): void {} function &g(): array {} function h(): void {}", "deprecated.void_by_reference", 1),
+            ("<?php class _ {} class A_ {}", "deprecated.underscore_class_name", 1),
+            ("<?php class A { final private function f() {} final private function __construct() {} private function g() {} } trait T { final private function f() {} }", "deprecated.final_private_method", 1),
+            (
+                "<?php class A { function __get(int $n) {} function __set(string $n, $v): void {} function __clone(): int {} function __toString(): string { return ''; } function __isset(string|int $n): bool {} function __debugInfo(): ?array {} function __call($n, array $a) {} function __unserialize(string $d): void {} }",
+                "removed.magic_method_signature",
+                3,
+            ),
+            ("<?php class A { function __debugInfo() { return null; } } class B { function __debugInfo() { return []; } }", "deprecated.debug_info_null", 1),
+            ("<?php interface I { const X = 1; const Y = 2; } class C implements I { protected const X = 2; public const Y = 3; }", "removed.interface_constant_visibility", 1),
+            ("<?php class D extends DateTime { const ATOM = 'x'; const MINE = 1; } class E extends \\DateTime { const string ATOM = 'y'; } class F extends PDO { const PARAM_INT = 'x'; }", "removed.typed_constant_override", 2),
+            ("<?php namespace App; class D extends DateTime { const ATOM = 'x'; }", "removed.typed_constant_override", 0),
+            ("<?php #[Attribute] abstract class A {} #[Attribute] interface I {} #[Attribute, Other] enum E {} #[Attribute] final class B {} #[Other] trait T {}", "removed.attribute_on_non_class", 3),
+            ("<?php trait T { static function f() {} public static $p; } class C { use T; } T::f(); T::$p = 1; C::f(); T::class;", "deprecated.trait_static_access", 2),
+        ];
+        for (src, id, n) in cases {
+            assert_eq!(count85(src, id), *n, "{id}: {src}");
+        }
     }
 
     #[test]

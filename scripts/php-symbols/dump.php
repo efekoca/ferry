@@ -58,9 +58,13 @@ foreach ($types as $name) {
         $methods[strtolower($m->getName())] = array('static' => $m->isStatic()) + signature($m);
     }
     $constants = array();
+    $typed = array();
     if (method_exists($c, 'getReflectionConstants')) {
         foreach ($c->getReflectionConstants() as $k) {
             $constants[$k->getName()] = method_exists($k, 'isDeprecated') ? $k->isDeprecated() : false;
+            if (method_exists($k, 'hasType') && $k->hasType() && !$k->isFinal() && !$k->isPrivate()) {
+                $typed[$k->getName()] = (string) $k->getType();
+            }
         }
     } else {
         foreach (array_keys($c->getConstants()) as $k) {
@@ -72,8 +76,10 @@ foreach ($types as $name) {
         'name' => $c->getName(),
         'ext' => strtolower((string) $c->getExtensionName()),
         'kind' => $kind,
+        'final' => $c->isFinal(),
         'methods' => $methods,
         'constants' => $constants,
+        'typed' => $typed,
     );
 }
 
