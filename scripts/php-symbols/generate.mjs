@@ -26,6 +26,7 @@ const removedIni = new Map();
 const typedConstants = new Map();
 const removedClassConstants = new Map();
 const deprecatedClassConstants = new Map();
+const finalClasses = new Map();
 const first = (map, key, value) => map.has(key) || map.set(key, value);
 const latest = dumps[dumps.length - 1];
 // Functions that only exist when the build host supports them, so their absence isn't a removal.
@@ -97,6 +98,9 @@ for (let i = 1; i < dumps.length; i++) {
       if (!prev.classes[name]?.typed?.[k] && now.typed?.[k]) first(typedConstants, `${name}::${k}`, [since, now.typed[k]]);
     }
   }
+  for (const [name, c] of Object.entries(next.classes)) {
+    if (c.final && prev.classes[name] && !prev.classes[name].final && latest.classes[name]?.final) first(finalClasses, name, [since, c.name]);
+  }
   for (const [name, ext] of Object.entries(prev.ini)) {
     if (!(name in next.ini) && !(name in latest.ini) && kept.has(ext)) first(removedIni, name, [since, ext]);
   }
@@ -152,6 +156,10 @@ const out = [
   table("TYPED_CONSTANTS", "(class lowercase::CONSTANT, typed in, type) for classes that can be extended", typedConstants, {
     type: "(&str, (u32, u32), &str)",
     fmt: (k, [s, t]) => `(${str(k)}, ${ver(s)}, ${str(t)})`,
+  }),
+  table("FINAL_CLASSES", "(class lowercase, final since, class name)", finalClasses, {
+    type: "(&str, (u32, u32), &str)",
+    fmt: (k, [s, n]) => `(${str(k)}, ${ver(s)}, ${str(n)})`,
   }),
   table("REMOVED_INI", "(ini setting, removed in, extension)", removedIni, {
     type: "(&str, (u32, u32), &str)",

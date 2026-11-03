@@ -42,5 +42,10 @@ fn every_generated_symbol_is_reported() {
             missing.push(format!("ini {name} {}.{}", since.0, since.1));
         }
     }
+    for (_, since, class) in FINAL_CLASSES {
+        if !hit(&format!("<?php\nclass Mine extends {class} {{}}\n")) {
+            missing.push(format!("final class {class} {}.{}", since.0, since.1));
+        }
+    }
     assert!(missing.is_empty(), "{} symbols are not reported:\n{}", missing.len(), missing.join("\n"));
 }

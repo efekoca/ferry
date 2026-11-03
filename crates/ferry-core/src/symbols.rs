@@ -2581,6 +2581,15 @@ pub const TYPED_CONSTANTS: &[(&str, (u32, u32), &str)] = &[
     ("ziparchive::RDONLY", (8, 3), "int"),
 ];
 
+/// (class lowercase, final since, class name)
+pub const FINAL_CLASSES: &[(&str, (u32, u32), &str)] = &[
+    ("__php_incomplete_class", (8, 0), "__PHP_Incomplete_Class"),
+    ("directory", (8, 5), "Directory"),
+    ("gmp", (8, 4), "GMP"),
+    ("reflectiongenerator", (8, 0), "ReflectionGenerator"),
+    ("reflectionreference", (8, 0), "ReflectionReference"),
+];
+
 /// (ini setting, removed in, extension)
 pub const REMOVED_INI: &[(&str, (u32, u32), &str)] = &[
     ("assert.quiet_eval", (8, 0), "standard"),

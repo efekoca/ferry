@@ -46,6 +46,9 @@ foreach ($rows['TYPED_CONSTANTS'] as $r) {
     $type = defined("$class::$name") ? (new ReflectionClassConstant($class, $name))->getType() : null;
     if ((string) $type !== $r[4]) { echo "type differs: constant {$r[1]}\n"; $bad++; }
 }
+foreach ($rows['FINAL_CLASSES'] as $r) {
+    if (!class_exists($r[4], false) || !(new ReflectionClass($r[4]))->isFinal()) { echo "not final: class {$r[1]}\n"; $bad++; }
+}
 foreach ($rows['DEPRECATED_FUNCTIONS'] as $r) {
     if (function_exists($r[1]) && !(new ReflectionFunction($r[1]))->isDeprecated()) { echo "not deprecated: function {$r[1]}\n"; $bad++; }
 }

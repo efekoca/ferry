@@ -925,8 +925,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Core",
   "change": "$this, autoglobals, and variables with the same name as a parameter can no longer be bound to a closure via the use construct.",
-  "status": "gap",
-  "note": "Closures with use ($this), use ($_GET) or use ($a) shadowing a parameter are not reported."
+  "status": "covered",
+  "note": "Closures binding $this, a superglobal or a variable named like a parameter with use() are reported.",
+  "rules": [
+   "removed.closure_use_variable"
+  ]
  },
  {
   "version": "7.1",
@@ -1089,8 +1092,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Core",
   "change": "Initial trait property value compatibility check will no longer perform any casts.",
-  "status": "gap",
-  "note": "A class redeclaring a trait property with a different-typed default (1 vs '1') is not reported."
+  "status": "covered",
+  "note": "A class redeclaring a property of a trait from the same file with a different literal default is reported.",
+  "rules": [
+   "removed.trait_property_default"
+  ]
  },
  {
   "version": "7.2",
@@ -1552,8 +1558,11 @@
   "version": "7.3",
   "section": "Deprecated Functionality",
   "change": "Declaring a function called assert() inside a namespace is deprecated.",
-  "status": "gap",
-  "note": "namespace Foo; function assert($a) {} is not reported."
+  "status": "covered",
+  "note": "A function named assert() declared inside a namespace is reported.",
+  "rules": [
+   "removed.custom_assert"
+  ]
  },
  {
   "version": "7.3",
@@ -2524,8 +2533,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Core",
   "change": "Arguments with a default value that resolves to null at runtime will no longer implicitly mark the argument type as nullable.",
-  "status": "gap",
-  "note": "Not reported: const FOO = null; function t(int $a = FOO) {} (only explicit = null defaults are flagged)."
+  "status": "covered",
+  "note": "A typed, non-nullable parameter whose default is a constant declared null in the same file is reported.",
+  "rules": [
+   "removed.null_constant_default"
+  ]
  },
  {
   "version": "8.0",
@@ -2588,8 +2600,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Core",
   "change": "Non-absolute trait method references in trait alias adaptations are now required to be unambiguous:",
-  "status": "gap",
-  "note": "Not reported: class X { use T1, T2 { func as otherFunc; } } where both traits define func()."
+  "status": "covered",
+  "note": "An unqualified alias for a method that more than one of the used project traits defines is reported.",
+  "rules": [
+   "removed.ambiguous_trait_alias"
+  ]
  },
  {
   "version": "8.0",
@@ -3832,8 +3847,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "tidy",
   "change": "tidy::repairString() and tidy::repairFile() became static methods",
-  "status": "gap",
-  "note": "Not reported: class T extends tidy { public function repairString(...) {} } overriding a now-static method as non-static."
+  "status": "covered",
+  "note": "Non-static overrides of tidy::repairString() and tidy::repairFile() are reported.",
+  "rules": [
+   "removed.builtin_override_signature"
+  ]
  },
  {
   "version": "8.0",
@@ -4465,8 +4483,11 @@
   "section": "Deprecated Functionality",
   "ext": "Core",
   "change": "Returning a non-array from __sleep will raise a warning",
-  "status": "gap",
-  "note": "Not reported: function __sleep() { return null; } returning a non-array literal."
+  "status": "covered",
+  "note": "__sleep() returning a scalar literal such as null or false is reported.",
+  "rules": [
+   "behavior.sleep_non_array"
+  ]
  },
  {
   "version": "8.1",
@@ -4939,8 +4960,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Core",
   "change": "Uses of traits with static properties will now redeclare static properties inherited from the parent class.",
-  "status": "gap",
-  "note": "Not reported: class P { public static $x; } trait T { public static $x; } class C extends P { use T; } now gets separate storage."
+  "status": "covered",
+  "note": "A class using a trait whose static property an ancestor class also declares is reported.",
+  "rules": [
+   "behavior.trait_static_property"
+  ]
  },
  {
   "version": "8.3",
@@ -5270,8 +5294,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Core",
   "change": "Indirect modification of readonly properties within __clone() is no longer allowed, e.g. $ref = &$this->readonly.",
-  "status": "gap",
-  "note": "`$ref = &$this->readonlyProp` inside __clone() on a declared readonly property was tested and not reported."
+  "status": "covered",
+  "note": "Taking a reference to a readonly property of the class (including promoted ones) inside __clone() is reported.",
+  "rules": [
+   "removed.readonly_clone_reference"
+  ]
  },
  {
   "version": "8.4",
@@ -5551,8 +5578,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "GMP",
   "change": "The GMP class is now final and cannot be extended anymore.",
-  "status": "gap",
-  "note": "`class G extends GMP {}` was tested and not reported."
+  "status": "covered",
+  "note": "Extending GMP, and any other built-in class that became final, is reported.",
+  "rules": [
+   "removed.extends_final_class"
+  ]
  },
  {
   "version": "8.4",
@@ -6586,8 +6616,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "SPL",
   "change": "SplFileObject::fwrite's parameter $length is now nullable.",
-  "status": "gap",
-  "note": "Subclass override `fwrite(string $data, int $length = 0)` (now incompatible with ?int) was tested and not reported."
+  "status": "covered",
+  "note": "SplFileObject::fwrite() overrides with a non-nullable $length type are reported.",
+  "rules": [
+   "removed.builtin_override_signature"
+  ]
  },
  {
   "version": "8.5",
@@ -6605,8 +6638,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "SOAP",
   "change": "SoapClient::__doRequest() expects a new, optional $uriParserClass parameter as described in https://wiki.php.net/rfc/url_parsing_api#plugability.",
-  "status": "gap",
-  "note": "SoapClient subclass overriding __doRequest() without the new $uriParserClass parameter was tested and not reported."
+  "status": "covered",
+  "note": "SoapClient::__doRequest() overrides with fewer than six parameters are reported.",
+  "rules": [
+   "removed.builtin_override_signature"
+  ]
  },
  {
   "version": "8.5",
@@ -6687,8 +6723,11 @@
   "section": "Deprecated Functionality",
   "ext": "Core",
   "change": "Constant redeclaration has been deprecated.",
-  "status": "gap",
-  "note": "Redeclaring a constant with define() twice or `const B` twice was tested and not reported."
+  "status": "covered",
+  "note": "Constants declared twice in the same file with const or unguarded top-level define() are reported.",
+  "rules": [
+   "deprecated.constant_redeclared"
+  ]
  },
  {
   "version": "8.5",
