@@ -377,6 +377,9 @@ pub fn analyze_source_in(file: &str, src: &str, target: PhpVersion, index: &crat
             }
         }
     }
+    for (k, rule) in crate::strings::check(&tokens) {
+        ctx.pattern(rule, &tokens[k], None);
+    }
     for o in crate::objects::check(&tokens, |short| index.declares_type(short)) {
         ctx.pattern_since(o.rule, tokens[o.at].line, tokens[o.at].column, PhpVersion::new(o.since.0, o.since.1));
     }
@@ -3456,6 +3459,35 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
             assert_eq!(count85(&format!("<?php {src}"), id), 0, "{src}");
         }
         assert_eq!(at("<?php $GLOBALS = [];", (8, 0)).iter().filter(|(r, _)| r == id).count(), 0);
+    }
+
+    #[test]
+    fn string_contents() {
+        let cases: &[(&str, &str, usize)] = &[
+            ("<?php is_numeric('0x1A'); if ('0x123' == '291') {} $a = '0x1A'; is_numeric('12');", "behavior.hex_numeric_string", 2),
+            ("<?php stream_context_create(['ssl' => ['CN_match' => 'x', 'rsa_key_size' => 2048, 'peer_name' => 'x']]); echo 'CN_match';", "removed.ssl_context_option", 2),
+            ("<?php $o = ['ssl' => ['capture_session_meta' => true]];", "deprecated.ssl_capture_session_meta", 1),
+            ("<?php fopen('sslv2://host:443', 'r'); fopen('tls://host:443', 'r');", "removed.sslv2_stream", 1),
+            ("<?php if (gettype($r) === 'unknown type') {} echo 'unknown type';", "behavior.gettype_closed_resource", 1),
+            ("<?php if (get_class($l) === 'OCI-Lob') {}", "behavior.oci_class_name", 1),
+            ("<?php mb_convert_encoding($s, 'UTF-8', 'ISO_8859-1'); mb_regex_encoding('ISO8859_9'); iconv('ISO_8859-1', 'UTF-8', $s); mb_convert_encoding($s, 'ISO-8859-1');", "removed.mbstring_iso_alias", 2),
+            ("<?php preg_match('/\\i/', $s); preg_match('/a/X', $s); preg_match('/\\d\\w\\\\\\\\i/', $s); preg_replace('#[\\i]#', '', $s);", "removed.regex_invalid_escape", 2),
+            ("<?php preg_match('/a{,3}/', $s); preg_match('/a{0,3}/', $s); preg_match('/a\\{,3}/', $s);", "behavior.regex_empty_min_quantifier", 1),
+            ("<?php preg_match('/(?=a\\K)b/', $s); preg_match('/a\\Kb/', $s);", "removed.regex_keep_in_lookaround", 1),
+            ("<?php printf('%.f', 1.5); sprintf('%5.2f', 1); sprintf('%%.f'); fprintf($fp, '%.f', 1);", "behavior.printf_bare_precision", 2),
+            ("<?php unserialize('S:1:\"a\";'); unserialize('s:1:\"a\";'); unserialize('a:1:{i:0;S:1:\"a\";}');", "deprecated.unserialize_upper_s", 2),
+            ("<?php $pdo->prepare('SELECT $$a ?? b$$, ?'); $pdo->prepare('SELECT a ?? b');", "deprecated.pgsql_escaped_question", 1),
+            ("<?php $_SESSION['a|b'] = 1; $_SESSION['ab'] = 1; $x['a|b'] = 1;", "behavior.session_key_pipe", 1),
+            ("<?php unserialize($s, ['allowed_classes' => 'Foo']); unserialize($s, ['allowed_classes' => ['Foo']]);", "behavior.unserialize_allowed_classes_type", 1),
+            ("<?php hash('murmur3a', $d, false, ['seed' => 'abc']); hash('murmur3a', $d, false, ['seed' => 42]);", "deprecated.hash_option_type", 1),
+            ("<?php mb_ereg('(?<y>\\d+)', $s, $m); mb_ereg('(\\d+)', $s, $m);", "behavior.mb_ereg_named_capture", 1),
+            ("<?php file_put_contents('data://text/plain,foo', 'x'); fopen('data:text/plain,x', 'w'); fopen('data:text/plain,x', 'r');", "removed.data_stream_write", 2),
+            ("<?php range(1, 10, 0); range('', 'z'); range([1], 5); range(1, 10, 2);", "removed.range_invalid", 3),
+            ("<?php str_getcsv($s, ',,'); str_getcsv($s, ','); fgetcsv($f, 0, '');", "removed.csv_separator_length", 2),
+        ];
+        for (src, id, n) in cases {
+            assert_eq!(count85(src, id), *n, "{id}: {src}");
+        }
     }
 
     #[test]

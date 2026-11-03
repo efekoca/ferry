@@ -24,6 +24,8 @@ pub enum Check {
     StringKeys(usize),
     StrStarts(usize, &'static [&'static str]),
     New(usize),
+    StrContains(usize, &'static str),
+    ArrayLit(usize),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -101,7 +103,9 @@ impl Check {
             | Check::Key(n, _)
             | Check::StringKeys(n)
             | Check::StrStarts(n, _)
-            | Check::New(n) => Some(n),
+            | Check::New(n)
+            | Check::StrContains(n, _)
+            | Check::ArrayLit(n) => Some(n),
         }
     }
 
@@ -148,6 +152,11 @@ impl Check {
             }
             Check::StrStarts(_, list) => text().is_some_and(|s| list.iter().any(|p| s.to_ascii_lowercase().starts_with(p))),
             Check::New(_) => arg.first().is_some_and(|t| t.is_ident_ci("new")),
+            Check::StrContains(_, part) => arg.len() == 1 && matches!(arg[0].kind, TokenKind::Str { .. }) && arg[0].text.contains(part),
+            Check::ArrayLit(_) => {
+                arg.first().is_some_and(|t| t.is_punct("[") || t.is_ident_ci("array"))
+                    && arg.last().is_some_and(|t| t.is_punct("]") || t.is_punct(")"))
+            }
             Check::Key(_, key) => {
                 arg.windows(2).any(|w| string_literal(&w[0].text).is_some_and(|s| s.eq_ignore_ascii_case(key)) && w[1].is_punct("=>"))
             }
@@ -788,5 +797,62 @@ pub const ARGUMENTS: &[ArgRule] = &[
         Text::new("FFI'ın statik çağrısı", "Static FFI call"),
         D, (8, 3), code("FFI::cdef()->cast()"),
         Text::new("FFI::cast(), FFI::new() ve FFI::type()'ı statik çağırmak PHP 8.3'te kullanımdan kalktı.", "Calling FFI::cast(), FFI::new() and FFI::type() statically is deprecated since PHP 8.3."),
+    )),
+    arg(&["mb_ereg", "mb_eregi", "mb_ereg_replace", "mb_eregi_replace", "mb_ereg_match", "mb_split", "mb_ereg_search_init"], &[StrContains(0, "(?<")], rule(
+        "behavior.mb_ereg_named_capture",
+        Text::new("Adlandırılmış grup içeren mb_ereg deseni", "mb_ereg pattern with a named group"),
+        B, (7, 3), None,
+        Text::new(
+            "PHP 7.3'ten beri mb_ereg_*() adlandırılmış grupları destekler; bu gruplar eşleşmelere eklenir ve değiştirme metni yeni sözdizimini yorumlar.",
+            "Since PHP 7.3 mb_ereg_*() supports named groups; they're added to the matches and the replacement interprets new syntax.",
+        ),
+    )),
+    arg(&["file_put_contents"], &[StrStarts(0, &["data:"])], rule(
+        "removed.data_stream_write",
+        Text::new("data: akışına yazma", "Writing to a data: stream"),
+        R, (8, 0), None,
+        Text::new("data: akışları PHP 8.0'dan beri yazılamaz.", "data: streams can't be written to since PHP 8.0."),
+    )),
+    arg(&["fopen"], &[StrStarts(0, &["data:"]), StrNot(1, &["r", "rb", "rt"])], rule(
+        "removed.data_stream_write",
+        Text::new("data: akışına yazma", "Writing to a data: stream"),
+        R, (8, 0), None,
+        Text::new("data: akışları PHP 8.0'dan beri yazılamaz.", "data: streams can't be written to since PHP 8.0."),
+    )),
+    arg(&["range"], &[NumIs(2, 0.0)], rule(
+        "removed.range_invalid",
+        Text::new("Geçersiz range() argümanı", "Invalid range() argument"),
+        R, (8, 3), None,
+        Text::new("range() PHP 8.3'ten beri 0 adımda, boş metinde ve dizi sınırda hata fırlatır.", "Since PHP 8.3 range() throws for a step of 0, an empty string or an array as a boundary."),
+    )),
+    arg(&["range"], &[StrIs(0, &[""])], rule(
+        "removed.range_invalid",
+        Text::new("Geçersiz range() argümanı", "Invalid range() argument"),
+        R, (8, 3), None,
+        Text::new("range() PHP 8.3'ten beri 0 adımda, boş metinde ve dizi sınırda hata fırlatır.", "Since PHP 8.3 range() throws for a step of 0, an empty string or an array as a boundary."),
+    )),
+    arg(&["range"], &[StrIs(1, &[""])], rule(
+        "removed.range_invalid",
+        Text::new("Geçersiz range() argümanı", "Invalid range() argument"),
+        R, (8, 3), None,
+        Text::new("range() PHP 8.3'ten beri 0 adımda, boş metinde ve dizi sınırda hata fırlatır.", "Since PHP 8.3 range() throws for a step of 0, an empty string or an array as a boundary."),
+    )),
+    arg(&["range"], &[ArrayLit(0)], rule(
+        "removed.range_invalid",
+        Text::new("Geçersiz range() argümanı", "Invalid range() argument"),
+        R, (8, 3), None,
+        Text::new("range() PHP 8.3'ten beri 0 adımda, boş metinde ve dizi sınırda hata fırlatır.", "Since PHP 8.3 range() throws for a step of 0, an empty string or an array as a boundary."),
+    )),
+    arg(&["str_getcsv"], &[StrLenNot(1, 1)], rule(
+        "removed.csv_separator_length",
+        Text::new("Tek karakter olmayan CSV ayırıcısı", "CSV separator that isn't one character"),
+        R, (8, 4), None,
+        Text::new("CSV fonksiyonları PHP 8.4'ten beri boş ya da birden uzun ayırıcıda ValueError fırlatır.", "CSV functions throw a ValueError for an empty or longer separator since PHP 8.4."),
+    )),
+    arg(&["fgetcsv", "fputcsv"], &[StrLenNot(2, 1)], rule(
+        "removed.csv_separator_length",
+        Text::new("Tek karakter olmayan CSV ayırıcısı", "CSV separator that isn't one character"),
+        R, (8, 4), None,
+        Text::new("CSV fonksiyonları PHP 8.4'ten beri boş ya da birden uzun ayırıcıda ValueError fırlatır.", "CSV functions throw a ValueError for an empty or longer separator since PHP 8.4."),
     )),
 ];
