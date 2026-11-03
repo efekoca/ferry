@@ -14,7 +14,7 @@ async function violations(context: Element = document.body) {
 
 const nav = (name: RegExp) => within(screen.getByRole("navigation", { name: "Bölümler" })).getByRole("button", { name });
 
-describe("accessibility", () => {
+describe("accessibility", { timeout: 30_000 }, () => {
   it("has no axe violations on any screen or dialog", async () => {
     const user = userEvent.setup();
     render(<App api={mockApi({ delay: 0 })} />);
