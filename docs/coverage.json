@@ -1783,8 +1783,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "MySQLi",
   "change": "The undocumented mysqli::$stat property has been removed in favor of mysqli::stat().",
-  "status": "gap",
-  "note": "$mysqli->stat property access on a new mysqli() is not reported."
+  "status": "covered",
+  "note": "$m = new mysqli(); echo $m->stat is reported when the receiver's class is visible in the code.",
+  "rules": [
+   "removed.mysqli_stat_property"
+  ]
  },
  {
   "version": "7.4",
@@ -1863,8 +1866,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "SPL",
   "change": "SplPriorityQueue::setExtractFlags() will throw an exception if zero is passed.",
-  "status": "gap",
-  "note": "$q->setExtractFlags(0) on SplPriorityQueue with a literal zero is not reported."
+  "status": "covered",
+  "note": "$q = new SplPriorityQueue(); $q->setExtractFlags(0) is reported when the receiver's class is visible in the code.",
+  "rules": [
+   "removed.extract_flags_zero"
+  ]
  },
  {
   "version": "7.4",
@@ -4164,8 +4170,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "MySQLi",
   "change": "mysqli_fetch_fields() and mysqli_fetch_field_direct() will now always return zero for max_length.",
-  "status": "gap",
-  "note": "Not reported: mysqli_fetch_field_direct($r, 0)->max_length (or ->max_length on mysqli_fetch_fields() entries) is now always 0."
+  "status": "covered",
+  "note": "max_length read from a mysqli_fetch_field*() or ->fetch_field*() result is reported.",
+  "rules": [
+   "behavior.mysqli_max_length"
+  ]
  },
  {
   "version": "8.1",
@@ -4259,8 +4268,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "PDO",
   "change": "Calling bindColumn() with PDO::PARAM_LOB (and assuming stringification is not enabled) will now consistently bind a stream result, as documented.",
-  "status": "gap",
-  "note": "Not reported: $stmt->bindColumn(1, $lob, PDO::PARAM_LOB) now always binds a stream."
+  "status": "covered",
+  "note": "function f(PDOStatement $stmt) { $stmt->bindColumn(1, $lob, PDO::PARAM_LOB); } is reported when the receiver's class is visible in the code.",
+  "rules": [
+   "behavior.bind_column_lob"
+  ]
  },
  {
   "version": "8.1",
@@ -4536,8 +4548,8 @@
   "section": "Deprecated Functionality",
   "ext": "Intl",
   "change": "Calling IntlCalendar::roll() with bool argument is deprecated.",
-  "status": "partial",
-  "note": "intlcal_roll() with a bool literal is reported; the $cal->roll() method form is not.",
+  "status": "covered",
+  "note": "$cal = new IntlGregorianCalendar(); $cal->roll(IntlCalendar::FIELD_DAY_OF_MONTH, true) is reported when the receiver's class is visible in the code.",
   "rules": [
    "deprecated.intlcal_roll_bool"
   ]
@@ -4558,8 +4570,11 @@
   "section": "Deprecated Functionality",
   "ext": "MySQLi",
   "change": "The mysqli_driver::$driver_version property has been deprecated.",
-  "status": "gap",
-  "note": "Not reported: (new mysqli_driver())->driver_version property read."
+  "status": "covered",
+  "note": "$d = new mysqli_driver(); echo $d->driver_version is reported when the receiver's class is visible in the code.",
+  "rules": [
+   "deprecated.mysqli_driver_version"
+  ]
  },
  {
   "version": "8.1",
@@ -4633,8 +4648,11 @@
   "section": "Deprecated Functionality",
   "ext": "SOAP",
   "change": "The ssl_method option for the SoapClient constructor has been deprecated in favor of ssl stream context options.",
-  "status": "gap",
-  "note": "Not reported: new SoapClient('x.wsdl', ['ssl_method' => SOAP_SSL_METHOD_TLS])."
+  "status": "covered",
+  "note": "new SoapClient('x.wsdl', ['ssl_method' => SOAP_SSL_METHOD_TLS]) is reported.",
+  "rules": [
+   "deprecated.soap_ssl_method"
+  ]
  },
  {
   "version": "8.1",
@@ -4753,8 +4771,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "SPL",
   "change": "The following methods now enforce their signature:",
-  "status": "gap",
-  "note": "Not reported: $f = new SplFileObject('x'); $f->ftell(1); / ->fflush(1) / ->getCsvControl(1) with extra arguments now throw."
+  "status": "covered",
+  "note": "$f = new SplFileObject('x'); $f->ftell(1) is reported when the receiver's class is visible in the code.",
+  "rules": [
+   "removed.splfileobject_extra_argument"
+  ]
  },
  {
   "version": "8.2",
@@ -5058,8 +5079,11 @@
   "version": "8.3",
   "section": "Deprecated Functionality",
   "change": "Calling FFI::cast(), FFI::new(), and FFI::type() statically is now deprecated.",
-  "status": "gap",
-  "note": "Not reported: static FFI::cast('int', $x) / FFI::new('int') / FFI::type('int')."
+  "status": "covered",
+  "note": "Static FFI::cast(), FFI::new() and FFI::type() calls are reported.",
+  "rules": [
+   "deprecated.ffi_static_call"
+  ]
  },
  {
   "version": "8.3",
@@ -5105,8 +5129,11 @@
   "version": "8.3",
   "section": "Deprecated Functionality",
   "change": "Calling Phar::setStub() with a resource and a length is now deprecated.",
-  "status": "gap",
-  "note": "Not reported: $p = new Phar('x.phar'); $p->setStub($fp, 100) with a length argument."
+  "status": "covered",
+  "note": "$p = new Phar('x.phar'); $p->setStub($fp, 100) is reported when the receiver's class is visible in the code.",
+  "rules": [
+   "deprecated.phar_setstub_length"
+  ]
  },
  {
   "version": "8.3",
@@ -5145,8 +5172,11 @@
   "section": "Deprecated Functionality",
   "ext": "Standard",
   "change": "Using exceptions is now preferred, warnings will be removed in the future.",
-  "status": "gap",
-  "note": "Not reported: (new SQLite3('x'))->enableExceptions(false)."
+  "status": "covered",
+  "note": "$db = new SQLite3('x'); $db->enableExceptions(false) is reported when the receiver's class is visible in the code.",
+  "rules": [
+   "deprecated.sqlite3_exceptions_off"
+  ]
  },
  {
   "version": "8.3",
@@ -5327,8 +5357,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Resource to Object conversions",
   "change": "SOAP: . SoapClient::$httpurl is now a Soap\\Url object rather than a resource.",
-  "status": "gap",
-  "note": "`is_resource($client->httpurl)` / `is_resource($client->sdl)` on a SoapClient was tested and not reported."
+  "status": "covered",
+  "note": "$c = new SoapClient('x'); if (is_resource($c->httpurl)) {} is reported when the receiver's class is visible in the code.",
+  "rules": [
+   "removed.resource_check"
+  ]
  },
  {
   "version": "8.4",
@@ -5455,8 +5488,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "DOM",
   "change": "Previously, DOMXPath objects could be cloned, but resulted in an unusable object.",
-  "status": "gap",
-  "note": "`clone $xpath` on a `new DOMXPath(...)` variable was tested and not reported."
+  "status": "covered",
+  "note": "$x = new DOMXPath($doc); $y = clone $x is reported when the receiver's class is visible in the code.",
+  "rules": [
+   "removed.uncloneable_object"
+  ]
  },
  {
   "version": "8.4",
@@ -5641,8 +5677,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "SOAP",
   "change": "SoapClient::$typemap is now an array rather than a resource.",
-  "status": "gap",
-  "note": "`is_resource($client->typemap)` on a SoapClient was tested and not reported."
+  "status": "covered",
+  "note": "$c = new SoapClient('x'); if (is_resource($c->typemap)) {} is reported when the receiver's class is visible in the code.",
+  "rules": [
+   "removed.resource_check"
+  ]
  },
  {
   "version": "8.4",
@@ -5766,8 +5805,11 @@
   "section": "Deprecated Functionality",
   "ext": "Date",
   "change": "Calling DatePeriod::__construct(string $isostr, int $options = 0) is deprecated.",
-  "status": "gap",
-  "note": "`new DatePeriod('R4/2012-07-01T00:00:00Z/P7D')` (ISO string constructor) was tested and not reported."
+  "status": "covered",
+  "note": "new DatePeriod('R4/2012-07-01T00:00:00Z/P7D') is reported.",
+  "rules": [
+   "deprecated.date_period_iso_string"
+  ]
  },
  {
   "version": "8.4",
@@ -5807,8 +5849,11 @@
   "section": "Deprecated Functionality",
   "ext": "DOM",
   "change": "DOMDocument::$actualEncoding, DOMDocument::config, DOMEntity::$actualEncoding, DOMEntity::$encoding, DOMEntity::$version have been deprecated.",
-  "status": "gap",
-  "note": "`$doc->actualEncoding` / `$doc->config` on a new DOMDocument were tested and not reported."
+  "status": "covered",
+  "note": "$doc = new DOMDocument(); echo $doc->actualEncoding is reported when the receiver's class is visible in the code.",
+  "rules": [
+   "deprecated.dom_document_property"
+  ]
  },
  {
   "version": "8.4",
@@ -5823,22 +5868,22 @@
   "section": "Deprecated Functionality",
   "ext": "Intl",
   "change": "Calling intlcal_set() as well as calling IntlCalendar::set() with more than 2 arguments is deprecated.",
-  "status": "partial",
+  "status": "covered",
   "rules": [
    "deprecated.intlcal_set"
   ],
-  "note": "intlcal_set() is reported, but `$cal->set(2020, 1, 1)` on an IntlCalendar/IntlGregorianCalendar with more than 2 arguments is not."
+  "note": "$cal = new IntlGregorianCalendar(); $cal->set(2020, 1, 1) is reported when the receiver's class is visible in the code."
  },
  {
   "version": "8.4",
   "section": "Deprecated Functionality",
   "ext": "Intl",
   "change": "Calling intlgregcal_create_instance() as well as calling IntlGregorianCalendar::__construct() with more than 2 arguments is deprecated.",
-  "status": "partial",
+  "status": "covered",
   "rules": [
    "deprecated.intlgregcal_create_instance"
   ],
-  "note": "intlgregcal_create_instance() is reported, but `new IntlGregorianCalendar(2020, 1, 1)` is not."
+  "note": "new IntlGregorianCalendar(2020, 1, 1) is reported."
  },
  {
   "version": "8.4",
@@ -5904,12 +5949,12 @@
   "section": "Deprecated Functionality",
   "ext": "Mysqli",
   "change": "Passing explicitly the $mode parameter to mysqli_store_result() has been deprecated.",
-  "status": "partial",
+  "status": "covered",
   "rules": [
    "deprecated.mysqli_store_result_copy_data",
    "deprecated.mysqli_store_result_mode"
   ],
-  "note": "mysqli_store_result($l, 0) is reported; the $m->store_result(0) method form is not."
+  "note": "$m = new mysqli(); $m->store_result(0) is reported when the receiver's class is visible in the code."
  },
  {
   "version": "8.4",
@@ -5968,8 +6013,11 @@
   "section": "Deprecated Functionality",
   "ext": "Reflection",
   "change": "Calling ReflectionMethod::__construct() with 1 argument is deprecated.",
-  "status": "gap",
-  "note": "`new ReflectionMethod('A::b')` with one argument was tested and not reported."
+  "status": "covered",
+  "note": "new ReflectionMethod('A::b') is reported.",
+  "rules": [
+   "deprecated.reflection_method_string"
+  ]
  },
  {
   "version": "8.4",
@@ -6009,11 +6057,11 @@
   "section": "Deprecated Functionality",
   "ext": "SOAP",
   "change": "Passing an int to SoapServer::addFunction() is now deprecated.",
-  "status": "partial",
+  "status": "covered",
   "rules": [
    "deprecated.soap_functions_all"
   ],
-  "note": "addFunction(SOAP_FUNCTIONS_ALL) is reported via the constant, but addFunction() with a literal int like 999 is not."
+  "note": "$s = new SoapServer(null); $s->addFunction(999) is reported when the receiver's class is visible in the code."
  },
  {
   "version": "8.4",
@@ -6043,8 +6091,11 @@
   "section": "Deprecated Functionality",
   "ext": "SPL",
   "change": "Using the default value for $escape parameter of:",
-  "status": "gap",
-  "note": "SplFileObject fgetcsv()/fputcsv()/setCsvControl() without $escape were tested and not reported."
+  "status": "covered",
+  "note": "$f = new SplFileObject('x'); $f->fgetcsv() is reported when the receiver's class is visible in the code.",
+  "rules": [
+   "deprecated.csv_escape"
+  ]
  },
  {
   "version": "8.4",
@@ -6125,8 +6176,11 @@
   "section": "Removed Extensions and SAPIs",
   "ext": "PDO_OCI",
   "change": "The PDO_OCI extension has been unbundled and moved to PECL.",
-  "status": "gap",
-  "note": "`new PDO('oci:dbname=...')` (unbundled PDO_OCI driver) was tested and not reported."
+  "status": "covered",
+  "note": "new PDO('oci:dbname=x') is reported.",
+  "rules": [
+   "removed.pdo_oci"
+  ]
  },
  {
   "version": "8.4",
@@ -6279,8 +6333,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "DOM",
   "change": "Cloning a DOMNamedNodeMap, DOMNodeList, Dom\\NamedNodeMap, Dom\\NodeList, Dom\\HTMLCollection, and Dom\\DtdNamedNodeMap now fails.",
-  "status": "gap",
-  "note": "`clone $doc->childNodes` / `clone $doc->getElementsByTagName('a')` were tested and not reported."
+  "status": "covered",
+  "note": "clone of ->childNodes, ->attributes or ->getElementsByTagName() is reported.",
+  "rules": [
+   "removed.uncloneable_object"
+  ]
  },
  {
   "version": "8.5",
@@ -6386,8 +6443,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "PDO",
   "change": "The constructor arguments set in conjunction with PDO::FETCH_CLASS now follow the usual CUFA (call_user_func_array) semantics.",
-  "status": "gap",
-  "note": "Literal string-keyed constructor args `setFetchMode(PDO::FETCH_CLASS, 'X', ['name' => 1])` were tested and not reported."
+  "status": "covered",
+  "note": "function f(PDOStatement $s) { $s->setFetchMode(PDO::FETCH_CLASS, 'X', ['name' => 1]); } is reported when the receiver's class is visible in the code.",
+  "rules": [
+   "removed.fetch_class_named_args"
+  ]
  },
  {
   "version": "8.5",
@@ -6410,16 +6470,22 @@
   "section": "Backward Incompatible Changes",
   "ext": "PDO",
   "change": "A ValueError is now thrown if PDO::FETCH_PROPS_LATE is used with a fetch mode different than PDO::FETCH_CLASS, consistent with other fetch flags.",
-  "status": "gap",
-  "note": "Literal `fetchAll(PDO::FETCH_ASSOC | PDO::FETCH_PROPS_LATE)` was tested and not reported."
+  "status": "covered",
+  "note": "function f(PDOStatement $s) { $s->fetchAll(PDO::FETCH_ASSOC | PDO::FETCH_PROPS_LATE); } is reported when the receiver's class is visible in the code.",
+  "rules": [
+   "removed.fetch_props_late_mode"
+  ]
  },
  {
   "version": "8.5",
   "section": "Backward Incompatible Changes",
   "ext": "PDO",
   "change": "A ValueError is now thrown if PDO::FETCH_INTO is used as a fetch mode in PDO::fetchAll(), similar to PDO::FETCH_LAZY.",
-  "status": "gap",
-  "note": "Literal `fetchAll(PDO::FETCH_INTO)` was tested and not reported."
+  "status": "covered",
+  "note": "function f(PDOStatement $s) { $s->fetchAll(PDO::FETCH_INTO); } is reported when the receiver's class is visible in the code.",
+  "rules": [
+   "removed.fetch_all_into"
+  ]
  },
  {
   "version": "8.5",
@@ -6442,8 +6508,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "SimpleXML",
   "change": "Passing an XPath expression that returns something other than a node set to SimpleXMLElement::xpath() will now emit a warning and return false, instead of silently failing and returning an empty…",
-  "status": "gap",
-  "note": "Literal non-node-set XPath `$xml->xpath('count(//a)')` was tested and not reported."
+  "status": "covered",
+  "note": "$xml = new SimpleXMLElement('<a/>'); $xml->xpath('count(//a)') is reported when the receiver's class is visible in the code.",
+  "rules": [
+   "removed.xpath_non_node_set"
+  ]
  },
  {
   "version": "8.5",
@@ -6729,8 +6798,11 @@
   "section": "Deprecated Functionality",
   "ext": "PDO",
   "change": "The \"uri:\" DSN scheme has been deprecated due to security concerns with DSNs coming from remote URIs.",
-  "status": "gap",
-  "note": "Literal `new PDO('uri:file:///etc/dsn')` was tested and not reported."
+  "status": "covered",
+  "note": "new PDO('uri:file:///etc/dsn') is reported.",
+  "rules": [
+   "deprecated.pdo_uri_dsn"
+  ]
  },
  {
   "version": "8.5",
@@ -6748,8 +6820,11 @@
   "section": "Deprecated Functionality",
   "ext": "PDO",
   "change": "Driver specific methods in the PDO class have been deprecated.",
-  "status": "gap",
-  "note": "`$pdo->sqliteCreateFunction()` / `$pdo->pgsqlCopyFromArray()` on a new PDO were tested and not reported."
+  "status": "covered",
+  "note": "$pdo = new PDO('sqlite::memory:'); $pdo->sqliteCreateFunction('f', 'g') is reported when the receiver's class is visible in the code.",
+  "rules": [
+   "deprecated.pdo_driver_method"
+  ]
  },
  {
   "version": "8.5",
@@ -6805,8 +6880,11 @@
   "section": "Deprecated Functionality",
   "ext": "SPL",
   "change": "Using ArrayObject and ArrayIterator with objects has been deprecated.",
-  "status": "gap",
-  "note": "`new ArrayObject(new stdClass)` / `new ArrayIterator(new Foo())` were tested and not reported."
+  "status": "covered",
+  "note": "new ArrayObject(new stdClass) is reported.",
+  "rules": [
+   "deprecated.array_object_object"
+  ]
  },
  {
   "version": "8.5",

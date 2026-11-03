@@ -19,7 +19,11 @@ pub enum Check {
     NumBelow(usize, f64),
     NumOutside(usize, f64, f64),
     Has(usize, &'static str),
+    Lacks(usize, &'static str),
     Key(usize, &'static str),
+    StringKeys(usize),
+    StrStarts(usize, &'static [&'static str]),
+    New(usize),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -93,7 +97,11 @@ impl Check {
             | Check::NumBelow(n, _)
             | Check::NumOutside(n, ..)
             | Check::Has(n, _)
-            | Check::Key(n, _) => Some(n),
+            | Check::Lacks(n, _)
+            | Check::Key(n, _)
+            | Check::StringKeys(n)
+            | Check::StrStarts(n, _)
+            | Check::New(n) => Some(n),
         }
     }
 
@@ -133,6 +141,13 @@ impl Check {
             Check::Has(_, name) => {
                 arg.iter().any(|t| t.kind == TokenKind::Ident && t.text.trim_start_matches('\\').eq_ignore_ascii_case(name))
             }
+            Check::Lacks(_, name) => !Check::Has(n, name).holds(args),
+            Check::StringKeys(_) => {
+                arg.first().is_some_and(|t| t.is_punct("[") || t.is_ident_ci("array"))
+                    && arg.windows(2).any(|w| matches!(w[0].kind, TokenKind::Str { .. }) && w[1].is_punct("=>"))
+            }
+            Check::StrStarts(_, list) => text().is_some_and(|s| list.iter().any(|p| s.to_ascii_lowercase().starts_with(p))),
+            Check::New(_) => arg.first().is_some_and(|t| t.is_ident_ci("new")),
             Check::Key(_, key) => {
                 arg.windows(2).any(|w| string_literal(&w[0].text).is_some_and(|s| s.eq_ignore_ascii_case(key)) && w[1].is_punct("=>"))
             }
@@ -618,5 +633,160 @@ pub const ARGUMENTS: &[ArgRule] = &[
         Text::new("Tek karakter olmayan ord() argümanı", "ord() argument that isn't one character"),
         D, (8, 5), code("ord($s[0])"),
         Text::new("ord()'a boş ya da birden uzun bir metin vermek PHP 8.5'te kullanımdan kalktı.", "Passing an empty or longer string to ord() is deprecated in PHP 8.5."),
+    )),
+    arg(&["splpriorityqueue::setextractflags"], &[NumIs(0, 0.0)], rule(
+        "removed.extract_flags_zero",
+        Text::new("setExtractFlags(0)", "setExtractFlags(0)"),
+        R, (7, 4), code("SplPriorityQueue::EXTR_DATA"),
+        Text::new("SplPriorityQueue::setExtractFlags() PHP 7.4'ten beri 0 verildiğinde exception fırlatır.", "SplPriorityQueue::setExtractFlags() throws for 0 since PHP 7.4."),
+    )),
+    arg(&["pdostatement::bindcolumn"], &[Has(2, "PARAM_LOB")], rule(
+        "behavior.bind_column_lob",
+        Text::new("PARAM_LOB ile bindColumn()", "bindColumn() with PARAM_LOB"),
+        B, (8, 1), None,
+        Text::new("PHP 8.1'den beri PDO::PARAM_LOB ile bağlanan sütun her zaman bir stream verir; metin bekleyen kod bozulur.", "Since PHP 8.1 a column bound with PDO::PARAM_LOB is always a stream, which breaks code expecting a string."),
+    )),
+    arg(&["splfileobject::ftell", "splfileobject::fflush", "splfileobject::getcsvcontrol", "splfileobject::eof", "splfileobject::valid", "splfileobject::fgetc", "splfileobject::fpassthru", "splfileobject::getmaxlinelen"], &[Count(1, 9)], rule(
+        "removed.splfileobject_extra_argument",
+        Text::new("Fazladan SplFileObject argümanı", "Extra SplFileObject argument"),
+        R, (8, 2), tx("argümanı silin", "remove the argument"),
+        Text::new("Bu SplFileObject metotları PHP 8.2'den beri argüman verildiğinde ArgumentCountError fırlatır.", "These SplFileObject methods throw an ArgumentCountError for any argument since PHP 8.2."),
+    )),
+    arg(&["phar::setstub", "phardata::setstub"], &[Count(2, 2)], rule(
+        "deprecated.phar_setstub_length",
+        Text::new("setStub() uzunluk argümanı", "setStub() length argument"),
+        D, (8, 3), tx("stub'ı metin olarak verin", "pass the stub as a string"),
+        Text::new("Phar::setStub()'a resource ve uzunluk vermek PHP 8.3'te kullanımdan kalktı.", "Passing a resource and a length to Phar::setStub() is deprecated since PHP 8.3."),
+    )),
+    arg(&["sqlite3::enableexceptions"], &[False(0)], rule(
+        "deprecated.sqlite3_exceptions_off",
+        Text::new("SQLite3 exception'larını kapatma", "Turning off SQLite3 exceptions"),
+        D, (8, 3), None,
+        Text::new("SQLite3::enableExceptions(false) PHP 8.3'te kullanımdan kalktı; ileride exception'lar hep açık olacak.", "SQLite3::enableExceptions(false) is deprecated since PHP 8.3; exceptions will always be on."),
+    )),
+    arg(&["reflectionmethod::__construct"], &[Count(1, 1)], rule(
+        "deprecated.reflection_method_string",
+        Text::new("Tek argümanlı new ReflectionMethod()", "new ReflectionMethod() with one argument"),
+        D, (8, 4), code("ReflectionMethod::createFromMethodName()"),
+        Text::new("new ReflectionMethod('Sınıf::metot') PHP 8.4'te kullanımdan kalktı.", "new ReflectionMethod('Class::method') is deprecated since PHP 8.4."),
+    )),
+    arg(&["splfileobject::fgetcsv", "splfileobject::setcsvcontrol"], &[Count(0, 2)], rule(
+        "deprecated.csv_escape",
+        Text::new("Varsayılan CSV escape karakteri", "Default CSV escape character"),
+        D, (8, 4), tx("$escape argümanını açıkça verin", "pass $escape explicitly"),
+        Text::new("CSV fonksiyonlarını $escape vermeden çağırmak PHP 8.4'te kullanımdan kalktı.", "Calling CSV functions without $escape is deprecated since PHP 8.4."),
+    )),
+    arg(&["splfileobject::fputcsv"], &[Count(1, 3)], rule(
+        "deprecated.csv_escape",
+        Text::new("Varsayılan CSV escape karakteri", "Default CSV escape character"),
+        D, (8, 4), tx("$escape argümanını açıkça verin", "pass $escape explicitly"),
+        Text::new("CSV fonksiyonlarını $escape vermeden çağırmak PHP 8.4'te kullanımdan kalktı.", "Calling CSV functions without $escape is deprecated since PHP 8.4."),
+    )),
+    arg(&["pdostatement::setfetchmode", "pdostatement::fetchall", "pdo::query"], &[Has(0, "FETCH_CLASS"), StringKeys(2)], rule(
+        "removed.fetch_class_named_args",
+        Text::new("Anahtarlı constructor argümanları", "Keyed constructor arguments"),
+        R, (8, 5), tx("anahtarsız bir dizi verin", "pass a list without keys"),
+        Text::new("PHP 8.5'ten beri FETCH_CLASS'ın constructor argümanlarında metin anahtar kullanılamaz.", "Since PHP 8.5 the constructor arguments of FETCH_CLASS can't have string keys."),
+    )),
+    arg(&["pdostatement::fetchall", "pdostatement::fetch", "pdostatement::setfetchmode"], &[Has(0, "FETCH_PROPS_LATE"), Lacks(0, "FETCH_CLASS")], rule(
+        "removed.fetch_props_late_mode",
+        Text::new("FETCH_CLASS olmadan FETCH_PROPS_LATE", "FETCH_PROPS_LATE without FETCH_CLASS"),
+        R, (8, 5), None,
+        Text::new("PHP 8.5'ten beri FETCH_PROPS_LATE yalnızca FETCH_CLASS ile kullanılabilir.", "Since PHP 8.5 FETCH_PROPS_LATE can only be used with FETCH_CLASS."),
+    )),
+    arg(&["pdostatement::fetchall"], &[Has(0, "FETCH_INTO")], rule(
+        "removed.fetch_all_into",
+        Text::new("fetchAll() ile FETCH_INTO", "FETCH_INTO with fetchAll()"),
+        R, (8, 5), code("fetch()"),
+        Text::new("PHP 8.5'ten beri fetchAll() FETCH_INTO modunu kabul etmez.", "Since PHP 8.5 fetchAll() doesn't accept the FETCH_INTO mode."),
+    )),
+    arg(&["simplexmlelement::xpath"], &[StrStarts(0, &["count(", "sum(", "string(", "number(", "boolean(", "concat(", "name(", "local-name(", "string-length("])], rule(
+        "removed.xpath_non_node_set",
+        Text::new("Düğüm dönmeyen XPath ifadesi", "XPath expression that doesn't return nodes"),
+        R, (8, 5), code("DOMXPath::evaluate()"),
+        Text::new("SimpleXMLElement::xpath() PHP 8.5'ten beri düğüm kümesi dönmeyen ifadelerde hata fırlatır.", "SimpleXMLElement::xpath() throws for expressions that don't return a node set since PHP 8.5."),
+    )),
+    arg(
+        &[
+            "pdo::sqlitecreatefunction", "pdo::sqlitecreateaggregate", "pdo::sqlitecreatecollation", "pdo::pgsqlcopyfromarray", "pdo::pgsqlcopyfromfile",
+            "pdo::pgsqlcopytoarray", "pdo::pgsqlcopytofile", "pdo::pgsqlgetnotify", "pdo::pgsqlgetpid", "pdo::pgsqllobcreate", "pdo::pgsqllobopen",
+            "pdo::pgsqllobunlink",
+        ],
+        &[Count(0, 9)],
+        rule(
+            "deprecated.pdo_driver_method",
+            Text::new("PDO üzerinde sürücüye özel metot", "Driver-specific method on PDO"),
+            D, (8, 5), code("Pdo\\Sqlite / Pdo\\Pgsql"),
+            Text::new(
+                "Sürücüye özel PDO metotları PHP 8.5'te kullanımdan kalktı; Pdo\\Sqlite ya da Pdo\\Pgsql alt sınıfındaki karşılığını kullanın.",
+                "Driver-specific PDO methods are deprecated in PHP 8.5; use the method on the Pdo\\Sqlite or Pdo\\Pgsql subclass.",
+            ),
+        ),
+    ),
+    arg(&["intlcalendar::roll", "intlgregoriancalendar::roll"], &[Bool(1)], rule(
+        "deprecated.intlcal_roll_bool",
+        Text::new("roll() bool değer", "roll() bool value"),
+        D, (8, 1), code("1 / -1"),
+        Text::new("IntlCalendar::roll()'a bool vermek PHP 8.1'de kullanımdan kalktı; 1 ya da -1 verin.", "Passing a bool to IntlCalendar::roll() is deprecated since PHP 8.1; pass 1 or -1."),
+    )),
+    arg(&["intlcalendar::set", "intlgregoriancalendar::set"], &[Count(3, 6)], rule(
+        "deprecated.intlcal_set",
+        Text::new("Çok argümanlı IntlCalendar::set()", "IntlCalendar::set() with several arguments"),
+        D, (8, 4), code("setDate() / setDateTime()"),
+        Text::new("IntlCalendar::set()'i tarih parçalarıyla çağırmak PHP 8.4'te kullanımdan kalktı.", "Calling IntlCalendar::set() with date parts is deprecated since PHP 8.4."),
+    )),
+    arg(&["intlgregoriancalendar::__construct"], &[Count(3, 6)], rule(
+        "deprecated.intlgregcal_create_instance",
+        Text::new("Tarih parçalarıyla IntlGregorianCalendar", "IntlGregorianCalendar from date parts"),
+        D, (8, 4), code("IntlGregorianCalendar::createFromDate()"),
+        Text::new("new IntlGregorianCalendar()'ı tarih parçalarıyla çağırmak PHP 8.4'te kullanımdan kalktı.", "Calling new IntlGregorianCalendar() with date parts is deprecated since PHP 8.4."),
+    )),
+    arg(&["mysqli::store_result"], &[Count(1, 1)], rule(
+        "deprecated.mysqli_store_result_mode",
+        Text::new("store_result() modu", "store_result() mode"),
+        D, (8, 4), tx("argümanı silin", "remove the argument"),
+        Text::new("mysqli::store_result()'a mod vermek PHP 8.4'te kullanımdan kalktı.", "Passing a mode to mysqli::store_result() is deprecated since PHP 8.4."),
+    )),
+    arg(&["soapserver::addfunction"], &[Int(0)], rule(
+        "deprecated.soap_functions_all",
+        Text::new("addFunction()'a sayı", "Integer passed to addFunction()"),
+        D, (8, 4), tx("fonksiyon adlarını verin", "pass function names"),
+        Text::new("SoapServer::addFunction()'a sayı vermek PHP 8.4'te kullanımdan kalktı.", "Passing an integer to SoapServer::addFunction() is deprecated since PHP 8.4."),
+    )),
+    arg(&["dateperiod::__construct"], &[Str(0)], rule(
+        "deprecated.date_period_iso_string",
+        Text::new("ISO metniyle DatePeriod", "DatePeriod from an ISO string"),
+        D, (8, 4), code("DatePeriod::createFromISO8601String()"),
+        Text::new("new DatePeriod()'u ISO 8601 metniyle çağırmak PHP 8.4'te kullanımdan kalktı.", "Calling new DatePeriod() with an ISO 8601 string is deprecated since PHP 8.4."),
+    )),
+    arg(&["arrayobject::__construct", "arrayiterator::__construct"], &[New(0)], rule(
+        "deprecated.array_object_object",
+        Text::new("Nesneyle ArrayObject", "ArrayObject wrapping an object"),
+        D, (8, 5), tx("bir dizi verin", "pass an array"),
+        Text::new("ArrayObject ve ArrayIterator'a nesne vermek PHP 8.5'te kullanımdan kalktı.", "Passing an object to ArrayObject or ArrayIterator is deprecated in PHP 8.5."),
+    )),
+    arg(&["soapclient::__construct"], &[Key(1, "ssl_method")], rule(
+        "deprecated.soap_ssl_method",
+        Text::new("SoapClient ssl_method seçeneği", "SoapClient ssl_method option"),
+        D, (8, 1), tx("stream context'in crypto_method seçeneği", "the crypto_method option of a stream context"),
+        Text::new("SoapClient'ın ssl_method seçeneği PHP 8.1'de kullanımdan kalktı.", "The ssl_method option of SoapClient is deprecated since PHP 8.1."),
+    )),
+    arg(&["pdo::__construct"], &[StrStarts(0, &["oci:"])], rule(
+        "removed.pdo_oci",
+        Text::new("PDO_OCI bağlantısı", "PDO_OCI connection"),
+        R, (8, 4), tx("PECL pdo_oci", "PECL pdo_oci"),
+        Text::new("PDO_OCI sürücüsü PHP 8.4'te çekirdekten çıkarıldı; ancak PECL'den ayrıca kurulursa çalışır.", "The PDO_OCI driver was unbundled in PHP 8.4; it only works if you install it from PECL."),
+    )),
+    arg(&["pdo::__construct"], &[StrStarts(0, &["uri:"])], rule(
+        "deprecated.pdo_uri_dsn",
+        Text::new("uri: DSN", "uri: DSN"),
+        D, (8, 5), tx("DSN'i doğrudan verin", "pass the DSN directly"),
+        Text::new("DSN'i uri: ile bir dosyadan okumak PHP 8.5'te kullanımdan kalktı.", "Reading the DSN from a file with uri: is deprecated in PHP 8.5."),
+    )),
+    arg(&["static ffi::cast", "static ffi::new", "static ffi::type"], &[Count(0, 9)], rule(
+        "deprecated.ffi_static_call",
+        Text::new("FFI'ın statik çağrısı", "Static FFI call"),
+        D, (8, 3), code("FFI::cdef()->cast()"),
+        Text::new("FFI::cast(), FFI::new() ve FFI::type()'ı statik çağırmak PHP 8.3'te kullanımdan kalktı.", "Calling FFI::cast(), FFI::new() and FFI::type() statically is deprecated since PHP 8.3."),
     )),
 ];
