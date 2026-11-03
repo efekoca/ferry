@@ -316,6 +316,7 @@ pub fn analyze_source(file: &str, src: &str, target: PhpVersion) -> Vec<Finding>
 pub fn analyze_source_in(file: &str, src: &str, target: PhpVersion, index: &crate::index::ProjectIndex) -> Vec<Finding> {
     let lexed = lex(src);
     let tokens = lexed.tokens;
+    let html = lexed.html;
     let mut line_starts = vec![0];
     line_starts.extend(src.match_indices('\n').map(|(i, _)| i + 1));
     let methods = method_tokens(&tokens);
@@ -375,6 +376,9 @@ pub fn analyze_source_in(file: &str, src: &str, target: PhpVersion, index: &crat
                 ctx.incompatible_override(&patterns::INCOMPATIBLE_USER_OVERRIDE, &tokens[over.name], &parent, signature);
             }
         }
+    }
+    for (line, column, rule) in crate::syntax::check(src, &tokens, &html) {
+        ctx.pattern_at(rule, line, column);
     }
     for d in crate::declarations::check(&tokens, |fqn| index.type_by_fqn(fqn).is_some_and(|t| t.is_trait)) {
         let since = PhpVersion::new(d.since.0, d.since.1);
@@ -514,11 +518,20 @@ enum Builtin {
     RemovedMethod,
     DeprecatedMethod,
     RemovedIni,
+    RemovedClassConstant,
+    DeprecatedClassConstant,
 }
 
 impl Builtin {
     fn removed(self) -> bool {
-        matches!(self, Builtin::RemovedFunction | Builtin::RemovedConstant | Builtin::RemovedClass | Builtin::RemovedMethod)
+        matches!(
+            self,
+            Builtin::RemovedFunction
+                | Builtin::RemovedConstant
+                | Builtin::RemovedClass
+                | Builtin::RemovedMethod
+                | Builtin::RemovedClassConstant
+        )
     }
 
     fn rule(self) -> (&'static str, crate::i18n::Text) {
@@ -568,6 +581,20 @@ impl Builtin {
                 Text::new(
                     "Bu metot kullanımdan kalktı; çağrıldığında uyarı verir ve ileride kaldırılacak.",
                     "This method is deprecated; calling it raises a warning and it will be removed.",
+                ),
+            ),
+            Builtin::RemovedClassConstant => (
+                "removed.builtin_class_constant",
+                Text::new(
+                    "Bu sınıf sabiti PHP'den kaldırıldı; kullanıldığında hata verir.",
+                    "This class constant was removed from PHP; using it is a fatal error.",
+                ),
+            ),
+            Builtin::DeprecatedClassConstant => (
+                "deprecated.builtin_class_constant",
+                Text::new(
+                    "Bu sınıf sabiti kullanımdan kalktı ve ileride kaldırılacak.",
+                    "This class constant is deprecated and will be removed.",
                 ),
             ),
             Builtin::RemovedIni => (
@@ -1121,6 +1148,8 @@ impl<'a> Ctx<'a> {
         }) else {
             if is_call {
                 self.generated_method(tokens, i, class, known.as_ref());
+            } else if kind == MemberKind::Constant {
+                self.generated_class_constant(tokens, i);
             }
             return;
         };
@@ -1142,6 +1171,20 @@ impl<'a> Ctx<'a> {
             replacement: m.rule.replacement.map(Into::into),
         };
         self.push(hit, tok.line, tok.column);
+    }
+
+    fn generated_class_constant(&mut self, tokens: &[Token], i: usize) {
+        let class = tokens[i - 2].text.trim_start_matches('\\').to_ascii_lowercase();
+        let short = class.rsplit('\\').next().unwrap_or_default();
+        if ["self", "static", "parent"].contains(&short) || self.index.declares_type(short) {
+            return;
+        }
+        let key = format!("{class}::{}", tokens[i].text);
+        if let Some(&(_, since, name)) = generated(crate::symbols::REMOVED_CLASS_CONSTANTS, &key) {
+            self.builtin(Builtin::RemovedClassConstant, format!("{name}::{}", tokens[i].text), since, &tokens[i]);
+        } else if let Some(&(_, since, name)) = generated(crate::symbols::DEPRECATED_CLASS_CONSTANTS, &key) {
+            self.builtin(Builtin::DeprecatedClassConstant, format!("{name}::{}", tokens[i].text), since, &tokens[i]);
+        }
     }
 
     fn generated_method(&mut self, tokens: &[Token], i: usize, class: Option<&str>, known: Option<&std::collections::HashSet<String>>) {
@@ -3406,6 +3449,29 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
             assert_eq!(count85(&format!("<?php {src}"), id), 0, "{src}");
         }
         assert_eq!(at("<?php $GLOBALS = [];", (8, 0)).iter().filter(|(r, _)| r == id).count(), 0);
+    }
+
+    #[test]
+    fn syntax_checks() {
+        let cases: &[(&str, &str, usize)] = &[
+            ("<?php $a = 0781; $b = 0777; $c = 0; $d = 09.5;", "removed.invalid_octal", 1),
+            ("<?php $a = \"\\u{zz}\"; $b = \"\\u{1F600}\"; $c = '\\u{zz}'; $d = \"\\\\u{zz}\";", "removed.invalid_unicode_escape", 1),
+            ("<?php $a = 1 >> -1; $b = $x << -2; $c = 1 << 2; $d = $x >> -0;", "removed.negative_shift", 2),
+            ("<?php $a = 1 << 64; $b = $x >> 65; $c = 1 << 63;", "behavior.wide_shift", 2),
+            ("<?php $a = 0 ** -1; $b = 0.0 ** -2; $c = 2 ** -1; $d = 0 ** 1;", "deprecated.pow_zero_negative", 2),
+            ("<?php list() = $a; list(,,) = $a; list($x) = $a; list(, $y) = $a;", "removed.empty_list", 2),
+            (
+                "<?php foreach ($a as $v) { switch ($v) { case 1: continue; case 2: continue 2; } } switch ($x) { case 1: foreach ($a as $v) { continue; } }",
+                "deprecated.continue_switch",
+                1,
+            ),
+            ("<script language=\"php\"> echo 1; </script><script language='javascript'></script><?php echo '<script language=php>';", "removed.script_tag", 1),
+            ("<?php echo 1; ?>\ntext <?php", "behavior.trailing_open_tag", 1),
+            ("<?php echo 1; ?>\ntext <?php\n", "behavior.trailing_open_tag", 0),
+        ];
+        for (src, id, n) in cases {
+            assert_eq!(count85(src, id), *n, "{id}: {src}");
+        }
     }
 
     #[test]

@@ -31,6 +31,12 @@ fn every_generated_symbol_is_reported() {
             missing.push(format!("method {class}::{method} {}.{}", since.0, since.1));
         }
     }
+    for (key, since, class) in REMOVED_CLASS_CONSTANTS.iter().chain(DEPRECATED_CLASS_CONSTANTS) {
+        let constant = key.split("::").nth(1).unwrap();
+        if !hit(&format!("<?php\necho \\{class}::{constant};\n")) {
+            missing.push(format!("class constant {class}::{constant} {}.{}", since.0, since.1));
+        }
+    }
     for (name, since, _) in REMOVED_INI {
         if !hit(&format!("<?php\nini_set('{name}', '1');\n")) {
             missing.push(format!("ini {name} {}.{}", since.0, since.1));

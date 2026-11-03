@@ -15,18 +15,18 @@ The data lives in `docs/coverage.json`; this page is generated from it with
 
 | Version | Covered | Partial | Gap | Runtime only | Not applicable | Total |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| [7.0](#php-70) | 25 | 2 | 22 | 14 | 19 | 82 |
+| [7.0](#php-70) | 31 | 3 | 15 | 14 | 19 | 82 |
 | [7.1](#php-71) | 4 | 0 | 7 | 13 | 4 | 28 |
 | [7.2](#php-72) | 21 | 1 | 3 | 5 | 4 | 34 |
-| [7.3](#php-73) | 7 | 0 | 9 | 12 | 6 | 34 |
-| [7.4](#php-74) | 23 | 1 | 13 | 25 | 3 | 65 |
-| [8.0](#php-80) | 99 | 6 | 20 | 48 | 11 | 184 |
+| [7.3](#php-73) | 9 | 0 | 7 | 12 | 6 | 34 |
+| [7.4](#php-74) | 24 | 1 | 12 | 25 | 3 | 65 |
+| [8.0](#php-80) | 101 | 6 | 18 | 48 | 11 | 184 |
 | [8.1](#php-81) | 36 | 2 | 16 | 6 | 2 | 62 |
 | [8.2](#php-82) | 10 | 0 | 1 | 7 | 0 | 18 |
 | [8.3](#php-83) | 15 | 1 | 7 | 10 | 2 | 35 |
-| [8.4](#php-84) | 46 | 9 | 17 | 22 | 5 | 99 |
+| [8.4](#php-84) | 47 | 8 | 17 | 22 | 5 | 99 |
 | [8.5](#php-85) | 33 | 0 | 20 | 22 | 4 | 79 |
-| **All** | **319** | **22** | **135** | **184** | **60** | **720** |
+| **All** | **331** | **22** | **123** | **184** | **60** | **720** |
 
 ## PHP 7.0
 
@@ -41,7 +41,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-7.0/UPGRADING)
 | Changes to variable handling | https://wiki.php.net/rfc/uniform_variable_syntax | Not applicable |  | RFC reference only; the change is classified under item 0. |
 | Changes to variable handling | https://wiki.php.net/rfc/abstract_syntax_tree | Not applicable |  | RFC reference only; the changes are classified under items 0, 6 and 7. |
 | Changes to list() | list() will no longer assign variables in reverse order. | Gap |  | list($array[], $array[], $array[]) = [1, 2, 3] (assignment order change) is not reported. |
-| Changes to list() | Empty list() assignments are no longer allowed. | Gap |  | Empty list() = $a, list(,,) = $a and nested empty list() are not reported. |
+| Changes to list() | Empty list() assignments are no longer allowed. | Covered | `removed.empty_list` | Empty list() and list(,,) assignments are reported. |
 | Changes to list() | list() no longer supports unpacking strings (while previously this was only supported in some cases). | Runtime only |  | Whether list() unpacks a string depends on the runtime type of the right-hand side. |
 | Changes to list() | https://wiki.php.net/rfc/abstract_syntax_tree#changes_to_list | Not applicable |  | RFC reference only; the change is classified under items 6 and 7. |
 | Changes to list() | https://wiki.php.net/rfc/fix_list_behavior_inconsistency | Not applicable |  | RFC reference only; the change is classified under item 8. |
@@ -53,12 +53,12 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-7.0/UPGRADING)
 | Changes to parameter handling | It is no longer possible to define two function parameters with the same name. | Covered | `removed.duplicate_parameter` | function foo($a, $b, $unused, $unused) {} is reported. |
 | Changes to parameter handling | The func_get_arg() and func_get_args() functions will no longer return the original value that was passed to a parameter and will instead provide the current value (which might have been modified). | Gap |  | func_get_arg(0) after the parameter is modified ($x++) is not reported. |
 | Changes to parameter handling | Similarly exception backtraces will no longer display the original value that was passed to a function and show the modified value instead. | Not applicable |  | Only affects backtrace display, not program behavior. |
-| Changes to integer handling | Invalid octal literals (containing digits larger than 7) now produce compile errors. | Gap |  | Invalid octal literal $i = 0781 is not reported. |
-| Changes to integer handling | Bitwise shifts by negative numbers will now throw an ArithmeticError: | Gap |  | Literal negative shift 1 >> -1 is not reported. |
-| Changes to integer handling | Left bitwise shifts by a number of bits beyond the bit width of an integer will always result in 0: | Gap |  | Literal over-wide shift 1 &lt;&lt; 64 is not reported. |
-| Changes to integer handling | Similarly right bitwise shifts by a number of bits beyond the bit width of an integer will always result in 0 or -1 (depending on sign): | Gap |  | Literal over-wide right shift 1 >> 64 is not reported. |
+| Changes to integer handling | Invalid octal literals (containing digits larger than 7) now produce compile errors. | Covered | `removed.invalid_octal` | Octal literals containing 8 or 9, such as 0781, are reported. |
+| Changes to integer handling | Bitwise shifts by negative numbers will now throw an ArithmeticError: | Covered | `removed.negative_shift` | Shifts by a negative integer literal, such as 1 >> -1, are reported. |
+| Changes to integer handling | Left bitwise shifts by a number of bits beyond the bit width of an integer will always result in 0: | Covered | `behavior.wide_shift` | Shifts by an integer literal of 64 or more are reported. |
+| Changes to integer handling | Similarly right bitwise shifts by a number of bits beyond the bit width of an integer will always result in 0 or -1 (depending on sign): | Covered | `behavior.wide_shift` | Shifts by an integer literal of 64 or more are reported. |
 | Changes to string handling | Strings that contain hexadecimal numbers are no longer considered to be numeric and don't receive special treatment anymore. | Gap |  | Literal hex numeric strings like is_numeric("0x123") or "0x123" == "291" are not reported. |
-| Changes to string handling | Due to the addition of the Unicode Codepoint Escape Syntax for double-quoted strings and heredocs, "\u{" followed by an invalid sequence will now result in an error: | Gap |  | Invalid "\u{xyz}" escape in a double-quoted string is not reported. |
+| Changes to string handling | Due to the addition of the Unicode Codepoint Escape Syntax for double-quoted strings and heredocs, "\u{" followed by an invalid sequence will now result in an error: | Covered | `removed.invalid_unicode_escape` | Double-quoted strings and heredocs with an invalid \u{ escape are reported. |
 | Changes to string handling | https://wiki.php.net/rfc/remove_hex_support_in_numeric_strings | Not applicable |  | RFC reference only; the change is classified under item 23. |
 | Changes to string handling | https://wiki.php.net/rfc/unicode_escape | Not applicable |  | RFC reference only; the change is classified under item 24. |
 | Changes to error handling | There are now two exception classes: | Covered | `removed.exception_handler_type` | set_exception_handler(function (Exception $e) {...}) is reported. |
@@ -73,7 +73,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-7.0/UPGRADING)
 | Other language changes | Removed support for static calls to non-static methods from an incompatible $this context. | Covered | `removed.static_call_to_instance_method` | A::test() called from unrelated class B is reported. |
 | Other language changes | It is no longer possible to use the following class, interface and trait names (case-insensitive): | Covered | `removed.reserved_name`<br>`removed.reserved_alias` | Class declarations, use aliases and class_alias() with the reserved name are reported. |
 | Other language changes | The yield language construct no longer requires parentheses when used in an expression context. | Gap |  | echo yield -1; and yield $foo or die; precedence change is not reported. |
-| Other language changes | Removed ASP (&lt;%) and script (&lt;script language=php>) tags. | Gap |  | ASP tags &lt;% ... %> and &lt;script language="php"> are not reported. |
+| Other language changes | Removed ASP (&lt;%) and script (&lt;script language=php>) tags. | Partial | `removed.script_tag` | &lt;script language="php"> in HTML is reported; ASP tags (&lt;% %>) are not, because the same markers appear in other template languages. |
 | Other language changes | Removed support for assigning the result of new by reference. | Covered | `removed.assign_new_by_ref` | $a = &new Foo is reported. |
 | Other language changes | Removed support for scoped calls to non-static methods from an incompatible $this context. | Covered | `removed.static_call_to_instance_method` | Scoped call A::test() from an incompatible context is reported. |
 | Other language changes | Removed support for #-style comments in ini files. | Gap |  | A '# comment' line in php.ini is not reported. |
@@ -204,7 +204,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-7.3/UPGRADING)
 | Backward Incompatible Changes | Exceptions thrown due to automatic conversion of warnings into exceptions in EH_THROW mode (e.g. some DateTime exceptions) no longer populate error_get_last() state. | Runtime only |  | Depends on error_get_last() state after exceptions at runtime. |
 | Backward Incompatible Changes | TypeError now reports wrong types as `int` and `bool` instead of `integer` and `boolean`. | Not applicable |  | TypeError message wording. |
 | Backward Incompatible Changes | Due to the introduction of flexible heredoc/nowdoc syntax (see New Features section), doc strings that contain the ending label inside their body may cause syntax errors or change in interpretation. | Gap |  | A heredoc whose body contains an indented closing label (   FOO) is not reported. |
-| Backward Incompatible Changes | "continue" statements targeting "switch" control flow structures will now generate a warning. | Gap |  | continue; targeting a switch inside a loop is not reported. |
+| Backward Incompatible Changes | "continue" statements targeting "switch" control flow structures will now generate a warning. | Covered | `deprecated.continue_switch` | continue; whose innermost target is a switch is reported; on the corpus it matched every warning php -l gives on PHP 7.4. |
 | Backward Incompatible Changes | Array accesses of type $obj["123"], where $obj implements ArrayAccess and "123" is an integer string literal will no longer result in an implicit conversion to integer, i.e.,… | Runtime only |  | Depends on $obj being an ArrayAccess object at runtime. |
 | Backward Incompatible Changes | In PHP, static properties are shared between inheriting classes, unless the static property is explicitly overridden in a child class. | Gap |  | Test2::$x = &$x reference assignment to an inherited static property is not reported. |
 | Backward Incompatible Changes | References returned by array and property accesses are now unwrapped as part of the access. | Runtime only |  | Depends on references existing at runtime. |
@@ -226,7 +226,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-7.3/UPGRADING)
 | Deprecated Functionality | Declaring a function called assert() inside a namespace is deprecated. | Gap |  | namespace Foo; function assert($a) {} is not reported. |
 | Deprecated Functionality | The explicit usage of the constants FILTER_FLAG_SCHEME_REQUIRED and FILTER_FLAG_HOST_REQUIRED is now deprecated; both are implied for FILTER_VALIDATE_URL anyway. | Covered | `removed.filter_flag_scheme_required`<br>`removed.filter_flag_host_required` | FILTER_FLAG_SCHEME_REQUIRED and FILTER_FLAG_HOST_REQUIRED are reported. |
 | Deprecated Functionality | image2wbmp() has been deprecated. | Covered | `removed.image2wbmp` | image2wbmp() is reported. |
-| Deprecated Functionality | Usage of the Normalizer::NONE form throws a deprecation warning, if PHP is linked with ICU >= 56. | Gap |  | Normalizer::NONE is not reported. |
+| Deprecated Functionality | Usage of the Normalizer::NONE form throws a deprecation warning, if PHP is linked with ICU >= 56. | Covered | `removed.builtin_class_constant` | Normalizer::NONE is reported. |
 | Deprecated Functionality | The following undocumented mbereg_*() aliases have been deprecated. | Covered | `removed.mbereg`<br>`removed.mbregex_encoding`<br>`removed.mbsplit` | mbereg(), mbregex_encoding(), mbsplit() and mbereg_search_init() are reported. |
 | Deprecated Functionality | The pdo_odbc.db2_instance_name ini setting has been formally deprecated. | Gap |  | pdo_odbc.db2_instance_name in php.ini is not reported. |
 | Deprecated Functionality | Passing a non-string needle to string search functions is deprecated. | Covered | `behavior.int_as_char_code` | strpos($h, 65) is reported. |
@@ -244,7 +244,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-7.4/UPGRADING)
 | Core | get_declared_classes() no longer returns anonymous classes that haven't been instantiated yet. | Runtime only |  | Depends on runtime class instantiation. |
 | Core | "fn" is now a reserved keyword. | Covered | `removed.reserved_name` | function fn() {} and class Fn {} are reported. |
 | Core | Passing the result of a (non-reference) list() assignment by reference is consistently disallowed now. | Gap |  | foo(list($a) = $b) passing a list() assignment result by reference is not reported. |
-| Core | `&lt;?php` at the end of the file (without trailing newline) will now be interpreted as an opening PHP tag. | Gap |  | A file ending in '&lt;?php' without a trailing newline is not reported. |
+| Core | `&lt;?php` at the end of the file (without trailing newline) will now be interpreted as an opening PHP tag. | Covered | `behavior.trailing_open_tag` | A file ending in &lt;?php without a newline is reported. |
 | Core | When using include/require on a stream, stream_set_option() will be invoked with the STREAM_OPTION_READ_BUFFER option. | Gap |  | A stream wrapper class registered with stream_wrapper_register() that lacks stream_set_option() is not reported. |
 | Core | The "creating default object from empty value" warning is now consistently thrown if a falsy value is promoted into an stdClass object. | Runtime only |  | Depends on falsy values being promoted at runtime. |
 | Core | Previously get_declared_classes() always returned parent classes before child classes. | Runtime only |  | Depends on order of get_declared_classes() at runtime. |
@@ -380,7 +380,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.0/UPGRADING)
 | IMAP | The unused default_host argument of imap_headerinfo() has been removed. | Covered | `removed.imap` | imap_headerinfo() with five arguments is reported, via the ext/imap unbundling rule rather than the argument removal. |
 | IMAP | The imap_header() function which is an alias of imap_headerinfo() has been removed. | Covered | `removed.imap` | imap_header() is reported via the ext/imap unbundling rule. |
 | Intl | The deprecated constant INTL_IDNA_VARIANT_2003 has been removed. | Covered | `removed.intl_idna_variant_2003` | INTL_IDNA_VARIANT_2003 is reported. |
-| Intl | The deprecated Normalizer::NONE constant has been removed. | Gap |  | Not reported: Normalizer::normalize($s, Normalizer::NONE). |
+| Intl | The deprecated Normalizer::NONE constant has been removed. | Covered | `removed.builtin_class_constant` | Normalizer::NONE is reported. |
 | Intl | The IntlDateFormatter::RELATIVE_FULL, IntlDateFormatter::RELATIVE_LONG, IntlDateFormatter::RELATIVE_MEDIUM, and IntlDateFormatter::RELATIVE_SHORT constants have been added. | Not applicable |  | New constants were added; existing code is unaffected. |
 | LDAP | The deprecated function ldap_sort has been removed. | Covered | `removed.ldap_sort` | ldap_sort() is reported. |
 | LDAP | The deprecated function ldap_control_paged_result has been removed. | Covered | `removed.ldap_control_paged_result` | ldap_control_paged_result() is reported. |
@@ -476,7 +476,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.0/UPGRADING)
 | XML | xml_parser_create(_ns) will now return an XMLParser object rather than a resource. | Covered | `removed.resource_check`<br>`deprecated.xml_parser_free` | is_resource() on xml_parser_create() and xml_parser_free() are reported. |
 | XMLReader | XMLReader::open() and XMLReader::xml() are now static methods. | Covered | `removed.incompatible_override` | A subclass overriding XMLReader::open()/xml() as non-static is reported. |
 | XMLWriter | The XMLWriter functions now accept and return, respectively, XMLWriter objects instead of resources. | Covered | `removed.resource_check` | is_resource() on xmlwriter_open_memory() is reported. |
-| Zip | ZipArchive::OPSYS_Z_CPM has been removed (this name was a typo). | Gap |  | Not reported: ZipArchive::OPSYS_Z_CPM. |
+| Zip | ZipArchive::OPSYS_Z_CPM has been removed (this name was a typo). | Covered | `removed.builtin_class_constant` | ZipArchive::OPSYS_Z_CPM is reported. |
 | Zlib | gzgetss() has been removed. | Covered | `removed.gzgetss` | gzgetss() is reported. |
 | Zlib | inflate_init() will now return an InflateContext object rather than a resource. | Covered | `removed.resource_check` | is_resource() on inflate_init() is reported. |
 | Zlib | deflate_init() will now return a DeflateContext object rather than a resource. | Covered | `removed.resource_check` | is_resource() on deflate_init() is reported. |
@@ -699,7 +699,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.4/UPGRADING)
 | Core | Implicitly nullable parameter types are now deprecated. | Covered | `deprecated.implicit_nullable` | `int $x = null` parameter is reported. |
 | Core | Passing E_USER_ERROR to trigger_error() is now deprecated. | Covered | `deprecated.e_user_error` | trigger_error('x', E_USER_ERROR) is reported. |
 | Core | Using "_" as a class name is now deprecated. | Covered | `deprecated.underscore_class_name` | class _ {} is reported. |
-| Core | Raising zero to the power of negative number is deprecated. | Partial | `deprecated.pow_zero_negative` | pow(0, -2) with literals is reported; the 0 ** -1 operator form is not. |
+| Core | Raising zero to the power of negative number is deprecated. | Covered | `deprecated.pow_zero_negative` | 0 ** -1 and pow(0, -2) with literals are reported. |
 | Core | The E_STRICT constant was deprecated and its corresponding error level was removed. | Covered | `deprecated.e_strict` | E_STRICT constant use is reported. |
 | Curl | The CURLOPT_BINARYTRANSFER constant is deprecated. | Covered | `deprecated.curlopt_binarytransfer` | CURLOPT_BINARYTRANSFER is reported. |
 | Date | Calling DatePeriod::__construct(string $isostr, int $options = 0) is deprecated. | Gap |  | `new DatePeriod('R4/2012-07-01T00:00:00Z/P7D')` (ISO string constructor) was tested and not reported. |

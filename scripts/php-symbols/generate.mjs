@@ -24,6 +24,8 @@ const removedConstants = new Map();
 const deprecatedConstants = new Map();
 const removedIni = new Map();
 const typedConstants = new Map();
+const removedClassConstants = new Map();
+const deprecatedClassConstants = new Map();
 const first = (map, key, value) => map.has(key) || map.set(key, value);
 const latest = dumps[dumps.length - 1];
 // Functions that only exist when the build host supports them, so their absence isn't a removal.
@@ -76,6 +78,18 @@ for (let i = 1; i < dumps.length; i++) {
   for (const [name, c] of Object.entries(next.constants)) {
     if (c.deprecated && !prev.constants[name]?.deprecated && latest.constants[name]?.deprecated !== false) first(deprecatedConstants, name, [since, c.ext]);
   }
+  for (const [name, c] of Object.entries(prev.classes)) {
+    const now = next.classes[name];
+    if (!now || !latest.classes[name] || !kept.has(c.ext)) continue;
+    for (const k of Object.keys(c.constants)) {
+      if (!(k in now.constants) && !(k in latest.classes[name].constants)) first(removedClassConstants, `${name}::${k}`, [since, c.name]);
+    }
+  }
+  for (const [name, c] of Object.entries(next.classes)) {
+    for (const [k, deprecated] of Object.entries(c.constants)) {
+      if (deprecated && !prev.classes[name]?.constants[k] && latest.classes[name]?.constants[k] !== false) first(deprecatedClassConstants, `${name}::${k}`, [since, c.name]);
+    }
+  }
   for (const [name, c] of Object.entries(next.classes)) {
     const now = latest.classes[name];
     if (c.final || !now || now.final) continue;
@@ -126,6 +140,14 @@ const out = [
   table("DEPRECATED_CONSTANTS", "(constant, deprecated in, extension)", deprecatedConstants, {
     type: "(&str, (u32, u32), &str)",
     fmt: (k, [s, e]) => `(${str(k)}, ${ver(s)}, ${str(e)})`,
+  }),
+  table("REMOVED_CLASS_CONSTANTS", "(class lowercase::CONSTANT, removed in, class name)", removedClassConstants, {
+    type: "(&str, (u32, u32), &str)",
+    fmt: (k, [s, n]) => `(${str(k)}, ${ver(s)}, ${str(n)})`,
+  }),
+  table("DEPRECATED_CLASS_CONSTANTS", "(class lowercase::CONSTANT, deprecated in, class name)", deprecatedClassConstants, {
+    type: "(&str, (u32, u32), &str)",
+    fmt: (k, [s, n]) => `(${str(k)}, ${ver(s)}, ${str(n)})`,
   }),
   table("TYPED_CONSTANTS", "(class lowercase::CONSTANT, typed in, type) for classes that can be extended", typedConstants, {
     type: "(&str, (u32, u32), &str)",
