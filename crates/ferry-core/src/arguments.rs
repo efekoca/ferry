@@ -188,6 +188,18 @@ const NULL_LENGTH: Text = Text::new(
     "Before PHP 8.0 a null length counted as 0; it now means \"to the end\", so the result changes.",
 );
 
+pub(crate) const POW_ZERO_NEGATIVE: PatternRule = rule(
+    "deprecated.pow_zero_negative",
+    Text::new("0'ın negatif kuvveti", "Zero to a negative power"),
+    D,
+    (8, 4),
+    code("fpow()"),
+    Text::new(
+        "0'ın negatif bir kuvvetini almak PHP 8.4'te kullanımdan kalktı.",
+        "Raising zero to a negative power is deprecated since PHP 8.4.",
+    ),
+);
+
 pub const ARGUMENTS: &[ArgRule] = &[
     arg(&["curl_setopt"], &[Has(1, "CURLOPT_SAFE_UPLOAD"), False(2)], rule(
         "removed.curl_safe_upload_off",
@@ -516,12 +528,7 @@ pub const ARGUMENTS: &[ArgRule] = &[
         R, (8, 4), code("'a'"),
         Text::new("php_uname() PHP 8.4'ten beri geçersiz modda ValueError fırlatır.", "php_uname() throws a ValueError for an invalid mode since PHP 8.4."),
     )),
-    arg(&["pow"], &[NumIs(0, 0.0), NumBelow(1, 0.0)], rule(
-        "deprecated.pow_zero_negative",
-        Text::new("0'ın negatif kuvveti", "Zero to a negative power"),
-        D, (8, 4), code("fpow()"),
-        Text::new("0'ın negatif bir kuvvetini almak PHP 8.4'te kullanımdan kalktı.", "Raising zero to a negative power is deprecated since PHP 8.4."),
-    )),
+    arg(&["pow"], &[NumIs(0, 0.0), NumBelow(1, 0.0)], POW_ZERO_NEGATIVE),
     arg(&["dba_key_split"], &[Null(0)], rule(
         "deprecated.dba_key_split_null",
         Text::new("dba_key_split() null/false", "dba_key_split() null/false"),

@@ -29,6 +29,7 @@ pub mod runtime;
 pub mod safefs;
 pub mod server;
 pub mod snapshot;
+mod syntax;
 #[rustfmt::skip]
 pub mod symbols;
 pub mod toolchain;

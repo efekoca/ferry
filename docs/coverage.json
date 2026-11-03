@@ -66,8 +66,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Changes to list()",
   "change": "Empty list() assignments are no longer allowed.",
-  "status": "gap",
-  "note": "Empty list() = $a, list(,,) = $a and nested empty list() are not reported."
+  "status": "covered",
+  "note": "Empty list() and list(,,) assignments are reported.",
+  "rules": [
+   "removed.empty_list"
+  ]
  },
  {
   "version": "7.0",
@@ -165,32 +168,44 @@
   "section": "Backward Incompatible Changes",
   "ext": "Changes to integer handling",
   "change": "Invalid octal literals (containing digits larger than 7) now produce compile errors.",
-  "status": "gap",
-  "note": "Invalid octal literal $i = 0781 is not reported."
+  "status": "covered",
+  "note": "Octal literals containing 8 or 9, such as 0781, are reported.",
+  "rules": [
+   "removed.invalid_octal"
+  ]
  },
  {
   "version": "7.0",
   "section": "Backward Incompatible Changes",
   "ext": "Changes to integer handling",
   "change": "Bitwise shifts by negative numbers will now throw an ArithmeticError:",
-  "status": "gap",
-  "note": "Literal negative shift 1 >> -1 is not reported."
+  "status": "covered",
+  "note": "Shifts by a negative integer literal, such as 1 >> -1, are reported.",
+  "rules": [
+   "removed.negative_shift"
+  ]
  },
  {
   "version": "7.0",
   "section": "Backward Incompatible Changes",
   "ext": "Changes to integer handling",
   "change": "Left bitwise shifts by a number of bits beyond the bit width of an integer will always result in 0:",
-  "status": "gap",
-  "note": "Literal over-wide shift 1 << 64 is not reported."
+  "status": "covered",
+  "note": "Shifts by an integer literal of 64 or more are reported.",
+  "rules": [
+   "behavior.wide_shift"
+  ]
  },
  {
   "version": "7.0",
   "section": "Backward Incompatible Changes",
   "ext": "Changes to integer handling",
   "change": "Similarly right bitwise shifts by a number of bits beyond the bit width of an integer will always result in 0 or -1 (depending on sign):",
-  "status": "gap",
-  "note": "Literal over-wide right shift 1 >> 64 is not reported."
+  "status": "covered",
+  "note": "Shifts by an integer literal of 64 or more are reported.",
+  "rules": [
+   "behavior.wide_shift"
+  ]
  },
  {
   "version": "7.0",
@@ -205,8 +220,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Changes to string handling",
   "change": "Due to the addition of the Unicode Codepoint Escape Syntax for double-quoted strings and heredocs, \"\\u{\" followed by an invalid sequence will now result in an error:",
-  "status": "gap",
-  "note": "Invalid \"\\u{xyz}\" escape in a double-quoted string is not reported."
+  "status": "covered",
+  "note": "Double-quoted strings and heredocs with an invalid \\u{ escape are reported.",
+  "rules": [
+   "removed.invalid_unicode_escape"
+  ]
  },
  {
   "version": "7.0",
@@ -338,8 +356,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Other language changes",
   "change": "Removed ASP (<%) and script (<script language=php>) tags.",
-  "status": "gap",
-  "note": "ASP tags <% ... %> and <script language=\"php\"> are not reported."
+  "status": "partial",
+  "note": "<script language=\"php\"> in HTML is reported; ASP tags (<% %>) are not, because the same markers appear in other template languages.",
+  "rules": [
+   "removed.script_tag"
+  ]
  },
  {
   "version": "7.0",
@@ -1350,8 +1371,11 @@
   "version": "7.3",
   "section": "Backward Incompatible Changes",
   "change": "\"continue\" statements targeting \"switch\" control flow structures will now generate a warning.",
-  "status": "gap",
-  "note": "continue; targeting a switch inside a loop is not reported."
+  "status": "covered",
+  "note": "continue; whose innermost target is a switch is reported; on the corpus it matched every warning php -l gives on PHP 7.4.",
+  "rules": [
+   "deprecated.continue_switch"
+  ]
  },
  {
   "version": "7.3",
@@ -1520,8 +1544,11 @@
   "version": "7.3",
   "section": "Deprecated Functionality",
   "change": "Usage of the Normalizer::NONE form throws a deprecation warning, if PHP is linked with ICU >= 56.",
-  "status": "gap",
-  "note": "Normalizer::NONE is not reported."
+  "status": "covered",
+  "note": "Normalizer::NONE is reported.",
+  "rules": [
+   "removed.builtin_class_constant"
+  ]
  },
  {
   "version": "7.3",
@@ -1622,8 +1649,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Core",
   "change": "`<?php` at the end of the file (without trailing newline) will now be interpreted as an opening PHP tag.",
-  "status": "gap",
-  "note": "A file ending in '<?php' without a trailing newline is not reported."
+  "status": "covered",
+  "note": "A file ending in <?php without a newline is reported.",
+  "rules": [
+   "behavior.trailing_open_tag"
+  ]
  },
  {
   "version": "7.4",
@@ -2838,8 +2868,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Intl",
   "change": "The deprecated Normalizer::NONE constant has been removed.",
-  "status": "gap",
-  "note": "Not reported: Normalizer::normalize($s, Normalizer::NONE)."
+  "status": "covered",
+  "note": "Normalizer::NONE is reported.",
+  "rules": [
+   "removed.builtin_class_constant"
+  ]
  },
  {
   "version": "8.0",
@@ -3771,8 +3804,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Zip",
   "change": "ZipArchive::OPSYS_Z_CPM has been removed (this name was a typo).",
-  "status": "gap",
-  "note": "Not reported: ZipArchive::OPSYS_Z_CPM."
+  "status": "covered",
+  "note": "ZipArchive::OPSYS_Z_CPM is reported.",
+  "rules": [
+   "removed.builtin_class_constant"
+  ]
  },
  {
   "version": "8.0",
@@ -5644,8 +5680,8 @@
   "section": "Deprecated Functionality",
   "ext": "Core",
   "change": "Raising zero to the power of negative number is deprecated.",
-  "status": "partial",
-  "note": "pow(0, -2) with literals is reported; the 0 ** -1 operator form is not.",
+  "status": "covered",
+  "note": "0 ** -1 and pow(0, -2) with literals are reported.",
   "rules": [
    "deprecated.pow_zero_negative"
   ]

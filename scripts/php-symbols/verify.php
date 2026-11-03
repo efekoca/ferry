@@ -33,6 +33,14 @@ foreach ($rows['REMOVED_METHODS'] as $r) {
 foreach ($rows['REMOVED_INI'] as $r) {
     if (ini_get($r[1]) !== false) { echo "still exists: ini {$r[1]}\n"; $bad++; }
 }
+foreach ($rows['REMOVED_CLASS_CONSTANTS'] as $r) {
+    if (defined(stripslashes($r[1]))) { echo "still exists: class constant {$r[1]}\n"; $bad++; }
+}
+foreach ($rows['DEPRECATED_CLASS_CONSTANTS'] as $r) {
+    $before = $deprecations;
+    constant(stripslashes($r[1]));
+    if ($deprecations === $before) { echo "no deprecation: class constant {$r[1]}\n"; $bad++; }
+}
 foreach ($rows['TYPED_CONSTANTS'] as $r) {
     list($class, $name) = explode('::', stripslashes($r[1]));
     $type = defined("$class::$name") ? (new ReflectionClassConstant($class, $name))->getType() : null;
