@@ -16,17 +16,17 @@ The data lives in `docs/coverage.json`; this page is generated from it with
 | Version | Covered | Partial | Gap | Runtime only | Not applicable | Total |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | [7.0](#php-70) | 39 | 3 | 7 | 14 | 19 | 82 |
-| [7.1](#php-71) | 6 | 0 | 5 | 13 | 4 | 28 |
-| [7.2](#php-72) | 22 | 1 | 2 | 5 | 4 | 34 |
-| [7.3](#php-73) | 12 | 0 | 4 | 12 | 6 | 34 |
+| [7.1](#php-71) | 7 | 0 | 4 | 13 | 4 | 28 |
+| [7.2](#php-72) | 23 | 1 | 1 | 5 | 4 | 34 |
+| [7.3](#php-73) | 13 | 0 | 3 | 12 | 6 | 34 |
 | [7.4](#php-74) | 30 | 1 | 6 | 25 | 3 | 65 |
-| [8.0](#php-80) | 110 | 5 | 10 | 48 | 11 | 184 |
-| [8.1](#php-81) | 42 | 1 | 11 | 6 | 2 | 62 |
+| [8.0](#php-80) | 113 | 5 | 7 | 48 | 11 | 184 |
+| [8.1](#php-81) | 43 | 1 | 10 | 6 | 2 | 62 |
 | [8.2](#php-82) | 11 | 0 | 0 | 7 | 0 | 18 |
-| [8.3](#php-83) | 19 | 1 | 3 | 10 | 2 | 35 |
-| [8.4](#php-84) | 66 | 3 | 3 | 22 | 5 | 99 |
-| [8.5](#php-85) | 45 | 0 | 8 | 22 | 4 | 79 |
-| **All** | **402** | **15** | **59** | **184** | **60** | **720** |
+| [8.3](#php-83) | 20 | 1 | 2 | 10 | 2 | 35 |
+| [8.4](#php-84) | 68 | 3 | 1 | 22 | 5 | 99 |
+| [8.5](#php-85) | 48 | 0 | 5 | 22 | 4 | 79 |
+| **All** | **415** | **15** | **46** | **184** | **60** | **720** |
 
 ## PHP 7.0
 
@@ -139,7 +139,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-7.1/UPGRADING)
 | Core | The empty index operator (e.g. $str[] = $x) is not supported for strings anymore, and throws a fatal error instead of silently converting to array. | Runtime only |  | Whether $x[] = ... targets a string depends on the runtime type. |
 | Core | Array elements or object properties that are automatically created during by-reference assignments will now result in a different order. | Runtime only |  | Ordering of elements auto-created by reference assignment only shows at runtime. |
 | Core | The allowed_classes element of the $options parameter of unserialize() is now strictly typed, i.e. if anything other than an array or a boolean is given, unserialize() returns FALSE and issues an… | Covered | `behavior.unserialize_allowed_classes_type` | A string or number given for allowed_classes is reported. |
-| Core | $this, autoglobals, and variables with the same name as a parameter can no longer be bound to a closure via the use construct. | Gap |  | Closures with use ($this), use ($_GET) or use ($a) shadowing a parameter are not reported. |
+| Core | $this, autoglobals, and variables with the same name as a parameter can no longer be bound to a closure via the use construct. | Covered | `removed.closure_use_variable` | Closures binding $this, a superglobal or a variable named like a parameter with use() are reported. |
 | JSON | The serialize_precision is used instead of precision when encoding double values. | Runtime only |  | Float encoding output depends on values and serialize_precision. |
 | JSON | An empty key is decoded as an empty property name instead of using _empty_ property name when decoding object to stdClass. | Runtime only |  | Depends on JSON data containing empty keys. |
 | JSON | When calling json_encode with JSON_UNESCAPED_UNICODE option, U+2028 and U+2029 are escaped. | Runtime only |  | Depends on data containing U+2028/U+2029. |
@@ -165,7 +165,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-7.2/UPGRADING)
 | Core | Casting objects to arrays (with (array) or settype()), and retrieving object properties in an array with get_object_vars(), will now convert numeric string property names (that is, property names… | Runtime only |  | Depends on property names at runtime. |
 | Core | Unqualified references to undefined constants now generate a Warning instead of a notice. | Partial | `removed.bareword_key` | Bareword array keys $a[key] are reported, but other undefined bare constants like echo FOO_UNDEF are not. |
 | Core | Minimum supported Windows versions are Windows 7/Server 2008 R2. | Not applicable |  | Windows platform requirement. |
-| Core | Initial trait property value compatibility check will no longer perform any casts. | Gap |  | A class redeclaring a trait property with a different-typed default (1 vs '1') is not reported. |
+| Core | Initial trait property value compatibility check will no longer perform any casts. | Covered | `removed.trait_property_default` | A class redeclaring a property of a trait from the same file with a different literal default is reported. |
 | Core | "object" (in any case) can no longer be used as a class name. | Covered | `removed.reserved_name` | class Object {} is reported. |
 | BCMath | The bcmod() function no longer truncates fractional numbers to integers. | Runtime only |  | Depends on bcmod() operands being fractional at runtime. |
 | Hash | The hash_hmac(), hash_hmac_file(), hash_pbkdf2() and hash_init() (with HASH_HMAC) functions no longer accept non-cryptographic hashes. | Covered | `removed.hash_hmac_non_crypto` | hash_hmac('crc32', $d, $k) is reported. |
@@ -223,7 +223,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-7.3/UPGRADING)
 | SAPI | getimagesize() and related functions now report the mime type of BMP images as image/bmp instead of image/x-ms-bmp, since the former has been registered with the IANA (see RFC 7903). | Runtime only |  | Depends on image data at runtime. |
 | SAPI | stream_socket_get_name() will now return IPv6 addresses wrapped in brackets. | Runtime only |  | Depends on the socket address at runtime. |
 | Deprecated Functionality | The declaration of case-insensitive constants has been deprecated. | Covered | `removed.case_insensitive_constant` | define('FOO', 1, true) is reported. |
-| Deprecated Functionality | Declaring a function called assert() inside a namespace is deprecated. | Gap |  | namespace Foo; function assert($a) {} is not reported. |
+| Deprecated Functionality | Declaring a function called assert() inside a namespace is deprecated. | Covered | `removed.custom_assert` | A function named assert() declared inside a namespace is reported. |
 | Deprecated Functionality | The explicit usage of the constants FILTER_FLAG_SCHEME_REQUIRED and FILTER_FLAG_HOST_REQUIRED is now deprecated; both are implied for FILTER_VALIDATE_URL anyway. | Covered | `removed.filter_flag_scheme_required`<br>`removed.filter_flag_host_required` | FILTER_FLAG_SCHEME_REQUIRED and FILTER_FLAG_HOST_REQUIRED are reported. |
 | Deprecated Functionality | image2wbmp() has been deprecated. | Covered | `removed.image2wbmp` | image2wbmp() is reported. |
 | Deprecated Functionality | Usage of the Normalizer::NONE form throws a deprecation warning, if PHP is linked with ICU >= 56. | Covered | `removed.builtin_class_constant` | Normalizer::NONE is reported. |
@@ -337,7 +337,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.0/UPGRADING)
 | Core | Following the hash comment operator # immediately with an opening bracket is not supported as a comment anymore since this syntax is now used for attributes. | Covered | `removed.hash_bracket_comment` | A '#[' comment is reported. |
 | Core | Inheritance errors due to incompatible method signatures (LSP violations) will now always generate a fatal error. | Covered | `removed.incompatible_user_override` | A child method with an incompatible signature to its user-defined parent is reported. |
 | Core | The precedence of the concatenation operator has changed relative to bitshifts and addition as well as subtraction. | Covered | `behavior.concat_precedence` | echo "Sum: " . $a + $b; is reported. |
-| Core | Arguments with a default value that resolves to null at runtime will no longer implicitly mark the argument type as nullable. | Gap |  | Not reported: const FOO = null; function t(int $a = FOO) {} (only explicit = null defaults are flagged). |
+| Core | Arguments with a default value that resolves to null at runtime will no longer implicitly mark the argument type as nullable. | Covered | `removed.null_constant_default` | A typed, non-nullable parameter whose default is a constant declared null in the same file is reported. |
 | Core | A number of warnings have been converted into Error exceptions: | Runtime only |  | Writing properties/indexes on non-objects/scalars etc. depends on runtime value types. |
 | Core | Attempting to assign multiple bytes to a string offset will now emit a warning. | Runtime only |  | Multi-byte assignment to a string offset depends on runtime string values. |
 | Core | Unexpected characters in source files (such as null bytes outside of strings) will now result in a ParseError exception instead of a compile warning. | Gap |  | Not reported: a source file containing a NUL byte outside strings, e.g. '&lt;?php $x = 1;\0'. |
@@ -345,7 +345,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.0/UPGRADING)
 | Core | Compile time fatal error "Only variables can be passed by reference" has been delayed until runtime and converted to "Argument cannot be passed by reference" exception. | Not applicable |  | The code was already a compile-time fatal error in PHP 7, so working code cannot contain it. |
 | Core | Some "Only variables should be passed by reference" notices have been converted to "Argument cannot be passed by reference" exception. | Runtime only |  | Which by-reference notices became exceptions depends on runtime call targets; end(explode()) and &array_pop() were not reported. |
 | Core | The generated name for anonymous classes has changed. | Runtime only |  | Only code comparing generated anonymous class names at runtime is affected. |
-| Core | Non-absolute trait method references in trait alias adaptations are now required to be unambiguous: | Gap |  | Not reported: class X { use T1, T2 { func as otherFunc; } } where both traits define func(). |
+| Core | Non-absolute trait method references in trait alias adaptations are now required to be unambiguous: | Covered | `removed.ambiguous_trait_alias` | An unqualified alias for a method that more than one of the used project traits defines is reported. |
 | Core | The signature of abstract methods defined in traits is now checked against the implementing class method: | Gap |  | Not reported: a class implementing a trait's abstract method with an incompatible return type (string vs int). |
 | Core | Disabled functions are now treated exactly like non-existent functions. | Runtime only |  | Disabled functions depend on the server's disable_functions configuration at runtime. |
 | Core | data: stream wrappers are no longer writable, which matches the documented behavior. | Covered | `removed.data_stream_write` | file_put_contents() and fopen() in a writing mode on a literal data: URL are reported. |
@@ -470,7 +470,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.0/UPGRADING)
 | Sysvsem | The $auto_release parameter of sem_get() was changed to accept bool values rather than int. | Runtime only |  | An int auto_release is still coerced to bool outside strict_types; only typed runtime values in strict mode fail. |
 | Sysvshm | shm_attach() will now return an SysvSharedMemory object rather than a resource. | Covered | `removed.resource_check` | is_resource() on shm_attach() is reported. |
 | tidy | The $use_include_path parameter, which was not used internally, has been removed from tidy_repair_string(). | Covered | `removed.builtin_arity` | tidy_repair_string() with a fourth $use_include_path argument is reported. |
-| tidy | tidy::repairString() and tidy::repairFile() became static methods | Gap |  | Not reported: class T extends tidy { public function repairString(...) {} } overriding a now-static method as non-static. |
+| tidy | tidy::repairString() and tidy::repairFile() became static methods | Covered | `removed.builtin_override_signature` | Non-static overrides of tidy::repairString() and tidy::repairFile() are reported. |
 | Tokenizer | T_COMMENT tokens will no longer include a trailing newline. | Runtime only |  | Only code inspecting token_get_all() output at runtime is affected. |
 | Tokenizer | Namespaced names are now represented using the T_NAME_QUALIFIED (Foo\Bar), T_NAME_FULLY_QUALIFIED (\Foo\Bar) and T_NAME_RELATIVE (namespace\Foo\Bar) tokens. | Runtime only |  | Only code inspecting token_get_all() output at runtime is affected. |
 | XML | xml_parser_create(_ns) will now return an XMLParser object rather than a resource. | Covered | `removed.resource_check`<br>`deprecated.xml_parser_free` | is_resource() on xml_parser_create() and xml_parser_free() are reported. |
@@ -540,7 +540,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.1/UPGRADING)
 | Core | Implementing the Serializable interface without also implementing __serialize() and __unserialize() has been deprecated. | Covered | `deprecated.serializable` | Class implementing Serializable without __serialize/__unserialize is reported. |
 | Core | Implicit conversion of floats to integers that result in loss of precision, e.g. a truncation from 1.9 to 1, is deprecated. | Gap |  | Float-to-int loss usually comes from runtime values, but literal forms like $a[1.5] = 1, 7.5 % 2 and str_repeat('x', 2.5) are not reported. |
 | Core | Calling a static method or accessing a static property directly on a trait is deprecated. | Covered | `deprecated.trait_static_access` | trait T { static function f() {} } T::f(); is reported. |
-| Core | Returning a non-array from __sleep will raise a warning | Gap |  | Not reported: function __sleep() { return null; } returning a non-array literal. |
+| Core | Returning a non-array from __sleep will raise a warning | Covered | `behavior.sleep_non_array` | __sleep() returning a scalar literal such as null or false is reported. |
 | Core | Returning by reference from a void function is deprecated. | Covered | `deprecated.void_by_reference` | function &f(): void {} is reported. |
 | Core | Automatic conversion of "false" into an empty array on write operands is deprecated. | Gap |  | Mostly runtime, but literal $a = false; $a[] = 1; is not reported. |
 | Ctype | Passing a non-string value to ctype_*() functions is deprecated. | Covered | `deprecated.ctype_non_string` | ctype_digit(5) is reported. |
@@ -600,7 +600,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.3/UPGRADING)
 | Core | Programs that were very close to overflowing the call stack may now throw an Error when using more than `zend.max_allowed_stack_size-zend.reserved_stack_size` bytes of stack… | Runtime only |  | Depends on runtime stack depth. |
 | Core | Executing proc_get_status() multiple times will now always return the right value on posix systems. | Runtime only |  | Depends on runtime process status call sequence. |
 | Core | Zend Max Execution Timers is now enabled by default for ZTS builds on Linux. | Not applicable |  | ZTS build / SAPI internals. |
-| Core | Uses of traits with static properties will now redeclare static properties inherited from the parent class. | Gap |  | Not reported: class P { public static $x; } trait T { public static $x; } class C extends P { use T; } now gets separate storage. |
+| Core | Uses of traits with static properties will now redeclare static properties inherited from the parent class. | Covered | `behavior.trait_static_property` | A class using a trait whose static property an ancestor class also declares is reported. |
 | Core | Assigning a negative index n to an empty array will now make sure that the next index is n+1 instead of 0. | Gap |  | Not reported: $a = []; $a[-5] = 'a'; $a[] = 'b'; or [-5 => 'a', 'b'] where the next key is now -4. |
 | Core | Class constant visibility variance is now correctly checked when inherited from interfaces. | Partial | `removed.interface_constant_visibility` | Reported when the interface is declared in the same file; an interface from another file is not checked. |
 | Core | WeakMaps entries whose key maps to itself (possibly transitively) may now be removed during cycle collection if the key is not reachable except by iterating over the WeakMap (reachability via… | Runtime only |  | Garbage-collection behavior of WeakMap entries at runtime. |
@@ -642,7 +642,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.4/UPGRADING)
 | Core | The type of PHP_DEBUG and PHP_ZTS constants changed to bool. | Covered | `behavior.php_debug_bool` | Strict comparisons of PHP_DEBUG or PHP_ZTS with a number are reported. |
 | Core | The name of uploaded files and files created by the tempnam() function are now 13 bytes longer. | Runtime only |  | Longer tempnam()/upload file names only matter if code depends on the generated name length. |
 | Core | Encountering recursion during comparison now results in a Error exception, rather than a fatal error. | Runtime only |  | Recursion during comparison depends on runtime object graphs. |
-| Core | Indirect modification of readonly properties within __clone() is no longer allowed, e.g. $ref = &$this->readonly. | Gap |  | `$ref = &$this->readonlyProp` inside __clone() on a declared readonly property was tested and not reported. |
+| Core | Indirect modification of readonly properties within __clone() is no longer allowed, e.g. $ref = &$this->readonly. | Covered | `removed.readonly_clone_reference` | Taking a reference to a readonly property of the class (including promoted ones) inside __clone() is reported. |
 | Core | The exit (and die) language constructs now behave more like a function. | Runtime only |  | TypeErrors from exit()/die() depend on argument types; literal exit(true)/die(1.5)/exit(null) were not reported, but common int/string calls are unaffected. |
 | Core | The E_STRICT constant was deprecated and its corresponding error level was removed. | Covered | `deprecated.e_strict` | E_STRICT usage in error_reporting() is reported. |
 | Extension Class constants are now typed | Date | Covered | `removed.typed_constant_override` | class D extends DateTime { const ATOM = 5; } is reported. |
@@ -670,7 +670,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.4/UPGRADING)
 | DOM | Some DOM methods previously returned false or a PHP_ERR DOMException if a new node could not be allocated. | Not applicable |  | Node allocation failure is practically unreachable; only a tentative return type changed. |
 | DOM | Previously, DOMXPath objects could be cloned, but resulted in an unusable object. | Covered | `removed.uncloneable_object` | $x = new DOMXPath($doc); $y = clone $x is reported when the receiver's class is visible in the code. |
 | DOM | Removed DOMImplementation::getFeature(). | Covered | `removed.builtin_method` | DOMImplementation::getFeature() call is reported. |
-| GMP | The GMP class is now final and cannot be extended anymore. | Gap |  | `class G extends GMP {}` was tested and not reported. |
+| GMP | The GMP class is now final and cannot be extended anymore. | Covered | `removed.extends_final_class` | Extending GMP, and any other built-in class that became final, is reported. |
 | MBString | On invalid strings (those with encoding errors), mb_substr() now interprets character indices in the same manner as most other mbstring functions. | Runtime only |  | mb_substr() index semantics on invalid strings depend on runtime string contents. |
 | MBString | For SJIS-Mac (MacJapanese) strings, character indices passed to mb_substr() now refer to the indices of the Unicode codepoints which are produced when the string is converted to Unicode. | Runtime only |  | SJIS-Mac index semantics depend on runtime string contents. |
 | Mysqli | The unused and undocumented constant MYSQLI_SET_CHARSET_DIR has been removed. | Covered | `removed.builtin_constant` | MYSQLI_SET_CHARSET_DIR is reported. |
@@ -782,9 +782,9 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.5/UPGRADING)
 | Session | Attempting to write session data where $_SESSION has a key containing the pipe character will now emit a warning instead of silently failing. | Covered | `behavior.session_key_pipe` | $_SESSION keys containing \| are reported. |
 | SimpleXML | Passing an XPath expression that returns something other than a node set to SimpleXMLElement::xpath() will now emit a warning and return false, instead of silently failing and returning an empty… | Covered | `removed.xpath_non_node_set` | $xml = new SimpleXMLElement('&lt;a/>'); $xml->xpath('count(//a)') is reported when the receiver's class is visible in the code. |
 | SPL | ArrayObject no longer accepts enums, as modifying the $name or $value properties can break engine assumptions. | Gap |  | `new ArrayObject(Suit::H)` with an enum case was tested and not reported. |
-| SPL | SplFileObject::fwrite's parameter $length is now nullable. | Gap |  | Subclass override `fwrite(string $data, int $length = 0)` (now incompatible with ?int) was tested and not reported. |
+| SPL | SplFileObject::fwrite's parameter $length is now nullable. | Covered | `removed.builtin_override_signature` | SplFileObject::fwrite() overrides with a non-nullable $length type are reported. |
 | Standard | Using a printf-family function with a formatter that did not specify the precision previously incorrectly reset the precision instead of treating it as a precision of 0. | Covered | `behavior.printf_bare_precision` | printf-family formats with a precision but no digits, such as %.f, are reported. |
-| SOAP | SoapClient::__doRequest() expects a new, optional $uriParserClass parameter as described in https://wiki.php.net/rfc/url_parsing_api#plugability. | Gap |  | SoapClient subclass overriding __doRequest() without the new $uriParserClass parameter was tested and not reported. |
+| SOAP | SoapClient::__doRequest() expects a new, optional $uriParserClass parameter as described in https://wiki.php.net/rfc/url_parsing_api#plugability. | Covered | `removed.builtin_override_signature` | SoapClient::__doRequest() overrides with fewer than six parameters are reported. |
 | Core | Trying to produce output (e.g. with `echo`) within a user output handler is deprecated. | Gap |  | `ob_start(function ($b) { echo 'x'; return $b; })` was tested and not reported. |
 | Core | Non-canonical cast names (boolean), (integer), (double), and (binary) have been deprecated, use (bool), (int), (float), and (string) respectively. | Covered | `deprecated.non_canonical_cast` | (boolean)/(integer)/(double)/(binary) casts are reported. |
 | Core | The $exclude_disabled parameter of the get_defined_functions() function has been deprecated, as it no longer has any effect since PHP 8.0. | Covered | `deprecated.get_defined_functions_arg` | get_defined_functions(true) is reported. |
@@ -792,7 +792,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.5/UPGRADING)
 | Core | The backtick operator as an alias for shell_exec() has been deprecated. | Covered | `deprecated.backtick` | Backtick shell execution is reported. |
 | Core | Returning null from __debugInfo() has been deprecated. | Covered | `deprecated.debug_info_null` | class A { function __debugInfo() { return null; } } is reported. |
 | Core | The report_memleaks INI directive has been deprecated. | Covered | `deprecated.ini_setting` | report_memleaks in php.ini and ini_set() is reported. |
-| Core | Constant redeclaration has been deprecated. | Gap |  | Redeclaring a constant with define() twice or `const B` twice was tested and not reported. |
+| Core | Constant redeclaration has been deprecated. | Covered | `deprecated.constant_redeclared` | Constants declared twice in the same file with const or unguarded top-level define() are reported. |
 | Core | Enacted the follow-up phase of the "Path to Saner Increment/Decrement operators" RFC, meaning that incrementing non-numeric strings is now deprecated. | Gap |  | Incrementing a literal non-numeric string variable (`$s = 'abc'; $s++;`) was tested and not reported. |
 | Core | The following closure binding issues, which already emit an E_WARNING, are now deprecated: | Gap |  | Binding an object to a static closure via Closure::bind()/bindTo() and unbinding $this from a closure using $this were tested and not reported. |
 | Core | Using null as an array offset or when calling array_key_exists() is now deprecated. | Covered | `deprecated.null_offset` | `$a[null]` and `array_key_exists(null, $a)` are reported. |

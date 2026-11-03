@@ -15,6 +15,7 @@ pub struct TypeInfo {
     pub traits: Vec<String>,
     pub props: HashSet<String>,
     pub private_props: HashSet<String>,
+    pub(crate) static_props: HashSet<String>,
     pub methods: HashSet<String>,
     pub(crate) signatures: HashMap<String, MethodSig>,
     pub open: bool,
@@ -592,6 +593,9 @@ fn type_decl(tokens: &[Token], kw: usize, names: &Names) -> Option<TypeDecl> {
                 let start = (0..k).rev().find(|&j| stops.iter().any(|p| tokens[j].is_punct(p))).map_or(0, |j| j + 1);
                 if tokens[start..k].iter().any(|m| m.is_ident_ci("private")) {
                     info.private_props.insert(t.text.clone());
+                }
+                if depth == 1 && tokens[start..k].iter().any(|m| m.is_ident_ci("static")) {
+                    info.static_props.insert(t.text.clone());
                 }
                 info.props.insert(t.text.clone());
             }

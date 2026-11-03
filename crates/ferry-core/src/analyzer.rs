@@ -386,7 +386,7 @@ pub fn analyze_source_in(file: &str, src: &str, target: PhpVersion, index: &crat
     for (line, column, rule) in crate::syntax::check(src, &tokens, &html) {
         ctx.pattern_at(rule, line, column);
     }
-    for d in crate::declarations::check(&tokens, |fqn| index.type_by_fqn(fqn).is_some_and(|t| t.is_trait)) {
+    for d in crate::declarations::check(&tokens, index) {
         let since = PhpVersion::new(d.since.0, d.since.1);
         match d.title {
             Some(title) => ctx.pattern_titled(d.rule, &tokens[d.at], since, title),
@@ -3596,6 +3596,19 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
             ("<?php namespace App; class D extends DateTime { const ATOM = 'x'; }", "removed.typed_constant_override", 0),
             ("<?php #[Attribute] abstract class A {} #[Attribute] interface I {} #[Attribute, Other] enum E {} #[Attribute] final class B {} #[Other] trait T {}", "removed.attribute_on_non_class", 3),
             ("<?php trait T { static function f() {} public static $p; } class C { use T; } T::f(); T::$p = 1; C::f(); T::class;", "deprecated.trait_static_access", 2),
+            ("<?php define('A', 1); define('A', 2); const B = 1, C = 2; const C = 3; if (!defined('D')) define('D', 1); if (!defined('D')) define('D', 2); if ($x) { define('E', 1); } else { define('E', 2); }", "deprecated.constant_redeclared", 2),
+            ("<?php namespace N { const X = 1; } namespace M { const X = 1; }", "deprecated.constant_redeclared", 0),
+            ("<?php class A { function f($a) { return function ($b) use ($this, $_GET, $b, $c) {}; } }", "removed.closure_use_variable", 3),
+            ("<?php namespace N; function assert($a) {} class C { function assert() {} }", "removed.custom_assert", 1),
+            ("<?php const N = null; const M = 1; define('O', null); function f(int $a = N, ?int $b = N, $c = N, int $d = M, string $e = O, mixed $f = N) {}", "removed.null_constant_default", 2),
+            ("<?php class A { function __sleep() { return null; } } class B { function __sleep() { return ['x']; } } class C { function __sleep() { return false; } }", "behavior.sleep_non_array", 2),
+            ("<?php trait T1 { function f() {} function g() {} } trait T2 { function f() {} } class X { use T1, T2 { T1::f insteadof T2; f as h; g as i; T2::f as j; } }", "removed.ambiguous_trait_alias", 1),
+            ("<?php trait T { public $a = 1; public $b = 'x'; public $c; } class C { use T; public $a = '1'; public $b = 'x'; public $c = 2; }", "removed.trait_property_default", 1),
+            ("<?php class P { public static $x; public $y; } trait T { public static $x; public static $y; } class C extends P { use T; } class D extends P { use T; public static $x; }", "behavior.trait_static_property", 1),
+            ("<?php class R { public readonly int $a; public int $b; function __construct(public readonly int $c) {} function __clone() { $x = &$this->a; $y = &$this->b; $z = &$this->c; $this->a = 1; } }", "removed.readonly_clone_reference", 2),
+            ("<?php class G extends GMP {} class D extends \\Directory {} class R extends ReflectionClass {}", "removed.extends_final_class", 2),
+            ("<?php namespace App; class G extends GMP {} class GMP {}", "removed.extends_final_class", 0),
+            ("<?php class T extends tidy { function repairString($s) {} static function repairFile($f) {} } class F extends SplFileObject { function fwrite(string $d, int $l = 0): int|false { return 0; } } class S extends SoapClient { function __doRequest($a, $b, $c, $d, $e = false): ?string { return null; } } class S2 extends SoapClient { function __doRequest($a, $b, $c, $d, $e = false, $f = null): ?string { return null; } }", "removed.builtin_override_signature", 3),
         ];
         for (src, id, n) in cases {
             assert_eq!(count85(src, id), *n, "{id}: {src}");

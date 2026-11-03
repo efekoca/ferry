@@ -39,6 +39,7 @@ fn type_parts(tokens: &[Token]) -> Vec<String> {
 struct Param {
     var: usize,
     types: Vec<String>,
+    default: Option<usize>,
 }
 
 fn params(tokens: &[Token], open: usize, close: usize) -> Vec<Param> {
@@ -52,7 +53,8 @@ fn params(tokens: &[Token], open: usize, close: usize) -> Vec<Param> {
             if let Some(v) = part.iter().position(|t| t.kind == TokenKind::Variable) {
                 let modifiers = ["public", "protected", "private", "readonly"];
                 let ty: Vec<Token> = part[..v].iter().filter(|t| !modifiers.iter().any(|m| t.is_ident_ci(m))).cloned().collect();
-                out.push(Param { var: start + v, types: type_parts(&ty) });
+                let default = part.iter().position(|t| t.is_punct("=")).filter(|&e| e + 2 == part.len()).map(|e| start + e + 1);
+                out.push(Param { var: start + v, types: type_parts(&ty), default });
             }
             start = k + 1;
         } else if t.is_punct("(") || t.is_punct("[") || t.is_punct("{") || t.is_punct("#[") {
@@ -69,6 +71,7 @@ struct Function {
     name: Option<usize>,
     by_ref: bool,
     params: Vec<Param>,
+    uses: Vec<usize>,
     returns: Option<Vec<String>>,
     body: Option<(usize, usize)>,
 }
@@ -93,8 +96,11 @@ fn function_at(tokens: &[Token], k: usize) -> Option<Function> {
     let close = close_of(tokens, j)?;
     let params = params(tokens, j, close);
     let mut after = close + 1;
+    let mut uses = Vec::new();
     if tokens.get(after).is_some_and(|t| t.is_ident_ci("use")) && tokens.get(after + 1).is_some_and(|t| t.is_punct("(")) {
-        after = close_of(tokens, after + 1)? + 1;
+        let end = close_of(tokens, after + 1)?;
+        uses = (after + 2..end).filter(|&u| tokens[u].kind == TokenKind::Variable).collect();
+        after = end + 1;
     }
     let mut returns = None;
     let mut end = after;
@@ -103,7 +109,7 @@ fn function_at(tokens: &[Token], k: usize) -> Option<Function> {
         returns = Some(type_parts(&tokens[after + 1..end]));
     }
     let body = tokens.get(end).filter(|t| t.is_punct("{")).and_then(|_| close_of(tokens, end)).map(|c| (end, c));
-    Some(Function { keyword: k, name, by_ref, params, returns, body })
+    Some(Function { keyword: k, name, by_ref, params, uses, returns, body })
 }
 
 fn modifiers(tokens: &[Token], keyword: usize) -> Vec<String> {
@@ -222,12 +228,124 @@ fn constants(tokens: &[Token], body: &TypeBody) -> Vec<Const> {
     out
 }
 
-/// Declarations that newer PHP versions reject or warn about. `is_trait` says whether the project declares
-/// a fully qualified name as a trait and not as a class.
-pub(crate) fn check(tokens: &[Token], is_trait: impl Fn(&str) -> bool) -> Vec<Issue> {
+const SUPERGLOBALS: &[&str] = &["this", "GLOBALS", "_SERVER", "_GET", "_POST", "_FILES", "_COOKIE", "_SESSION", "_REQUEST", "_ENV"];
+
+fn literal(t: &Token) -> bool {
+    matches!(t.kind, TokenKind::Number | TokenKind::Str { interpolates: false, .. })
+        || ["true", "false", "null"].iter().any(|w| t.is_ident_ci(w))
+}
+
+fn statement_start(tokens: &[Token], k: usize) -> bool {
+    k == 0 || [";", "{", "}"].iter().any(|p| tokens[k - 1].is_punct(p)) || tokens[k - 1].kind == TokenKind::CloseTag
+}
+
+fn string_value(t: &Token) -> Option<&str> {
+    matches!(t.kind, TokenKind::Str { interpolates: false, .. }).then(|| t.text.trim_matches(|c| c == '\'' || c == '"'))
+}
+
+/// Global and namespaced constants declared with `const` or `define()` outside any block, in order.
+fn top_constants(tokens: &[Token], names: &crate::index::Names, inside: impl Fn(usize) -> bool) -> Vec<(usize, String, usize)> {
+    let mut out = Vec::new();
+    let mut depth = 0usize;
+    for k in 0..tokens.len() {
+        let t = &tokens[k];
+        if t.is_punct("{") {
+            depth += 1;
+        } else if t.is_punct("}") {
+            depth = depth.saturating_sub(1);
+        } else if t.is_ident_ci("const") && !inside(k) && statement_start(tokens, k) {
+            let mut j = k + 1;
+            while let (Some(name), Some(eq)) = (tokens.get(j), tokens.get(j + 1)) {
+                if name.kind != TokenKind::Ident || !eq.is_punct("=") {
+                    break;
+                }
+                let value = j + 2;
+                out.push((j, names.declared(j, &name.text), value));
+                let mut d = 0usize;
+                j = (value..tokens.len())
+                    .find(|&e| {
+                        let p = &tokens[e];
+                        if p.is_punct("(") || p.is_punct("[") {
+                            d += 1;
+                        } else if p.is_punct(")") || p.is_punct("]") {
+                            d = d.saturating_sub(1);
+                        }
+                        d == 0 && (p.is_punct(",") || p.is_punct(";"))
+                    })
+                    .filter(|&e| tokens[e].is_punct(","))
+                    .map_or(tokens.len(), |e| e + 1);
+            }
+        } else if depth == 0 && t.is_ident_ci("define") && statement_start(tokens, k) && tokens.get(k + 1).is_some_and(|n| n.is_punct("("))
+        {
+            let name = tokens.get(k + 2).and_then(string_value);
+            if let (Some(name), Some(comma)) = (name, tokens.get(k + 3)) {
+                if comma.is_punct(",") {
+                    out.push((k, name.trim_start_matches('\\').to_ascii_lowercase(), k + 4));
+                }
+            }
+        }
+    }
+    out
+}
+
+fn property_defaults(tokens: &[Token], body: &TypeBody) -> Vec<(usize, Option<usize>)> {
+    depth_one(tokens, body)
+        .into_iter()
+        .filter(|&k| tokens[k].kind == TokenKind::Variable)
+        .map(|k| {
+            let value = (tokens.get(k + 1).is_some_and(|n| n.is_punct("="))
+                && tokens.get(k + 3).is_some_and(|n| n.is_punct(";") || n.is_punct(",")))
+            .then_some(k + 2)
+            .filter(|&v| literal(&tokens[v]));
+            (k, value)
+        })
+        .collect()
+}
+
+struct TraitUse {
+    keyword: usize,
+    traits: Vec<usize>,
+    block: Option<(usize, usize)>,
+}
+
+fn trait_uses(tokens: &[Token], body: &TypeBody) -> Vec<TraitUse> {
+    let mut out = Vec::new();
+    for k in depth_one(tokens, body) {
+        if !tokens[k].is_ident_ci("use") {
+            continue;
+        }
+        let Some(end) = (k + 1..body.close).find(|&j| tokens[j].is_punct(";") || tokens[j].is_punct("{")) else { continue };
+        let traits = (k + 1..end).filter(|&j| tokens[j].kind == TokenKind::Ident).collect();
+        let block = tokens[end].is_punct("{").then(|| close_of(tokens, end).map(|c| (end, c))).flatten();
+        out.push(TraitUse { keyword: k, traits, block });
+    }
+    out
+}
+
+/// Declarations that newer PHP versions reject or warn about, checked against the project index for traits and parents.
+pub(crate) fn check(tokens: &[Token], index: &crate::index::ProjectIndex) -> Vec<Issue> {
     let mut out = Vec::new();
     let names = crate::index::Names::new(tokens);
     let bodies = type_bodies(tokens);
+    let inside = |k: usize| bodies.iter().any(|b| b.open < k && k < b.close);
+    let user_type = |fqn: &str| index.type_by_fqn(fqn).is_some() || index.interface_by_fqn(fqn).is_some();
+    let constants_here = top_constants(tokens, &names, inside);
+    let null_constants: HashSet<&str> = constants_here
+        .iter()
+        .filter(|(_, _, v)| tokens.get(*v).is_some_and(|t| t.is_ident_ci("null")))
+        .map(|(_, n, _)| n.as_str())
+        .collect();
+    let mut seen_constants = HashSet::new();
+    for (at, name, _) in &constants_here {
+        let guarded = tokens.windows(3).any(|w| {
+            w[0].is_ident_ci("defined")
+                && w[1].is_punct("(")
+                && string_value(&w[2]).is_some_and(|n| n.trim_start_matches('\\').eq_ignore_ascii_case(name))
+        });
+        if !seen_constants.insert(name.as_str()) && !guarded {
+            out.push(issue(*at, &CONSTANT_REDECLARED));
+        }
+    }
     let mut interfaces: HashMap<String, HashSet<String>> = HashMap::new();
     for b in bodies.iter().filter(|b| tokens[b.keyword].is_ident_ci("interface")) {
         if let Some(name) = tokens.get(b.keyword + 1) {
@@ -246,6 +364,39 @@ pub(crate) fn check(tokens: &[Token], is_trait: impl Fn(&str) -> bool) -> Vec<Is
         }
         if f.by_ref && f.returns.as_deref() == Some(&["void".to_string()]) {
             out.push(issue(f.keyword, &VOID_BY_REFERENCE));
+        }
+        for &u in &f.uses {
+            let text = tokens[u].text.as_str();
+            if SUPERGLOBALS.contains(&text) || f.params.iter().any(|p| tokens[p.var].text == text) {
+                out.push(issue(u, &CLOSURE_USE));
+            }
+        }
+        if let Some(name) = f.name.filter(|&n| tokens[n].is_ident_ci("assert") && !inside(n)) {
+            if names.declared(name, "assert") != "assert" {
+                out.push(issue(name, &CUSTOM_ASSERT));
+            }
+        }
+        for p in &f.params {
+            let Some(d) = p.default.filter(|&d| tokens[d].kind == TokenKind::Ident && !literal(&tokens[d])) else { continue };
+            let nullable = p.types.is_empty() || p.types.iter().any(|t| t == "null" || t == "mixed");
+            let text = &tokens[d].text;
+            let resolved = names.declared(d, text);
+            let global = text.trim_start_matches('\\').to_ascii_lowercase();
+            if !nullable && (null_constants.contains(resolved.as_str()) || !text.contains('\\') && null_constants.contains(global.as_str()))
+            {
+                out.push(issue(d, &NULL_CONSTANT_DEFAULT));
+            }
+        }
+    }
+
+    let mut trait_defaults: HashMap<String, Vec<(String, String)>> = HashMap::new();
+    for b in bodies.iter().filter(|b| tokens[b.keyword].is_ident_ci("trait")) {
+        if let Some(name) = tokens.get(b.keyword + 1) {
+            let props = property_defaults(tokens, b)
+                .into_iter()
+                .filter_map(|(var, value)| value.map(|v| (tokens[var].text.clone(), tokens[v].text.clone())))
+                .collect();
+            trait_defaults.insert(names.declared(b.keyword, &name.text), props);
         }
     }
 
@@ -271,6 +422,141 @@ pub(crate) fn check(tokens: &[Token], is_trait: impl Fn(&str) -> bool) -> Vec<Is
                         if tokens[r].is_ident_ci("return") && tokens.get(r + 1).is_some_and(|t| t.is_ident_ci("null")) {
                             out.push(issue(r, &DEBUG_INFO_NULL));
                         }
+                    }
+                }
+            }
+            if name == "__sleep" {
+                if let Some((open, close)) = f.body {
+                    for r in open..close {
+                        let scalar = tokens.get(r + 1).is_some_and(literal) && tokens.get(r + 2).is_some_and(|t| t.is_punct(";"));
+                        if tokens[r].is_ident_ci("return") && scalar {
+                            out.push(issue(r, &SLEEP_NON_ARRAY));
+                        }
+                    }
+                }
+            }
+        }
+
+        let uses = trait_uses(tokens, b);
+        for u in &uses {
+            let Some((open, close)) = u.block else { continue };
+            let methods: Vec<Option<&HashSet<String>>> = u
+                .traits
+                .iter()
+                .map(|&t| index.type_by_fqn(&names.resolve(t, &tokens[t].text)).filter(|i| i.is_trait).map(|i| &i.methods))
+                .collect();
+            for j in open + 1..close {
+                let starts = tokens[j - 1].is_punct("{") || tokens[j - 1].is_punct(";");
+                if !starts || tokens[j].kind != TokenKind::Ident || !tokens.get(j + 1).is_some_and(|t| t.is_ident_ci("as")) {
+                    continue;
+                }
+                let method = tokens[j].text.to_ascii_lowercase();
+                if methods.iter().filter(|m| m.is_some_and(|m| m.contains(&method))).count() > 1 {
+                    out.push(issue(j, &AMBIGUOUS_TRAIT_ALIAS));
+                }
+            }
+        }
+        let own_props = property_defaults(tokens, b);
+        for u in &uses {
+            for &t in &u.traits {
+                let Some(defaults) = trait_defaults.get(&names.resolve(t, &tokens[t].text)) else { continue };
+                for &(var, value) in &own_props {
+                    let Some(value) = value else { continue };
+                    let clash = defaults.iter().any(|(name, other)| *name == tokens[var].text && *other != tokens[value].text);
+                    if clash {
+                        out.push(issue(var, &TRAIT_PROPERTY_DEFAULT));
+                    }
+                }
+            }
+        }
+
+        if kind == "class" {
+            let parent = header_names(tokens, b, "extends").first().copied();
+            let parent_fqn = parent.map(|p| names.resolve(p, &tokens[p].text));
+            if let (Some(p), Some(fqn)) = (parent, parent_fqn.as_deref().filter(|f| !user_type(f))) {
+                let shown = tokens[p].text.trim_start_matches('\\');
+                if let Ok(i) = crate::symbols::FINAL_CLASSES.binary_search_by(|r| r.0.cmp(fqn)) {
+                    let (_, since, class) = crate::symbols::FINAL_CLASSES[i];
+                    out.push(Issue { at: p, rule: &FINAL_BUILTIN, since, title: Some(format!("extends {class}")) });
+                }
+                for k in depth_one(tokens, b) {
+                    let Some(f) = function_at(tokens, k) else { continue };
+                    let Some(name_at) = f.name else { continue };
+                    let method = tokens[name_at].text.to_ascii_lowercase();
+                    let since = match (fqn, method.as_str()) {
+                        ("tidy", "repairstring" | "repairfile") if !modifiers(tokens, k).iter().any(|m| m == "static") => (8, 0),
+                        ("splfileobject", "fwrite")
+                            if f.params
+                                .get(1)
+                                .is_some_and(|p| !p.types.is_empty() && !p.types.iter().any(|t| t == "null" || t == "mixed")) =>
+                        {
+                            (8, 5)
+                        }
+                        ("soapclient", "__dorequest")
+                            if f.params.len() < 6 && !f.params.iter().any(|p| tokens[p.var - 1].is_punct("...")) =>
+                        {
+                            (8, 5)
+                        }
+                        _ => continue,
+                    };
+                    out.push(Issue {
+                        at: name_at,
+                        rule: &BUILTIN_OVERRIDE,
+                        since,
+                        title: Some(format!("{shown}::{}()", tokens[name_at].text)),
+                    });
+                }
+            }
+            let mut inherited = HashSet::new();
+            let mut ancestor = parent_fqn.as_deref().and_then(|f| index.type_by_fqn(f));
+            for _ in 0..32 {
+                let Some(a) = ancestor else { break };
+                inherited.extend(a.static_props.iter().cloned());
+                ancestor = a.parent_fqn.as_deref().and_then(|f| index.type_by_fqn(f));
+            }
+            let declared: HashSet<&str> = own_props.iter().map(|&(v, _)| tokens[v].text.as_str()).collect();
+            for u in &uses {
+                let shared = u
+                    .traits
+                    .iter()
+                    .filter_map(|&t| index.type_by_fqn(&names.resolve(t, &tokens[t].text)))
+                    .any(|t| t.is_trait && t.static_props.iter().any(|p| inherited.contains(p) && !declared.contains(p.as_str())));
+                if shared {
+                    out.push(issue(u.keyword, &TRAIT_STATIC_REDECLARED));
+                }
+            }
+
+            let class_readonly = (0..b.keyword)
+                .rev()
+                .take_while(|&j| ["final", "abstract", "readonly"].iter().any(|m| tokens[j].is_ident_ci(m)))
+                .any(|j| tokens[j].is_ident_ci("readonly"));
+            let mut readonly = HashSet::new();
+            let mut clone_body = None;
+            for k in depth_one(tokens, b) {
+                if tokens[k].kind == TokenKind::Variable {
+                    let start = (b.open..k).rev().find(|&j| [";", "{", "}"].iter().any(|p| tokens[j].is_punct(p))).unwrap_or(b.open);
+                    if class_readonly || tokens[start..k].iter().any(|t| t.is_ident_ci("readonly")) {
+                        readonly.insert(tokens[k].text.clone());
+                    }
+                }
+                let Some(f) = function_at(tokens, k) else { continue };
+                let Some(name_at) = f.name else { continue };
+                if tokens[name_at].is_ident_ci("__construct") {
+                    for p in &f.params {
+                        let start = (0..p.var).rev().find(|&j| tokens[j].is_punct("(") || tokens[j].is_punct(",")).unwrap_or(0);
+                        if class_readonly || tokens[start..p.var].iter().any(|t| t.is_ident_ci("readonly")) {
+                            readonly.insert(tokens[p.var].text.clone());
+                        }
+                    }
+                } else if tokens[name_at].is_ident_ci("__clone") {
+                    clone_body = f.body;
+                }
+            }
+            if let Some((open, close)) = clone_body {
+                for r in open..close.saturating_sub(3) {
+                    let this = tokens[r + 1].kind == TokenKind::Variable && tokens[r + 1].text == "this" && tokens[r + 2].is_punct("->");
+                    if tokens[r].is_punct("&") && this && readonly.contains(tokens[r + 3].text.as_str()) {
+                        out.push(issue(r, &READONLY_CLONE_REFERENCE));
                     }
                 }
             }
@@ -354,7 +640,7 @@ pub(crate) fn check(tokens: &[Token], is_trait: impl Fn(&str) -> bool) -> Vec<Is
         let member = &tokens[k + 2];
         let static_member = member.kind == TokenKind::Variable
             || member.kind == TokenKind::Ident && tokens.get(k + 3).is_some_and(|n| n.is_punct("(")) && !member.is_ident_ci("class");
-        if static_member && is_trait(&names.resolve(k, &t.text)) {
+        if static_member && index.type_by_fqn(&names.resolve(k, &t.text)).is_some_and(|t| t.is_trait) {
             out.push(issue(k, &TRAIT_STATIC_ACCESS));
         }
     }
@@ -479,5 +765,137 @@ pub(crate) const TRAIT_STATIC_ACCESS: PatternRule = rule(
     Text::new(
         "Bir trait'in statik metodunu çağırmak ya da statik özelliğine doğrudan trait üzerinden erişmek PHP 8.1'de kullanımdan kalktı.",
         "Calling a static method or accessing a static property directly on a trait is deprecated since PHP 8.1.",
+    ),
+);
+
+pub(crate) const CONSTANT_REDECLARED: PatternRule = rule(
+    "deprecated.constant_redeclared",
+    Text::new("Sabit yeniden tanımlanıyor", "Constant redeclared"),
+    Severity::Deprecated,
+    (8, 5),
+    Some(Text::new("ikinci tanımı silin", "remove the second declaration")),
+    Text::new(
+        "Bu sabit aynı dosyada daha önce tanımlandı. İkinci tanım her zaman uyarı verip yok sayıldı; PHP 8.5'ten beri kullanımdan kalktı ve PHP 9'da hata olacak.",
+        "This constant is already declared earlier in the file. The second declaration always warned and was ignored; since PHP 8.5 it's deprecated and PHP 9 will make it an error.",
+    ),
+);
+
+pub(crate) const CLOSURE_USE: PatternRule = rule(
+    "removed.closure_use_variable",
+    Text::new("Closure use() ile yasak değişken", "Forbidden variable in closure use()"),
+    Severity::Breaking,
+    (7, 1),
+    Some(Text::new("değişkeni use() listesinden çıkarın", "remove the variable from use()")),
+    Text::new(
+        "PHP 7.1'den beri $this, süper global değişkenler ve parametreyle aynı adı taşıyan değişkenler use() ile closure'a bağlanamaz; dosya derlenmez.",
+        "Since PHP 7.1 $this, superglobals and variables named like a parameter can't be bound with use(); the file doesn't compile.",
+    ),
+);
+
+pub(crate) const CUSTOM_ASSERT: PatternRule = rule(
+    "removed.custom_assert",
+    Text::new("Namespace içinde assert() tanımı", "assert() declared in a namespace"),
+    Severity::Breaking,
+    (8, 0),
+    Some(Text::new("fonksiyonu yeniden adlandırın", "rename the function")),
+    Text::new(
+        "assert() adlı bir fonksiyon tanımlamak PHP 7.3'te kullanımdan kalktı ve PHP 8.0'dan beri derleme hatası veriyor; assert'in özel bir anlamı var.",
+        "Declaring a function named assert() was deprecated in PHP 7.3 and is a compile error since PHP 8.0, because assert has special semantics.",
+    ),
+);
+
+pub(crate) const NULL_CONSTANT_DEFAULT: PatternRule = rule(
+    "removed.null_constant_default",
+    Text::new("null değerli sabit varsayılan değer", "Default value is a null constant"),
+    Severity::Breaking,
+    (8, 0),
+    Some(Text::new("tipin önüne ? koyun", "add ? before the type")),
+    Text::new(
+        "Bu sabitin değeri null. PHP 8.0'dan önce böyle bir varsayılan değer parametre tipini nullable yapıyordu; artık yapmıyor ve parametre verilmeden yapılan çağrı TypeError fırlatır.",
+        "This constant is null. Before PHP 8.0 such a default made the parameter type nullable; now it doesn't, and a call that omits the argument throws a TypeError.",
+    ),
+);
+
+pub(crate) const SLEEP_NON_ARRAY: PatternRule = rule(
+    "behavior.sleep_non_array",
+    Text::new("__sleep() dizi dönmüyor", "__sleep() doesn't return an array"),
+    Severity::Behavior,
+    (8, 0),
+    Some(Text::new("return [];", "return [];")),
+    Text::new(
+        "__sleep() bir özellik adları dizisi döndürmeli. Başka bir değer döndüğünde serialize() PHP 8.0'dan beri notice yerine uyarı verir ve null serileştirir.",
+        "__sleep() must return an array of property names. Since PHP 8.0 serialize() raises a warning instead of a notice for anything else and serializes null.",
+    ),
+);
+
+pub(crate) const AMBIGUOUS_TRAIT_ALIAS: PatternRule = rule(
+    "removed.ambiguous_trait_alias",
+    Text::new("Belirsiz trait takma adı", "Ambiguous trait alias"),
+    Severity::Breaking,
+    (8, 0),
+    Some(Text::new("Trait::metot as yeniAd", "Trait::method as newName")),
+    Text::new(
+        "Bu metot kullanılan birden fazla trait'te var. PHP 8.0'dan beri takma ad hangi trait'in metodunu kastettiğini Trait::metot biçiminde belirtmeli; yoksa sınıf derlenmez.",
+        "This method exists in more than one of the used traits. Since PHP 8.0 the alias must say which one with Trait::method, or the class doesn't compile.",
+    ),
+);
+
+pub(crate) const TRAIT_PROPERTY_DEFAULT: PatternRule = rule(
+    "removed.trait_property_default",
+    Text::new("Trait özelliğiyle farklı varsayılan değer", "Default value differs from the trait property"),
+    Severity::Breaking,
+    (7, 2),
+    Some(Text::new("trait'teki varsayılan değerin aynısını yazın", "use the same default as the trait")),
+    Text::new(
+        "Sınıf, kullandığı trait'teki bir özelliği farklı bir varsayılan değerle yeniden tanımlıyor. PHP 7.2'den beri değerler dönüştürülmeden karşılaştırılır; 1 ile '1' bile uyumsuz sayılır ve sınıf derlenmez.",
+        "The class redeclares a property of a trait it uses with a different default. Since PHP 7.2 the defaults are compared without casting, so even 1 and '1' are incompatible and the class doesn't compile.",
+    ),
+);
+
+pub(crate) const TRAIT_STATIC_REDECLARED: PatternRule = rule(
+    "behavior.trait_static_property",
+    Text::new("Trait üst sınıfın statik özelliğini ayırıyor", "Trait separates a parent's static property"),
+    Severity::Behavior,
+    (8, 3),
+    None,
+    Text::new(
+        "Bu trait, üst sınıfta da tanımlı bir statik özellik içeriyor. PHP 8.3'ten beri trait'i kullanan sınıf özelliği yeniden tanımlar ve üst sınıfla aynı değeri paylaşmaz.",
+        "This trait declares a static property the parent class also has. Since PHP 8.3 the class using the trait redeclares it and no longer shares the parent's value.",
+    ),
+);
+
+pub(crate) const READONLY_CLONE_REFERENCE: PatternRule = rule(
+    "removed.readonly_clone_reference",
+    Text::new("__clone() içinde readonly özelliğe referans", "Reference to a readonly property in __clone()"),
+    Severity::Breaking,
+    (8, 4),
+    Some(Text::new("özelliğe doğrudan değer atayın", "assign the property directly")),
+    Text::new(
+        "PHP 8.4'ten beri __clone() içinde readonly bir özelliğe referans almak dolaylı değişiklik sayılır ve Error fırlatır.",
+        "Since PHP 8.4 taking a reference to a readonly property inside __clone() counts as indirect modification and throws an Error.",
+    ),
+);
+
+pub(crate) const FINAL_BUILTIN: PatternRule = rule(
+    "removed.extends_final_class",
+    Text::new("final olan yerleşik sınıftan türetme", "Extending a built-in class that's final now"),
+    Severity::Breaking,
+    (8, 4),
+    Some(Text::new("sınıfı türetmek yerine içinde tutun", "wrap the class instead of extending it")),
+    Text::new(
+        "Bu yerleşik sınıf artık final; ondan türeyen bir sınıf derlenmez.",
+        "This built-in class is final now, so a class that extends it doesn't compile.",
+    ),
+);
+
+pub(crate) const BUILTIN_OVERRIDE: PatternRule = rule(
+    "removed.builtin_override_signature",
+    Text::new("Yerleşik metodun değişen imzası", "Changed built-in method signature"),
+    Severity::Breaking,
+    (8, 0),
+    Some(Text::new("imzayı yerleşik metoda uydurun", "match the built-in signature")),
+    Text::new(
+        "Yerleşik metodun imzası değişti: tidy::repairString() ve repairFile() PHP 8.0'da statik oldu, SplFileObject::fwrite()'ın $length parametresi PHP 8.5'te ?int oldu, SoapClient::__doRequest() PHP 8.5'te altıncı bir $uriParserClass parametresi aldı. Uymayan bir alt sınıf metodu derlenmez.",
+        "The built-in method's signature changed: tidy::repairString() and repairFile() became static in PHP 8.0, SplFileObject::fwrite()'s $length became ?int in PHP 8.5, and SoapClient::__doRequest() gained a sixth $uriParserClass parameter in PHP 8.5. A subclass method that doesn't match doesn't compile.",
     ),
 );
