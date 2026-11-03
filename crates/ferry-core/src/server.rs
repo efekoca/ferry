@@ -142,7 +142,19 @@ fn setting(name: &str, value: &str, line: usize) -> Option<Hit> {
             replacement: Some(Text::new("satırı silin", "delete the line").into()),
         });
     }
-    let &(_, a, b) = DEPRECATED_INI.iter().find(|(k, _, _)| *k == name)?;
+    let Some(&(_, a, b)) = DEPRECATED_INI.iter().find(|(k, _, _)| *k == name) else {
+        let i = crate::symbols::REMOVED_INI.binary_search_by(|r| r.0.cmp(name.as_str())).ok()?;
+        let (_, (a, b), _) = crate::symbols::REMOVED_INI[i];
+        return Some(Hit {
+            line,
+            rule: "removed.builtin_ini",
+            title: Localized::same(name.clone()),
+            since: PhpVersion::new(a, b),
+            severity: Severity::Behavior,
+            message: IGNORED_SETTING,
+            replacement: Some(Text::new("satırı silin", "delete the line").into()),
+        });
+    };
     Some(Hit {
         line,
         rule: "deprecated.ini_setting",
@@ -157,6 +169,11 @@ fn setting(name: &str, value: &str, line: usize) -> Option<Hit> {
 const REMOVED_SETTING: Text = Text::new(
     "Bu ayar PHP'den kaldırıldı. Açık bırakıldığında PHP \"Directive is no longer available\" hatasıyla başlamaz, yani site hiç açılmaz.",
     "PHP removed this setting. Left on, PHP refuses to start with \"Directive is no longer available\", so the site doesn't load at all.",
+);
+
+const IGNORED_SETTING: Text = Text::new(
+    "Bu ayar PHP'den kaldırıldı. PHP satırı yok sayar, yani ayarın yaptığı iş artık yapılmaz.",
+    "PHP removed this setting. It ignores the line, so whatever the setting did no longer happens.",
 );
 
 const PHP_VALUE_FPM: Text = Text::new(
@@ -414,7 +431,7 @@ mod tests {
             std::fs::write(p, text).unwrap();
         };
         write(".htaccess", "php_value memory_limit 256M\n<IfModule mod_php7.c>\n  php_flag magic_quotes_gpc off\n  php_flag register_globals on\n</IfModule>\n<IfModule mod_php.c>\n  php_value upload_max_filesize 8M\n</IfModule>\n");
-        write("public/.user.ini", "; comment\nallow_url_include = On\nsafe_mode = Off\ntrack_errors = 1\n");
+        write("public/.user.ini", "; comment\nallow_url_include = On\nsafe_mode = Off\ntrack_errors = 1\nsession.hash_function = 0\n");
         write("Dockerfile", "FROM php:7.4-fpm-alpine\nFROM node:20 AS assets\n");
         write("docker-compose.yml", "services:\n  app:\n    image: wordpress:php8.4-apache\n  old:\n    image: php:8.1-cli\n");
         write(".github/workflows/ci.yml", "jobs:\n  test:\n    strategy:\n      matrix:\n        php: ['7.4', '8.0']\n    steps:\n      - uses: shivammathur/setup-php@v2\n        with:\n          php-version: ${{ matrix.php }}\n  modern:\n    steps:\n      - with:\n          php-version: '8.4'\n");
@@ -440,6 +457,7 @@ mod tests {
             ("docker-compose.yml", 5, "server.php_version_pin"),
             ("public/.user.ini", 2, "deprecated.ini_setting"),
             ("public/.user.ini", 4, "removed.ini_setting"),
+            ("public/.user.ini", 5, "removed.builtin_ini"),
         ];
         let expected: Vec<_> = expected.iter().map(|(f, l, r)| (f.to_string(), *l, r.to_string())).collect();
         assert_eq!(ids(&found), expected);
