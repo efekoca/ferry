@@ -315,12 +315,12 @@
   "section": "Backward Incompatible Changes",
   "ext": "Other language changes",
   "change": "It is no longer possible to use the following class, interface and trait names (case-insensitive):",
-  "status": "partial",
+  "status": "covered",
   "rules": [
    "removed.reserved_name",
    "removed.reserved_alias"
   ],
-  "note": "class Int {} and use ... as Bool are reported, but class_alias('Foo', 'string') is not."
+  "note": "Class declarations, use aliases and class_alias() with the reserved name are reported."
  },
  {
   "version": "7.0",
@@ -428,16 +428,22 @@
   "section": "Backward Incompatible Changes",
   "ext": "Standard library changes",
   "change": "setcookie() with an empty cookie name now issues a WARNING and doesn't send an empty set-cookie header line anymore.",
-  "status": "gap",
-  "note": "setcookie('', 'v') with a literal empty name is not reported."
+  "status": "covered",
+  "note": "setcookie('', 'v') is reported.",
+  "rules": [
+   "behavior.setcookie_empty_name"
+  ]
  },
  {
   "version": "7.0",
   "section": "Backward Incompatible Changes",
   "ext": "Curl",
   "change": "Removed support for disabling the CURLOPT_SAFE_UPLOAD option.",
-  "status": "gap",
-  "note": "curl_setopt($ch, CURLOPT_SAFE_UPLOAD, false) is not reported."
+  "status": "covered",
+  "note": "curl_setopt($ch, CURLOPT_SAFE_UPLOAD, false) is reported.",
+  "rules": [
+   "removed.curl_safe_upload_off"
+  ]
  },
  {
   "version": "7.0",
@@ -479,8 +485,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Date",
   "change": "gmp_setbit() and gmp_clrbit() now return FALSE for negative indices, making them consistent with other GMP functions.",
-  "status": "gap",
-  "note": "gmp_setbit($g, -1) with a literal negative index is not reported."
+  "status": "covered",
+  "note": "gmp_setbit($g, -1) is reported.",
+  "rules": [
+   "removed.gmp_setbit_negative"
+  ]
  },
  {
   "version": "7.0",
@@ -614,8 +623,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Standard",
   "change": "Removed string category support in setlocale().",
-  "status": "gap",
-  "note": "setlocale('LC_ALL', 'en_US') with a string category is not reported."
+  "status": "covered",
+  "note": "setlocale('LC_ALL', 'en_US') is reported.",
+  "rules": [
+   "removed.setlocale_string_category"
+  ]
  },
  {
   "version": "7.0",
@@ -724,23 +736,23 @@
   "section": "Backward Incompatible Changes",
   "ext": "Core",
   "change": "'void' can no longer be used as the name of a class, interface, or trait.",
-  "status": "partial",
+  "status": "covered",
   "rules": [
    "removed.reserved_name"
   ],
-  "note": "class Void {} is reported, but class_alias('Foo', 'void') is not."
+  "note": "Class declarations, use aliases and class_alias() with the reserved name are reported."
  },
  {
   "version": "7.1",
   "section": "Backward Incompatible Changes",
   "ext": "Core",
   "change": "'iterable' can no longer be used as the name of a class, interface, or trait.",
-  "status": "partial",
+  "status": "covered",
   "rules": [
    "removed.reserved_name",
    "removed.reserved_alias"
   ],
-  "note": "interface Iterable {} and use ... as Iterable are reported, but the class_alias() form is not."
+  "note": "Class declarations, use aliases and class_alias() with the reserved name are reported."
  },
  {
   "version": "7.1",
@@ -1047,16 +1059,22 @@
   "section": "Backward Incompatible Changes",
   "ext": "Hash",
   "change": "The hash_hmac(), hash_hmac_file(), hash_pbkdf2() and hash_init() (with HASH_HMAC) functions no longer accept non-cryptographic hashes.",
-  "status": "gap",
-  "note": "hash_hmac('crc32', ...) and hash_init('fnv132', HASH_HMAC, ...) with literal non-cryptographic algorithms are not reported."
+  "status": "covered",
+  "note": "hash_hmac('crc32', $d, $k) is reported.",
+  "rules": [
+   "removed.hash_hmac_non_crypto"
+  ]
  },
  {
   "version": "7.2",
   "section": "Backward Incompatible Changes",
   "ext": "JSON",
   "change": "The json_decode() option JSON_OBJECT_AS_ARRAY is used if the second parameter (assoc) is null.",
-  "status": "gap",
-  "note": "json_decode($s, null, 512, JSON_OBJECT_AS_ARRAY) is not reported."
+  "status": "covered",
+  "note": "json_decode($s, null, 512, JSON_OBJECT_AS_ARRAY) is reported.",
+  "rules": [
+   "behavior.json_decode_null_assoc"
+  ]
  },
  {
   "version": "7.2",
@@ -1525,20 +1543,24 @@
   "version": "7.3",
   "section": "Deprecated Functionality",
   "change": "Passing a non-string needle to string search functions is deprecated.",
-  "status": "gap",
-  "note": "strpos($h, 65) and strstr($h, 10) with literal integer needles are not reported."
+  "status": "covered",
+  "note": "strpos($h, 65) is reported.",
+  "rules": [
+   "behavior.int_as_char_code"
+  ]
  },
  {
   "version": "7.3",
   "section": "Deprecated Functionality",
   "change": "The fgetss() function and the string.strip_tags stream filter have been deprecated.",
-  "status": "partial",
+  "status": "covered",
   "rules": [
    "removed.fgetss",
    "removed.gzgetss",
-   "removed.builtin_method"
+   "removed.builtin_method",
+   "removed.strip_tags_filter"
   ],
-  "note": "fgetss(), gzgetss() and SplFileObject::fgetss() are reported, but the 'string.strip_tags' stream filter is not."
+  "note": "fgetss(), gzgetss(), SplFileObject::fgetss() and the string.strip_tags stream filter are reported."
  },
  {
   "version": "7.3",
@@ -1954,16 +1976,22 @@
   "section": "Deprecated Functionality",
   "ext": "Mbstring",
   "change": "Passing a non-string pattern to mb_ereg_replace() is deprecated.",
-  "status": "gap",
-  "note": "mb_ereg_replace(65, 'b', $s) with a literal integer pattern is not reported."
+  "status": "covered",
+  "note": "mb_ereg_replace(65, 'b', $s) is reported.",
+  "rules": [
+   "behavior.int_as_char_code"
+  ]
  },
  {
   "version": "7.4",
   "section": "Deprecated Functionality",
   "ext": "Mbstring",
   "change": "Passing the encoding as 3rd parameter to mb_strrpos() is deprecated.",
-  "status": "gap",
-  "note": "mb_strrpos($h, $n, 'UTF-8') with the encoding as third argument is not reported."
+  "status": "covered",
+  "note": "mb_strrpos($h, $n, 'UTF-8') is reported.",
+  "rules": [
+   "removed.mb_strrpos_encoding"
+  ]
  },
  {
   "version": "7.4",
@@ -2009,8 +2037,11 @@
   "section": "Deprecated Functionality",
   "ext": "Standard",
   "change": "Passing invalid characters to ''base_convert()'', ''bindec()'', ''octdec()'' and ''hexdec()'' will now generate a deprecation notice.",
-  "status": "gap",
-  "note": "bindec('12'), hexdec('zz'), octdec('9') with literal invalid digits are not reported."
+  "status": "partial",
+  "note": "bindec(), hexdec() and octdec() with literal invalid digits are reported; base_convert() is not.",
+  "rules": [
+   "deprecated.invalid_digits"
+  ]
  },
  {
   "version": "7.4",
@@ -2735,8 +2766,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "GD",
   "change": "The default $mode parameter of imagecropauto() no longer accepts -1.",
-  "status": "gap",
-  "note": "Not reported: imagecropauto($im, -1)."
+  "status": "covered",
+  "note": "imagecropauto($im, -1) is reported.",
+  "rules": [
+   "removed.imagecropauto_default"
+  ]
  },
  {
   "version": "8.0",
@@ -2844,8 +2878,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "LDAP",
   "change": "The interface of ldap_set_rebind_proc has changed; the $callback parameter does not accept empty string anymore; null value shall be used instead.",
-  "status": "gap",
-  "note": "Not reported: ldap_set_rebind_proc($l, '') with an empty-string callback."
+  "status": "covered",
+  "note": "ldap_set_rebind_proc($l, '') is reported.",
+  "rules": [
+   "deprecated.ldap_rebind_empty"
+  ]
  },
  {
   "version": "8.0",
@@ -2888,16 +2925,22 @@
   "section": "Backward Incompatible Changes",
   "ext": "Mbstring",
   "change": "The 'e' modifier for mb_ereg_replace() has been removed.",
-  "status": "gap",
-  "note": "Not reported: mb_ereg_replace('a', $code, $s, 'e') with the 'e' option."
+  "status": "covered",
+  "note": "mb_ereg_replace('a', $c, $s, 'e') is reported.",
+  "rules": [
+   "removed.mb_ereg_e_option"
+  ]
  },
  {
   "version": "8.0",
   "section": "Backward Incompatible Changes",
   "ext": "Mbstring",
   "change": "A non-string pattern argument to mb_ereg_replace() will now be interpreted as a string instead of an ASCII codepoint.",
-  "status": "gap",
-  "note": "Not reported: mb_ereg_replace(65, 'b', $s) with a literal integer pattern."
+  "status": "covered",
+  "note": "mb_ereg_replace(65, 'b', $s) is reported.",
+  "rules": [
+   "behavior.int_as_char_code"
+  ]
  },
  {
   "version": "8.0",
@@ -2923,8 +2966,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Mbstring",
   "change": "The legacy behavior of passing the encoding as the third argument instead of an offset for the mb_strrpos() function has been removed; provide an explicit 0 offset with the encoding as the fourth…",
-  "status": "gap",
-  "note": "Not reported: mb_strrpos($h, $n, 'UTF-8') with the encoding as third argument."
+  "status": "covered",
+  "note": "mb_strrpos($h, $n, 'UTF-8') is reported.",
+  "rules": [
+   "removed.mb_strrpos_encoding"
+  ]
  },
  {
   "version": "8.0",
@@ -3273,8 +3319,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "SPL",
   "change": "spl_autoload_register() will now always throw a TypeError on invalid arguments, therefore the second argument $do_throw is ignored and a notice will be emitted if it is set to false.",
-  "status": "gap",
-  "note": "Not reported: spl_autoload_register('loader', false)."
+  "status": "covered",
+  "note": "spl_autoload_register('loader', false) is reported.",
+  "rules": [
+   "behavior.spl_autoload_register_throw"
+  ]
  },
  {
   "version": "8.0",
@@ -3328,16 +3377,22 @@
   "section": "Backward Incompatible Changes",
   "ext": "Standard",
   "change": "The string.strip_tags filter has been removed.",
-  "status": "gap",
-  "note": "Not reported: stream_filter_append($fp, 'string.strip_tags')."
+  "status": "covered",
+  "note": "stream_filter_append($fp, 'string.strip_tags') is reported.",
+  "rules": [
+   "removed.strip_tags_filter"
+  ]
  },
  {
   "version": "8.0",
   "section": "Backward Incompatible Changes",
   "ext": "Standard",
   "change": "The needle argument of strpos(), strrpos(), stripos(), strripos(), strstr(), strchr(), strrchr(), and stristr() will now always be interpreted as a string.",
-  "status": "gap",
-  "note": "Not reported: strpos($s, 65) / strstr($s, 10) with a literal integer needle."
+  "status": "covered",
+  "note": "strstr($s, 10) is reported.",
+  "rules": [
+   "behavior.int_as_char_code"
+  ]
  },
  {
   "version": "8.0",
@@ -3352,16 +3407,22 @@
   "section": "Backward Incompatible Changes",
   "ext": "Standard",
   "change": "The length argument for substr(), substr_count(), substr_compare(), and iconv_substr() can now be null.",
-  "status": "gap",
-  "note": "Not reported: substr($s, 2, null) or substr_count($s, 'a', 0, null) with a literal null length."
+  "status": "covered",
+  "note": "substr($s, 2, null) is reported.",
+  "rules": [
+   "behavior.null_length"
+  ]
  },
  {
   "version": "8.0",
   "section": "Backward Incompatible Changes",
   "ext": "Standard",
   "change": "The length argument for array_splice() can now be null.",
-  "status": "gap",
-  "note": "Not reported: array_splice($a, 1, null) with a literal null length."
+  "status": "covered",
+  "note": "array_splice($a, 1, null) is reported.",
+  "rules": [
+   "behavior.null_length"
+  ]
  },
  {
   "version": "8.0",
@@ -3376,8 +3437,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Standard",
   "change": "The 'salt' option of password_hash() is no longer supported.",
-  "status": "gap",
-  "note": "Not reported: password_hash($p, PASSWORD_DEFAULT, ['salt' => $salt])."
+  "status": "covered",
+  "note": "password_hash($p, PASSWORD_DEFAULT, ['salt' => $salt]) is reported.",
+  "rules": [
+   "behavior.password_hash_salt"
+  ]
  },
  {
   "version": "8.0",
@@ -3758,8 +3822,11 @@
   "section": "Deprecated Functionality",
   "ext": "Core",
   "change": "Calling get_defined_functions() with $exclude_disabled explicitly set to false is deprecated.",
-  "status": "gap",
-  "note": "Not reported: get_defined_functions(false)."
+  "status": "covered",
+  "note": "get_defined_functions(false) is reported.",
+  "rules": [
+   "deprecated.get_defined_functions_arg"
+  ]
  },
  {
   "version": "8.0",
@@ -4081,8 +4148,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "OpenSSL",
   "change": "openssl_pkcs7_encrypt() and openssl_cms_encrypt() will now default to using AES-128-CBC rather than RC2-40.",
-  "status": "gap",
-  "note": "Not reported: openssl_pkcs7_encrypt('in','out',$cert,[]) / openssl_cms_encrypt() without an explicit cipher argument now uses AES-128-CBC."
+  "status": "covered",
+  "note": "openssl_pkcs7_encrypt('in', 'out', $cert, []) is reported.",
+  "rules": [
+   "behavior.openssl_default_cipher"
+  ]
  },
  {
   "version": "8.1",
@@ -4182,8 +4252,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Standard",
   "change": "version_compare() no longer accepts undocumented operator abbreviations.",
-  "status": "gap",
-  "note": "Not reported: version_compare('1.0', '2.0', 'l') with an undocumented operator abbreviation literal."
+  "status": "covered",
+  "note": "version_compare('1.0', '2.0', 'l') is reported.",
+  "rules": [
+   "removed.version_compare_operator"
+  ]
  },
  {
   "version": "8.1",
@@ -4191,7 +4264,7 @@
   "ext": "Standard",
   "change": "htmlspecialchars(), htmlentities(), htmlspecialchars_decode(), html_entity_decode() and get_html_translation_table() now use ENT_QUOTES | ENT_SUBSTITUTE rather than ENT_COMPAT by default.",
   "status": "gap",
-  "note": "Not reported: htmlspecialchars($s) / htmlentities($s) / html_entity_decode($s) without a flags argument now default to ENT_QUOTES | ENT_SUBSTITUTE."
+  "note": "Statically detectable, but deliberately not reported: one-argument calls matched 445 lines across the corpus, and for most of them the only difference is that single quotes are now encoded."
  },
  {
   "version": "8.1",
@@ -4273,8 +4346,11 @@
   "section": "Deprecated Functionality",
   "ext": "Ctype",
   "change": "Passing a non-string value to ctype_*() functions is deprecated.",
-  "status": "gap",
-  "note": "Mostly runtime, but literal ctype_digit(5) / ctype_alpha(65) with int arguments are not reported."
+  "status": "covered",
+  "note": "ctype_digit(5) is reported.",
+  "rules": [
+   "deprecated.ctype_non_string"
+  ]
  },
  {
   "version": "8.1",
@@ -4328,8 +4404,11 @@
   "section": "Deprecated Functionality",
   "ext": "GD",
   "change": "The $num_points parameter of image(open|filled)polygon has been deprecated.",
-  "status": "gap",
-  "note": "Not reported: imagepolygon($im, $pts, 3, $col) / imagefilledpolygon / imageopenpolygon called with the 4-argument $num_points form."
+  "status": "covered",
+  "note": "imagepolygon($im, $pts, 3, $col) is reported.",
+  "rules": [
+   "deprecated.polygon_num_points"
+  ]
  },
  {
   "version": "8.1",
@@ -4359,8 +4438,11 @@
   "section": "Deprecated Functionality",
   "ext": "Intl",
   "change": "Calling IntlCalendar::roll() with bool argument is deprecated.",
-  "status": "gap",
-  "note": "Not reported: $cal->roll(IntlCalendar::FIELD_DAY_OF_MONTH, true) / intlcal_roll($cal, 5, false) with a bool literal."
+  "status": "partial",
+  "note": "intlcal_roll() with a bool literal is reported; the $cal->roll() method form is not.",
+  "rules": [
+   "deprecated.intlcal_roll_bool"
+  ]
  },
  {
   "version": "8.1",
@@ -4386,11 +4468,12 @@
   "section": "Deprecated Functionality",
   "ext": "MySQLi",
   "change": "Calling mysqli::get_client_info in OO style or passing $mysqli argument to mysqli_get_client_info() function has been deprecated.",
-  "status": "partial",
+  "status": "covered",
   "rules": [
-   "deprecated.mysqli_method"
+   "deprecated.mysqli_method",
+   "deprecated.mysqli_get_client_info_arg"
   ],
-  "note": "$m->get_client_info() is reported, but mysqli_get_client_info($m) with an argument is not."
+  "note": "mysqli_get_client_info($m) is reported."
  },
  {
   "version": "8.1",
@@ -4408,8 +4491,11 @@
   "section": "Deprecated Functionality",
   "ext": "OCI8",
   "change": "The INI directive oci8.old_oci_close_semantics has been deprecated.",
-  "status": "gap",
-  "note": "Not reported: oci8.old_oci_close_semantics in php.ini/.user.ini or ini_set()."
+  "status": "covered",
+  "note": "ini_set('oci8.old_oci_close_semantics', 1) is reported.",
+  "rules": [
+   "deprecated.ini_setting"
+  ]
  },
  {
   "version": "8.1",
@@ -4438,8 +4524,11 @@
   "section": "Deprecated Functionality",
   "ext": "PgSQL",
   "change": "Not passing the connection argument to PgSQL functions and using the default connection is deprecated.",
-  "status": "gap",
-  "note": "Not reported: pg_query('SELECT 1') / pg_escape_string('x') / pg_last_error() without the connection argument."
+  "status": "covered",
+  "note": "pg_query('SELECT 1') is reported.",
+  "rules": [
+   "deprecated.pg_implicit_connection"
+  ]
  },
  {
   "version": "8.1",
@@ -4813,8 +4902,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Standard",
   "change": "The file() flags error check now catches all invalid flags.",
-  "status": "gap",
-  "note": "Not reported: file('x', FILE_APPEND) now throws a ValueError."
+  "status": "covered",
+  "note": "file('x', FILE_APPEND) is reported.",
+  "rules": [
+   "removed.file_append_flag"
+  ]
  },
  {
   "version": "8.3",
@@ -4852,8 +4944,11 @@
   "version": "8.3",
   "section": "Deprecated Functionality",
   "change": "Calling dba_fetch() with $dba as the 3rd argument is now deprecated.",
-  "status": "gap",
-  "note": "Not reported: dba_fetch('k', 0, $dba) with the handle as the third argument."
+  "status": "covered",
+  "note": "dba_fetch('k', 0, $dba) is reported.",
+  "rules": [
+   "deprecated.dba_fetch_order"
+  ]
  },
  {
   "version": "8.3",
@@ -4886,15 +4981,21 @@
   "version": "8.3",
   "section": "Deprecated Functionality",
   "change": "Calling ldap_connect() with separate hostname and port is deprecated.",
-  "status": "gap",
-  "note": "Not reported: ldap_connect('h', 389) with separate host and port."
+  "status": "covered",
+  "note": "ldap_connect('h', 389) is reported.",
+  "rules": [
+   "deprecated.ldap_connect_port"
+  ]
  },
  {
   "version": "8.3",
   "section": "Deprecated Functionality",
   "change": "Passing a negative $width to mb_strimwidth() is now deprecated.",
-  "status": "gap",
-  "note": "Not reported: mb_strimwidth($s, 0, -5) with a negative width literal."
+  "status": "covered",
+  "note": "mb_strimwidth($s, 0, -5) is reported.",
+  "rules": [
+   "deprecated.mb_strimwidth_negative"
+  ]
  },
  {
   "version": "8.3",
@@ -5106,24 +5207,33 @@
   "section": "Backward Incompatible Changes",
   "ext": "New warnings and exceptions",
   "change": "Curl: . curl_multi_select throws a ValueError if the timeout argument if it's negative or greater than PHP_INT_MAX.",
-  "status": "gap",
-  "note": "Literal out-of-range timeout `curl_multi_select($mh, -1)` is not reported."
+  "status": "covered",
+  "note": "curl_multi_select($mh, -1) is reported.",
+  "rules": [
+   "removed.curl_multi_select_negative"
+  ]
  },
  {
   "version": "8.4",
   "section": "Backward Incompatible Changes",
   "ext": "New warnings and exceptions",
   "change": "GD: . imagejpeg/imagewebp/imagepng/imageavif throws an exception if an invalid quality parameter value is passed.",
-  "status": "gap",
-  "note": "Literal invalid quality `imagejpeg($im, null, 150)` / `imagepng($im, null, 15)` is not reported."
+  "status": "covered",
+  "note": "imagejpeg($im, null, 150) is reported.",
+  "rules": [
+   "removed.image_quality_range"
+  ]
  },
  {
   "version": "8.4",
   "section": "Backward Incompatible Changes",
   "ext": "New warnings and exceptions",
   "change": "Gettext: . bind_textdomain_codeset, textdomain and d(*)gettext functions now throw an exception if the domain argument is empty.",
-  "status": "gap",
-  "note": "Literal empty domain `textdomain('')` / `dgettext('', 'x')` is not reported."
+  "status": "covered",
+  "note": "textdomain('') is reported.",
+  "rules": [
+   "removed.gettext_empty_domain"
+  ]
  },
  {
   "version": "8.4",
@@ -5146,8 +5256,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "New warnings and exceptions",
   "change": "ODBC: . odbc_fetch_row() now emits a warning when a value less than or equal to 0 is passed for parameter $row.",
-  "status": "gap",
-  "note": "Literal `odbc_fetch_row($r, 0)` would be detectable but is not reported."
+  "status": "covered",
+  "note": "odbc_fetch_row($r, 0) is reported.",
+  "rules": [
+   "removed.odbc_row_zero"
+  ]
  },
  {
   "version": "8.4",
@@ -5170,8 +5283,12 @@
   "section": "Backward Incompatible Changes",
   "ext": "New warnings and exceptions",
   "change": "Standard: . round() now validates the value of the $mode parameter and throws a ValueError for invalid modes.",
-  "status": "gap",
-  "note": "Literal invalid round() mode, multi-byte str_getcsv() separator, invalid php_uname() mode and string allowed_classes were tested and not reported."
+  "status": "partial",
+  "note": "Literal invalid round() modes and php_uname() modes are reported; a multi-byte str_getcsv() separator and a string allowed_classes are not.",
+  "rules": [
+   "removed.round_invalid_mode",
+   "removed.php_uname_mode"
+  ]
  },
  {
   "version": "8.4",
@@ -5482,8 +5599,11 @@
   "section": "Deprecated Functionality",
   "ext": "Core",
   "change": "Raising zero to the power of negative number is deprecated.",
-  "status": "gap",
-  "note": "Literal `0 ** -1` and `pow(0, -2)` were tested and not reported."
+  "status": "partial",
+  "note": "pow(0, -2) with literals is reported; the 0 ** -1 operator form is not.",
+  "rules": [
+   "deprecated.pow_zero_negative"
+  ]
  },
  {
   "version": "8.4",
@@ -5531,8 +5651,11 @@
   "section": "Deprecated Functionality",
   "ext": "DBA",
   "change": "Passing null or false to dba_key_split() is deprecated.",
-  "status": "gap",
-  "note": "`dba_key_split(null)` / `dba_key_split(false)` were tested and not reported."
+  "status": "covered",
+  "note": "dba_key_split(null) is reported.",
+  "rules": [
+   "deprecated.dba_key_split_null"
+  ]
  },
  {
   "version": "8.4",
@@ -5599,8 +5722,11 @@
   "section": "Deprecated Functionality",
   "ext": "LDAP",
   "change": "Calling ldap_exop() with more than 4 arguments is deprecated.",
-  "status": "gap",
-  "note": "ldap_exop() with 5 or 6 arguments was tested and not reported (only an invalid 7-argument call is)."
+  "status": "covered",
+  "note": "ldap_exop($l, $o, null, null, $r, $m) is reported.",
+  "rules": [
+   "deprecated.ldap_exop_response"
+  ]
  },
  {
   "version": "8.4",
@@ -5646,9 +5772,10 @@
   "change": "Passing explicitly the $mode parameter to mysqli_store_result() has been deprecated.",
   "status": "partial",
   "rules": [
-   "deprecated.mysqli_store_result_copy_data"
+   "deprecated.mysqli_store_result_copy_data",
+   "deprecated.mysqli_store_result_mode"
   ],
-  "note": "MYSQLI_STORE_RESULT_COPY_DATA is reported, but passing any explicit mode like `mysqli_store_result($l, 0)` or `$m->store_result(0)` is not."
+  "note": "mysqli_store_result($l, 0) is reported; the $m->store_result(0) method form is not."
  },
  {
   "version": "8.4",
@@ -5663,24 +5790,33 @@
   "section": "Deprecated Functionality",
   "ext": "PgSQL",
   "change": "Calling pg_fetch_result() with 2 arguments is deprecated.",
-  "status": "gap",
-  "note": "`pg_fetch_result($r, 'col')` with 2 arguments was tested and not reported."
+  "status": "covered",
+  "note": "pg_fetch_result($r, 'col') is reported.",
+  "rules": [
+   "deprecated.pg_implicit_row"
+  ]
  },
  {
   "version": "8.4",
   "section": "Deprecated Functionality",
   "ext": "PgSQL",
   "change": "Calling pg_field_prtlen() with 2 arguments is deprecated.",
-  "status": "gap",
-  "note": "`pg_field_prtlen($r, 'col')` with 2 arguments was tested and not reported."
+  "status": "covered",
+  "note": "pg_field_prtlen($r, 'col') is reported.",
+  "rules": [
+   "deprecated.pg_implicit_row"
+  ]
  },
  {
   "version": "8.4",
   "section": "Deprecated Functionality",
   "ext": "PgSQL",
   "change": "Calling pg_field_is_null() with 2 arguments is deprecated.",
-  "status": "gap",
-  "note": "`pg_field_is_null($r, 'col')` with 2 arguments was tested and not reported."
+  "status": "covered",
+  "note": "pg_field_is_null($r, 'col') is reported.",
+  "rules": [
+   "deprecated.pg_implicit_row"
+  ]
  },
  {
   "version": "8.4",
@@ -5732,7 +5868,7 @@
   "rules": [
    "deprecated.ini_setting"
   ],
-  "note": "use_trans_sid/referer_check are reported, but session.use_only_cookies (ini_set and php.ini) and the SID constant are not."
+  "note": "session.use_trans_sid, referer_check and use_only_cookies are reported; the SID constant is not."
  },
  {
   "version": "8.4",
@@ -5781,8 +5917,11 @@
   "section": "Deprecated Functionality",
   "ext": "Standard",
   "change": "Calling stream_context_set_option() with 2 arguments is deprecated.",
-  "status": "gap",
-  "note": "`stream_context_set_option($ctx, [...])` with 2 arguments was tested and not reported."
+  "status": "covered",
+  "note": "stream_context_set_option($ctx, ['ssl' => []]) is reported.",
+  "rules": [
+   "deprecated.stream_context_option_array"
+  ]
  },
  {
   "version": "8.4",
@@ -5871,8 +6010,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Core",
   "change": "It is no longer possible to use \"array\" and \"callable\" as class alias names in class_alias().",
-  "status": "gap",
-  "note": "`class_alias('Foo', 'array')` / `'callable'` were tested and not reported."
+  "status": "covered",
+  "note": "class_alias() with array or callable as the alias is reported.",
+  "rules": [
+   "removed.reserved_name"
+  ]
  },
  {
   "version": "8.5",
@@ -5978,16 +6120,22 @@
   "section": "Backward Incompatible Changes",
   "ext": "BZ2",
   "change": "bzcompress() now throws a ValueError when $block_size is not between 1 and 9.",
-  "status": "gap",
-  "note": "Literal invalid block size `bzcompress($s, 10)` was tested and not reported."
+  "status": "covered",
+  "note": "bzcompress($s, 10) is reported.",
+  "rules": [
+   "removed.bzcompress_range"
+  ]
  },
  {
   "version": "8.5",
   "section": "Backward Incompatible Changes",
   "ext": "BZ2",
   "change": "bzcompress() now throws a ValueError when $work_factor is not between 0 and 250.",
-  "status": "gap",
-  "note": "Literal invalid work factor `bzcompress($s, 4, 300)` was tested and not reported."
+  "status": "covered",
+  "note": "bzcompress($s, 4, 300) is reported.",
+  "rules": [
+   "removed.bzcompress_range"
+  ]
  },
  {
   "version": "8.5",
@@ -6213,8 +6361,11 @@
   "section": "Deprecated Functionality",
   "ext": "Core",
   "change": "The $exclude_disabled parameter of the get_defined_functions() function has been deprecated, as it no longer has any effect since PHP 8.0.",
-  "status": "gap",
-  "note": "`get_defined_functions(true)` was tested and not reported."
+  "status": "covered",
+  "note": "get_defined_functions(true) is reported.",
+  "rules": [
+   "deprecated.get_defined_functions_arg"
+  ]
  },
  {
   "version": "8.5",
@@ -6369,8 +6520,11 @@
   "section": "Deprecated Functionality",
   "ext": "FileInfo",
   "change": "The $context parameter of the finfo_buffer() and finfo::buffer() functions has been deprecated as it is ignored.",
-  "status": "gap",
-  "note": "finfo_buffer() / finfo::buffer() with a $context argument were tested and not reported."
+  "status": "covered",
+  "note": "finfo_buffer($f, $b, FILEINFO_NONE, $ctx) is reported.",
+  "rules": [
+   "deprecated.finfo_buffer_context"
+  ]
  },
  {
   "version": "8.5",
@@ -6399,8 +6553,11 @@
   "section": "Deprecated Functionality",
   "ext": "Intl",
   "change": "The intl.error_level INI setting has been deprecated.",
-  "status": "gap",
-  "note": "intl.error_level in php.ini and ini_set() was tested and not reported."
+  "status": "covered",
+  "note": "ini_set('intl.error_level', E_WARNING) is reported.",
+  "rules": [
+   "deprecated.ini_setting"
+  ]
  },
  {
   "version": "8.5",
@@ -6418,8 +6575,11 @@
   "section": "Deprecated Functionality",
   "ext": "OpenSSL",
   "change": "The $key_length parameter for openssl_pkey_derive() has been deprecated.",
-  "status": "gap",
-  "note": "`openssl_pkey_derive($pub, $priv, 32)` with $key_length was tested and not reported."
+  "status": "covered",
+  "note": "openssl_pkey_derive($pub, $priv, 32) is reported.",
+  "rules": [
+   "deprecated.openssl_pkey_derive_length"
+  ]
  },
  {
   "version": "8.5",
@@ -6480,8 +6640,11 @@
   "section": "Deprecated Functionality",
   "ext": "SPL",
   "change": "Unregistering all autoloaders by passing the spl_autoload_call() function as a callback argument to spl_autoload_unregister() has been deprecated.",
-  "status": "gap",
-  "note": "`spl_autoload_unregister('spl_autoload_call')` was tested and not reported."
+  "status": "covered",
+  "note": "spl_autoload_unregister('spl_autoload_call') is reported.",
+  "rules": [
+   "deprecated.unregister_autoload_call"
+  ]
  },
  {
   "version": "8.5",
@@ -6518,27 +6681,33 @@
   "section": "Deprecated Functionality",
   "ext": "Standard",
   "change": "Passing null to to readdir(), rewinddir(), and closedir() to use the last opened directory has been deprecated.",
-  "status": "partial",
+  "status": "covered",
   "rules": [
    "deprecated.implicit_argument"
   ],
-  "note": "readdir()/rewinddir()/closedir() without arguments are reported, but passing literal null (`readdir(null)`, `closedir(null)`) is not."
+  "note": "readdir(null) is reported."
  },
  {
   "version": "8.5",
   "section": "Deprecated Functionality",
   "ext": "Standard",
   "change": "Passing integers outside the interval [0, 255] to chr() is now deprecated.",
-  "status": "gap",
-  "note": "Literal `chr(256)` / `chr(-1)` were tested and not reported."
+  "status": "covered",
+  "note": "chr(256) is reported.",
+  "rules": [
+   "deprecated.chr_out_of_range"
+  ]
  },
  {
   "version": "8.5",
   "section": "Deprecated Functionality",
   "ext": "Standard",
   "change": "Passing a string which is not a single byte to ord() is now deprecated, this is indicative of a bug.",
-  "status": "gap",
-  "note": "Literal `ord('ab')` / `ord('')` were tested and not reported."
+  "status": "covered",
+  "note": "ord('ab') is reported.",
+  "rules": [
+   "deprecated.ord_length"
+  ]
  },
  {
   "version": "8.5",
