@@ -378,7 +378,7 @@ describe("Ferry app", () => {
     const box = (file: string) => screen.getByRole("checkbox", { name: `${file} dosyasını seçin` });
     expect(box("includes/class-mailer.php")).not.toBeChecked();
     expect(box("includes/helpers.php")).toBeChecked();
-    expect(within(files).getAllByText("Bakılmadı")).toHaveLength(1);
+    await waitFor(() => expect(within(files).getAllByText("Bakılmadı")).toHaveLength(1));
     await user.click(box("includes/class-mailer.php"));
     await user.click(screen.getByRole("button", { name: /dosyayı uygula/ }));
     const dialog = await screen.findByRole("dialog");
