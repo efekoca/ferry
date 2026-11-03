@@ -506,6 +506,7 @@ enum Builtin {
     RemovedClass,
     RemovedMethod,
     DeprecatedMethod,
+    RemovedIni,
 }
 
 impl Builtin {
@@ -560,6 +561,13 @@ impl Builtin {
                 Text::new(
                     "Bu metot kullanımdan kalktı; çağrıldığında uyarı verir ve ileride kaldırılacak.",
                     "This method is deprecated; calling it raises a warning and it will be removed.",
+                ),
+            ),
+            Builtin::RemovedIni => (
+                "removed.builtin_ini",
+                Text::new(
+                    "Bu ayar PHP'den kaldırıldı; ini_set() ve ini_get() false döner ve ayarın yaptığı iş artık yapılmaz.",
+                    "PHP removed this setting; ini_set() and ini_get() return false and whatever it did no longer happens.",
                 ),
             ),
         }
@@ -677,7 +685,11 @@ impl<'a> Ctx<'a> {
             title: Localized::same(title),
             message: note,
             since,
-            severity: if kind.removed() { Severity::Breaking } else { Severity::Deprecated },
+            severity: match kind {
+                Builtin::RemovedIni => Severity::Behavior,
+                _ if kind.removed() => Severity::Breaking,
+                _ => Severity::Deprecated,
+            },
             fix: FixKind::Manual,
             replacement: None,
         };
@@ -964,8 +976,18 @@ impl<'a> Ctx<'a> {
                 "ini_set" | "ini_alter" => {
                     if let Some(key) = single(0).filter(|t| matches!(t.kind, TokenKind::Str { .. })) {
                         let name = key.text.get(1..key.text.len().saturating_sub(1)).unwrap_or_default().to_ascii_lowercase();
+                        // Turning a removed setting off is what the new PHP does anyway.
+                        let off = single(1).is_some_and(|t| {
+                            let v = t.text.trim_matches(|c| c == '"' || c == '\'').to_ascii_lowercase();
+                            matches!(v.as_str(), "" | "0" | "off" | "false" | "no" | "none")
+                        });
                         if let Some(&(_, a, b)) = crate::rules::DEPRECATED_INI.iter().find(|(k, _, _)| *k == name) {
                             self.pattern_since(&patterns::INI_SETTING, key.line, key.column, PhpVersion::new(a, b));
+                        } else if !off {
+                            let hand = crate::rules::REMOVED_INI.iter().find(|(k, _, _)| *k == name).map(|&(_, a, b)| (a, b));
+                            if let Some(since) = hand.or_else(|| generated(crate::symbols::REMOVED_INI, &name).map(|r| r.1)) {
+                                self.builtin(Builtin::RemovedIni, name, since, key);
+                            }
                         }
                     }
                     return;
@@ -3679,6 +3701,13 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
             count85(
                 "<?php ini_set('session.sid_length', 32); ini_get('mbstring.func_overload'); ini_set('mbstring.func_overload', 0);",
                 "deprecated.ini_setting"
+            ),
+            2
+        );
+        assert_eq!(
+            count85(
+                "<?php ini_set('session.hash_function', 1); ini_set('opcache.fast_shutdown', $on); ini_set('safe_mode', 0); ini_get('sql.safe_mode'); ini_set('memory_limit', '1G');",
+                "removed.builtin_ini"
             ),
             2
         );
