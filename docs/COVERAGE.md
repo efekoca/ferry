@@ -15,18 +15,18 @@ The data lives in `docs/coverage.json`; this page is generated from it with
 
 | Version | Covered | Partial | Gap | Runtime only | Not applicable | Total |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| [7.0](#php-70) | 35 | 3 | 11 | 14 | 19 | 82 |
-| [7.1](#php-71) | 4 | 0 | 7 | 13 | 4 | 28 |
-| [7.2](#php-72) | 21 | 1 | 3 | 5 | 4 | 34 |
-| [7.3](#php-73) | 11 | 0 | 5 | 12 | 6 | 34 |
+| [7.0](#php-70) | 39 | 3 | 7 | 14 | 19 | 82 |
+| [7.1](#php-71) | 6 | 0 | 5 | 13 | 4 | 28 |
+| [7.2](#php-72) | 22 | 1 | 2 | 5 | 4 | 34 |
+| [7.3](#php-73) | 12 | 0 | 4 | 12 | 6 | 34 |
 | [7.4](#php-74) | 30 | 1 | 6 | 25 | 3 | 65 |
-| [8.0](#php-80) | 106 | 5 | 14 | 48 | 11 | 184 |
+| [8.0](#php-80) | 110 | 5 | 10 | 48 | 11 | 184 |
 | [8.1](#php-81) | 42 | 1 | 11 | 6 | 2 | 62 |
 | [8.2](#php-82) | 11 | 0 | 0 | 7 | 0 | 18 |
-| [8.3](#php-83) | 18 | 1 | 4 | 10 | 2 | 35 |
-| [8.4](#php-84) | 61 | 4 | 7 | 22 | 5 | 99 |
-| [8.5](#php-85) | 42 | 0 | 11 | 22 | 4 | 79 |
-| **All** | **381** | **16** | **79** | **184** | **60** | **720** |
+| [8.3](#php-83) | 19 | 1 | 3 | 10 | 2 | 35 |
+| [8.4](#php-84) | 66 | 3 | 3 | 22 | 5 | 99 |
+| [8.5](#php-85) | 45 | 0 | 8 | 22 | 4 | 79 |
+| **All** | **402** | **15** | **59** | **184** | **60** | **720** |
 
 ## PHP 7.0
 
@@ -57,7 +57,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-7.0/UPGRADING)
 | Changes to integer handling | Bitwise shifts by negative numbers will now throw an ArithmeticError: | Covered | `removed.negative_shift` | Shifts by a negative integer literal, such as 1 >> -1, are reported. |
 | Changes to integer handling | Left bitwise shifts by a number of bits beyond the bit width of an integer will always result in 0: | Covered | `behavior.wide_shift` | Shifts by an integer literal of 64 or more are reported. |
 | Changes to integer handling | Similarly right bitwise shifts by a number of bits beyond the bit width of an integer will always result in 0 or -1 (depending on sign): | Covered | `behavior.wide_shift` | Shifts by an integer literal of 64 or more are reported. |
-| Changes to string handling | Strings that contain hexadecimal numbers are no longer considered to be numeric and don't receive special treatment anymore. | Gap |  | Literal hex numeric strings like is_numeric("0x123") or "0x123" == "291" are not reported. |
+| Changes to string handling | Strings that contain hexadecimal numbers are no longer considered to be numeric and don't receive special treatment anymore. | Covered | `behavior.hex_numeric_string` | Hex strings such as '0x1A' passed to is_numeric() or compared with == are reported. |
 | Changes to string handling | Due to the addition of the Unicode Codepoint Escape Syntax for double-quoted strings and heredocs, "\u{" followed by an invalid sequence will now result in an error: | Covered | `removed.invalid_unicode_escape` | Double-quoted strings and heredocs with an invalid \u{ escape are reported. |
 | Changes to string handling | https://wiki.php.net/rfc/remove_hex_support_in_numeric_strings | Not applicable |  | RFC reference only; the change is classified under item 23. |
 | Changes to string handling | https://wiki.php.net/rfc/unicode_escape | Not applicable |  | RFC reference only; the change is classified under item 24. |
@@ -100,8 +100,8 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-7.0/UPGRADING)
 | libxml | session.lazy_write(default=On) INI setting enables only write session data when session data is updated. | Not applicable |  | New INI setting with a compatible default. |
 | libxml | session_regenerate_id() saves current $_SESSION before creating new session ID. | Runtime only |  | Session save timing on regeneration only shows at runtime. |
 | libxml | Removed opcache.load_comments configuration directive. | Covered | `removed.builtin_ini` | opcache.load_comments is reported in ini files and ini_set(). |
-| OpenSSL | Removed the "rsa_key_size" SSL context option in favor of automatically setting the appropriate size given the negotiated crypto algorithm. | Gap |  | 'rsa_key_size' SSL context option in stream_context_create() is not reported. |
-| OpenSSL | Removed "CN_match" and "SNI_server_name" SSL context options. | Gap |  | 'CN_match' and 'SNI_server_name' SSL context options are not reported. |
+| OpenSSL | Removed the "rsa_key_size" SSL context option in favor of automatically setting the appropriate size given the negotiated crypto algorithm. | Covered | `removed.ssl_context_option` | rsa_key_size used as an array key is reported. |
+| OpenSSL | Removed "CN_match" and "SNI_server_name" SSL context options. | Covered | `removed.ssl_context_option` | CN_match and SNI_server_name used as array keys are reported. |
 | PCRE | Removed support for /e (PREG_REPLACE_EVAL) modifier. | Covered | `removed.preg_eval_modifier` | preg_replace('/a/e', ...) is reported. |
 | PDO_pgsql | Removed PGSQL_ATTR_DISABLE_NATIVE_PREPARED_STATEMENT attribute in favor of ATTR_EMULATE_PREPARES. | Covered | `deprecated.pdo_driver_constant` | PDO::PGSQL_ATTR_DISABLE_NATIVE_PREPARED_STATEMENT is reported. |
 | Standard | Removed string category support in setlocale(). | Covered | `removed.setlocale_string_category` | setlocale('LC_ALL', 'en_US') is reported. |
@@ -113,7 +113,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-7.0/UPGRADING)
 | XSL | Removed xsl.security_prefs ini option. | Covered | `removed.builtin_ini` | xsl.security_prefs is reported in ini files and ini_set(). |
 | Deprecated Functionality | PHP 4 style constructors, where the constructor name is the same as the class name, are now deprecated. | Covered | `removed.php4_constructor` | class Foo { function Foo() {} } is reported. |
 | Deprecated Functionality | Static calls to non-static methods are now deprecated. | Covered | `removed.static_call_to_instance_method` | A::m() on a non-static method is reported. |
-| Deprecated Functionality | The "capture_session_meta" SSL context option is now deprecated. | Gap |  | 'capture_session_meta' SSL context option is not reported. |
+| Deprecated Functionality | The "capture_session_meta" SSL context option is now deprecated. | Covered | `deprecated.ssl_capture_session_meta` | capture_session_meta used as an array key is reported. |
 | Changes to INI File Handling | Removed asp_tags ini directive. | Covered | `removed.ini_setting` | asp_tags=On in php.ini and .htaccess is reported. |
 | Changes to INI File Handling | Removed always_populate_raw_post_data ini directive. | Covered | `removed.builtin_ini` | always_populate_raw_post_data is reported in ini files and ini_set(). |
 
@@ -138,13 +138,13 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-7.1/UPGRADING)
 | Core | The error message for E_RECOVERABLE errors has been changed from "Catchable fatal error" to "Recoverable fatal error". | Not applicable |  | Error message wording change. |
 | Core | The empty index operator (e.g. $str[] = $x) is not supported for strings anymore, and throws a fatal error instead of silently converting to array. | Runtime only |  | Whether $x[] = ... targets a string depends on the runtime type. |
 | Core | Array elements or object properties that are automatically created during by-reference assignments will now result in a different order. | Runtime only |  | Ordering of elements auto-created by reference assignment only shows at runtime. |
-| Core | The allowed_classes element of the $options parameter of unserialize() is now strictly typed, i.e. if anything other than an array or a boolean is given, unserialize() returns FALSE and issues an… | Gap |  | unserialize($s, ['allowed_classes' => 'Foo']) with a literal non-array/bool value is not reported. |
+| Core | The allowed_classes element of the $options parameter of unserialize() is now strictly typed, i.e. if anything other than an array or a boolean is given, unserialize() returns FALSE and issues an… | Covered | `behavior.unserialize_allowed_classes_type` | A string or number given for allowed_classes is reported. |
 | Core | $this, autoglobals, and variables with the same name as a parameter can no longer be bound to a closure via the use construct. | Gap |  | Closures with use ($this), use ($_GET) or use ($a) shadowing a parameter are not reported. |
 | JSON | The serialize_precision is used instead of precision when encoding double values. | Runtime only |  | Float encoding output depends on values and serialize_precision. |
 | JSON | An empty key is decoded as an empty property name instead of using _empty_ property name when decoding object to stdClass. | Runtime only |  | Depends on JSON data containing empty keys. |
 | JSON | When calling json_encode with JSON_UNESCAPED_UNICODE option, U+2028 and U+2029 are escaped. | Runtime only |  | Depends on data containing U+2028/U+2029. |
 | mbstring | mb_ereg() and mb_eregi() will now set the $regs argument to an empty array, if nothing matched. | Runtime only |  | Depends on match results at runtime. |
-| OpenSSL | Dropped sslv2 stream. | Gap |  | The literal 'sslv2://' stream transport in fopen()/stream_socket_client() is not reported. |
+| OpenSSL | Dropped sslv2 stream. | Covered | `removed.sslv2_stream` | Literal sslv2:// URLs are reported. |
 | Session | Session ID is generated from CSPRNG directly. | Runtime only |  | Session ID length depends on runtime INI configuration. |
 | Session | Following INIs are removed . | Covered | `removed.builtin_ini` | Each of the four settings is reported in php.ini, .user.ini, .htaccess and ini_set(). |
 | Session | New INIs and defaults . | Not applicable |  | New INI settings with defaults. |
@@ -158,7 +158,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-7.2/UPGRADING)
 
 | Area | Change | Status | Rules | Note |
 | --- | --- | --- | --- | --- |
-| Core | gettype() will now return "resource (closed)" instead of "unknown type" for closed resources. | Gap |  | Comparing gettype($r) with the literal 'unknown type' is not reported. |
+| Core | gettype() will now return "resource (closed)" instead of "unknown type" for closed resources. | Covered | `behavior.gettype_closed_resource` | Comparisons with the literal 'unknown type' are reported. |
 | Core | is_object() will now return true for objects of class __PHP_Incomplete_Class. | Runtime only |  | Depends on objects being __PHP_Incomplete_Class at runtime. |
 | Core | Support for Netware operating systems has been removed. | Not applicable |  | Netware OS support removal. |
 | Core | Casting arrays to objects (with (object) or settype()) will now convert integer keys to string property names. | Runtime only |  | Depends on array keys at runtime. |
@@ -212,7 +212,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-7.3/UPGRADING)
 | Backward Incompatible Changes | All warnings thrown by BCMath functions are now using PHP's error handling. | Not applicable |  | Warning output channel change. |
 | Backward Incompatible Changes | bcmul() and bcpow() now return numbers with the requested scale. | Runtime only |  | Result formatting depends on runtime values. |
 | Backward Incompatible Changes | As of PHP 7.3.16, the value of the $childNodes property of DOMDocument, DOMNode, DOMProcessingInstruction, DOMComment, DOMText, DOMCdataSection and DOMNotation is now an empty DOMNodeList instead… | Runtime only |  | DOM childNodes value and IMAP rsh depend on runtime objects and configuration. |
-| Backward Incompatible Changes | Due to added support for named captures, mb_ereg_*() patterns using named captures will behave differently. | Gap |  | mb_ereg() with a literal named-capture pattern '(?&lt;name>...)' is not reported. |
+| Backward Incompatible Changes | Due to added support for named captures, mb_ereg_*() patterns using named captures will behave differently. | Covered | `behavior.mb_ereg_named_capture` | mb_ereg_*() with a literal pattern containing a named group is reported. |
 | Backward Incompatible Changes | Prepared statements now properly report the fractional seconds for DATETIME/ TIME/TIMESTAMP columns with decimals specifier (e.g. TIMESTAMP(6) when using microseconds). | Runtime only |  | Depends on database column types and returned values. |
 | Backward Incompatible Changes | Prepared statements now properly report the fractional seconds for DATETIME/ TIME/TIMESTAMP columns with decimals specifier (e.g. TIMESTAMP(6) when using microseconds). | Runtime only |  | Depends on database column types and PDO emulation mode. |
 | Backward Incompatible Changes | Reflection export to string now uses `int` and `bool` instead of `integer` and `boolean`. | Not applicable |  | Reflection string output wording. |
@@ -348,7 +348,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.0/UPGRADING)
 | Core | Non-absolute trait method references in trait alias adaptations are now required to be unambiguous: | Gap |  | Not reported: class X { use T1, T2 { func as otherFunc; } } where both traits define func(). |
 | Core | The signature of abstract methods defined in traits is now checked against the implementing class method: | Gap |  | Not reported: a class implementing a trait's abstract method with an incompatible return type (string vs int). |
 | Core | Disabled functions are now treated exactly like non-existent functions. | Runtime only |  | Disabled functions depend on the server's disable_functions configuration at runtime. |
-| Core | data: stream wrappers are no longer writable, which matches the documented behavior. | Gap |  | Not reported: writing to a literal data: URL, e.g. file_put_contents('data://text/plain,foo', 'x') or fopen('data:...', 'w'). |
+| Core | data: stream wrappers are no longer writable, which matches the documented behavior. | Covered | `removed.data_stream_write` | file_put_contents() and fopen() in a writing mode on a literal data: URL are reported. |
 | Core | The arithmetic and bitwise operators +, -, *, /, **, %, &lt;&lt;, >>, &, \|, ^, ~, ++, -- will now consistently throw a TypeError when one of the operands is an array, resource or non-overloaded object. | Runtime only |  | Arithmetic on arrays/resources/objects depends on runtime operand types. |
 | Core | Float to string casting will now always behave locale-independently. | Runtime only |  | Float-to-string output differs only when a non-C LC_NUMERIC locale is active at runtime. |
 | Core | Removed support for deprecated curly braces for offset access RFC: | Covered | `removed.curly_offset` | $s{0} is reported. |
@@ -394,9 +394,9 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.0/UPGRADING)
 | Mbstring | The needle argument for mb_strpos(), mb_strrpos(), mb_stripos(), mb_strripos(), mb_strstr(), mb_stristr(), mb_strrchr() and mb_strrichr() can now be empty. | Runtime only |  | Return value for an empty needle changes; the needle is normally a variable. |
 | Mbstring | The $is_hex parameter, which was not used internally, has been removed from mb_decode_numericentity(). | Covered | `removed.builtin_arity` | mb_decode_numericentity() with a fourth $is_hex argument is reported. |
 | Mbstring | The legacy behavior of passing the encoding as the third argument instead of an offset for the mb_strrpos() function has been removed; provide an explicit 0 offset with the encoding as the fourth… | Covered | `removed.mb_strrpos_encoding` | mb_strrpos($h, $n, 'UTF-8') is reported. |
-| Mbstring | The ISO_8859-* character encoding aliases have been replaced by ISO8859-* aliases for better interoperability with the iconv extension. | Gap |  | Not reported: literal 'ISO_8859-1' / 'ISO_8859_1' encoding names in mb_convert_encoding() or mb_regex_encoding(). |
+| Mbstring | The ISO_8859-* character encoding aliases have been replaced by ISO8859-* aliases for better interoperability with the iconv extension. | Covered | `removed.mbstring_iso_alias` | ISO_8859-* and ISO8859_* names passed to mb_*() functions are reported. |
 | Mbstring | mb_ereg() and mb_eregi() will now return boolean true on a successful match. | Runtime only |  | Return value change of mb_ereg() only matters for runtime use of the result. |
-| OCI8 | The OCI-Lob class is now called OCILob, and the OCI-Collection class is now called OCICollection for name compliance enforced by PHP 8 arginfo type annotation tooling. | Gap |  | Not reported: class name string checks such as get_class($l) === 'OCI-Lob'. |
+| OCI8 | The OCI-Lob class is now called OCILob, and the OCI-Collection class is now called OCICollection for name compliance enforced by PHP 8 arginfo type annotation tooling. | Covered | `behavior.oci_class_name` | The literal class names 'OCI-Lob' and 'OCI-Collection' are reported. |
 | OCI8 | Several alias functions have been marked as deprecated. | Covered | `deprecated.oci8_alias` | The OCI8 aliases without the oci_ prefix, such as ocilogon() and ociparse(), are reported. |
 | OCI8 | oci_internal_debug() and its alias ociinternaldebug() have been removed. | Covered | `deprecated.oci8_alias`<br>`removed.oci8` | oci_internal_debug() and its alias ociinternaldebug() are reported. |
 | ODBC | odbc_connect() no longer reuses persistent connections. | Not applicable |  | Connection pooling behavior of odbc_connect(); no source change required. |
@@ -407,7 +407,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.0/UPGRADING)
 | OpenSSL | openssl_pkey_new() will now return an OpenSSLAsymmetricKey object rather than a resource. | Covered | `removed.resource_check` | is_resource() on openssl_pkey_new() is reported. |
 | OpenSSL | The openssl_pkey_free() function is deprecated and no longer has an effect, instead the OpenSSLAsymmetricKey instance is automatically destroyed if it is no longer referenced. | Covered | `deprecated.openssl_pkey_free` | openssl_pkey_free() is reported. |
 | OpenSSL | openssl_seal() and openssl_open() now require $method to be passed, as the previous default of "RC4" is considered insecure. | Covered | `removed.builtin_arity` | openssl_seal() and openssl_open() with four arguments (no method) are reported. |
-| PCRE | When passing invalid escape sequences they are no longer interpreted as literals. | Gap |  | Not reported: a literal regex with the X modifier or invalid escape, e.g. preg_match('/\i/X', $s). |
+| PCRE | When passing invalid escape sequences they are no longer interpreted as literals. | Covered | `removed.regex_invalid_escape` | Literal preg_*() patterns with the X modifier or an unknown letter escape such as \i are reported; PHP 8.0 rejects them. |
 | PDO | The default error handling mode has been changed from "silent" to "exceptions". | Runtime only |  | Whether code relied on silent PDO errors depends on runtime query failures and error handling flow. |
 | PDO | The signatures of some PDO methods have changed: | Covered | `removed.incompatible_override` | Subclasses overriding PDO::query() and PDOStatement::setFetchMode() with old signatures are reported. |
 | PDO MySQL | PDO::inTransaction() now reports the actual transaction state of the connection, rather than an approximation maintained by PDO. | Runtime only |  | inTransaction() result depends on runtime transaction state. |
@@ -613,7 +613,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.3/UPGRADING)
 | FFI | C functions that have a return type of void now return null instead of returning the following object object(FFI\CData:void) { } | Runtime only |  | FFI return value depends on runtime C function signatures. |
 | Opcache | The opcache.consistency_checks INI directive was removed. | Covered | `removed.builtin_ini` | opcache.consistency_checks is reported in php.ini, .user.ini, .htaccess and ini_set(). |
 | Phar | The type of Phar class constants are now declared. | Covered | `removed.typed_constant_override` | class P extends Phar { const SHA1 = []; } is reported. |
-| Standard | The range() function has had various changes: | Gap |  | Mostly runtime, but literal range(1, 10, 0), range(1, 10, -1), range('', 'z') and range([1], 5) are not reported. |
+| Standard | The range() function has had various changes: | Covered | `removed.range_invalid` | Literal range() calls with a step of 0, an empty string or an array boundary are reported. |
 | Standard | The file() flags error check now catches all invalid flags. | Covered | `removed.file_append_flag` | file('x', FILE_APPEND) is reported. |
 | SNMP | The type of SNMP class constants are now declared. | Gap |  | Not reported: class S extends SNMP { const VERSION_1 = 'x'; } redeclaring a now-typed constant with another type. |
 | Deprecated Functionality | Using the ++ operator on empty, non-numeric, or non-alphanumeric strings is now deprecated. | Runtime only |  | Whether the incremented string is empty or non-alphanumeric depends on runtime values. |
@@ -663,7 +663,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.4/UPGRADING)
 | New warnings and exceptions | ODBC: . odbc_fetch_row() now emits a warning when a value less than or equal to 0 is passed for parameter $row. | Covered | `removed.odbc_row_zero` | odbc_fetch_row($r, 0) is reported. |
 | New warnings and exceptions | PCNTL: . The functions pcntl_sigprocmask(), pcntl_sigwaitinfo() and pcntl_sigtimedwait() now throw: | Runtime only |  | Empty or invalid signal arrays depend on runtime values. |
 | New warnings and exceptions | SimpleXML: . Calling simplexml_import_dom() with a non-XML object now throws a TypeError instead of a ValueError. | Runtime only |  | Only the thrown exception class changes for invalid runtime objects. |
-| New warnings and exceptions | Standard: . round() now validates the value of the $mode parameter and throws a ValueError for invalid modes. | Partial | `removed.round_invalid_mode`<br>`removed.php_uname_mode` | Literal invalid round() modes and php_uname() modes are reported; a multi-byte str_getcsv() separator and a string allowed_classes are not. |
+| New warnings and exceptions | Standard: . round() now validates the value of the $mode parameter and throws a ValueError for invalid modes. | Covered | `removed.round_invalid_mode`<br>`removed.php_uname_mode`<br>`removed.csv_separator_length`<br>`behavior.unserialize_allowed_classes_type` | Literal invalid round() and php_uname() modes, CSV separators that aren't one character and a string allowed_classes are reported. |
 | New warnings and exceptions | XMLReader: . Passing an invalid character encoding to XMLReader::open() or XMLReader::XML() now throws a ValueError. | Runtime only |  | Invalid encodings or null bytes passed to XMLReader come from runtime values. |
 | New warnings and exceptions | XMLWriter: . Passing an encoding containing null bytes previously emitted a warning and now throws a ValueError. | Runtime only |  | Null bytes in XMLWriter encoding depend on runtime values. |
 | New warnings and exceptions | XSL: . XSLTProcessor::setParameter() will now throw a ValueError when its arguments contain null bytes. | Runtime only |  | Null bytes in XSLT parameters and non-XML objects depend on runtime values. |
@@ -682,7 +682,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.4/UPGRADING)
 | Opcache | The maximum value of the opcache.interned_strings_buffer setting on 64bit architectures is now 32767 (it was previously 4095). | Not applicable |  | Raised maximum for opcache.interned_strings_buffer does not break existing configs. |
 | Opcache | If JIT is enabled, PHP will now exit with a fatal error on startup in case of JIT startup initialization issues. | Not applicable |  | JIT startup failure behavior is environment-specific, not source-level. |
 | PCNTL | The functions pcntl_sigprocmask(), pcntl_sigwaitinfo() and pcntl_sigtimedwait() now always return false on failure. | Gap |  | Checking `pcntl_sigwaitinfo(...) === -1` (now returns false) was tested and not reported. |
-| PCRE | The bundled pcre2lib has been updated to version 10.44. | Gap |  | Regex literal with `{,3}` quantifier (now a quantifier) in preg_match() was tested and not reported. |
+| PCRE | The bundled pcre2lib has been updated to version 10.44. | Covered | `behavior.regex_empty_min_quantifier` | Literal preg_*() patterns containing {,n} are reported. |
 | PDO_DBLIB | setAttribute, DBLIB_ATTR_STRINGIFY_UNIQUEIDENTIFIER and DBLIB_ATTR_DATETIME_CONVERT have been changed to set value as a bool. | Runtime only |  | setAttribute value types for DBLIB attributes depend on runtime values. |
 | PDO_FIREBIRD | Since some Firebird C++ APIs are used now, this extension requires a C++ compiler to be built. | Not applicable |  | Build requirement for PDO_FIREBIRD. |
 | PDO_FIREBIRD | getAttribute, ATTR_AUTOCOMMIT has been changed to get the value as a bool. | Runtime only |  | getAttribute() now returns bool; impact depends on how the value is compared at runtime. |
@@ -707,7 +707,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.4/UPGRADING)
 | DBA | Passing null or false to dba_key_split() is deprecated. | Covered | `deprecated.dba_key_split_null` | dba_key_split(null) is reported. |
 | DOM | Deprecated DOM_PHP_ERR constant. | Covered | `deprecated.dom_php_err` | DOM_PHP_ERR is reported. |
 | DOM | DOMDocument::$actualEncoding, DOMDocument::config, DOMEntity::$actualEncoding, DOMEntity::$encoding, DOMEntity::$version have been deprecated. | Covered | `deprecated.dom_document_property` | $doc = new DOMDocument(); echo $doc->actualEncoding is reported when the receiver's class is visible in the code. |
-| Hash | Deprecated passing incorrect data types for options to ext/hash functions. | Gap |  | Literal wrong option types like `hash('murmur3a', $d, false, ['seed' => 'abc'])` were tested and not reported. |
+| Hash | Deprecated passing incorrect data types for options to ext/hash functions. | Covered | `deprecated.hash_option_type` | A string seed option passed to hash functions is reported. |
 | Intl | Calling intlcal_set() as well as calling IntlCalendar::set() with more than 2 arguments is deprecated. | Covered | `deprecated.intlcal_set` | $cal = new IntlGregorianCalendar(); $cal->set(2020, 1, 1) is reported when the receiver's class is visible in the code. |
 | Intl | Calling intlgregcal_create_instance() as well as calling IntlGregorianCalendar::__construct() with more than 2 arguments is deprecated. | Covered | `deprecated.intlgregcal_create_instance` | new IntlGregorianCalendar(2020, 1, 1) is reported. |
 | LDAP | Calling ldap_connect() with more than 2 arguments is deprecated. | Covered | `removed.builtin_arity` | ldap_connect() with 3 arguments is reported (as an arity issue). |
@@ -716,7 +716,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.4/UPGRADING)
 | Mysqli | The mysqli_kill() function and mysqli::kill() method are now deprecated. | Covered | `deprecated.mysqli_kill`<br>`deprecated.mysqli_method` | mysqli_kill() and $mysqli->kill() are reported. |
 | Mysqli | The mysqli_refresh() function and mysqli::refresh() method are now deprecated. | Covered | `deprecated.mysqli_refresh`<br>`deprecated.mysqli_method`<br>`deprecated.mysqli_refresh_constant` | mysqli_refresh(), ->refresh() and MYSQLI_REFRESH_* constants are reported. |
 | Mysqli | Passing explicitly the $mode parameter to mysqli_store_result() has been deprecated. | Covered | `deprecated.mysqli_store_result_copy_data`<br>`deprecated.mysqli_store_result_mode` | $m = new mysqli(); $m->store_result(0) is reported when the receiver's class is visible in the code. |
-| PDO_PGSQL | Using escaped question marks (??) inside dollar-quoted strings is deprecated. | Gap |  | SQL literal with `??` inside `$$...$$` passed to a pgsql PDO prepare() was tested and not reported. |
+| PDO_PGSQL | Using escaped question marks (??) inside dollar-quoted strings is deprecated. | Covered | `deprecated.pgsql_escaped_question` | ?? inside $$-quoted SQL passed to prepare(), query() or exec() is reported. |
 | PgSQL | Calling pg_fetch_result() with 2 arguments is deprecated. | Covered | `deprecated.pg_implicit_row` | pg_fetch_result($r, 'col') is reported. |
 | PgSQL | Calling pg_field_prtlen() with 2 arguments is deprecated. | Covered | `deprecated.pg_implicit_row` | pg_field_prtlen($r, 'col') is reported. |
 | PgSQL | Calling pg_field_is_null() with 2 arguments is deprecated. | Covered | `deprecated.pg_implicit_row` | pg_field_is_null($r, 'col') is reported. |
@@ -730,7 +730,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.4/UPGRADING)
 | SPL | The SplFixedArray::__wakeup() method has been deprecated as it implements __serialize() and __unserialize() which need to be overwritten instead. | Covered | `deprecated.builtin_method`<br>`deprecated.splfixedarray_wakeup` | Overriding and calling SplFixedArray::__wakeup() are reported. |
 | SPL | Using the default value for $escape parameter of: | Covered | `deprecated.csv_escape` | $f = new SplFileObject('x'); $f->fgetcsv() is reported when the receiver's class is visible in the code. |
 | Standard | Calling stream_context_set_option() with 2 arguments is deprecated. | Covered | `deprecated.stream_context_option_array` | stream_context_set_option($ctx, ['ssl' => []]) is reported. |
-| Standard | Unserializing strings using the uppercase 'S' tag is deprecated. | Gap |  | Literal `unserialize('S:1:"a";')` with uppercase S tag was tested and not reported. |
+| Standard | Unserializing strings using the uppercase 'S' tag is deprecated. | Covered | `deprecated.unserialize_upper_s` | Literal serialized strings with the S: tag passed to unserialize() are reported. |
 | Standard | Using the default value for $escape parameter of: | Covered | `deprecated.csv_escape` | fputcsv()/fgetcsv()/str_getcsv() without $escape are reported. |
 | XML | The xml_set_object() function has been deprecated. | Covered | `deprecated.xml_set_object` | xml_set_object() is reported. |
 | XML | Passing non-callable strings to the xml_set_*_handler() functions is now deprecated. | Partial | `deprecated.xml_set_object` | xml_set_object() is reported, but the xml_set_*_handler() calls with non-callable method-name strings or '' are not. |
@@ -772,18 +772,18 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.5/UPGRADING)
 | Opcache | The Opcache extension is now always built into the PHP binary and is always loaded. | Covered | `behavior.opcache_zend_extension` | zend_extension lines that load OPcache are reported. |
 | PCNTL | pcntl_exec() now throws ValueErrors when entries of the $args parameter contain null bytes. | Runtime only |  | Null bytes in pcntl_exec() args depend on runtime values. |
 | PCNTL | pcntl_exec() now throws ValueErrors when entries or keys of the $env_vars parameter contain null bytes. | Runtime only |  | Null bytes in pcntl_exec() env vars depend on runtime values. |
-| PCRE | The extension is compiled without semi-deprecated PCRE2_EXTRA_ALLOW_LOOKAROUND_BSK compile option. | Gap |  | Regex literal with \K inside a lookaround, e.g. `/(?=a\K)b/`, was tested and not reported. |
+| PCRE | The extension is compiled without semi-deprecated PCRE2_EXTRA_ALLOW_LOOKAROUND_BSK compile option. | Covered | `removed.regex_keep_in_lookaround` | Literal preg_*() patterns with \K inside a lookaround are reported. |
 | PDO | The constructor arguments set in conjunction with PDO::FETCH_CLASS now follow the usual CUFA (call_user_func_array) semantics. | Covered | `removed.fetch_class_named_args` | function f(PDOStatement $s) { $s->setFetchMode(PDO::FETCH_CLASS, 'X', ['name' => 1]); } is reported when the receiver's class is visible in the code. |
 | PDO | Attempting to call PDOStatement::setFetchMode during a call to PDO::fetch(), PDO::fetchObject(), PDO::fetchAll(), for example using tricks such as passing the statement object as a constructor… | Runtime only |  | Calling setFetchMode() during a fetch depends on runtime call flow. |
 | PDO | The value of the constants PDO::FETCH_GROUP, PDO::FETCH_UNIQUE, PDO::FETCH_CLASSTYPE, PDO::FETCH_PROPS_LATE, and PDO::FETCH_SERIALIZE have changed. | Runtime only |  | Changed constant values only matter if code hardcodes or persists the raw integers. |
 | PDO | A ValueError is now thrown if PDO::FETCH_PROPS_LATE is used with a fetch mode different than PDO::FETCH_CLASS, consistent with other fetch flags. | Covered | `removed.fetch_props_late_mode` | function f(PDOStatement $s) { $s->fetchAll(PDO::FETCH_ASSOC \| PDO::FETCH_PROPS_LATE); } is reported when the receiver's class is visible in the code. |
 | PDO | A ValueError is now thrown if PDO::FETCH_INTO is used as a fetch mode in PDO::fetchAll(), similar to PDO::FETCH_LAZY. | Covered | `removed.fetch_all_into` | function f(PDOStatement $s) { $s->fetchAll(PDO::FETCH_INTO); } is reported when the receiver's class is visible in the code. |
 | PDO_FIREBIRD | A ValueError is now thrown when trying to set a cursor name that is too long on a PDOStatement resulting from the Firebird driver. | Runtime only |  | Cursor name length depends on runtime values. |
-| Session | Attempting to write session data where $_SESSION has a key containing the pipe character will now emit a warning instead of silently failing. | Gap |  | Literal session key with a pipe `$_SESSION['a\|b'] = 1` was tested and not reported. |
+| Session | Attempting to write session data where $_SESSION has a key containing the pipe character will now emit a warning instead of silently failing. | Covered | `behavior.session_key_pipe` | $_SESSION keys containing \| are reported. |
 | SimpleXML | Passing an XPath expression that returns something other than a node set to SimpleXMLElement::xpath() will now emit a warning and return false, instead of silently failing and returning an empty… | Covered | `removed.xpath_non_node_set` | $xml = new SimpleXMLElement('&lt;a/>'); $xml->xpath('count(//a)') is reported when the receiver's class is visible in the code. |
 | SPL | ArrayObject no longer accepts enums, as modifying the $name or $value properties can break engine assumptions. | Gap |  | `new ArrayObject(Suit::H)` with an enum case was tested and not reported. |
 | SPL | SplFileObject::fwrite's parameter $length is now nullable. | Gap |  | Subclass override `fwrite(string $data, int $length = 0)` (now incompatible with ?int) was tested and not reported. |
-| Standard | Using a printf-family function with a formatter that did not specify the precision previously incorrectly reset the precision instead of treating it as a precision of 0. | Gap |  | Literal format strings without precision digits like `printf('%.f', 1.5)` were tested and not reported. |
+| Standard | Using a printf-family function with a formatter that did not specify the precision previously incorrectly reset the precision instead of treating it as a precision of 0. | Covered | `behavior.printf_bare_precision` | printf-family formats with a precision but no digits, such as %.f, are reported. |
 | SOAP | SoapClient::__doRequest() expects a new, optional $uriParserClass parameter as described in https://wiki.php.net/rfc/url_parsing_api#plugability. | Gap |  | SoapClient subclass overriding __doRequest() without the new $uriParserClass parameter was tested and not reported. |
 | Core | Trying to produce output (e.g. with `echo`) within a user output handler is deprecated. | Gap |  | `ob_start(function ($b) { echo 'x'; return $b; })` was tested and not reported. |
 | Core | Non-canonical cast names (boolean), (integer), (double), and (binary) have been deprecated, use (bool), (int), (float), and (string) respectively. | Covered | `deprecated.non_canonical_cast` | (boolean)/(integer)/(double)/(binary) casts are reported. |

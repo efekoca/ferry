@@ -212,8 +212,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Changes to string handling",
   "change": "Strings that contain hexadecimal numbers are no longer considered to be numeric and don't receive special treatment anymore.",
-  "status": "gap",
-  "note": "Literal hex numeric strings like is_numeric(\"0x123\") or \"0x123\" == \"291\" are not reported."
+  "status": "covered",
+  "note": "Hex strings such as '0x1A' passed to is_numeric() or compared with == are reported.",
+  "rules": [
+   "behavior.hex_numeric_string"
+  ]
  },
  {
   "version": "7.0",
@@ -615,16 +618,22 @@
   "section": "Backward Incompatible Changes",
   "ext": "OpenSSL",
   "change": "Removed the \"rsa_key_size\" SSL context option in favor of automatically setting the appropriate size given the negotiated crypto algorithm.",
-  "status": "gap",
-  "note": "'rsa_key_size' SSL context option in stream_context_create() is not reported."
+  "status": "covered",
+  "note": "rsa_key_size used as an array key is reported.",
+  "rules": [
+   "removed.ssl_context_option"
+  ]
  },
  {
   "version": "7.0",
   "section": "Backward Incompatible Changes",
   "ext": "OpenSSL",
   "change": "Removed \"CN_match\" and \"SNI_server_name\" SSL context options.",
-  "status": "gap",
-  "note": "'CN_match' and 'SNI_server_name' SSL context options are not reported."
+  "status": "covered",
+  "note": "CN_match and SNI_server_name used as array keys are reported.",
+  "rules": [
+   "removed.ssl_context_option"
+  ]
  },
  {
   "version": "7.0",
@@ -744,8 +753,11 @@
   "version": "7.0",
   "section": "Deprecated Functionality",
   "change": "The \"capture_session_meta\" SSL context option is now deprecated.",
-  "status": "gap",
-  "note": "'capture_session_meta' SSL context option is not reported."
+  "status": "covered",
+  "note": "capture_session_meta used as an array key is reported.",
+  "rules": [
+   "deprecated.ssl_capture_session_meta"
+  ]
  },
  {
   "version": "7.0",
@@ -902,8 +914,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Core",
   "change": "The allowed_classes element of the $options parameter of unserialize() is now strictly typed, i.e. if anything other than an array or a boolean is given, unserialize() returns FALSE and issues an…",
-  "status": "gap",
-  "note": "unserialize($s, ['allowed_classes' => 'Foo']) with a literal non-array/bool value is not reported."
+  "status": "covered",
+  "note": "A string or number given for allowed_classes is reported.",
+  "rules": [
+   "behavior.unserialize_allowed_classes_type"
+  ]
  },
  {
   "version": "7.1",
@@ -950,8 +965,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "OpenSSL",
   "change": "Dropped sslv2 stream.",
-  "status": "gap",
-  "note": "The literal 'sslv2://' stream transport in fopen()/stream_socket_client() is not reported."
+  "status": "covered",
+  "note": "Literal sslv2:// URLs are reported.",
+  "rules": [
+   "removed.sslv2_stream"
+  ]
  },
  {
   "version": "7.1",
@@ -1009,8 +1027,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Core",
   "change": "gettype() will now return \"resource (closed)\" instead of \"unknown type\" for closed resources.",
-  "status": "gap",
-  "note": "Comparing gettype($r) with the literal 'unknown type' is not reported."
+  "status": "covered",
+  "note": "Comparisons with the literal 'unknown type' are reported.",
+  "rules": [
+   "behavior.gettype_closed_resource"
+  ]
  },
  {
   "version": "7.2",
@@ -1442,8 +1463,11 @@
   "version": "7.3",
   "section": "Backward Incompatible Changes",
   "change": "Due to added support for named captures, mb_ereg_*() patterns using named captures will behave differently.",
-  "status": "gap",
-  "note": "mb_ereg() with a literal named-capture pattern '(?<name>...)' is not reported."
+  "status": "covered",
+  "note": "mb_ereg_*() with a literal pattern containing a named group is reported.",
+  "rules": [
+   "behavior.mb_ereg_named_capture"
+  ]
  },
  {
   "version": "7.3",
@@ -2588,8 +2612,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Core",
   "change": "data: stream wrappers are no longer writable, which matches the documented behavior.",
-  "status": "gap",
-  "note": "Not reported: writing to a literal data: URL, e.g. file_put_contents('data://text/plain,foo', 'x') or fopen('data:...', 'w')."
+  "status": "covered",
+  "note": "file_put_contents() and fopen() in a writing mode on a literal data: URL are reported.",
+  "rules": [
+   "removed.data_stream_write"
+  ]
  },
  {
   "version": "8.0",
@@ -3059,8 +3086,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Mbstring",
   "change": "The ISO_8859-* character encoding aliases have been replaced by ISO8859-* aliases for better interoperability with the iconv extension.",
-  "status": "gap",
-  "note": "Not reported: literal 'ISO_8859-1' / 'ISO_8859_1' encoding names in mb_convert_encoding() or mb_regex_encoding()."
+  "status": "covered",
+  "note": "ISO_8859-* and ISO8859_* names passed to mb_*() functions are reported.",
+  "rules": [
+   "removed.mbstring_iso_alias"
+  ]
  },
  {
   "version": "8.0",
@@ -3075,8 +3105,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "OCI8",
   "change": "The OCI-Lob class is now called OCILob, and the OCI-Collection class is now called OCICollection for name compliance enforced by PHP 8 arginfo type annotation tooling.",
-  "status": "gap",
-  "note": "Not reported: class name string checks such as get_class($l) === 'OCI-Lob'."
+  "status": "covered",
+  "note": "The literal class names 'OCI-Lob' and 'OCI-Collection' are reported.",
+  "rules": [
+   "behavior.oci_class_name"
+  ]
  },
  {
   "version": "8.0",
@@ -3191,8 +3224,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "PCRE",
   "change": "When passing invalid escape sequences they are no longer interpreted as literals.",
-  "status": "gap",
-  "note": "Not reported: a literal regex with the X modifier or invalid escape, e.g. preg_match('/\\i/X', $s)."
+  "status": "covered",
+  "note": "Literal preg_*() patterns with the X modifier or an unknown letter escape such as \\i are reported; PHP 8.0 rejects them.",
+  "rules": [
+   "removed.regex_invalid_escape"
+  ]
  },
  {
   "version": "8.0",
@@ -5019,8 +5055,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Standard",
   "change": "The range() function has had various changes:",
-  "status": "gap",
-  "note": "Mostly runtime, but literal range(1, 10, 0), range(1, 10, -1), range('', 'z') and range([1], 5) are not reported."
+  "status": "covered",
+  "note": "Literal range() calls with a step of 0, an empty string or an array boundary are reported.",
+  "rules": [
+   "removed.range_invalid"
+  ]
  },
  {
   "version": "8.3",
@@ -5444,11 +5483,13 @@
   "section": "Backward Incompatible Changes",
   "ext": "New warnings and exceptions",
   "change": "Standard: . round() now validates the value of the $mode parameter and throws a ValueError for invalid modes.",
-  "status": "partial",
-  "note": "Literal invalid round() modes and php_uname() modes are reported; a multi-byte str_getcsv() separator and a string allowed_classes are not.",
+  "status": "covered",
+  "note": "Literal invalid round() and php_uname() modes, CSV separators that aren't one character and a string allowed_classes are reported.",
   "rules": [
    "removed.round_invalid_mode",
-   "removed.php_uname_mode"
+   "removed.php_uname_mode",
+   "removed.csv_separator_length",
+   "behavior.unserialize_allowed_classes_type"
   ]
  },
  {
@@ -5621,8 +5662,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "PCRE",
   "change": "The bundled pcre2lib has been updated to version 10.44.",
-  "status": "gap",
-  "note": "Regex literal with `{,3}` quantifier (now a quantifier) in preg_match() was tested and not reported."
+  "status": "covered",
+  "note": "Literal preg_*() patterns containing {,n} are reported.",
+  "rules": [
+   "behavior.regex_empty_min_quantifier"
+  ]
  },
  {
   "version": "8.4",
@@ -5860,8 +5904,11 @@
   "section": "Deprecated Functionality",
   "ext": "Hash",
   "change": "Deprecated passing incorrect data types for options to ext/hash functions.",
-  "status": "gap",
-  "note": "Literal wrong option types like `hash('murmur3a', $d, false, ['seed' => 'abc'])` were tested and not reported."
+  "status": "covered",
+  "note": "A string seed option passed to hash functions is reported.",
+  "rules": [
+   "deprecated.hash_option_type"
+  ]
  },
  {
   "version": "8.4",
@@ -5961,8 +6008,11 @@
   "section": "Deprecated Functionality",
   "ext": "PDO_PGSQL",
   "change": "Using escaped question marks (??) inside dollar-quoted strings is deprecated.",
-  "status": "gap",
-  "note": "SQL literal with `??` inside `$$...$$` passed to a pgsql PDO prepare() was tested and not reported."
+  "status": "covered",
+  "note": "?? inside $$-quoted SQL passed to prepare(), query() or exec() is reported.",
+  "rules": [
+   "deprecated.pgsql_escaped_question"
+  ]
  },
  {
   "version": "8.4",
@@ -6113,8 +6163,11 @@
   "section": "Deprecated Functionality",
   "ext": "Standard",
   "change": "Unserializing strings using the uppercase 'S' tag is deprecated.",
-  "status": "gap",
-  "note": "Literal `unserialize('S:1:\"a\";')` with uppercase S tag was tested and not reported."
+  "status": "covered",
+  "note": "Literal serialized strings with the S: tag passed to unserialize() are reported.",
+  "rules": [
+   "deprecated.unserialize_upper_s"
+  ]
  },
  {
   "version": "8.4",
@@ -6435,8 +6488,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "PCRE",
   "change": "The extension is compiled without semi-deprecated PCRE2_EXTRA_ALLOW_LOOKAROUND_BSK compile option.",
-  "status": "gap",
-  "note": "Regex literal with \\K inside a lookaround, e.g. `/(?=a\\K)b/`, was tested and not reported."
+  "status": "covered",
+  "note": "Literal preg_*() patterns with \\K inside a lookaround are reported.",
+  "rules": [
+   "removed.regex_keep_in_lookaround"
+  ]
  },
  {
   "version": "8.5",
@@ -6500,8 +6556,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Session",
   "change": "Attempting to write session data where $_SESSION has a key containing the pipe character will now emit a warning instead of silently failing.",
-  "status": "gap",
-  "note": "Literal session key with a pipe `$_SESSION['a|b'] = 1` was tested and not reported."
+  "status": "covered",
+  "note": "$_SESSION keys containing | are reported.",
+  "rules": [
+   "behavior.session_key_pipe"
+  ]
  },
  {
   "version": "8.5",
@@ -6535,8 +6594,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Standard",
   "change": "Using a printf-family function with a formatter that did not specify the precision previously incorrectly reset the precision instead of treating it as a precision of 0.",
-  "status": "gap",
-  "note": "Literal format strings without precision digits like `printf('%.f', 1.5)` were tested and not reported."
+  "status": "covered",
+  "note": "printf-family formats with a precision but no digits, such as %.f, are reported.",
+  "rules": [
+   "behavior.printf_bare_precision"
+  ]
  },
  {
   "version": "8.5",
