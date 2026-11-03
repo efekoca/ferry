@@ -46,9 +46,11 @@ class OldReport
         $mail = imap_open('{localhost:993/imap/ssl}INBOX', 'user', 'secret');
         $spell = pspell_new('tr');
         $oracle = oci_connect('user', 'secret', 'db');
+        $statement = ociparse($oracle, 'SELECT 1 FROM dual');
+        curl_setopt($curl, CURLOPT_PIPELINING, CURLPIPE_HTTP1);
         $legacy = mssql_connect('db', 'user', 'secret');
         $sybase = sybase_connect('db', 'user', 'secret');
-        return array($ok, $mail, $spell, $oracle, $legacy, $sybase);
+        return array($ok, $mail, $spell, $oracle, $statement, $legacy, $sybase);
     }
 }
 

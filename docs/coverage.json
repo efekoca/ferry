@@ -389,8 +389,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Other language changes",
   "change": "Removed support for #-style comments in ini files.",
-  "status": "gap",
-  "note": "A '# comment' line in php.ini is not reported."
+  "status": "covered",
+  "note": "Lines starting with # in php.ini and .user.ini are reported.",
+  "rules": [
+   "removed.ini_hash_comment"
+  ]
  },
  {
   "version": "7.0",
@@ -601,8 +604,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "libxml",
   "change": "Removed opcache.load_comments configuration directive.",
-  "status": "gap",
-  "note": "opcache.load_comments=0 in php.ini is not reported."
+  "status": "covered",
+  "note": "opcache.load_comments is reported in ini files and ini_set().",
+  "rules": [
+   "removed.builtin_ini"
+  ]
  },
  {
   "version": "7.0",
@@ -708,8 +714,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "XSL",
   "change": "Removed xsl.security_prefs ini option.",
-  "status": "gap",
-  "note": "xsl.security_prefs in php.ini or ini_set('xsl.security_prefs', ...) is not reported."
+  "status": "covered",
+  "note": "xsl.security_prefs is reported in ini files and ini_set().",
+  "rules": [
+   "removed.builtin_ini"
+  ]
  },
  {
   "version": "7.0",
@@ -752,8 +761,11 @@
   "version": "7.0",
   "section": "Changes to INI File Handling",
   "change": "Removed always_populate_raw_post_data ini directive.",
-  "status": "gap",
-  "note": "always_populate_raw_post_data in php.ini or ini_set() is not reported."
+  "status": "covered",
+  "note": "always_populate_raw_post_data is reported in ini files and ini_set().",
+  "rules": [
+   "removed.builtin_ini"
+  ]
  },
  {
   "version": "7.1",
@@ -1566,8 +1578,11 @@
   "version": "7.3",
   "section": "Deprecated Functionality",
   "change": "The pdo_odbc.db2_instance_name ini setting has been formally deprecated.",
-  "status": "gap",
-  "note": "pdo_odbc.db2_instance_name in php.ini is not reported."
+  "status": "covered",
+  "note": "pdo_odbc.db2_instance_name is reported in ini files and ini_set().",
+  "rules": [
+   "removed.builtin_ini"
+  ]
  },
  {
   "version": "7.3",
@@ -1596,8 +1611,11 @@
   "version": "7.3",
   "section": "Changes to INI File Handling",
   "change": "This INI directive has been removed.",
-  "status": "gap",
-  "note": "birdstep.max_links in php.ini is not reported."
+  "status": "covered",
+  "note": "birdstep.max_links is reported in ini files and ini_set().",
+  "rules": [
+   "removed.builtin_ini"
+  ]
  },
  {
   "version": "7.3",
@@ -1700,8 +1718,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Curl",
   "change": "Using CURLPIPE_HTTP1 is deprecated, and is no longer supported as of cURL 7.62.0.",
-  "status": "gap",
-  "note": "CURLPIPE_HTTP1 is not reported."
+  "status": "covered",
+  "note": "CURLPIPE_HTTP1 is reported.",
+  "rules": [
+   "deprecated.curlpipe_http1"
+  ]
  },
  {
   "version": "7.4",
@@ -1751,8 +1772,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "MySQLi",
   "change": "The embedded server functionality has been removed.",
-  "status": "gap",
-  "note": "mysqli_embedded_server_start() and mysqli_embedded_server_end() are not reported."
+  "status": "covered",
+  "note": "mysqli_embedded_server_start() and mysqli_embedded_server_end() are reported.",
+  "rules": [
+   "removed.mysqli_embedded_server"
+  ]
  },
  {
   "version": "7.4",
@@ -1990,8 +2014,11 @@
   "section": "Deprecated Functionality",
   "ext": "COM",
   "change": "Importing type libraries with case-insensitive constant registering has been deprecated.",
-  "status": "gap",
-  "note": "com_load_typelib('Word.Application', false) with case-insensitive registration is not reported."
+  "status": "covered",
+  "note": "com_load_typelib() with false as the second argument is reported.",
+  "rules": [
+   "deprecated.com_typelib_case_insensitive"
+  ]
  },
  {
   "version": "7.4",
@@ -2062,8 +2089,11 @@
   "section": "Deprecated Functionality",
   "ext": "Socket",
   "change": "The AI_IDN_ALLOW_UNASSIGNED and AI_IDN_USE_STD3_ASCII_RULES flags for socket_addrinfo_lookup() are deprecated, due to an upstream deprecation in glibc.",
-  "status": "gap",
-  "note": "AI_IDN_ALLOW_UNASSIGNED and AI_IDN_USE_STD3_ASCII_RULES are not reported."
+  "status": "covered",
+  "note": "AI_IDN_ALLOW_UNASSIGNED and AI_IDN_USE_STD3_ASCII_RULES are reported.",
+  "rules": [
+   "removed.ai_idn_constant"
+  ]
  },
  {
   "version": "7.4",
@@ -2668,8 +2698,12 @@
   "section": "Backward Incompatible Changes",
   "ext": "COM",
   "change": "Removed the ability to import case-insensitive constants from type libraries.",
-  "status": "gap",
-  "note": "Not reported: com_load_typelib('Word.Application', false) or com.autoregister_casesensitive = 0 in php.ini."
+  "status": "covered",
+  "note": "com_load_typelib(..., false) and com.autoregister_casesensitive are reported.",
+  "rules": [
+   "deprecated.com_typelib_case_insensitive",
+   "removed.builtin_ini"
+  ]
  },
  {
   "version": "8.0",
@@ -3043,19 +3077,23 @@
   "section": "Backward Incompatible Changes",
   "ext": "OCI8",
   "change": "Several alias functions have been marked as deprecated.",
-  "status": "gap",
-  "note": "Not reported: deprecated OCI8 aliases without an oci_ prefix, e.g. ocilogon(), ociparse(), ociexecute()."
+  "status": "covered",
+  "note": "The OCI8 aliases without the oci_ prefix, such as ocilogon() and ociparse(), are reported.",
+  "rules": [
+   "deprecated.oci8_alias"
+  ]
  },
  {
   "version": "8.0",
   "section": "Backward Incompatible Changes",
   "ext": "OCI8",
   "change": "oci_internal_debug() and its alias ociinternaldebug() have been removed.",
-  "status": "partial",
+  "status": "covered",
   "rules": [
+   "deprecated.oci8_alias",
    "removed.oci8"
   ],
-  "note": "oci_internal_debug() is reported, but its alias ociinternaldebug() is not."
+  "note": "oci_internal_debug() and its alias ociinternaldebug() are reported."
  },
  {
   "version": "8.0",
@@ -3182,8 +3220,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "PDO_ODBC",
   "change": "The php.ini directive pdo_odbc.db2_instance_name has been removed",
-  "status": "gap",
-  "note": "Not reported: pdo_odbc.db2_instance_name = db2inst1 in php.ini."
+  "status": "covered",
+  "note": "pdo_odbc.db2_instance_name is reported in ini files and ini_set().",
+  "rules": [
+   "removed.builtin_ini"
+  ]
  },
  {
   "version": "8.0",
@@ -3279,8 +3320,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Sockets",
   "change": "The deprecated AI_IDN_ALLOW_UNASSIGNED and AI_IDN_USE_STD3_ASCII_RULES flags for socket_addrinfo_lookup() have been removed.",
-  "status": "gap",
-  "note": "Not reported: AI_IDN_ALLOW_UNASSIGNED and AI_IDN_USE_STD3_ASCII_RULES constants."
+  "status": "covered",
+  "note": "AI_IDN_ALLOW_UNASSIGNED and AI_IDN_USE_STD3_ASCII_RULES are reported.",
+  "rules": [
+   "removed.ai_idn_constant"
+  ]
  },
  {
   "version": "8.0",
@@ -4128,8 +4172,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "MySQLi",
   "change": "The MYSQLI_STMT_ATTR_UPDATE_MAX_LENGTH option no longer has an effect.",
-  "status": "gap",
-  "note": "Not reported: mysqli_stmt_attr_set($s, MYSQLI_STMT_ATTR_UPDATE_MAX_LENGTH, true); the constant no longer has an effect."
+  "status": "covered",
+  "note": "MYSQLI_STMT_ATTR_UPDATE_MAX_LENGTH is reported.",
+  "rules": [
+   "deprecated.mysqli_update_max_length"
+  ]
  },
  {
   "version": "8.1",
@@ -5127,8 +5174,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Core",
   "change": "The type of PHP_DEBUG and PHP_ZTS constants changed to bool.",
-  "status": "gap",
-  "note": "PHP_DEBUG/PHP_ZTS are now bool; literal comparisons like `PHP_DEBUG === 1` were tested and not reported."
+  "status": "covered",
+  "note": "Strict comparisons of PHP_DEBUG or PHP_ZTS with a number are reported.",
+  "rules": [
+   "behavior.php_debug_bool"
+  ]
  },
  {
   "version": "8.4",
@@ -5500,8 +5550,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Opcache",
   "change": "The JIT config defaults changed from opcache.jit=tracing and opcache.jit_buffer_size=0 to opcache.jit=disable and opcache.jit_buffer_size=64M, respectively.",
-  "status": "gap",
-  "note": "php.ini setting opcache.jit_buffer_size without opcache.jit (JIT now silently stays disabled) was tested and not reported."
+  "status": "covered",
+  "note": "An ini file that sets opcache.jit_buffer_size without opcache.jit is reported.",
+  "rules": [
+   "behavior.opcache_jit_default"
+  ]
  },
  {
   "version": "8.4",
@@ -6298,8 +6351,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Opcache",
   "change": "The Opcache extension is now always built into the PHP binary and is always loaded.",
-  "status": "gap",
-  "note": "php.ini `zend_extension=opcache.so` (now emits a warning since opcache is built in) was tested and not reported."
+  "status": "covered",
+  "note": "zend_extension lines that load OPcache are reported.",
+  "rules": [
+   "behavior.opcache_zend_extension"
+  ]
  },
  {
   "version": "8.5",

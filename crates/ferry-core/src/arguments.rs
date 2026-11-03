@@ -316,6 +316,15 @@ pub const ARGUMENTS: &[ArgRule] = &[
             "Converting a string with invalid digits raises a deprecation since PHP 7.4; those digits are ignored.",
         ),
     )),
+    arg(&["com_load_typelib"], &[False(1)], rule(
+        "deprecated.com_typelib_case_insensitive",
+        Text::new("Büyük/küçük harfe duyarsız typelib", "Case-insensitive type library"),
+        D, (7, 4), tx("argümanı silin", "remove the argument"),
+        Text::new(
+            "Tür kütüphanesini büyük/küçük harfe duyarsız kaydetmek PHP 7.4'te kullanımdan kalktı ve 8.0'da kaldırıldı.",
+            "Registering a type library case-insensitively was deprecated in PHP 7.4 and removed in 8.0.",
+        ),
+    )),
     arg(&["imagecropauto"], &[NumIs(1, -1.0)], rule(
         "removed.imagecropauto_default",
         Text::new("imagecropauto() modu -1", "imagecropauto() mode -1"),

@@ -15,18 +15,18 @@ The data lives in `docs/coverage.json`; this page is generated from it with
 
 | Version | Covered | Partial | Gap | Runtime only | Not applicable | Total |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| [7.0](#php-70) | 31 | 3 | 15 | 14 | 19 | 82 |
+| [7.0](#php-70) | 35 | 3 | 11 | 14 | 19 | 82 |
 | [7.1](#php-71) | 4 | 0 | 7 | 13 | 4 | 28 |
 | [7.2](#php-72) | 21 | 1 | 3 | 5 | 4 | 34 |
-| [7.3](#php-73) | 9 | 0 | 7 | 12 | 6 | 34 |
-| [7.4](#php-74) | 24 | 1 | 12 | 25 | 3 | 65 |
-| [8.0](#php-80) | 101 | 6 | 18 | 48 | 11 | 184 |
-| [8.1](#php-81) | 36 | 2 | 16 | 6 | 2 | 62 |
+| [7.3](#php-73) | 11 | 0 | 5 | 12 | 6 | 34 |
+| [7.4](#php-74) | 28 | 1 | 8 | 25 | 3 | 65 |
+| [8.0](#php-80) | 106 | 5 | 14 | 48 | 11 | 184 |
+| [8.1](#php-81) | 37 | 2 | 15 | 6 | 2 | 62 |
 | [8.2](#php-82) | 10 | 0 | 1 | 7 | 0 | 18 |
 | [8.3](#php-83) | 15 | 1 | 7 | 10 | 2 | 35 |
-| [8.4](#php-84) | 47 | 8 | 17 | 22 | 5 | 99 |
-| [8.5](#php-85) | 33 | 0 | 20 | 22 | 4 | 79 |
-| **All** | **331** | **22** | **123** | **184** | **60** | **720** |
+| [8.4](#php-84) | 49 | 8 | 15 | 22 | 5 | 99 |
+| [8.5](#php-85) | 34 | 0 | 19 | 22 | 4 | 79 |
+| **All** | **350** | **21** | **105** | **184** | **60** | **720** |
 
 ## PHP 7.0
 
@@ -76,7 +76,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-7.0/UPGRADING)
 | Other language changes | Removed ASP (&lt;%) and script (&lt;script language=php>) tags. | Partial | `removed.script_tag` | &lt;script language="php"> in HTML is reported; ASP tags (&lt;% %>) are not, because the same markers appear in other template languages. |
 | Other language changes | Removed support for assigning the result of new by reference. | Covered | `removed.assign_new_by_ref` | $a = &new Foo is reported. |
 | Other language changes | Removed support for scoped calls to non-static methods from an incompatible $this context. | Covered | `removed.static_call_to_instance_method` | Scoped call A::test() from an incompatible context is reported. |
-| Other language changes | Removed support for #-style comments in ini files. | Gap |  | A '# comment' line in php.ini is not reported. |
+| Other language changes | Removed support for #-style comments in ini files. | Covered | `removed.ini_hash_comment` | Lines starting with # in php.ini and .user.ini are reported. |
 | Other language changes | $HTTP_RAW_POST_DATA is no longer available. | Covered | `removed.magic_variable` | $HTTP_RAW_POST_DATA is reported. |
 | Standard library changes | substr() now returns an empty string instead of FALSE when the truncation happens on boundaries. | Gap |  | substr(...) === false checks are not reported. |
 | Standard library changes | call_user_method() and call_user_method_array() no longer exists. | Covered | `removed.call_user_method`<br>`removed.call_user_method_array` | call_user_method() and call_user_method_array() are reported. |
@@ -99,7 +99,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-7.0/UPGRADING)
 | libxml | SessionUpdateTimestampHandlerInterface is added. | Not applicable |  | New interface added. |
 | libxml | session.lazy_write(default=On) INI setting enables only write session data when session data is updated. | Not applicable |  | New INI setting with a compatible default. |
 | libxml | session_regenerate_id() saves current $_SESSION before creating new session ID. | Runtime only |  | Session save timing on regeneration only shows at runtime. |
-| libxml | Removed opcache.load_comments configuration directive. | Gap |  | opcache.load_comments=0 in php.ini is not reported. |
+| libxml | Removed opcache.load_comments configuration directive. | Covered | `removed.builtin_ini` | opcache.load_comments is reported in ini files and ini_set(). |
 | OpenSSL | Removed the "rsa_key_size" SSL context option in favor of automatically setting the appropriate size given the negotiated crypto algorithm. | Gap |  | 'rsa_key_size' SSL context option in stream_context_create() is not reported. |
 | OpenSSL | Removed "CN_match" and "SNI_server_name" SSL context options. | Gap |  | 'CN_match' and 'SNI_server_name' SSL context options are not reported. |
 | PCRE | Removed support for /e (PREG_REPLACE_EVAL) modifier. | Covered | `removed.preg_eval_modifier` | preg_replace('/a/e', ...) is reported. |
@@ -110,12 +110,12 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-7.0/UPGRADING)
 | JSON | Calling json_decode with 1st argument equal to empty PHP string or value that after casting to string is empty string (NULL, FALSE) results in JSON syntax error. | Runtime only |  | Depends on json_decode() input being empty at runtime. |
 | Stream | Removed set_socket_blocking() in favor of its alias stream_set_blocking(). | Covered | `removed.set_socket_blocking` | set_socket_blocking() is reported. |
 | XML | xml_set_object() now requires to manually unset the $parser when finished, to avoid memory leaks. | Covered | `deprecated.xml_set_object` | xml_set_object() is reported (via its 8.4 deprecation rule). |
-| XSL | Removed xsl.security_prefs ini option. | Gap |  | xsl.security_prefs in php.ini or ini_set('xsl.security_prefs', ...) is not reported. |
+| XSL | Removed xsl.security_prefs ini option. | Covered | `removed.builtin_ini` | xsl.security_prefs is reported in ini files and ini_set(). |
 | Deprecated Functionality | PHP 4 style constructors, where the constructor name is the same as the class name, are now deprecated. | Covered | `removed.php4_constructor` | class Foo { function Foo() {} } is reported. |
 | Deprecated Functionality | Static calls to non-static methods are now deprecated. | Covered | `removed.static_call_to_instance_method` | A::m() on a non-static method is reported. |
 | Deprecated Functionality | The "capture_session_meta" SSL context option is now deprecated. | Gap |  | 'capture_session_meta' SSL context option is not reported. |
 | Changes to INI File Handling | Removed asp_tags ini directive. | Covered | `removed.ini_setting` | asp_tags=On in php.ini and .htaccess is reported. |
-| Changes to INI File Handling | Removed always_populate_raw_post_data ini directive. | Gap |  | always_populate_raw_post_data in php.ini or ini_set() is not reported. |
+| Changes to INI File Handling | Removed always_populate_raw_post_data ini directive. | Covered | `removed.builtin_ini` | always_populate_raw_post_data is reported in ini files and ini_set(). |
 
 ## PHP 7.1
 
@@ -228,10 +228,10 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-7.3/UPGRADING)
 | Deprecated Functionality | image2wbmp() has been deprecated. | Covered | `removed.image2wbmp` | image2wbmp() is reported. |
 | Deprecated Functionality | Usage of the Normalizer::NONE form throws a deprecation warning, if PHP is linked with ICU >= 56. | Covered | `removed.builtin_class_constant` | Normalizer::NONE is reported. |
 | Deprecated Functionality | The following undocumented mbereg_*() aliases have been deprecated. | Covered | `removed.mbereg`<br>`removed.mbregex_encoding`<br>`removed.mbsplit` | mbereg(), mbregex_encoding(), mbsplit() and mbereg_search_init() are reported. |
-| Deprecated Functionality | The pdo_odbc.db2_instance_name ini setting has been formally deprecated. | Gap |  | pdo_odbc.db2_instance_name in php.ini is not reported. |
+| Deprecated Functionality | The pdo_odbc.db2_instance_name ini setting has been formally deprecated. | Covered | `removed.builtin_ini` | pdo_odbc.db2_instance_name is reported in ini files and ini_set(). |
 | Deprecated Functionality | Passing a non-string needle to string search functions is deprecated. | Covered | `behavior.int_as_char_code` | strpos($h, 65) is reported. |
 | Deprecated Functionality | The fgetss() function and the string.strip_tags stream filter have been deprecated. | Covered | `removed.fgetss`<br>`removed.gzgetss`<br>`removed.builtin_method`<br>`removed.strip_tags_filter` | fgetss(), gzgetss(), SplFileObject::fgetss() and the string.strip_tags stream filter are reported. |
-| Changes to INI File Handling | This INI directive has been removed. | Gap |  | birdstep.max_links in php.ini is not reported. |
+| Changes to INI File Handling | This INI directive has been removed. | Covered | `removed.builtin_ini` | birdstep.max_links is reported in ini files and ini_set(). |
 | Changes to INI File Handling | This INI directive has been removed. | Covered | `removed.builtin_ini` | opcache.inherited_hack is reported in php.ini, .user.ini, .htaccess and ini_set(). |
 
 ## PHP 7.4
@@ -250,13 +250,13 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-7.4/UPGRADING)
 | Core | Previously get_declared_classes() always returned parent classes before child classes. | Runtime only |  | Depends on order of get_declared_classes() at runtime. |
 | BCMath | BCMath functions will now warn if a non well-formed number is passed, such as "32foo". | Runtime only |  | Depends on malformed numeric values at runtime. |
 | Curl | Attempting to serialize a CURLFile class will now generate an exception. | Runtime only |  | Depends on serializing CURLFile objects at runtime. |
-| Curl | Using CURLPIPE_HTTP1 is deprecated, and is no longer supported as of cURL 7.62.0. | Gap |  | CURLPIPE_HTTP1 is not reported. |
+| Curl | Using CURLPIPE_HTTP1 is deprecated, and is no longer supported as of cURL 7.62.0. | Covered | `deprecated.curlpipe_http1` | CURLPIPE_HTTP1 is reported. |
 | Curl | The $version parameter of curl_version() is deprecated. | Covered | `removed.builtin_arity` | curl_version(5) with an argument is reported. |
 | Date | Calling var_dump() or similar on a DateTime(Immutable) instance will no longer leave behind accessible properties on the object. | Runtime only |  | Depends on var_dump side effects at runtime. |
 | Date | Comparison of DateInterval objects (using ==, &lt; and so on) will now generate a warning and always return false. | Runtime only |  | Depends on operand types being DateInterval at runtime. |
 | Date | As of PHP 7.4.4, the value of the $childNodes property of DOMDocument, DOMNode, DOMProcessingInstruction, DOMComment, DOMText, DOMCdataSection and DOMNotation is now an empty DOMNodeList instead… | Runtime only |  | Depends on DOM objects at runtime. |
 | Intl | The default parameter value of idn_to_ascii() and idn_to_utf8() is now INTL_IDNA_VARIANT_UTS46 instead of the deprecated INTL_IDNA_VARIANT_2003. | Gap |  | idn_to_ascii('x') / idn_to_utf8('x') relying on the changed default variant are not reported. |
-| MySQLi | The embedded server functionality has been removed. | Gap |  | mysqli_embedded_server_start() and mysqli_embedded_server_end() are not reported. |
+| MySQLi | The embedded server functionality has been removed. | Covered | `removed.mysqli_embedded_server` | mysqli_embedded_server_start() and mysqli_embedded_server_end() are reported. |
 | MySQLi | The undocumented mysqli::$stat property has been removed in favor of mysqli::stat(). | Gap |  | $mysqli->stat property access on a new mysqli() is not reported. |
 | Openssl | The openssl_random_pseudo_bytes() function will now throw an exception in error situations, similar to random_bytes(). | Runtime only |  | Depends on the requested length and entropy at runtime. |
 | Pcntl | The $restart_syscalls flag for pcntl_signal() will now be respected for SIGALARM. | Runtime only |  | Signal restart behavior at runtime. |
@@ -284,14 +284,14 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-7.4/UPGRADING)
 | Core | Unbinding $this of a non-static closure that uses $this is deprecated. | Runtime only |  | Depends on closure rebinding at runtime. |
 | Core | Using "parent" inside a class without a parent is deprecated, and will throw a compile-time error in the future. | Covered | `removed.parent_without_parent` | parent::f() in a class without a parent is reported. |
 | Core | The allow_url_include ini directive is deprecated. | Covered | `deprecated.ini_setting` | allow_url_include=On in php.ini is reported. |
-| COM | Importing type libraries with case-insensitive constant registering has been deprecated. | Gap |  | com_load_typelib('Word.Application', false) with case-insensitive registration is not reported. |
+| COM | Importing type libraries with case-insensitive constant registering has been deprecated. | Covered | `deprecated.com_typelib_case_insensitive` | com_load_typelib() with false as the second argument is reported. |
 | Filter | FILTER_SANITIZE_MAGIC_QUOTES is deprecated, use FILTER_SANITIZE_ADD_SLASHES instead. | Covered | `removed.filter_sanitize_magic_quotes` | FILTER_SANITIZE_MAGIC_QUOTES is reported. |
 | Mbstring | Passing a non-string pattern to mb_ereg_replace() is deprecated. | Covered | `behavior.int_as_char_code` | mb_ereg_replace(65, 'b', $s) is reported. |
 | Mbstring | Passing the encoding as 3rd parameter to mb_strrpos() is deprecated. | Covered | `removed.mb_strrpos_encoding` | mb_strrpos($h, $n, 'UTF-8') is reported. |
 | LDAP | ldap_control_paged_result_response and ldap_control_paged_result are deprecated. | Covered | `removed.ldap_control_paged_result`<br>`removed.ldap_control_paged_result_response` | ldap_control_paged_result() and ldap_control_paged_result_response() are reported. |
 | Reflection | Calls to ReflectionType::__toString() now generate a deprecation notice. | Gap |  | (string) $method->getReturnType() / ReflectionType::__toString() is not reported. |
 | Reflection | The export() methods on all Reflection classes are deprecated. | Covered | `removed.reflection_export` | ReflectionClass::export() and ReflectionFunction::export() are reported. |
-| Socket | The AI_IDN_ALLOW_UNASSIGNED and AI_IDN_USE_STD3_ASCII_RULES flags for socket_addrinfo_lookup() are deprecated, due to an upstream deprecation in glibc. | Gap |  | AI_IDN_ALLOW_UNASSIGNED and AI_IDN_USE_STD3_ASCII_RULES are not reported. |
+| Socket | The AI_IDN_ALLOW_UNASSIGNED and AI_IDN_USE_STD3_ASCII_RULES flags for socket_addrinfo_lookup() are deprecated, due to an upstream deprecation in glibc. | Covered | `removed.ai_idn_constant` | AI_IDN_ALLOW_UNASSIGNED and AI_IDN_USE_STD3_ASCII_RULES are reported. |
 | Standard | Passing invalid characters to ''base_convert()'', ''bindec()'', ''octdec()'' and ''hexdec()'' will now generate a deprecation notice. | Partial | `deprecated.invalid_digits` | bindec(), hexdec() and octdec() with literal invalid digits are reported; base_convert() is not. |
 | Standard | Using array_key_exists() on objects is deprecated. | Gap |  | array_key_exists('k', $this) or on a new stdClass object is not reported. |
 | Standard | The is_real() function is deprecated, use is_float() instead. | Covered | `removed.is_real` | is_real() is reported. |
@@ -361,7 +361,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.0/UPGRADING)
 | Core | Numeric string handling has been altered to be more intuitive and less error-prone. | Runtime only |  | Numeric string handling depends on runtime string values. |
 | Core | Magic Methods will now have their arguments and return types checked if they have them declared. | Covered | `removed.magic_method_signature` | Magic methods whose declared parameter or return types don't match what PHP expects, such as __get(int $name) or __clone(): int, are reported. |
 | Core | call_user_func_array() array keys will now be interpreted as parameter names, instead of being silently ignored. | Gap |  | Not reported: call_user_func_array('f', ['a' => 1, 'b' => 2]) with literal string keys. |
-| COM | Removed the ability to import case-insensitive constants from type libraries. | Gap |  | Not reported: com_load_typelib('Word.Application', false) or com.autoregister_casesensitive = 0 in php.ini. |
+| COM | Removed the ability to import case-insensitive constants from type libraries. | Covered | `deprecated.com_typelib_case_insensitive`<br>`removed.builtin_ini` | com_load_typelib(..., false) and com.autoregister_casesensitive are reported. |
 | Curl | CURLOPT_POSTFIELDS no longer accepts objects as arrays. | Runtime only |  | Whether CURLOPT_POSTFIELDS receives an object depends on the runtime value. |
 | Date | mktime() and gmmktime() now require at least one argument. | Covered | `removed.builtin_arity` | mktime() and gmmktime() with no arguments are reported. |
 | dom | Remove unimplemented classes from ext/dom that had no behavior and contained test data. | Covered | `removed.builtin_class` | new DOMConfiguration() is reported; type hints/instanceof on these classes do not fail at runtime. |
@@ -397,8 +397,8 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.0/UPGRADING)
 | Mbstring | The ISO_8859-* character encoding aliases have been replaced by ISO8859-* aliases for better interoperability with the iconv extension. | Gap |  | Not reported: literal 'ISO_8859-1' / 'ISO_8859_1' encoding names in mb_convert_encoding() or mb_regex_encoding(). |
 | Mbstring | mb_ereg() and mb_eregi() will now return boolean true on a successful match. | Runtime only |  | Return value change of mb_ereg() only matters for runtime use of the result. |
 | OCI8 | The OCI-Lob class is now called OCILob, and the OCI-Collection class is now called OCICollection for name compliance enforced by PHP 8 arginfo type annotation tooling. | Gap |  | Not reported: class name string checks such as get_class($l) === 'OCI-Lob'. |
-| OCI8 | Several alias functions have been marked as deprecated. | Gap |  | Not reported: deprecated OCI8 aliases without an oci_ prefix, e.g. ocilogon(), ociparse(), ociexecute(). |
-| OCI8 | oci_internal_debug() and its alias ociinternaldebug() have been removed. | Partial | `removed.oci8` | oci_internal_debug() is reported, but its alias ociinternaldebug() is not. |
+| OCI8 | Several alias functions have been marked as deprecated. | Covered | `deprecated.oci8_alias` | The OCI8 aliases without the oci_ prefix, such as ocilogon() and ociparse(), are reported. |
+| OCI8 | oci_internal_debug() and its alias ociinternaldebug() have been removed. | Covered | `deprecated.oci8_alias`<br>`removed.oci8` | oci_internal_debug() and its alias ociinternaldebug() are reported. |
 | ODBC | odbc_connect() no longer reuses persistent connections. | Not applicable |  | Connection pooling behavior of odbc_connect(); no source change required. |
 | ODBC | The unused flags parameter of odbc_exec() has been removed. | Covered | `removed.builtin_arity` | odbc_exec($c, $sql, 1) with the flags argument is reported. |
 | OpenSSL | openssl_x509_read() and openssl_csr_sign() will now return an OpenSSLCertificate object rather than a resource. | Partial | `removed.resource_check` | is_resource() on openssl_x509_read() is reported, but on openssl_csr_sign() it is not. |
@@ -411,7 +411,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.0/UPGRADING)
 | PDO | The default error handling mode has been changed from "silent" to "exceptions". | Runtime only |  | Whether code relied on silent PDO errors depends on runtime query failures and error handling flow. |
 | PDO | The signatures of some PDO methods have changed: | Covered | `removed.incompatible_override` | Subclasses overriding PDO::query() and PDOStatement::setFetchMode() with old signatures are reported. |
 | PDO MySQL | PDO::inTransaction() now reports the actual transaction state of the connection, rather than an approximation maintained by PDO. | Runtime only |  | inTransaction() result depends on runtime transaction state. |
-| PDO_ODBC | The php.ini directive pdo_odbc.db2_instance_name has been removed | Gap |  | Not reported: pdo_odbc.db2_instance_name = db2inst1 in php.ini. |
+| PDO_ODBC | The php.ini directive pdo_odbc.db2_instance_name has been removed | Covered | `removed.builtin_ini` | pdo_odbc.db2_instance_name is reported in ini files and ini_set(). |
 | pgsql | The deprecated pg_connect() syntax using multiple parameters instead of a connection string is no longer supported. | Covered | `removed.builtin_arity` | pg_connect() with five separate parameters is reported. |
 | pgsql | The deprecated pg_lo_import() and pg_lo_export() signature that passes the connection as the last argument is no longer supported. | Runtime only |  | Old vs new pg_lo_import()/pg_lo_export() argument order is indistinguishable when both arguments are variables. |
 | pgsql | pg_fetch_all() will now return an empty array instead of false for result sets with zero rows. | Runtime only |  | pg_fetch_all() result checks against false depend on runtime result sets. |
@@ -422,7 +422,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.0/UPGRADING)
 | Reflection | The following methods can now return information about default values of parameters of internal functions: | Not applicable |  | New capability for internal functions; existing code is unaffected. |
 | Reflection | ReflectionMethod::isConstructor() and ReflectionMethod::isDestructor() now also return true for `__construct` and `__destruct` methods of interfaces. | Runtime only |  | Return value change of isConstructor()/isDestructor() depends on the reflected method at runtime. |
 | Reflection | ReflectionType::isBuiltin() method has been moved to ReflectionNamedType. | Runtime only |  | Whether isBuiltin() is called on a ReflectionUnionType depends on the runtime type object. |
-| Sockets | The deprecated AI_IDN_ALLOW_UNASSIGNED and AI_IDN_USE_STD3_ASCII_RULES flags for socket_addrinfo_lookup() have been removed. | Gap |  | Not reported: AI_IDN_ALLOW_UNASSIGNED and AI_IDN_USE_STD3_ASCII_RULES constants. |
+| Sockets | The deprecated AI_IDN_ALLOW_UNASSIGNED and AI_IDN_USE_STD3_ASCII_RULES flags for socket_addrinfo_lookup() have been removed. | Covered | `removed.ai_idn_constant` | AI_IDN_ALLOW_UNASSIGNED and AI_IDN_USE_STD3_ASCII_RULES are reported. |
 | Sockets | socket_create(), socket_create_listen(), socket_accept(), socket_import_stream(), socket_addrinfo_connect(), socket_addrinfo_bind(), and socket_wsaprotocol_info_import() will now return a Socket… | Partial | `removed.resource_check` | is_resource() on socket_create() is reported, but on socket_import_stream() and socket_addrinfo_connect() it is not. |
 | Sockets | socket_addrinfo_lookup() will now return an array of AddressInfo objects rather than resources. | Runtime only |  | is_resource() checks on socket_addrinfo_lookup() array elements depend on data flow through arrays. |
 | SPL | SplFileObject::fgetss() has been removed. | Covered | `removed.builtin_method` | SplFileObject::fgetss() on a new SplFileObject is reported. |
@@ -514,7 +514,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.1/UPGRADING)
 | LDAP | The LDAP functions now accept and return, respectively, LDAP\Result objects instead of "ldap result" resources. | Gap |  | Not reported: $r = ldap_search($l, 'dc', 'x'); if (is_resource($r)) {} (only ldap_connect handles are tracked). |
 | LDAP | The LDAP functions now accept and return, respectively, LDAP\ResultEntry objects instead of "ldap result entry" resources. | Gap |  | Not reported: $e = ldap_first_entry($l, $r); if (is_resource($e)) {}. |
 | MySQLi | mysqli_fetch_fields() and mysqli_fetch_field_direct() will now always return zero for max_length. | Gap |  | Not reported: mysqli_fetch_field_direct($r, 0)->max_length (or ->max_length on mysqli_fetch_fields() entries) is now always 0. |
-| MySQLi | The MYSQLI_STMT_ATTR_UPDATE_MAX_LENGTH option no longer has an effect. | Gap |  | Not reported: mysqli_stmt_attr_set($s, MYSQLI_STMT_ATTR_UPDATE_MAX_LENGTH, true); the constant no longer has an effect. |
+| MySQLi | The MYSQLI_STMT_ATTR_UPDATE_MAX_LENGTH option no longer has an effect. | Covered | `deprecated.mysqli_update_max_length` | MYSQLI_STMT_ATTR_UPDATE_MAX_LENGTH is reported. |
 | MySQLi | The MYSQLI_STORE_RESULT_COPY_DATA option no longer has an effect. | Covered | `deprecated.mysqli_store_result_copy_data` | MYSQLI_STORE_RESULT_COPY_DATA constant use is reported. |
 | MySQLi | The default error handling mode has been changed from "silent" to "exceptions". | Gap |  | Not reported: mysqli_connect()/mysqli_query() results checked with === false and no mysqli_report() call, which now throw instead. |
 | MySQLi | Classes extending mysqli_stmt::execute() will be required to specify the additional parameter now. | Covered | `removed.incompatible_override` | class S extends mysqli_stmt { function execute() {} } is reported. |
@@ -639,7 +639,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.4/UPGRADING)
 
 | Area | Change | Status | Rules | Note |
 | --- | --- | --- | --- | --- |
-| Core | The type of PHP_DEBUG and PHP_ZTS constants changed to bool. | Gap |  | PHP_DEBUG/PHP_ZTS are now bool; literal comparisons like `PHP_DEBUG === 1` were tested and not reported. |
+| Core | The type of PHP_DEBUG and PHP_ZTS constants changed to bool. | Covered | `behavior.php_debug_bool` | Strict comparisons of PHP_DEBUG or PHP_ZTS with a number are reported. |
 | Core | The name of uploaded files and files created by the tempnam() function are now 13 bytes longer. | Runtime only |  | Longer tempnam()/upload file names only matter if code depends on the generated name length. |
 | Core | Encountering recursion during comparison now results in a Error exception, rather than a fatal error. | Runtime only |  | Recursion during comparison depends on runtime object graphs. |
 | Core | Indirect modification of readonly properties within __clone() is no longer allowed, e.g. $ref = &$this->readonly. | Gap |  | `$ref = &$this->readonlyProp` inside __clone() on a declared readonly property was tested and not reported. |
@@ -678,7 +678,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.4/UPGRADING)
 | Mysqli | The MYSQLI_CURSOR_TYPE_FOR_UPDATE and MYSQLI_CURSOR_TYPE_SCROLLABLE constants have been removed. | Covered | `removed.builtin_constant` | MYSQLI_CURSOR_TYPE_FOR_UPDATE and MYSQLI_CURSOR_TYPE_SCROLLABLE are reported. |
 | Mysqli | The unused MYSQLI_TYPE_INTERVAL constant, which is currently a stub and an alias for MYSQLI_TYPE_ENUM, has been removed. | Covered | `removed.builtin_constant` | MYSQLI_TYPE_INTERVAL is reported. |
 | MySQLnd | The error code reported for MySQL server wait timeouts has been changed from 2006 to 4031 for MySQL server versions 8.0.24 and above. | Runtime only |  | The error code comes from the server connection at runtime. |
-| Opcache | The JIT config defaults changed from opcache.jit=tracing and opcache.jit_buffer_size=0 to opcache.jit=disable and opcache.jit_buffer_size=64M, respectively. | Gap |  | php.ini setting opcache.jit_buffer_size without opcache.jit (JIT now silently stays disabled) was tested and not reported. |
+| Opcache | The JIT config defaults changed from opcache.jit=tracing and opcache.jit_buffer_size=0 to opcache.jit=disable and opcache.jit_buffer_size=64M, respectively. | Covered | `behavior.opcache_jit_default` | An ini file that sets opcache.jit_buffer_size without opcache.jit is reported. |
 | Opcache | The maximum value of the opcache.interned_strings_buffer setting on 64bit architectures is now 32767 (it was previously 4095). | Not applicable |  | Raised maximum for opcache.interned_strings_buffer does not break existing configs. |
 | Opcache | If JIT is enabled, PHP will now exit with a fatal error on startup in case of JIT startup initialization issues. | Not applicable |  | JIT startup failure behavior is environment-specific, not source-level. |
 | PCNTL | The functions pcntl_sigprocmask(), pcntl_sigwaitinfo() and pcntl_sigtimedwait() now always return false on failure. | Gap |  | Checking `pcntl_sigwaitinfo(...) === -1` (now returns false) was tested and not reported. |
@@ -769,7 +769,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.5/UPGRADING)
 | MySQLi | Calling the mysqli constructor on an already-constructed object is now no longer possible and throws an Error. | Runtime only |  | Re-constructing an existing mysqli object depends on runtime object state. |
 | ODBC | ODBC now assumes that at least ODBC 3.5 functionality is available. | Not applicable |  | ODBC build definition change. |
 | ODBC | ODBC no longer has build flags to build against specific drivers (except for DB2) and removes special cases for those drivers. | Not applicable |  | ODBC build flags change. |
-| Opcache | The Opcache extension is now always built into the PHP binary and is always loaded. | Gap |  | php.ini `zend_extension=opcache.so` (now emits a warning since opcache is built in) was tested and not reported. |
+| Opcache | The Opcache extension is now always built into the PHP binary and is always loaded. | Covered | `behavior.opcache_zend_extension` | zend_extension lines that load OPcache are reported. |
 | PCNTL | pcntl_exec() now throws ValueErrors when entries of the $args parameter contain null bytes. | Runtime only |  | Null bytes in pcntl_exec() args depend on runtime values. |
 | PCNTL | pcntl_exec() now throws ValueErrors when entries or keys of the $env_vars parameter contain null bytes. | Runtime only |  | Null bytes in pcntl_exec() env vars depend on runtime values. |
 | PCRE | The extension is compiled without semi-deprecated PCRE2_EXTRA_ALLOW_LOOKAROUND_BSK compile option. | Gap |  | Regex literal with \K inside a lookaround, e.g. `/(?=a\K)b/`, was tested and not reported. |

@@ -143,8 +143,10 @@ fn setting(name: &str, value: &str, line: usize) -> Option<Hit> {
         });
     }
     let Some(&(_, a, b)) = DEPRECATED_INI.iter().find(|(k, _, _)| *k == name) else {
-        let i = crate::symbols::REMOVED_INI.binary_search_by(|r| r.0.cmp(name.as_str())).ok()?;
-        let (_, (a, b), _) = crate::symbols::REMOVED_INI[i];
+        let generated =
+            crate::symbols::REMOVED_INI.binary_search_by(|r| r.0.cmp(name.as_str())).ok().map(|i| crate::symbols::REMOVED_INI[i].1);
+        let ignored = crate::rules::IGNORED_INI.iter().find(|(k, _, _)| *k == name).map(|&(_, a, b)| (a, b));
+        let (a, b) = generated.or(ignored)?;
         return Some(Hit {
             line,
             rule: "removed.builtin_ini",
@@ -244,19 +246,75 @@ fn htaccess(text: &str) -> Vec<Hit> {
 }
 
 fn ini(text: &str) -> Vec<Hit> {
-    text.lines()
-        .enumerate()
-        .filter_map(|(i, raw)| {
-            let line = raw.trim();
-            if line.starts_with(';') || line.starts_with('#') || line.starts_with('[') {
-                return None;
-            }
-            let (name, value) = line.split_once('=')?;
-            let value = value.split(';').next().unwrap_or_default();
-            setting(name.trim(), value, i + 1)
-        })
-        .collect()
+    let mut out = Vec::new();
+    let mut jit_buffer = None;
+    let mut jit_mode = false;
+    for (i, raw) in text.lines().enumerate() {
+        let line = raw.trim();
+        if let Some(rest) = line.strip_prefix('#') {
+            out.push(Hit {
+                line: i + 1,
+                rule: "removed.ini_hash_comment",
+                title: Localized::same(line.chars().take(40).collect::<String>()),
+                since: PhpVersion::new(7, 0),
+                severity: Severity::Breaking,
+                message: HASH_COMMENT,
+                replacement: Some(Localized::same(format!(";{rest}"))),
+            });
+            continue;
+        }
+        if line.starts_with(';') || line.starts_with('[') {
+            continue;
+        }
+        let Some((name, value)) = line.split_once('=') else { continue };
+        let value = value.split(';').next().unwrap_or_default();
+        let key = name.trim().to_ascii_lowercase();
+        match key.as_str() {
+            "opcache.jit" => jit_mode = true,
+            "opcache.jit_buffer_size" if truthy(value) => jit_buffer = Some(i + 1),
+            "zend_extension" if value.to_ascii_lowercase().contains("opcache") => out.push(Hit {
+                line: i + 1,
+                rule: "behavior.opcache_zend_extension",
+                title: Localized::same(line.to_string()),
+                since: PhpVersion::new(8, 5),
+                severity: Severity::Behavior,
+                message: OPCACHE_BUILT_IN,
+                replacement: Some(Text::new("satırı silin", "delete the line").into()),
+            }),
+            _ => {}
+        }
+        if let Some(hit) = setting(name.trim(), value, i + 1) {
+            out.push(hit);
+        }
+    }
+    if let Some(line) = jit_buffer.filter(|_| !jit_mode) {
+        out.push(Hit {
+            line,
+            rule: "behavior.opcache_jit_default",
+            title: Localized::same("opcache.jit_buffer_size".to_string()),
+            since: PhpVersion::new(8, 4),
+            severity: Severity::Behavior,
+            message: JIT_DEFAULT,
+            replacement: Some(Localized::same("opcache.jit = tracing".to_string())),
+        });
+    }
+    out
 }
+
+const HASH_COMMENT: Text = Text::new(
+    "PHP 7.0'dan beri ini dosyalarında # yorum başlatmaz; satır ayar olarak okunur ve dosya hata verebilir. Yorum için ; kullanın.",
+    "Since PHP 7.0 # doesn't start a comment in ini files; the line is read as a setting and the file can fail to parse. Use ; for comments.",
+);
+
+const OPCACHE_BUILT_IN: Text = Text::new(
+    "PHP 8.5'te OPcache her zaman PHP'nin içinde gelir; onu zend_extension ile yüklemek başlangıçta uyarı verir.",
+    "In PHP 8.5 OPcache is always built in, and loading it with zend_extension raises a warning at startup.",
+);
+
+const JIT_DEFAULT: Text = Text::new(
+    "PHP 8.4'te opcache.jit'in varsayılanı disable oldu. opcache.jit ayarlanmadan yalnızca jit_buffer_size verilirse JIT artık sessizce kapalı kalır.",
+    "In PHP 8.4 opcache.jit defaults to disable. Setting only jit_buffer_size, without opcache.jit, now silently leaves the JIT off.",
+);
 
 fn version_at(s: &str) -> Option<PhpVersion> {
     let digits: String = s.chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
@@ -431,7 +489,7 @@ mod tests {
             std::fs::write(p, text).unwrap();
         };
         write(".htaccess", "php_value memory_limit 256M\n<IfModule mod_php7.c>\n  php_flag magic_quotes_gpc off\n  php_flag register_globals on\n</IfModule>\n<IfModule mod_php.c>\n  php_value upload_max_filesize 8M\n</IfModule>\n");
-        write("public/.user.ini", "; comment\nallow_url_include = On\nsafe_mode = Off\ntrack_errors = 1\nsession.hash_function = 0\n");
+        write("public/.user.ini", "; comment\nallow_url_include = On\nsafe_mode = Off\ntrack_errors = 1\nsession.hash_function = 0\n# old comment\nopcache.load_comments = 0\nzend_extension = opcache.so\nopcache.jit_buffer_size = 64M\n");
         write("Dockerfile", "FROM php:7.4-fpm-alpine\nFROM node:20 AS assets\n");
         write("docker-compose.yml", "services:\n  app:\n    image: wordpress:php8.4-apache\n  old:\n    image: php:8.1-cli\n");
         write(".github/workflows/ci.yml", "jobs:\n  test:\n    strategy:\n      matrix:\n        php: ['7.4', '8.0']\n    steps:\n      - uses: shivammathur/setup-php@v2\n        with:\n          php-version: ${{ matrix.php }}\n  modern:\n    steps:\n      - with:\n          php-version: '8.4'\n");
@@ -458,6 +516,9 @@ mod tests {
             ("public/.user.ini", 2, "deprecated.ini_setting"),
             ("public/.user.ini", 4, "removed.ini_setting"),
             ("public/.user.ini", 5, "removed.builtin_ini"),
+            ("public/.user.ini", 6, "removed.ini_hash_comment"),
+            ("public/.user.ini", 7, "removed.builtin_ini"),
+            ("public/.user.ini", 9, "behavior.opcache_jit_default"),
         ];
         let expected: Vec<_> = expected.iter().map(|(f, l, r)| (f.to_string(), *l, r.to_string())).collect();
         assert_eq!(ids(&found), expected);
