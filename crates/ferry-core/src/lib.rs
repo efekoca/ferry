@@ -19,6 +19,7 @@ pub mod ignore;
 pub mod index;
 pub mod lexer;
 pub mod localcheck;
+mod objects;
 pub mod packagist;
 pub mod probe;
 pub mod project;

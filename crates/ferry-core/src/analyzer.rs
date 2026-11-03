@@ -377,6 +377,9 @@ pub fn analyze_source_in(file: &str, src: &str, target: PhpVersion, index: &crat
             }
         }
     }
+    for o in crate::objects::check(&tokens, |short| index.declares_type(short)) {
+        ctx.pattern_since(o.rule, tokens[o.at].line, tokens[o.at].column, PhpVersion::new(o.since.0, o.since.1));
+    }
     for (line, column, rule) in crate::syntax::check(src, &tokens, &html) {
         ctx.pattern_at(rule, line, column);
     }
@@ -1562,7 +1565,7 @@ fn argument_position(tokens: &[Token], i: usize) -> Option<(&str, usize)> {
     None
 }
 
-fn call_args(tokens: &[Token], open: usize) -> Vec<&[Token]> {
+pub(crate) fn call_args(tokens: &[Token], open: usize) -> Vec<&[Token]> {
     let mut args = Vec::new();
     let mut depth = 0usize;
     let mut start = open + 1;
@@ -2279,7 +2282,7 @@ fn case_semicolons(tokens: &[Token]) -> Vec<usize> {
     out
 }
 
-fn receiver_types(tokens: &[Token]) -> std::collections::HashMap<&str, std::collections::HashSet<String>> {
+pub(crate) fn receiver_types(tokens: &[Token]) -> std::collections::HashMap<&str, std::collections::HashSet<String>> {
     let mut out: std::collections::HashMap<&str, std::collections::HashSet<String>> = std::collections::HashMap::new();
     let class = |t: &Token| t.text.rsplit('\\').next().unwrap_or_default().to_ascii_lowercase();
     for k in 0..tokens.len() {
@@ -3453,6 +3456,46 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
             assert_eq!(count85(&format!("<?php {src}"), id), 0, "{src}");
         }
         assert_eq!(at("<?php $GLOBALS = [];", (8, 0)).iter().filter(|(r, _)| r == id).count(), 0);
+    }
+
+    #[test]
+    fn built_in_objects() {
+        let cases: &[(&str, &str, usize)] = &[
+            ("<?php $q = new SplPriorityQueue(); $q->setExtractFlags(0); $q->setExtractFlags(1);", "removed.extract_flags_zero", 1),
+            ("<?php function f(PDOStatement $s) { $s->bindColumn(1, $lob, PDO::PARAM_LOB); $s->bindColumn(1, $x); }", "behavior.bind_column_lob", 1),
+            ("<?php $f = new SplFileObject('x'); $f->ftell(1); $f->ftell(); $f->fflush(1);", "removed.splfileobject_extra_argument", 2),
+            ("<?php $p = new Phar('x.phar'); $p->setStub($fp, 100); $p->setStub('<?php');", "deprecated.phar_setstub_length", 1),
+            ("<?php $db = new SQLite3('x'); $db->enableExceptions(false); $db->enableExceptions(true);", "deprecated.sqlite3_exceptions_off", 1),
+            ("<?php new ReflectionMethod('A::b'); new ReflectionMethod('A', 'b');", "deprecated.reflection_method_string", 1),
+            ("<?php $f = new SplFileObject('x'); $f->fgetcsv(); $f->fputcsv([1]); $f->fgetcsv(',', '\"', '\\\\');", "deprecated.csv_escape", 2),
+            ("<?php function f(PDOStatement $s) { $s->setFetchMode(PDO::FETCH_CLASS, 'X', ['name' => 1]); $s->setFetchMode(PDO::FETCH_CLASS, 'X', [1]); }", "removed.fetch_class_named_args", 1),
+            ("<?php function f(PDOStatement $s) { $s->fetchAll(PDO::FETCH_ASSOC | PDO::FETCH_PROPS_LATE); $s->fetchAll(PDO::FETCH_CLASS | PDO::FETCH_PROPS_LATE, 'X'); $s->fetchAll(PDO::FETCH_INTO); }", "removed.fetch_props_late_mode", 1),
+            ("<?php function f(PDOStatement $s) { $s->fetchAll(PDO::FETCH_INTO); }", "removed.fetch_all_into", 1),
+            ("<?php $x = new SimpleXMLElement('<a/>'); $x->xpath('count(//a)'); $x->xpath('//a');", "removed.xpath_non_node_set", 1),
+            ("<?php $pdo = new PDO('sqlite::memory:'); $pdo->sqliteCreateFunction('f', 'g'); $pdo->query('x');", "deprecated.pdo_driver_method", 1),
+            ("<?php $c = new IntlGregorianCalendar(); $c->roll(5, true); $c->set(2020, 1, 1); new IntlGregorianCalendar(2020, 1, 1);", "deprecated.intlcal_roll_bool", 1),
+            ("<?php $c = new IntlGregorianCalendar(); $c->set(2020, 1, 1); $c->set(1, 2);", "deprecated.intlcal_set", 1),
+            ("<?php new IntlGregorianCalendar(2020, 1, 1); new IntlGregorianCalendar();", "deprecated.intlgregcal_create_instance", 1),
+            ("<?php $m = new mysqli(); $m->store_result(0); $m->store_result(); echo $m->stat;", "deprecated.mysqli_store_result_mode", 1),
+            ("<?php $m = new mysqli(); echo $m->stat; echo $m->stat();", "removed.mysqli_stat_property", 1),
+            ("<?php $s = new SoapServer(null); $s->addFunction(999); $s->addFunction('f');", "deprecated.soap_functions_all", 1),
+            ("<?php new DatePeriod('R4/2012-07-01T00:00:00Z/P7D'); new DatePeriod($a, $b, $c);", "deprecated.date_period_iso_string", 1),
+            ("<?php new ArrayObject(new stdClass); new ArrayIterator([1]);", "deprecated.array_object_object", 1),
+            ("<?php new SoapClient('x.wsdl', ['ssl_method' => SOAP_SSL_METHOD_TLS]);", "deprecated.soap_ssl_method", 1),
+            ("<?php new PDO('oci:dbname=x'); new PDO('mysql:host=x');", "removed.pdo_oci", 1),
+            ("<?php new PDO('uri:file:///etc/dsn');", "deprecated.pdo_uri_dsn", 1),
+            ("<?php FFI::new('int');", "deprecated.ffi_static_call", 1),
+            ("<?php FFI::cast('int', $x);\nFFI::new('int'); $ffi = FFI::cdef(); $ffi->cast('int', $x);", "deprecated.ffi_static_call", 2),
+            ("<?php $d = new mysqli_driver(); echo $d->driver_version;", "deprecated.mysqli_driver_version", 1),
+            ("<?php $doc = new DOMDocument(); echo $doc->actualEncoding, $doc->config, $doc->encoding;", "deprecated.dom_document_property", 2),
+            ("<?php $f = mysqli_fetch_field_direct($r, 0); echo $f->max_length; $f->max_length = 1; $o->max_length; foreach ($res->fetch_fields() as $c) { echo $c->max_length; }", "behavior.mysqli_max_length", 2),
+            ("<?php $x = new DOMXPath($doc); $y = clone $x; $n = clone $doc->childNodes; $m = clone $doc->getElementsByTagName('a'); $o = clone $doc;", "removed.uncloneable_object", 3),
+            ("<?php $c = new SoapClient('x'); if (is_resource($c->httpurl)) {} if (is_resource($c->sdl)) {}", "removed.resource_check", 2),
+            ("<?php class SplFileObject {} $f = new SplFileObject(); $f->ftell(1);", "removed.splfileobject_extra_argument", 0),
+        ];
+        for (src, id, n) in cases {
+            assert_eq!(count85(src, id), *n, "{id}: {src}");
+        }
     }
 
     #[test]
