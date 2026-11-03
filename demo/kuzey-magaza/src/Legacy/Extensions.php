@@ -7,7 +7,10 @@ class Extensions
         $flags = MYSQLI_SERVER_QUERY_WAS_SLOW | MYSQLI_SERVER_PS_OUT_PARAMS;
         $missing = array(MYSQLI_NO_DATA, MYSQLI_DATA_TRUNCATED);
         $result = $db->store_result(MYSQLI_STORE_RESULT_COPY_DATA);
-        return array('mariadb' => MYSQLI_IS_MARIADB, 'flags' => $flags, 'missing' => $missing, 'result' => $result);
+        mysqli_embedded_server_end();
+        $lengths = MYSQLI_STMT_ATTR_UPDATE_MAX_LENGTH;
+        $hints = AI_IDN_ALLOW_UNASSIGNED;
+        return array('mariadb' => MYSQLI_IS_MARIADB, 'flags' => $flags, 'missing' => $missing, 'result' => $result, 'lengths' => $lengths, 'hints' => $hints);
     }
 
     public function price($amount)

@@ -150,6 +150,15 @@ pub(crate) fn check(src: &str, tokens: &[Token], html: &[(usize, usize)]) -> Vec
         {
             out.push(at(t, &crate::arguments::POW_ZERO_NEGATIVE));
         }
+        if (t.is_punct("===") || t.is_punct("!==")) && k > 0 {
+            let sides = [(&tokens[k - 1], next), (next.unwrap_or(t), Some(&tokens[k - 1]))];
+            if sides.iter().any(|(a, b)| {
+                (a.text.trim_start_matches('\\') == "PHP_DEBUG" || a.text.trim_start_matches('\\') == "PHP_ZTS")
+                    && b.is_some_and(|b| b.kind == TokenKind::Number)
+            }) {
+                out.push(at(t, &DEBUG_ZTS_BOOL));
+            }
+        }
         if t.is_ident_ci("list") && next.is_some_and(|n| n.is_punct("(")) {
             let empty = tokens[k + 2..].iter().take_while(|n| !n.is_punct(")")).all(|n| n.is_punct(","));
             let close = (k + 2..tokens.len()).find(|&j| !tokens[j].is_punct(","));
@@ -277,5 +286,17 @@ pub(crate) const TRAILING_OPEN_TAG: PatternRule = rule(
     Text::new(
         "PHP 7.4'ten beri dosyanın en sonundaki, arkasında satır sonu olmayan <?php bir açılış etiketi sayılır; eskiden metin olarak yazılıyordu.",
         "Since PHP 7.4 a <?php at the very end of a file, without a newline after it, is an opening tag; it used to be output as text.",
+    ),
+);
+
+pub(crate) const DEBUG_ZTS_BOOL: PatternRule = rule(
+    "behavior.php_debug_bool",
+    Text::new("PHP_DEBUG/PHP_ZTS ile sayı karşılaştırması", "PHP_DEBUG/PHP_ZTS compared with a number"),
+    Severity::Behavior,
+    (8, 4),
+    Some(Text::new("true ya da false ile karşılaştırın", "compare with true or false")),
+    Text::new(
+        "PHP 8.4'te PHP_DEBUG ve PHP_ZTS tamsayı yerine bool oldu; sayıyla === karşılaştırması artık hep false döner.",
+        "In PHP 8.4 PHP_DEBUG and PHP_ZTS became bool instead of int, so a strict comparison with a number is now always false.",
     ),
 );

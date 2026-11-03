@@ -1050,7 +1050,11 @@ impl<'a> Ctx<'a> {
                         if let Some(&(_, a, b)) = crate::rules::DEPRECATED_INI.iter().find(|(k, _, _)| *k == name) {
                             self.pattern_since(&patterns::INI_SETTING, key.line, key.column, PhpVersion::new(a, b));
                         } else if !off {
-                            let hand = crate::rules::REMOVED_INI.iter().find(|(k, _, _)| *k == name).map(|&(_, a, b)| (a, b));
+                            let hand = crate::rules::REMOVED_INI
+                                .iter()
+                                .chain(&crate::rules::IGNORED_INI)
+                                .find(|(k, _, _)| *k == name)
+                                .map(|&(_, a, b)| (a, b));
                             if let Some(since) = hand.or_else(|| generated(crate::symbols::REMOVED_INI, &name).map(|r| r.1)) {
                                 self.builtin(Builtin::RemovedIni, name, since, key);
                             }
@@ -3449,6 +3453,31 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
             assert_eq!(count85(&format!("<?php {src}"), id), 0, "{src}");
         }
         assert_eq!(at("<?php $GLOBALS = [];", (8, 0)).iter().filter(|(r, _)| r == id).count(), 0);
+    }
+
+    #[test]
+    fn legacy_constants_and_aliases() {
+        let cases: &[(&str, &str, usize)] = &[
+            ("<?php curl_setopt($c, CURLOPT_PIPELINING, CURLPIPE_HTTP1);", "deprecated.curlpipe_http1", 1),
+            ("<?php $f = AI_IDN_ALLOW_UNASSIGNED | AI_IDN_USE_STD3_ASCII_RULES;", "removed.ai_idn_constant", 2),
+            ("<?php mysqli_stmt_attr_set($s, MYSQLI_STMT_ATTR_UPDATE_MAX_LENGTH, true);", "deprecated.mysqli_update_max_length", 1),
+            ("<?php mysqli_embedded_server_start(1, [], []); mysqli_embedded_server_end();", "removed.mysqli_embedded_server", 2),
+            ("<?php $c = ocilogon('u', 'p'); $s = ociparse($c, 'x'); oci_parse($c, 'x'); ocinotafunction();", "deprecated.oci8_alias", 2),
+            (
+                "<?php com_load_typelib('Word.Application', false); com_load_typelib('Word.Application');",
+                "deprecated.com_typelib_case_insensitive",
+                1,
+            ),
+            (
+                "<?php ini_set('always_populate_raw_post_data', 1); ini_set('xsl.security_prefs', 0); ini_set('birdstep.max_links', 5);",
+                "removed.builtin_ini",
+                2,
+            ),
+            ("<?php if (PHP_DEBUG === 1) {} if (1 !== PHP_ZTS) {} if (PHP_DEBUG) {} if (PHP_ZTS == 1) {}", "behavior.php_debug_bool", 2),
+        ];
+        for (src, id, n) in cases {
+            assert_eq!(count85(src, id), *n, "{id}: {src}");
+        }
     }
 
     #[test]

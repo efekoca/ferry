@@ -54,6 +54,9 @@ impl SymbolRule {
         if self.id == "deprecated.pg_alias" {
             return PG_ALIASES.iter().any(|(old, _)| *old == name);
         }
+        if self.id == "deprecated.oci8_alias" {
+            return OCI8_ALIASES.contains(&name);
+        }
         match self.name.strip_suffix('*') {
             Some(prefix) => name.starts_with(prefix),
             None => name == self.name,
@@ -155,6 +158,68 @@ pub const PG_ALIASES: [(&str, &str); 24] = [
     ("pg_numrows", "pg_num_rows"),
     ("pg_result", "pg_fetch_result"),
     ("pg_setclientencoding", "pg_set_client_encoding"),
+];
+
+pub const OCI8_ALIASES: &[&str] = &[
+    "ocibindbyname",
+    "ocicancel",
+    "ocicloselob",
+    "ocicollappend",
+    "ocicollassign",
+    "ocicollassignelem",
+    "ocicollgetelem",
+    "ocicollmax",
+    "ocicollsize",
+    "ocicolltrim",
+    "ocicolumnisnull",
+    "ocicolumnname",
+    "ocicolumnprecision",
+    "ocicolumnscale",
+    "ocicolumnsize",
+    "ocicolumntype",
+    "ocicolumntyperaw",
+    "ocicommit",
+    "ocidefinebyname",
+    "ocierror",
+    "ociexecute",
+    "ocifetch",
+    "ocifetchinto",
+    "ocifetchstatement",
+    "ocifreecollection",
+    "ocifreecursor",
+    "ocifreedesc",
+    "ocifreestatement",
+    "ociinternaldebug",
+    "ociloadlob",
+    "ocilogoff",
+    "ocilogon",
+    "ocinewcollection",
+    "ocinewcursor",
+    "ocinewdescriptor",
+    "ocinlogon",
+    "ocinumcols",
+    "ociparse",
+    "ociplogon",
+    "ociresult",
+    "ocirollback",
+    "ocirowcount",
+    "ocisavelob",
+    "ocisavelobfile",
+    "ociserverversion",
+    "ocisetprefetch",
+    "ocistatementtype",
+    "ociwritelobtofile",
+    "ociwritetemporarylob",
+];
+
+/// Settings PHP ignores since it removed them, for extensions the symbol dumps can't build.
+pub const IGNORED_INI: [(&str, u32, u32); 6] = [
+    ("always_populate_raw_post_data", 7, 0),
+    ("opcache.load_comments", 7, 0),
+    ("xsl.security_prefs", 7, 0),
+    ("birdstep.max_links", 7, 3),
+    ("pdo_odbc.db2_instance_name", 8, 0),
+    ("com.autoregister_casesensitive", 8, 0),
 ];
 
 pub const COMPILE_TIME: &[&str] = &[
@@ -306,6 +371,10 @@ const NOOP_SINCE_80: Text = Text::new(
     "Has done nothing since PHP 8.0 and is deprecated in 8.5.",
 );
 const REMOVE_CALL: Option<Text> = tx("çağrıyı silin", "remove the call");
+const AI_IDN: Text = Text::new(
+    "glibc'nin kaldırdığı bu socket sabitleri PHP 7.4'te kullanımdan kalktı ve 8.0'da kaldırıldı.",
+    "These socket constants, removed from glibc, were deprecated in PHP 7.4 and removed in 8.0.",
+);
 
 macro_rules! rule {
     ($id:literal, $name:literal, $change:expr, $since:expr, $repl:expr, $fix:expr, $note:expr) => {
@@ -446,6 +515,12 @@ pub const FUNCTIONS: &[SymbolRule] = &[
     rule!("removed.pspell", "pspell_*", R, (8, 4), tx("PECL pspell", "PECL pspell"), M, Text::new(
         "pspell eklentisi PHP 8.4'te çekirdekten çıkarıldı; ancak PECL'den ayrıca kurulursa çalışır.",
         "The pspell extension was unbundled in PHP 8.4; it only works if you install it from PECL.")),
+    rule!("removed.mysqli_embedded_server", "mysqli_embedded_server_*", R, (7, 4), None, M, Text::new(
+        "Gömülü MySQL sunucusu fonksiyonları PHP 7.4'te kaldırıldı.",
+        "The embedded MySQL server functions were removed in PHP 7.4.")),
+    rule!("deprecated.oci8_alias", "oci*", D, (8, 0), tx("oci_ ile başlayan karşılığı", "the oci_ prefixed equivalent"), M, Text::new(
+        "oci_ öneki olmayan OCI8 takma adları PHP 8.0'da kullanımdan kalktı; oci8 eklentisi de 8.4'te çekirdekten çıkarıldı.",
+        "The OCI8 aliases without the oci_ prefix are deprecated since PHP 8.0, and the oci8 extension was unbundled in 8.4.")),
     rule!("removed.oci8", "oci_*", R, (8, 4), tx("PECL oci8", "PECL oci8"), M, Text::new(
         "oci8 eklentisi PHP 8.4'te çekirdekten çıkarıldı; ancak PECL'den ayrıca kurulursa çalışır.",
         "The oci8 extension was unbundled in PHP 8.4; it only works if you install it from PECL.")),
@@ -651,6 +726,13 @@ pub const CONSTANTS: &[SymbolRule] = &[
         )
     ),
     rule!("deprecated.mhash_constant", "mhash_*", D, (8, 5), code("hash_*"), M, DEPRECATED_FN),
+    rule!("deprecated.curlpipe_http1", "curlpipe_http1", D, (7, 4), code("CURLPIPE_MULTIPLEX"), M, Text::new(
+        "CURLPIPE_HTTP1 curl 7.62'den beri hiçbir şey yapmıyor ve PHP 7.4'te kullanımdan kalktı.",
+        "CURLPIPE_HTTP1 has done nothing since curl 7.62 and is deprecated since PHP 7.4.")),
+    rule!("removed.ai_idn_constant", "ai_idn_*", R, (8, 0), None, M, AI_IDN),
+    rule!("deprecated.mysqli_update_max_length", "mysqli_stmt_attr_update_max_length", D, (8, 1), REMOVE_USE, M, Text::new(
+        "Bu sabit PHP 8.1'den beri hiçbir şey yapmıyor; max_length artık her zaman 0.",
+        "This constant has done nothing since PHP 8.1; max_length is now always 0.")),
     rule!(
         "removed.filter_flag_scheme_required",
         "filter_flag_scheme_required",
