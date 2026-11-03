@@ -937,6 +937,22 @@ impl<'a> Ctx<'a> {
                         }
                     }
                 }
+                if let Some((rule, at)) = crate::arguments::find(&lower, &args) {
+                    self.pattern(&rule.rule, at.unwrap_or(tok), None);
+                }
+                if lower == "class_alias" {
+                    if let Some(name) = single(1).and_then(|t| crate::arguments::string_literal(&t.text)) {
+                        let name = name.to_ascii_lowercase();
+                        let since = match name.as_str() {
+                            "array" | "callable" => Some(PhpVersion::new(8, 5)),
+                            "fn" | "match" | "readonly" => None,
+                            _ => RESERVED_CLASS_NAMES.iter().find(|(n, _, _)| *n == name).map(|&(_, a, b)| PhpVersion::new(a, b)),
+                        };
+                        if let Some(since) = since {
+                            self.pattern_since(&patterns::RESERVED_NAME, args[1][0].line, args[1][0].column, since);
+                        }
+                    }
+                }
             }
             match lower.as_str() {
                 "define" if single(2).is_some_and(|t| t.is_ident_ci("true")) => {
@@ -3367,6 +3383,66 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
             assert_eq!(count85(&format!("<?php {src}"), id), 0, "{src}");
         }
         assert_eq!(at("<?php $GLOBALS = [];", (8, 0)).iter().filter(|(r, _)| r == id).count(), 0);
+    }
+
+    #[test]
+    fn literal_arguments() {
+        let cases: &[(&str, &str, usize)] = &[
+            ("<?php curl_setopt($c, CURLOPT_SAFE_UPLOAD, false); curl_setopt($c, CURLOPT_SAFE_UPLOAD, true);", "removed.curl_safe_upload_off", 1),
+            ("<?php setcookie('', 'v'); setcookie('a', '');", "behavior.setcookie_empty_name", 1),
+            ("<?php gmp_setbit($g, -1); gmp_setbit($g, 1);", "removed.gmp_setbit_negative", 1),
+            ("<?php setlocale('LC_ALL', 'C'); setlocale(LC_ALL, 'C');", "removed.setlocale_string_category", 1),
+            ("<?php hash_hmac('crc32', $d, $k); hash_hmac('sha256', $d, $k); hash_init('fnv132', HASH_HMAC, $k); hash_init('fnv132');", "removed.hash_hmac_non_crypto", 2),
+            ("<?php json_decode($s, null, 512, JSON_OBJECT_AS_ARRAY); json_decode($s, true, 512, JSON_OBJECT_AS_ARRAY);", "behavior.json_decode_null_assoc", 1),
+            ("<?php strpos($h, 65); strstr($h, '65'); strrchr($h, 0x41); mb_ereg_replace(65, 'b', $s); strpos($h, $n);", "behavior.int_as_char_code", 3),
+            ("<?php stream_filter_append($fp, 'string.strip_tags'); stream_filter_append($fp, 'string.rot13');", "removed.strip_tags_filter", 1),
+            ("<?php mb_strrpos($h, $n, 'UTF-8'); mb_strrpos($h, $n, 0, 'UTF-8');", "removed.mb_strrpos_encoding", 1),
+            ("<?php bindec('12'); hexdec('zz'); octdec('9'); hexdec('0xff'); bindec('0101');", "deprecated.invalid_digits", 3),
+            ("<?php imagecropauto($im, -1); imagecropauto($im, IMG_CROP_DEFAULT);", "removed.imagecropauto_default", 1),
+            ("<?php ldap_set_rebind_proc($l, ''); ldap_set_rebind_proc($l, null);", "deprecated.ldap_rebind_empty", 1),
+            ("<?php mb_ereg_replace('a', $c, $s, 'e'); mb_ereg_replace('a', $c, $s, 'i');", "removed.mb_ereg_e_option", 1),
+            ("<?php spl_autoload_register('l', false); spl_autoload_register('l', true);", "behavior.spl_autoload_register_throw", 1),
+            ("<?php substr($s, 2, null); substr($s, 2); substr_count($s, 'a', 0, null); array_splice($a, 1, null);", "behavior.null_length", 3),
+            ("<?php password_hash($p, PASSWORD_DEFAULT, ['salt' => $x, 'cost' => 10]); password_hash($p, PASSWORD_DEFAULT, ['cost' => 10]);", "behavior.password_hash_salt", 1),
+            ("<?php get_defined_functions(false); get_defined_functions(true); get_defined_functions();", "deprecated.get_defined_functions_arg", 2),
+            ("<?php version_compare('1', '2', 'l'); version_compare('1', '2', '<'); version_compare('1', '2', 'GE');", "removed.version_compare_operator", 1),
+            ("<?php ctype_digit(5); ctype_digit('5');", "deprecated.ctype_non_string", 1),
+            ("<?php imagepolygon($im, $p, 3, $c); imagepolygon($im, $p, $c);", "deprecated.polygon_num_points", 1),
+            ("<?php intlcal_roll($c, 5, true); intlcal_roll($c, 5, 1);", "deprecated.intlcal_roll_bool", 1),
+            ("<?php pg_query('SELECT 1'); pg_query($c, 'SELECT 1'); pg_last_error(); pg_last_error($c);", "deprecated.pg_implicit_connection", 2),
+            ("<?php pg_fetch_result($r, 'c'); pg_fetch_result($r, 0, 'c');", "deprecated.pg_implicit_row", 1),
+            ("<?php openssl_pkcs7_encrypt('i', 'o', $c, []); openssl_pkcs7_encrypt('i', 'o', $c, [], 0, OPENSSL_CIPHER_AES_128_CBC);", "behavior.openssl_default_cipher", 1),
+            ("<?php mysqli_get_client_info($m); mysqli_get_client_info();", "deprecated.mysqli_get_client_info_arg", 1),
+            ("<?php file($f, FILE_APPEND); file($f, FILE_IGNORE_NEW_LINES);", "removed.file_append_flag", 1),
+            ("<?php dba_fetch('k', 0, $d); dba_fetch('k', $d, 0);", "deprecated.dba_fetch_order", 1),
+            ("<?php ldap_connect('h', 389); ldap_connect('ldap://h:389');", "deprecated.ldap_connect_port", 1),
+            ("<?php mb_strimwidth($s, 0, -5); mb_strimwidth($s, 0, 5);", "deprecated.mb_strimwidth_negative", 1),
+            ("<?php curl_multi_select($m, -1); curl_multi_select($m, 1.0);", "removed.curl_multi_select_negative", 1),
+            ("<?php imagejpeg($i, null, 150); imagejpeg($i, null, 90); imagepng($i, null, 15); imagepng($i, null, -1);", "removed.image_quality_range", 2),
+            ("<?php textdomain(''); dgettext('', 'x'); textdomain('app');", "removed.gettext_empty_domain", 2),
+            ("<?php odbc_fetch_row($r, 0); odbc_fetch_row($r, 1);", "removed.odbc_row_zero", 1),
+            ("<?php round($x, 0, 99); round($x, 0, PHP_ROUND_HALF_UP); round($x, 0, 2);", "removed.round_invalid_mode", 1),
+            ("<?php php_uname('x'); php_uname('s');", "removed.php_uname_mode", 1),
+            ("<?php pow(0, -2); pow(2, -2); pow(0, 2);", "deprecated.pow_zero_negative", 1),
+            ("<?php dba_key_split(null); dba_key_split(false); dba_key_split('[a]b');", "deprecated.dba_key_split_null", 2),
+            ("<?php ldap_exop($l, $o, null, null, $r, $m); ldap_exop($l, $o);", "deprecated.ldap_exop_response", 1),
+            ("<?php stream_context_set_option($c, ['ssl' => []]); stream_context_set_option($c, 'ssl', 'verify_peer', true);", "deprecated.stream_context_option_array", 1),
+            ("<?php mysqli_store_result($l, 0); mysqli_store_result($l);", "deprecated.mysqli_store_result_mode", 1),
+            ("<?php bzcompress($s, 10); bzcompress($s, 4, 300); bzcompress($s, 9, 250);", "removed.bzcompress_range", 2),
+            ("<?php finfo_buffer($f, $b, FILEINFO_NONE, $ctx); finfo_buffer($f, $b);", "deprecated.finfo_buffer_context", 1),
+            ("<?php openssl_pkey_derive($a, $b, 32); openssl_pkey_derive($a, $b);", "deprecated.openssl_pkey_derive_length", 1),
+            ("<?php spl_autoload_unregister('spl_autoload_call'); spl_autoload_unregister('loader');", "deprecated.unregister_autoload_call", 1),
+            ("<?php readdir(null); readdir($h); closedir(null);", "deprecated.implicit_argument", 2),
+            ("<?php chr(256); chr(-1); chr(65);", "deprecated.chr_out_of_range", 2),
+            ("<?php ord('ab'); ord(''); ord('a'); ord($s);", "deprecated.ord_length", 2),
+            ("<?php class_alias('Foo', 'array'); class_alias('Foo', 'string'); class_alias('Foo', 'Bar'); class_alias('Foo', 'match');", "removed.reserved_name", 2),
+            ("<?php ini_set('session.use_only_cookies', 1); ini_set('intl.error_level', E_WARNING);", "deprecated.ini_setting", 2),
+        ];
+        for (src, id, n) in cases {
+            assert_eq!(count85(src, id), *n, "{id}: {src}");
+        }
+        assert_eq!(count85("<?php strpos(haystack: $h, needle: 65);", "behavior.int_as_char_code"), 0);
+        assert_eq!(count85("<?php function chr($c) {} chr(300);", "deprecated.chr_out_of_range"), 0);
     }
 
     #[test]

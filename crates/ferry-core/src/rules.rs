@@ -240,13 +240,14 @@ pub const NULL_STRING_ARGS: &[(&str, &[usize])] = &[
     ("strtotime", &[0]),
 ];
 
-pub const DEPRECATED_INI: [(&str, u32, u32); 18] = [
+pub const DEPRECATED_INI: [(&str, u32, u32); 21] = [
     ("allow_url_include", 7, 4),
     ("mbstring.func_overload", 8, 0),
     ("track_errors", 8, 0),
     ("filter.default", 8, 1),
     ("filter.default_flags", 8, 1),
     ("auto_detect_line_endings", 8, 1),
+    ("oci8.old_oci_close_semantics", 8, 1),
     ("assert.active", 8, 3),
     ("assert.bail", 8, 3),
     ("assert.callback", 8, 3),
@@ -258,7 +259,9 @@ pub const DEPRECATED_INI: [(&str, u32, u32); 18] = [
     ("session.trans_sid_hosts", 8, 4),
     ("session.trans_sid_tags", 8, 4),
     ("session.referer_check", 8, 4),
+    ("session.use_only_cookies", 8, 4),
     ("report_memleaks", 8, 5),
+    ("intl.error_level", 8, 5),
 ];
 
 pub const REMOVED_INI: [(&str, u32, u32); 11] = [
