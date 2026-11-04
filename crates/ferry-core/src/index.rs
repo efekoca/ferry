@@ -94,6 +94,8 @@ pub struct ProjectIndex {
     types: HashMap<String, Vec<TypeInfo>>,
     interfaces: HashMap<String, Vec<InterfaceInfo>>,
     constants: HashSet<String>,
+    mysqli_report: bool,
+    enums: HashSet<String>,
     target: Option<crate::version::PhpVersion>,
 }
 
@@ -144,6 +146,14 @@ impl ProjectIndex {
         index
     }
 
+    pub(crate) fn is_enum(&self, fqn: &str) -> bool {
+        self.enums.contains(fqn)
+    }
+
+    pub(crate) fn sets_mysqli_report(&self) -> bool {
+        self.mysqli_report
+    }
+
     pub(crate) fn declares_type(&self, short: &str) -> bool {
         self.types.contains_key(short) || self.interfaces.contains_key(short)
     }
@@ -154,10 +164,16 @@ impl ProjectIndex {
 
     fn add(&mut self, tokens: &[Token]) {
         self.constants.extend(crate::analyzer::defined_constants(tokens));
+        self.mysqli_report |= tokens.iter().any(|t| t.is_ident_ci("mysqli_report") || t.is_ident_ci("report_mode"));
         let methods = crate::analyzer::method_tokens(tokens);
         let spaces = namespaces(tokens);
         let names = Names::new(tokens);
         let dead = self.target.map(|t| crate::guards::dead_spans(tokens, t)).unwrap_or_default();
+        for (i, w) in tokens.windows(2).enumerate() {
+            if w[0].is_ident_ci("enum") && w[1].kind == TokenKind::Ident {
+                self.enums.insert(names.declared(i, &w[1].text));
+            }
+        }
         for (i, t) in tokens.iter().enumerate() {
             if !t.is_ident_ci("function") || methods.contains(&i) {
                 continue;

@@ -71,7 +71,7 @@ pub(crate) struct Function {
     pub(crate) name: Option<usize>,
     by_ref: bool,
     pub(crate) params: Vec<Param>,
-    uses: Vec<usize>,
+    pub(crate) uses: Vec<usize>,
     returns: Option<Vec<String>>,
     pub(crate) body: Option<(usize, usize)>,
 }
@@ -638,6 +638,22 @@ pub(crate) fn check(tokens: &[Token], index: &crate::index::ProjectIndex) -> Vec
             continue;
         }
         let member = &tokens[k + 2];
+        if member.kind == TokenKind::Variable
+            && tokens.get(k + 3).is_some_and(|n| n.is_punct("="))
+            && tokens.get(k + 4).is_some_and(|n| n.is_punct("&"))
+        {
+            let class =
+                index.type_by_fqn(&names.resolve(k, &t.text)).filter(|c| c.traits.is_empty() && !c.static_props.contains(&member.text));
+            let mut ancestor = class.and_then(|c| c.parent_fqn.as_deref()).and_then(|f| index.type_by_fqn(f));
+            for _ in 0..32 {
+                let Some(a) = ancestor else { break };
+                if a.static_props.contains(&member.text) {
+                    out.push(issue(k, &STATIC_REFERENCE));
+                    break;
+                }
+                ancestor = a.parent_fqn.as_deref().and_then(|f| index.type_by_fqn(f));
+            }
+        }
         let static_member = member.kind == TokenKind::Variable
             || member.kind == TokenKind::Ident && tokens.get(k + 3).is_some_and(|n| n.is_punct("(")) && !member.is_ident_ci("class");
         if static_member && index.type_by_fqn(&names.resolve(k, &t.text)).is_some_and(|t| t.is_trait) {
@@ -765,6 +781,18 @@ pub(crate) const TRAIT_STATIC_ACCESS: PatternRule = rule(
     Text::new(
         "Bir trait'in statik metodunu çağırmak ya da statik özelliğine doğrudan trait üzerinden erişmek PHP 8.1'de kullanımdan kalktı.",
         "Calling a static method or accessing a static property directly on a trait is deprecated since PHP 8.1.",
+    ),
+);
+
+pub(crate) const STATIC_REFERENCE: PatternRule = rule(
+    "behavior.inherited_static_reference",
+    Text::new("Miras alınan statik özelliğe referans", "Reference to an inherited static property"),
+    Severity::Behavior,
+    (7, 3),
+    None,
+    Text::new(
+        "Bu statik özellik üst sınıftan geliyor. PHP 7.3'ten beri referans ataması özelliği ayırmaz, üst sınıfı da etkiler.",
+        "This static property comes from the parent class. Since PHP 7.3 assigning a reference no longer separates it, so the parent changes too.",
     ),
 );
 

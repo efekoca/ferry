@@ -350,7 +350,7 @@ pub fn analyze_source_in(file: &str, src: &str, target: PhpVersion, index: &crat
     for k in bareword_keys(&tokens, |name| defined.contains(name) || index.defines_constant(name)) {
         ctx.pattern(&patterns::BAREWORD_KEY, &tokens[k], None);
     }
-    for over in builtin_overrides(&tokens, index) {
+    for over in builtin_overrides(&tokens, index).into_iter().chain(trait_abstract_overrides(&tokens, index)) {
         match over.problem {
             Override::MissingTentativeType => ctx.pattern(&patterns::RETURN_TYPE_WILL_CHANGE, &tokens[over.name], None),
             Override::Incompatible(method) => {
@@ -377,7 +377,7 @@ pub fn analyze_source_in(file: &str, src: &str, target: PhpVersion, index: &crat
             }
         }
     }
-    for (k, rule) in crate::calls::check(&tokens, index) {
+    for (k, rule) in crate::calls::check(&tokens, index).into_iter().chain(crate::flow::check(&tokens)) {
         ctx.pattern(rule, &tokens[k], None);
     }
     for (k, rule) in crate::strings::check(&tokens) {
@@ -2091,6 +2091,52 @@ fn render_signature(
     format!("{}function {name}({}){ret}", if is_static { "static " } else { "" }, args.join(", "))
 }
 
+fn trait_abstract_overrides(tokens: &[Token], index: &crate::index::ProjectIndex) -> Vec<BuiltinOverride> {
+    let mut out = Vec::new();
+    for decl in crate::index::class_decls(tokens) {
+        let abstracts: Vec<(&str, &String, &crate::index::MethodSig)> = decl
+            .info
+            .trait_fqns
+            .iter()
+            .filter_map(|f| index.type_by_fqn(f))
+            .flat_map(|t| t.signatures.iter().filter(|(_, s)| s.is_abstract).map(move |(m, s)| (t.name.as_str(), m, s)))
+            .collect();
+        if abstracts.is_empty() {
+            continue;
+        }
+        let mut depth = 0usize;
+        for k in decl.open..decl.close {
+            if tokens[k].is_punct("{") {
+                depth += 1;
+            } else if tokens[k].is_punct("}") {
+                depth -= 1;
+            } else if depth == 1 && tokens[k].is_ident_ci("function") {
+                let name_at = if tokens.get(k + 1).is_some_and(|t| t.is_punct("&")) { k + 2 } else { k + 1 };
+                let lower = tokens[name_at].text.to_ascii_lowercase();
+                let Some(&(trait_name, _, sig)) = abstracts.iter().find(|(_, m, _)| **m == lower) else { continue };
+                let open = name_at + 1;
+                let Some(close) = crate::declarations::close_of(tokens, open) else { continue };
+                let relative = |t: &String| ["self", "static", "parent"].contains(&t.as_str());
+                if sig.returns.iter().flatten().any(relative) || sig.params.iter().any(|p| p.ty.iter().any(relative)) {
+                    continue;
+                }
+                let start =
+                    (0..k).rev().find(|&j| tokens[j].is_punct(";") || tokens[j].is_punct("{") || tokens[j].is_punct("}")).unwrap_or(0);
+                let is_static = tokens[start..k].iter().any(|t| t.is_ident_ci("static"));
+                let shapes = param_shapes(tokens, open, close);
+                if !user_parent_fits(&shapes, is_static, return_type(tokens, close).as_deref(), &lower, sig) {
+                    out.push(BuiltinOverride {
+                        name: name_at,
+                        parent: name_at,
+                        problem: Override::UserIncompatible(trait_name.to_string(), sig.clone()),
+                    });
+                }
+            }
+        }
+    }
+    out
+}
+
 fn builtin_overrides(tokens: &[Token], index: &crate::index::ProjectIndex) -> Vec<BuiltinOverride> {
     let mut out = Vec::new();
     let names = crate::index::Names::new(tokens);
@@ -3611,6 +3657,22 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
             ("<?php namespace App; class D extends DateTime { const ATOM = 'x'; }", "removed.typed_constant_override", 0),
             ("<?php #[Attribute] abstract class A {} #[Attribute] interface I {} #[Attribute, Other] enum E {} #[Attribute] final class B {} #[Other] trait T {}", "removed.attribute_on_non_class", 3),
             ("<?php trait T { static function f() {} public static $p; } class C { use T; } T::f(); T::$p = 1; C::f(); T::class;", "deprecated.trait_static_access", 2),
+            ("<?php class S extends SNMP { const VERSION_1 = 'x'; const int VERSION_3 = 3; }", "removed.typed_constant_override", 1),
+            ("<?php $a = [1]; foreach ($a as &$v) { echo current($a), key($a), current($b); } foreach ($a as $v) echo key($a);", "behavior.foreach_array_pointer", 3),
+            ("<?php function f($x) { $x++; return func_get_args(); } function g($x) { $y = func_get_args(); $x = 1; return $y; } function h($x) { $z = $x; return func_get_arg(0); } function j($x, $y) { $x++; return func_get_arg(1); } function k($x) { $x++; return array_slice(func_get_args(), 1); } function i($x) { $x = is_array($x) ? $x : func_get_args(); }", "behavior.func_get_args_current_value", 1),
+            ("<?php call_user_func('compact', 'x'); array_map('func_get_args', $a); call_user_func('strtolower', 'x'); function h() { $f = 'extract'; $f([]); } function i() { $f = 'trim'; $f(''); }", "removed.dynamic_scope_call", 3),
+            ("<?php mt_srand(5); srand(42); mt_srand(); mt_srand(time()); mt_srand($s);", "behavior.seeded_random_sequence", 2),
+            ("<?php function a($p) { $l = 1; return compact('p', 'l', 'nope'); } function b() { extract($_GET); return compact('x'); } function c() { global $g; return compact('g'); } function d() { $$n = 1; return compact('x'); }", "behavior.compact_undefined_variable", 1),
+            ("<?php function r(&$x) {} r(list($a) = $b); array_pop(list($a) = $b); function s($x) {} s(list($a) = $b);", "removed.list_result_by_reference", 2),
+            ("<?php function a() { $x = false; $x[] = 1; } function b() { $y = false; $y = []; $y[] = 1; } function c() { $z = false; echo $z[0]; } function d() { $w = false; $w['k'] = 1; }", "deprecated.false_to_array", 2),
+            ("<?php $s = 'abc'; $s++; $t = '12'; $t++; $u = 'abc'; $u = 1; $u++; $v = 'x'; ++$v;", "deprecated.string_increment", 2),
+            ("<?php $a = []; $a[-5] = 'x'; $a[] = 'y'; $b = []; $b[-5] = 'x'; $c = []; $c[5] = 'x'; $c[] = 'y';", "behavior.negative_index_assignment", 1),
+            ("<?php mysqli_query($c, 'q') === false; mysqli_query($c, 'q') or die('x'); if (!mysqli_connect('h')) {} mysqli_query($c, 'q');", "behavior.mysqli_default_exceptions", 3),
+            ("<?php mysqli_report(MYSQLI_REPORT_OFF); mysqli_query($c, 'q') === false;", "behavior.mysqli_default_exceptions", 0),
+            ("<?php $d = new mysqli(); if ($d->connect('h') === null) {} $d->connect('h'); class Q { function connect() {} } $q = new Q; if ($q->connect() === null) {}", "behavior.mysqli_connect_result", 1),
+            ("<?php class P { public static $x; } class C extends P {} class D extends P { public static $x; } C::$x = &$y; D::$x = &$y; C::$x = 1;", "behavior.inherited_static_reference", 1),
+            ("<?php enum S { case H; } class K { const A = 1; } new ArrayObject(S::H); new ArrayObject(K::A); new ArrayObject([]);", "removed.array_object_enum", 1),
+            ("<?php trait T { abstract function m(int $a): int; abstract function s(): self; abstract function k(int $a); } class U { use T; function m(string $a): string { return ''; } function s(): U { return $this; } function k(int $a) {} }", "removed.incompatible_user_override", 1),
             ("<?php substr($s, 1) === false; false !== substr($s, 1); substr($s, 1) === ''; strlen($s) === false;", "behavior.substr_false", 2),
             ("<?php pcntl_sigwaitinfo([1]) === -1; pcntl_sigtimedwait([1]) == -1; pcntl_sigwaitinfo([1]) === false;", "behavior.pcntl_failure_value", 2),
             ("<?php $a[1.5] = 1; echo 7.5 % 2, 2 % 1.5; $b[1.0] = 1; echo $c % 2; $d = [1.5];", "deprecated.implicit_float_to_int", 3),

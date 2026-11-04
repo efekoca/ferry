@@ -5,7 +5,7 @@ use crate::lexer::{Token, TokenKind};
 use crate::rules::{FixKind, PatternRule, Severity};
 use std::collections::HashSet;
 
-const BY_REF_ARGUMENT: &[&str] =
+pub(crate) const BY_REF_ARGUMENT: &[&str] =
     &["array_pop", "array_push", "array_shift", "array_unshift", "end", "next", "prev", "reset", "rsort", "shuffle", "sort"];
 const SORTS: &[&str] = &["usort", "uasort", "uksort"];
 const VALUE_CALLBACKS: &[(&str, usize)] =
@@ -100,6 +100,7 @@ fn is_null(tokens: &[Token], k: usize) -> bool {
 /// do, and how literal keys and operands behave.
 pub(crate) fn check(tokens: &[Token], index: &ProjectIndex) -> Vec<(usize, &'static PatternRule)> {
     let mut out = Vec::new();
+    let names = crate::index::Names::new(tokens);
     let mut closures: Vec<(&str, bool, bool)> = Vec::new();
     for k in 0..tokens.len().saturating_sub(2) {
         if tokens[k].kind == TokenKind::Variable && tokens[k + 1].is_punct("=") {
@@ -192,6 +193,13 @@ pub(crate) fn check(tokens: &[Token], index: &ProjectIndex) -> Vec<(usize, &'sta
             }
         }
 
+        if t.is_ident_ci("arrayobject") && open_call && prev.is_some_and(|p| p.is_ident_ci("new")) {
+            let case = tokens.get(k + 2).filter(|c| c.kind == TokenKind::Ident && tokens.get(k + 3).is_some_and(|n| n.is_punct("::")));
+            if case.is_some_and(|c| index.is_enum(&names.resolve(k + 2, &c.text))) {
+                out.push((k, &ARRAY_OBJECT_ENUM));
+            }
+        }
+
         if t.kind != TokenKind::Ident || !open_call || member || declared {
             continue;
         }
@@ -224,6 +232,14 @@ pub(crate) fn check(tokens: &[Token], index: &ProjectIndex) -> Vec<(usize, &'sta
             && tokens[k + 4].is_punct("(")
         {
             out.push((k, &PARENTHESIZED_REFERENCE));
+        }
+        if ["mysqli_connect", "mysqli_query", "mysqli_real_connect"].contains(&name.as_str()) && !index.sets_mysqli_report() {
+            let compared = after.is_some_and(|o| o.is_punct("===")) && tokens.get(close + 2).is_some_and(|v| v.is_ident_ci("false"));
+            let dies = after.is_some_and(|o| o.is_ident_ci("or"))
+                && tokens.get(close + 2).is_some_and(|v| v.is_ident_ci("die") || v.is_ident_ci("exit"));
+            if compared || dies || prev.is_some_and(|p| p.is_punct("!")) {
+                out.push((k, &MYSQLI_EXCEPTIONS));
+            }
         }
         if name == "ob_start" {
             if let Some((open, end)) = args.first().and_then(|&a| closure_at(tokens, a)).and_then(|f| f.body) {
@@ -284,6 +300,30 @@ const SUBSTR_FALSE: PatternRule = rule(
     Text::new(
         "PHP 7.0'da substr() sınırda kesilen metin için false yerine boş metin döndürmeye başladı; PHP 8.0'dan beri hiç false dönmüyor.",
         "PHP 7.0 made substr() return an empty string instead of false when it cuts on the boundary, and since PHP 8.0 it never returns false.",
+    ),
+);
+
+const ARRAY_OBJECT_ENUM: PatternRule = rule(
+    "removed.array_object_enum",
+    Text::new("ArrayObject enum ile", "ArrayObject with an enum"),
+    Severity::Breaking,
+    (8, 5),
+    None,
+    Text::new(
+        "PHP 8.5'ten beri ArrayObject enum kabul etmez; InvalidArgumentException fırlatır.",
+        "Since PHP 8.5 ArrayObject doesn't accept enums and throws an InvalidArgumentException.",
+    ),
+);
+
+const MYSQLI_EXCEPTIONS: PatternRule = rule(
+    "behavior.mysqli_default_exceptions",
+    Text::new("mysqli hatası artık istisna", "mysqli errors are exceptions now"),
+    Severity::Behavior,
+    (8, 1),
+    Some(Text::new("try/catch kullanın ya da mysqli_report(MYSQLI_REPORT_OFF) çağırın", "use try/catch or call mysqli_report(MYSQLI_REPORT_OFF)")),
+    Text::new(
+        "PHP 8.1'den beri mysqli varsayılan olarak hata durumunda false döndürmek yerine mysqli_sql_exception fırlatır, bu yüzden bu kontrole hiç ulaşılmaz.",
+        "Since PHP 8.1 mysqli throws mysqli_sql_exception by default instead of returning false on failure, so this check is never reached.",
     ),
 );
 
