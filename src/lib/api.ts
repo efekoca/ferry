@@ -53,6 +53,7 @@ export interface Api {
   cancelPreview(path?: string): Promise<void>;
   dockerCompare(path: string, source: string, target: string, extensions: boolean, cleanImages: boolean, pages: string[], database: DatabaseChoice | null, prepare: string | null): Promise<DockerResponse>;
   databasePlan(path: string): Promise<DatabasePlan>;
+  sshHosts(): Promise<string[]>;
   dockerImageUsage(): Promise<DockerImageUsage>;
   dockerHistory(path: string): Promise<DockerSummary[]>;
   removeDockerImages(): Promise<number>;
@@ -118,6 +119,7 @@ async function tauriApi(): Promise<Api> {
     cancelPreview: (path) => invoke("cancel_rector_preview", { path }),
     dockerCompare: (path, source, target, extensions, cleanImages, pages, database, prepare) => invoke("docker_compare", { path, source, target, extensions, cleanImages, pages, database, prepare }),
     databasePlan: (path) => invoke("database_plan", { path }),
+    sshHosts: () => invoke("ssh_hosts"),
     dockerImageUsage: () => invoke("docker_image_usage"),
     dockerHistory: (path) => invoke("docker_history", { path }),
     removeDockerImages: () => invoke("remove_docker_images"),

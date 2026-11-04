@@ -162,7 +162,11 @@ export interface DatabasePlan {
   dumps: string[];
 }
 
-export type DatabaseChoice = { kind: "dump"; path: string } | { kind: "live" } | { kind: "seed" };
+export type DatabaseChoice =
+  | { kind: "dump"; path: string }
+  | { kind: "live" }
+  | { kind: "seed" }
+  | { kind: "ssh"; host: string; engine: "mysql" | "postgres"; name: string; user: string };
 
 export interface DockerDataChange {
   table: string;

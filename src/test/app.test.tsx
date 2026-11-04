@@ -470,6 +470,26 @@ describe("Ferry app", () => {
     expect(screen.getByText("orders")).toBeInTheDocument();
   });
 
+  it("asks before copying a database from a server", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    const compare = vi.spyOn(api, "dockerCompare");
+    render(<App api={api} />);
+    await openAndScan(user);
+    await user.click(nav(/Docker karşılaştırması/));
+    await user.selectOptions(await screen.findByRole("combobox", { name: "Veritabanı" }), "ssh");
+    await user.type(screen.getByRole("combobox", { name: "SSH sunucusu" }), "prod");
+    await user.type(screen.getByRole("textbox", { name: "Veritabanı adı" }), "magaza");
+    await user.type(screen.getByRole("textbox", { name: "Veritabanı kullanıcısı" }), "app");
+    await user.click(screen.getByRole("button", { name: "Karşılaştırmayı başlat" }));
+    const dialog = await screen.findByRole("dialog", { name: "Sunucudaki veri kopyalansın mı?" });
+    expect(within(dialog).getByText(/prod sunucusundaki magaza/)).toBeInTheDocument();
+    expect(compare).not.toHaveBeenCalled();
+    await user.click(within(dialog).getByRole("button", { name: "Kopyala ve karşılaştır" }));
+    await waitFor(() => expect(compare).toHaveBeenCalled());
+    expect(compare.mock.calls[0][6]).toEqual({ kind: "ssh", host: "prod", engine: "mysql", name: "magaza", user: "app" });
+  });
+
   it("removes prepared Docker images from the settings", async () => {
     const user = userEvent.setup();
     render(<App api={mockApi({ delay: 0 })} />);

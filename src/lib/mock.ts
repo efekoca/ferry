@@ -257,6 +257,7 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
       dockerImages = 0;
       return removed;
     },
+    sshHosts: async () => ["prod", "staging"],
     databasePlan: async () => ({ engine: "mysql" as const, host: "127.0.0.1", name: "magaza", user: "app", live: true, seed: null, dumps: ["database/dump.sql"] }),
     dockerCompare: async (_path, source, target, extensions, cleanImages, pages, database) => {
       if (!lastScan) throw new Error("Scan the project first.");

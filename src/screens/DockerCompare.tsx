@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { CircleAlert, CircleCheck, Container, Play, Square } from "lucide-react";
+import { CircleAlert, CircleCheck, Container, Play, ShieldAlert, Square } from "lucide-react";
+import { ConfirmDialog } from "../components/Modal";
 import { PageHeader } from "../components/Shell";
 import { Badge, Button, Callout, Card, EmptyState } from "../components/ui";
 import { useI18n } from "../i18n";
@@ -173,9 +174,13 @@ export function DockerCompare() {
   const [plan, setPlan] = useState<DatabasePlan | null>(null);
   const [dataSource, setDataSource] = useState("none");
   const [dumpFile, setDumpFile] = useState<string | null>(null);
+  const [hosts, setHosts] = useState<string[]>([]);
+  const [remote, setRemote] = useState({ host: "", engine: "mysql" as "mysql" | "postgres", name: "", user: "" });
+  const [confirming, setConfirming] = useState(false);
   const root = project?.root;
   useEffect(() => {
     if (root) api?.databasePlan(root).then(setPlan).catch(() => setPlan(null));
+    api?.sshHosts().then(setHosts).catch(() => {});
   }, [api, root]);
   const [picked, setPicked] = useState<string | null>(null);
   const [extensions, setExtensions] = useState(true);
@@ -187,6 +192,11 @@ export function DockerCompare() {
   const sources = KNOWN_SOURCES.filter((v) => Number(v) < Number(target));
   const source = picked ?? project.currentVersion ?? "";
   const running = !!dockerStep;
+  const start = () => {
+    setConfirming(false);
+    const database = dataSource === "ssh" ? ({ kind: "ssh", ...remote } as const) : choice(dataSource, dumpFile, project.root);
+    void runDocker(source, extensions, extensions && cleanImages, comparePages ? parsePaths(paths) : [], database, prepare.trim() || null);
+  };
   const stepText = dockerStep && (dockerStep.step === "install" ? t.docker.installing : dockerStep.step === "extensions" ? t.docker.preparing(dockerStep.version ?? "") : dockerStep.step === "database" ? t.docker.preparingData : dockerStep.step === "prepare" ? t.docker.runningPrepare : dockerStep.step === "pages" ? t.docker.requesting(dockerStep.version ?? "") : dockerStep.step === "lint" ? t.docker.linting(dockerStep.version ?? "") : t.docker.testing(dockerStep.version ?? ""));
   return (
     <>
@@ -218,7 +228,7 @@ export function DockerCompare() {
                     {t.docker.stop}
                   </Button>
                 ) : (
-                  <Button variant="primary" icon={<Play size={14} />} disabled={!source || (dataSource === "file" && !dumpFile)} onClick={() => void runDocker(source, extensions, extensions && cleanImages, comparePages ? parsePaths(paths) : [], choice(dataSource, dumpFile, project.root), prepare.trim() || null)}>
+                  <Button variant="primary" icon={<Play size={14} />} disabled={!source || (dataSource === "file" && !dumpFile) || (dataSource === "ssh" && !(remote.host && remote.name && remote.user))} onClick={() => (dataSource === "ssh" ? setConfirming(true) : start())}>
                     {docker ? t.docker.again : t.docker.start}
                   </Button>
                 )}
@@ -250,6 +260,7 @@ export function DockerCompare() {
                   ))}
                   {plan?.live && <option value="live">{t.docker.dataLive(plan.name ?? "", plan.host ?? "")}</option>}
                   {plan?.seed && <option value="seed">{t.docker.dataSeed(plan.seed)}</option>}
+                  <option value="ssh">{t.docker.dataSsh}</option>
                 </select>
               </label>
               {dataSource === "file" && (
@@ -263,6 +274,23 @@ export function DockerCompare() {
                 </Button>
               )}
               {dataSource === "live" && <p className="subtle">{t.docker.dataLiveNote}</p>}
+              {dataSource === "ssh" && (
+                <div className="docker-remote">
+                  <input className="input" list="ssh-hosts" aria-label={t.docker.sshHost} placeholder={t.docker.sshHost} value={remote.host} disabled={running} onChange={(e) => setRemote({ ...remote, host: e.target.value })} />
+                  <datalist id="ssh-hosts">
+                    {hosts.map((h) => (
+                      <option key={h} value={h} />
+                    ))}
+                  </datalist>
+                  <select className="input" aria-label={t.docker.sshEngine} value={remote.engine} disabled={running} onChange={(e) => setRemote({ ...remote, engine: e.target.value as "mysql" | "postgres" })}>
+                    <option value="mysql">MySQL / MariaDB</option>
+                    <option value="postgres">PostgreSQL</option>
+                  </select>
+                  <input className="input" aria-label={t.docker.sshName} placeholder={plan?.name ?? t.docker.sshName} value={remote.name} disabled={running} onChange={(e) => setRemote({ ...remote, name: e.target.value })} />
+                  <input className="input" aria-label={t.docker.sshUser} placeholder={plan?.user ?? t.docker.sshUser} value={remote.user} disabled={running} onChange={(e) => setRemote({ ...remote, user: e.target.value })} />
+                  <p className="subtle">{t.docker.sshNote}</p>
+                </div>
+              )}
               <label className="docker-field">
                 <span>{t.docker.prepare}</span>
                 <input className="input docker-paths" placeholder="php bin/console sass:build" value={prepare} disabled={running} onChange={(e) => setPrepare(e.target.value)} />
@@ -276,6 +304,17 @@ export function DockerCompare() {
             </Card>
           )}
           {docker && !running && <Result result={docker} />}
+          <ConfirmDialog
+            open={confirming}
+            tone="danger"
+            icon={<ShieldAlert size={20} />}
+            title={t.docker.sshConfirmTitle}
+            confirmLabel={t.docker.sshConfirm}
+            onCancel={() => setConfirming(false)}
+            onConfirm={start}
+          >
+            {t.docker.sshConfirmText(remote.host, remote.name, remote.user)}
+          </ConfirmDialog>
         </div>
       </div>
     </>
