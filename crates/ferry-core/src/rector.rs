@@ -284,7 +284,8 @@ fn humanize(short: &str) -> String {
 pub fn describe_rule(class: &str) -> AppliedRule {
     let name = rule_short_name(class);
     let title = RULE_TITLES.iter().find(|(n, _)| *n == name).map_or_else(|| Localized::same(humanize(name)), |(_, t)| (*t).into());
-    let fix = if LIKELY_RULES.contains(&name) { FixKind::Likely } else { FixKind::Auto };
+    let known = RULE_TITLES.iter().any(|(n, _)| *n == name) || MODERNIZATION_RULES.iter().any(|c| rule_short_name(c) == name);
+    let fix = if known && !LIKELY_RULES.contains(&name) { FixKind::Auto } else { FixKind::Likely };
     AppliedRule { class: class.to_string(), name: name.to_string(), title, since: rule_since(class), fix }
 }
 
@@ -327,10 +328,21 @@ impl Staging {
         for path in crate::project::collect_php_files(root, excluded_dirs) {
             scope.insert(crate::analyzer::relative_path(root, &path));
             let Ok(bytes) = std::fs::read(&path) else { continue };
-            let Ok(text) = String::from_utf8(bytes) else { continue };
+            let text = match String::from_utf8(bytes) {
+                Ok(text) => text,
+                Err(e) => {
+                    constants.extend(crate::analyzer::constant_names(&String::from_utf8_lossy(e.as_bytes())));
+                    continue;
+                }
+            };
             constants.extend(crate::analyzer::constant_names(&text));
             if crate::analyzer::fix_legacy_syntax(&text).is_some() {
                 candidates.push((path, text));
+            }
+        }
+        for path in crate::index::composer_files(root) {
+            if let Ok(bytes) = std::fs::read(&path) {
+                constants.extend(crate::analyzer::constant_names(&String::from_utf8_lossy(&bytes)));
             }
         }
         for (path, text) in candidates {
@@ -710,6 +722,7 @@ mod tests {
         let r = describe_rule("Rector\\CodeQuality\\Rector\\Foo\\SomethingNiceRector");
         assert_eq!(r.since, None);
         assert_eq!(r.title, Localized::same("Something Nice"));
+        assert_eq!(r.fix, FixKind::Likely);
     }
 
     #[test]
@@ -808,6 +821,21 @@ mod tests {
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].new_content, "<?php\nrequire 'config.php';\necho $a[active] . $a[other_key] . $a['missing'];\n");
         assert_eq!(changes[0].fix, FixKind::Likely, "a staged-only file keeps its riskiest rule");
+    }
+
+    #[test]
+    fn constants_in_latin1_and_autoloaded_files_stay_constants() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("latin.php"), b"<?php // caf\xe9\ndefine('active', 'k');").unwrap();
+        std::fs::create_dir_all(root.join("vendor/composer")).unwrap();
+        std::fs::create_dir_all(root.join("vendor/lib")).unwrap();
+        std::fs::write(root.join("vendor/lib/c.php"), "<?php const other_key = 1;").unwrap();
+        std::fs::write(root.join("vendor/composer/autoload_files.php"), "<?php return ['x' => $vendorDir . '/lib/c.php'];").unwrap();
+        std::fs::write(root.join("a.php"), "<?php\necho $a[active] . $a[other_key] . $a[missing];\n").unwrap();
+        let staging = Staging::prepare(root, &["vendor".to_string()], root.join(".ferry-staged")).unwrap();
+        let (changes, _) = parse_output(root, r#"{"file_diffs": []}"#, &staging).unwrap();
+        assert_eq!(changes[0].new_content, "<?php\necho $a[active] . $a[other_key] . $a['missing'];\n");
     }
 
     #[test]
