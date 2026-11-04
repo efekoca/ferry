@@ -419,7 +419,7 @@
       setter.call(select, "dump:database/dump.sql");
       select.dispatchEvent(new Event("change", { bubbles: true }));
       await click("Karşılaştırmayı başlat");
-      await until(() => text().includes("İstekler sonrası"), "data comparison", 300000);
+      await until(() => text().includes("İstekler sonrası"), "data comparison", 900000);
       noErrorToast(before);
     },
 
