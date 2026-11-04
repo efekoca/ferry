@@ -13,6 +13,7 @@ const READY_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const SEED_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const LOCAL_ADDRESS: &str = "127.0.0.1";
 const ROOT_PASSWORD: &str = "ferry";
+const SOCKET_DIR: &str = "/var/run/mysqld";
 const DEFAULT_SQLITE: &str = "database/database.sqlite";
 const SQLITE_DUMP: &str = ".ferry-dump.sql";
 
@@ -314,11 +315,17 @@ fn point_copy_at(project: &Path, connection: &Connection) -> std::io::Result<()>
     Ok(())
 }
 
+/// Code that says `localhost` reaches MySQL through this socket, shared with the app's container.
+pub(crate) fn socket_mount(running: &Running, connection: &Connection) -> Option<String> {
+    (connection.engine == Engine::Mysql).then(|| format!("{}:{SOCKET_DIR}", running.socket))
+}
+
 pub(crate) fn environment(connection: &Connection) -> Vec<(String, String)> {
     if connection.engine == Engine::Sqlite {
         return vec![("DB_CONNECTION".to_string(), "sqlite".to_string()), ("DB_DATABASE".to_string(), connection.sqlite_path())];
     }
     let pairs = [
+        ("PHP_INI_SCAN_DIR", format!(":{SOCKET_DIR}")),
         ("DB_HOST", LOCAL_ADDRESS.to_string()),
         ("DB_PORT", connection.port.to_string()),
         ("DB_DATABASE", connection.name.clone()),
@@ -333,12 +340,15 @@ pub(crate) fn environment(connection: &Connection) -> Vec<(String, String)> {
 pub(crate) struct Running<'a> {
     docker: &'a Path,
     pub name: String,
+    pub socket: String,
     connection: Connection,
 }
 
 impl Drop for Running<'_> {
     fn drop(&mut self) {
         let _ = toolchain::command(self.docker).args(["rm", "-f", &self.name]).stderr(Stdio::null()).stdout(Stdio::null()).status();
+        let _ =
+            toolchain::command(self.docker).args(["volume", "rm", "-f", &self.socket]).stderr(Stdio::null()).stdout(Stdio::null()).status();
     }
 }
 
@@ -455,6 +465,7 @@ pub(crate) fn start<'a>(
     dump: Option<&Path>,
 ) -> Result<Running<'a>, String> {
     let name = format!("{}-db-{suffix}", container.prefix);
+    let socket = format!("{name}-socket");
     let engine = connection.engine;
     let mut cmd = toolchain::command(container.docker);
     cmd.args(["run", "-d", "--name", &name, "--network", "none", "--memory", "2g"]);
@@ -473,6 +484,7 @@ pub(crate) fn start<'a>(
                 pass("MYSQL_PASSWORD", &connection.password.replace('\\', "\\\\").replace('\'', "''"));
             }
             cmd.args(["--tmpfs", "/var/lib/mysql:uid=999,gid=999"]);
+            cmd.arg("-v").arg(format!("{socket}:{SOCKET_DIR}"));
         }
         Engine::Postgres | Engine::Sqlite => {
             pass("POSTGRES_USER", &connection.user);
@@ -490,12 +502,15 @@ pub(crate) fn start<'a>(
         cmd.args(["--default-authentication-plugin=mysql_native_password", "--character-set-server=utf8mb4", "--mysqlx=OFF"]);
     }
     let done = cmd.output().map_err(|e| e.to_string())?;
-    let running = Running { docker: container.docker, name, connection: connection.clone() };
+    let running = Running { docker: container.docker, name, socket, connection: connection.clone() };
     if !done.status.success() {
         let reason = String::from_utf8_lossy(&done.stderr).trim().to_string();
         return Err(crate::t!("Veritabanı başlatılamadı: {reason}", "The database couldn't start: {reason}"));
     }
     running.ready(container.cancel)?;
+    if engine == Engine::Mysql {
+        running.exec(&format!("printf 'mysqli.default_socket={SOCKET_DIR}/mysqld.sock\\npdo_mysql.default_socket={SOCKET_DIR}/mysqld.sock\\nmysql.default_socket={SOCKET_DIR}/mysqld.sock\\n' > {SOCKET_DIR}/ferry.ini; chmod 755 {SOCKET_DIR}"));
+    }
     Ok(running)
 }
 
@@ -663,7 +678,7 @@ pub(crate) fn prepare(
                 let copy = connection.sqlite_copy(project);
                 std::fs::create_dir_all(copy.parent().unwrap_or(project)).map_err(failed)?;
                 std::fs::write(&copy, "").map_err(failed)?;
-                container.attach(None, environment(&connection));
+                container.attach(None, None, environment(&connection));
                 let run = container.run(&format!("seed-{}", version.compact()), project, &image, false, command, SEED_TIMEOUT);
                 container.detach();
                 let run = run?;
@@ -674,7 +689,7 @@ pub(crate) fn prepare(
                 return Ok(Prepared { connection, dump: None });
             }
             let database = start(container, "seed", &connection, None)?;
-            container.attach(Some(&database.name), environment(&connection));
+            container.attach(Some(&database.name), socket_mount(&database, &connection), environment(&connection));
             let run = container.run(&format!("seed-{}", version.compact()), project, &image, false, command, SEED_TIMEOUT);
             container.detach();
             let run = run?;

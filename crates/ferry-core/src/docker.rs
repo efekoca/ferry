@@ -310,7 +310,7 @@ fn owner_flag(path: &Path) -> Vec<String> {
     Vec::new()
 }
 
-type SharedDatabase = (Option<String>, Vec<(String, String)>);
+type SharedDatabase = (Option<String>, Option<String>, Vec<(String, String)>);
 
 pub(crate) struct Container<'a> {
     pub docker: &'a Path,
@@ -321,8 +321,8 @@ pub(crate) struct Container<'a> {
 
 impl Container<'_> {
     /// Later runs share the network of `database` and receive its settings.
-    pub fn attach(&self, database: Option<&str>, env: Vec<(String, String)>) {
-        *self.shared.borrow_mut() = Some((database.map(str::to_string), env));
+    pub fn attach(&self, database: Option<&str>, socket: Option<String>, env: Vec<(String, String)>) {
+        *self.shared.borrow_mut() = Some((database.map(str::to_string), socket, env));
     }
 
     pub fn detach(&self) {
@@ -346,7 +346,10 @@ impl Container<'_> {
             .arg("-v")
             .arg(format!("{}:{CONTAINER_ROOT}", dir.display()));
         match &*self.shared.borrow() {
-            Some((database, env)) if !network => {
+            Some((database, socket, env)) if !network => {
+                if let Some(socket) = socket {
+                    cmd.arg("-v").arg(socket);
+                }
                 match database {
                     Some(database) => cmd.arg("--network").arg(format!("container:{database}")),
                     None => cmd.args(["--network", "none"]),
@@ -500,13 +503,14 @@ fn run_version(
     let sqlite = setup.database.filter(|p| p.connection.engine == crate::database::Engine::Sqlite);
     let database = match setup.database {
         Some(prepared) if sqlite.is_some() => {
-            container.attach(None, crate::database::environment(&prepared.connection));
+            container.attach(None, None, crate::database::environment(&prepared.connection));
             None
         }
         Some(prepared) => {
             step(Step::Database);
             let running = crate::database::start(container, &version.compact(), &prepared.connection, prepared.dump.as_deref())?;
-            container.attach(Some(&running.name), crate::database::environment(&prepared.connection));
+            let socket = crate::database::socket_mount(&running, &prepared.connection);
+            container.attach(Some(&running.name), socket, crate::database::environment(&prepared.connection));
             Some(running)
         }
         None => None,
@@ -824,6 +828,27 @@ mod tests {
             assert!(result.data_changes.is_empty(), "{sql}: {:?}", result.data_changes);
             assert_eq!(result.source.data.get("items").map(|r| r.0), Some(2), "{sql}");
         }
+    }
+
+    #[test]
+    fn hardcoded_localhost_reaches_mysql_through_its_socket() {
+        if std::env::var_os("FERRY_TEST_DOCKER").is_none() {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let page = "<?php $d = mysqli_connect('localhost', 'ferry', 'ferry', 'ferry'); $e = new PDO('mysql:host=localhost;dbname=ferry', 'ferry', 'ferry'); $r = mysqli_query($d, 'select name from items'); echo mysqli_fetch_row($r)[0], ' ', $e->query('select count(*) from items')->fetchColumn();";
+        std::fs::write(dir.path().join("index.php"), page).unwrap();
+        let dump = dir.path().join("seed.sql");
+        std::fs::write(&dump, "CREATE TABLE items (name TEXT);\nINSERT INTO items VALUES ('elma');\n").unwrap();
+        let options = Options {
+            clean_images: true,
+            pages: vec!["/".to_string()],
+            database: Some(crate::database::Source::Dump(dump)),
+            ..Options::default()
+        };
+        let result = compare(dir.path(), PhpVersion::new(8, 3), PhpVersion::new(8, 4), options, &AtomicBool::new(false), |_| {}).unwrap();
+        assert!(result.pages[0].source_text.contains("elma 1"), "{:?}\n{}", result.pages, result.source.log);
+        assert_eq!(result.pages[0].change, crate::web::PageChange::Same, "{:?}", result.pages);
     }
 
     #[test]
