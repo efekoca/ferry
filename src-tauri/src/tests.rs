@@ -556,11 +556,24 @@ fn docker_comparison_feeds_the_findings() {
     h.ok("scan_project", json!({ "path": dir.path(), "target": "8.4", "run": 1 }));
     let result = h.ok(
         "docker_compare",
-        json!({ "path": dir.path(), "source": "7.4", "target": "8.4", "extensions": false, "cleanImages": false, "pages": [] }),
+        json!({ "path": dir.path(), "source": "7.4", "target": "8.4", "extensions": false, "cleanImages": false, "pages": [], "database": null }),
     );
     assert!(!result["comparison"]["newOnTarget"].as_array().unwrap().is_empty(), "{result}");
     assert_eq!(result["scan"]["runtime"]["outside"], 0, "{result}");
     assert!(result["scan"]["findings"].as_array().unwrap().iter().any(|f| f["runtimeHits"].as_u64() > Some(0)), "{result}");
+}
+
+#[test]
+fn database_plans_never_include_the_password() {
+    let h = harness();
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join(".env"), "DB_CONNECTION=pgsql\nDB_DATABASE=shop\nDB_USERNAME=app\nDB_PASSWORD=hunter2\n").unwrap();
+    std::fs::create_dir(dir.path().join("database")).unwrap();
+    std::fs::write(dir.path().join("database/dump.sql"), "-- dump").unwrap();
+    let plan = h.ok("database_plan", json!({ "path": dir.path() }));
+    assert_eq!((plan["engine"].as_str(), plan["name"].as_str(), plan["live"].as_bool()), (Some("postgres"), Some("shop"), Some(true)));
+    assert_eq!(plan["dumps"], json!(["database/dump.sql"]));
+    assert!(!plan.to_string().contains("hunter2"));
 }
 
 #[test]

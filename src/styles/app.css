@@ -1861,6 +1861,16 @@ select.input {
   font-size: var(--text-sm);
 }
 
+.docker-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-top: var(--space-3);
+  max-width: 420px;
+  font-size: var(--text-sm);
+  color: var(--text-2);
+}
+
 .docker-paths {
   margin-top: var(--space-2);
   max-width: 420px;

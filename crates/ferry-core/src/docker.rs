@@ -101,6 +101,8 @@ pub struct VersionRun {
     pub failed_tests: Vec<String>,
     #[serde(skip)]
     pub crawl: crate::web::Crawl,
+    #[serde(skip)]
+    pub data: crate::database::Snapshot,
     pub missing_extensions: Vec<String>,
     pub installed_extensions: Vec<String>,
     pub image_failed: bool,
@@ -117,6 +119,8 @@ pub struct Comparison {
     pub install_log: String,
     pub new_failures: Vec<String>,
     pub pages: Vec<crate::web::PageDiff>,
+    pub data_changes: Vec<crate::database::DataChange>,
+    pub database_used: bool,
     pub new_on_target: Vec<Event>,
     pub gone_on_target: Vec<Event>,
 }
@@ -134,6 +138,7 @@ pub struct Options {
     pub clean_images: bool,
     /// Pages to start crawling from. Empty skips the page comparison.
     pub pages: Vec<String>,
+    pub database: Option<crate::database::Source>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -141,6 +146,7 @@ pub enum Step {
     Installing,
     Extensions(PhpVersion),
     Lint(PhpVersion),
+    Database,
     Pages(PhpVersion),
     Tests(PhpVersion),
 }
@@ -231,14 +237,26 @@ fn owner_flag(path: &Path) -> Vec<String> {
     Vec::new()
 }
 
-struct Container<'a> {
-    docker: &'a Path,
-    cancel: &'a AtomicBool,
-    prefix: String,
+type SharedDatabase = (String, Vec<(String, String)>);
+
+pub(crate) struct Container<'a> {
+    pub docker: &'a Path,
+    pub cancel: &'a AtomicBool,
+    pub prefix: String,
+    shared: RefCell<Option<SharedDatabase>>,
 }
 
 impl Container<'_> {
-    fn run(
+    /// Later runs share the network of `database` and receive its settings.
+    pub fn attach(&self, database: &str, env: Vec<(String, String)>) {
+        *self.shared.borrow_mut() = Some((database.to_string(), env));
+    }
+
+    pub fn detach(&self) {
+        *self.shared.borrow_mut() = None;
+    }
+
+    pub fn run(
         &self,
         name: &str,
         dir: &Path,
@@ -254,8 +272,17 @@ impl Container<'_> {
             .args(owner_flag(dir))
             .arg("-v")
             .arg(format!("{}:{CONTAINER_ROOT}", dir.display()));
-        if !network {
-            cmd.args(["--network", "none"]);
+        match &*self.shared.borrow() {
+            Some((database, env)) if !network => {
+                cmd.arg("--network").arg(format!("container:{database}"));
+                for (key, value) in env {
+                    cmd.arg("-e").arg(key).env(key, value);
+                }
+            }
+            _ if !network => {
+                cmd.args(["--network", "none"]);
+            }
+            _ => {}
         }
         cmd.args([image, "sh", "-c", script]);
         let done = toolchain::run_process(cmd, self.docker, self.cancel, timeout).map_err(|e| e.to_string())?;
@@ -269,11 +296,11 @@ impl Container<'_> {
     }
 }
 
-fn output(done: &toolchain::Finished) -> String {
+pub(crate) fn output(done: &toolchain::Finished) -> String {
     format!("{}{}", String::from_utf8_lossy(&done.stdout), String::from_utf8_lossy(&done.stderr))
 }
 
-fn tail(text: &str) -> String {
+pub(crate) fn tail(text: &str) -> String {
     let mut start = text.len().saturating_sub(LOG_LIMIT);
     while !text.is_char_boundary(start) {
         start += 1;
@@ -337,23 +364,32 @@ struct Setup<'a> {
     used: &'a [String],
     install_extensions: bool,
     pages: &'a [String],
+    drivers: &'a [String],
     images: &'a Path,
+    database: Option<&'a crate::database::Prepared>,
     built: RefCell<Vec<String>>,
 }
 
-fn run_version(
+struct PreparedImage {
+    image: String,
+    modules: HashSet<String>,
+    wanted: Vec<String>,
+    image_failed: bool,
+}
+
+fn prepare_image(
     container: &Container,
     version: PhpVersion,
     project: &Path,
     setup: &Setup,
     step: &dyn Fn(Step),
-) -> Result<VersionRun, String> {
+) -> Result<PreparedImage, String> {
     let base = format!("php:{version}-cli");
-    let used = setup.used;
     let mut image = base.clone();
     let mut modules = loaded(container, version, project, &image)?;
-    let missing: Vec<String> = used.iter().filter(|e| !modules.contains(*e)).cloned().collect();
-    let wanted = if setup.install_extensions { installable(&missing) } else { Vec::new() };
+    let missing: Vec<String> = setup.used.iter().filter(|e| !modules.contains(*e)).cloned().collect();
+    let needed: Vec<String> = missing.iter().filter(|e| setup.install_extensions || setup.drivers.contains(e)).cloned().collect();
+    let wanted = installable(&needed);
     let mut image_failed = false;
     if !wanted.is_empty() {
         step(Step::Extensions(version));
@@ -366,6 +402,18 @@ fn run_version(
             None => image_failed = true,
         }
     }
+    Ok(PreparedImage { image, modules, wanted, image_failed })
+}
+
+fn run_version(
+    container: &Container,
+    version: PhpVersion,
+    project: &Path,
+    setup: &Setup,
+    step: &dyn Fn(Step),
+) -> Result<VersionRun, String> {
+    let used = setup.used;
+    let PreparedImage { image, modules, wanted, image_failed } = prepare_image(container, version, project, setup, step)?;
     let installed_extensions = wanted.iter().filter(|e| modules.contains(*e)).cloned().collect();
     step(Step::Lint(version));
     let lint = container.run(&format!("lint-{}", version.compact()), project, &image, false, LINT_SCRIPT, LINT_TIMEOUT)?;
@@ -373,6 +421,16 @@ fn run_version(
     let lint_errors = lint_lines(&lint_output).count();
     let missing_extensions = used.iter().filter(|e| !modules.contains(*e)).cloned().collect();
     let mut log = lint_output;
+    let database = match setup.database {
+        Some(prepared) => {
+            step(Step::Database);
+            let running = crate::database::start(container, &version.compact(), &prepared.connection, prepared.dump.as_deref())?;
+            container.attach(&running.name, crate::database::environment(&prepared.connection));
+            Some(running)
+        }
+        None => None,
+    };
+    let mut data = crate::database::Snapshot::new();
     let mut crawl = crate::web::Crawl::default();
     if !setup.pages.is_empty() {
         step(Step::Pages(version));
@@ -381,6 +439,9 @@ fn run_version(
         let text = output(&run);
         crawl = crate::web::parse(&text);
         log.push_str(crate::web::server_log(&text));
+    }
+    if let Some(running) = &database {
+        data = running.snapshot();
     }
     let has_tests = project.join("vendor/bin/phpunit").exists() && project.join("vendor/autoload.php").is_file();
     let mut failed = Vec::new();
@@ -405,6 +466,8 @@ fn run_version(
     } else {
         None
     };
+    container.detach();
+    drop(database);
     let events = runtime::parse(&log);
     Ok(VersionRun {
         version,
@@ -413,6 +476,7 @@ fn run_version(
         tests,
         failed_tests: failed,
         crawl,
+        data,
         missing_extensions,
         installed_extensions,
         image_failed,
@@ -464,13 +528,13 @@ pub fn compare(
         Ok::<PathBuf, String>(dest)
     };
     let base = copy("base")?;
-    let container = Container { docker: &docker, cancel, prefix: format!("ferry-{}", std::process::id()) };
+    let container = Container { docker: &docker, cancel, prefix: format!("ferry-{}", std::process::id()), shared: RefCell::new(None) };
     let needs_install = base.join("composer.json").is_file() && !base.join("vendor/autoload.php").is_file();
     let mut dependencies_installed = !needs_install;
     let mut install_log = String::new();
     if needs_install {
         step(Step::Installing);
-        let install = "composer install --no-interaction --no-progress --no-scripts --no-plugins";
+        let install = "composer install --no-interaction --no-progress --no-scripts --no-plugins --no-security-blocking";
         let script = if base.join("composer.lock").is_file() {
             format!("{install} --ignore-platform-reqs")
         } else {
@@ -485,17 +549,39 @@ pub fn compare(
         }
     }
     let files = crate::project::collect_php_files(root, &[]);
-    let used: Vec<String> = crate::extensions::used(root, &files).into_iter().map(|e| e.name.to_ascii_lowercase()).collect();
-    let target_dir = work.path().join("target");
-    copy_project(&base, &target_dir).map_err(|e| crate::t!("Proje kopyalanamadı: {e}", "Couldn't copy the project: {e}"))?;
+    let mut used: Vec<String> = crate::extensions::used(root, &files).into_iter().map(|e| e.name.to_ascii_lowercase()).collect();
+    let drivers: Vec<String> =
+        options.database.iter().flat_map(|c| crate::database::engine_for(root, c).extensions().map(String::from)).collect();
+    used.extend(drivers.iter().cloned());
+    used.sort();
+    used.dedup();
     let images = work.path().join("images");
-    let setup = Setup {
+    let mut setup = Setup {
         used: &used,
         install_extensions: options.install_extensions,
         pages: &options.pages,
+        drivers: &drivers,
         images: &images,
+        database: None,
         built: RefCell::new(Vec::new()),
     };
+    if options.database == Some(crate::database::Source::Seed) && !dependencies_installed {
+        let reason = install_log.trim();
+        return Err(crate::t!(
+            "Test verisi için bağımlılıklar kurulamadı: {reason}",
+            "Dependencies for the test data couldn't be installed: {reason}"
+        ));
+    }
+    let prepared = match &options.database {
+        Some(choice) => {
+            let seed_image = || prepare_image(&container, source, &base, &setup, &step).map(|p| p.image);
+            Some(crate::database::prepare(&container, &base, choice, &work.path().join("data"), &seed_image, source, &step)?)
+        }
+        None => None,
+    };
+    setup.database = prepared.as_ref();
+    let target_dir = work.path().join("target");
+    copy_project(&base, &target_dir).map_err(|e| crate::t!("Proje kopyalanamadı: {e}", "Couldn't copy the project: {e}"))?;
     let runs = run_version(&container, source, &base, &setup, &step)
         .and_then(|first| run_version(&container, target, &target_dir, &setup, &step).map(|second| (first, second)));
     if options.clean_images {
@@ -503,6 +589,7 @@ pub fn compare(
     }
     let (source_run, target_run) = runs?;
     let pages = crate::web::compare(&source_run.crawl, &target_run.crawl);
+    let data_changes = crate::database::data_changes(&source_run.data, &target_run.data);
     let new_failures = target_run.failed_tests.iter().filter(|t| !source_run.failed_tests.contains(t)).cloned().collect();
     let new_on_target = differs(&target_run.events, &source_run.events);
     let gone_on_target = differs(&source_run.events, &target_run.events);
@@ -513,6 +600,8 @@ pub fn compare(
         install_log,
         new_failures,
         pages,
+        data_changes,
+        database_used: options.database.is_some(),
         new_on_target,
         gone_on_target,
     })
@@ -566,7 +655,7 @@ mod tests {
         }
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("a.php"), "<?php\n$b = new mysqli('h');\necho bcadd('1', '2');\n").unwrap();
-        let options = Options { install_extensions: true, clean_images: true, pages: Vec::new() };
+        let options = Options { install_extensions: true, clean_images: true, ..Options::default() };
         let result = compare(dir.path(), PhpVersion::new(7, 4), PhpVersion::new(8, 4), options, &AtomicBool::new(false), |_| {}).unwrap();
         let docker = available().unwrap();
         let left = built_images(&docker).unwrap();
@@ -574,6 +663,40 @@ mod tests {
             assert_eq!(run.installed_extensions, ["bcmath", "mysqli"], "{run:?}");
             assert!(run.missing_extensions.is_empty() && run.image.starts_with(IMAGE_PREFIX), "{run:?}");
             assert!(!left.contains(&run.image), "{left:?}");
+        }
+    }
+
+    #[test]
+    fn databases_are_imported_for_each_version() {
+        if std::env::var_os("FERRY_TEST_DOCKER").is_none() {
+            return;
+        }
+        for (dump, url, sql) in [
+            ("CREATE TABLE items (name TEXT);\nINSERT INTO items VALUES ('elma'), ('armut');\n", "mysql:host=127.0.0.1;dbname=ferry", "my"),
+            (
+                "-- PostgreSQL database dump\nCREATE TABLE items (name TEXT);\nINSERT INTO items VALUES ('elma'), ('armut');\n",
+                "pgsql:host=127.0.0.1;dbname=ferry",
+                "pg",
+            ),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let page = format!("<?php $d = new PDO('{url}', getenv('DB_USERNAME'), getenv('DB_PASSWORD')); foreach ($d->query('select name from items') as $r) {{ echo $r[0], ' '; }}");
+            std::fs::write(dir.path().join("index.php"), page).unwrap();
+            let file = dir.path().join(format!("{sql}.sql"));
+            std::fs::write(&file, dump).unwrap();
+            let options = Options {
+                install_extensions: true,
+                clean_images: true,
+                pages: vec!["/".to_string()],
+                database: Some(crate::database::Source::Dump(file)),
+            };
+            let result =
+                compare(dir.path(), PhpVersion::new(8, 3), PhpVersion::new(8, 4), options, &AtomicBool::new(false), |_| {}).unwrap();
+            let page = &result.pages[0];
+            assert!(page.source_text.contains("elma armut"), "{sql}: {page:?}");
+            assert_eq!(page.change, crate::web::PageChange::Same, "{sql}: {page:?}");
+            assert!(result.data_changes.is_empty(), "{sql}: {:?}", result.data_changes);
+            assert_eq!(result.source.data.get("items").map(|r| r.0), Some(2), "{sql}");
         }
     }
 
@@ -601,7 +724,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("a.php"), "<?php\necho gmp_add(1, 2);\n").unwrap();
         let cancel = AtomicBool::new(false);
-        let options = Options { install_extensions: true, clean_images: true, pages: Vec::new() };
+        let options = Options { install_extensions: true, clean_images: true, ..Options::default() };
         let started = std::time::Instant::now();
         let result = std::thread::scope(|scope| {
             scope.spawn(|| {

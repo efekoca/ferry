@@ -1,12 +1,17 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CircleAlert, CircleCheck, Container, Play, Square } from "lucide-react";
 import { PageHeader } from "../components/Shell";
 import { Badge, Button, Callout, Card, EmptyState } from "../components/ui";
 import { useI18n } from "../i18n";
 import { useStore } from "../lib/store";
-import { KNOWN_SOURCES, type DockerComparison, type DockerPage, type DockerRun, type Target } from "../lib/types";
+import { KNOWN_SOURCES, type DatabaseChoice, type DatabasePlan, type DockerComparison, type DockerPage, type DockerRun, type Target } from "../lib/types";
 
 const shortPath = (path: string) => path.replace(/^\/app\//, "");
+const choice = (source: string, file: string | null, root: string): DatabaseChoice | null => {
+  if (source === "live" || source === "seed") return { kind: source };
+  if (source === "file") return file ? { kind: "dump", path: file } : null;
+  return source.startsWith("dump:") ? { kind: "dump", path: `${root}/${source.slice(5)}` } : null;
+};
 const parsePaths = (text: string) => text.split(",").map((p) => p.trim()).filter(Boolean).map((p) => (p.startsWith("/") ? p : `/${p}`));
 
 function RunCard({ run }: { run: DockerRun }) {
@@ -105,6 +110,24 @@ function Result({ result }: { result: DockerComparison }) {
         <RunCard run={result.target} />
       </div>
       {result.pages.length > 0 && <PagesCard pages={result.pages} version={result.target.version} />}
+      {result.databaseUsed && (
+        <Card title={t.docker.dataTitle(result.dataChanges.length)}>
+          {result.dataChanges.length === 0 ? (
+            <p className="subtle">{t.docker.dataSame}</p>
+          ) : (
+            <ul className="docker-events">
+              {result.dataChanges.map((c) => (
+                <li key={c.table}>
+                  <code>{c.table}</code>
+                  <span>
+                    {c.sourceRows ?? "—"} → {c.targetRows ?? "—"}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      )}
       {result.newFailures.length > 0 && (
         <Card title={t.docker.failuresTitle(result.target.version, result.newFailures.length)}>
           <ul className="docker-events">
@@ -146,7 +169,14 @@ function Result({ result }: { result: DockerComparison }) {
 
 export function DockerCompare() {
   const { t } = useI18n();
-  const { project, target, toolchain, docker, dockerStep, runDocker, cancelDocker } = useStore();
+  const { api, project, target, toolchain, docker, dockerStep, runDocker, cancelDocker } = useStore();
+  const [plan, setPlan] = useState<DatabasePlan | null>(null);
+  const [dataSource, setDataSource] = useState("none");
+  const [dumpFile, setDumpFile] = useState<string | null>(null);
+  const root = project?.root;
+  useEffect(() => {
+    if (root) api?.databasePlan(root).then(setPlan).catch(() => setPlan(null));
+  }, [api, root]);
   const [picked, setPicked] = useState<string | null>(null);
   const [extensions, setExtensions] = useState(true);
   const [cleanImages, setCleanImages] = useState(false);
@@ -156,7 +186,7 @@ export function DockerCompare() {
   const sources = KNOWN_SOURCES.filter((v) => Number(v) < Number(target));
   const source = picked ?? project.currentVersion ?? "";
   const running = !!dockerStep;
-  const stepText = dockerStep && (dockerStep.step === "install" ? t.docker.installing : dockerStep.step === "extensions" ? t.docker.preparing(dockerStep.version ?? "") : dockerStep.step === "pages" ? t.docker.requesting(dockerStep.version ?? "") : dockerStep.step === "lint" ? t.docker.linting(dockerStep.version ?? "") : t.docker.testing(dockerStep.version ?? ""));
+  const stepText = dockerStep && (dockerStep.step === "install" ? t.docker.installing : dockerStep.step === "extensions" ? t.docker.preparing(dockerStep.version ?? "") : dockerStep.step === "database" ? t.docker.preparingData : dockerStep.step === "pages" ? t.docker.requesting(dockerStep.version ?? "") : dockerStep.step === "lint" ? t.docker.linting(dockerStep.version ?? "") : t.docker.testing(dockerStep.version ?? ""));
   return (
     <>
       <PageHeader title={t.docker.title} subtitle={t.docker.subtitle(source || "?", target as Target)} />
@@ -187,7 +217,7 @@ export function DockerCompare() {
                     {t.docker.stop}
                   </Button>
                 ) : (
-                  <Button variant="primary" icon={<Play size={14} />} disabled={!source} onClick={() => void runDocker(source, extensions, extensions && cleanImages, comparePages ? parsePaths(paths) : [])}>
+                  <Button variant="primary" icon={<Play size={14} />} disabled={!source || (dataSource === "file" && !dumpFile)} onClick={() => void runDocker(source, extensions, extensions && cleanImages, comparePages ? parsePaths(paths) : [], choice(dataSource, dumpFile, project.root))}>
                     {docker ? t.docker.again : t.docker.start}
                   </Button>
                 )}
@@ -207,6 +237,31 @@ export function DockerCompare() {
               {comparePages && (
                 <input className="input docker-paths" aria-label={t.docker.pagesLabel} placeholder="/, /login" value={paths} disabled={running} onChange={(e) => setPaths(e.target.value)} />
               )}
+              <label className="docker-field">
+                <span>{t.docker.dataSource}</span>
+                <select className="input" value={dataSource} disabled={running} onChange={(e) => setDataSource(e.target.value)}>
+                  <option value="none">{t.docker.dataNone}</option>
+                  <option value="file">{t.docker.dataFile}</option>
+                  {plan?.dumps.map((d) => (
+                    <option key={d} value={`dump:${d}`}>
+                      {t.docker.dataDump(d)}
+                    </option>
+                  ))}
+                  {plan?.live && <option value="live">{t.docker.dataLive(plan.name ?? "", plan.host ?? "")}</option>}
+                  {plan?.seed && <option value="seed">{t.docker.dataSeed(plan.seed)}</option>}
+                </select>
+              </label>
+              {dataSource === "file" && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={running}
+                  onClick={() => void api?.pickLogFile(t.docker.dataPick).then((f) => f && setDumpFile(f))}
+                >
+                  {dumpFile ?? t.docker.dataPick}
+                </Button>
+              )}
+              {dataSource === "live" && <p className="subtle">{t.docker.dataLiveNote}</p>}
               {stepText && (
                 <p className="subtle" role="status">
                   {stepText}

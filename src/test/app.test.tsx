@@ -435,6 +435,18 @@ describe("Ferry app", () => {
     expect(screen.queryByText("Sunucudaki proje kökü")).not.toBeInTheDocument();
   });
 
+  it("compares with a copy of the project's database", async () => {
+    const user = userEvent.setup();
+    render(<App api={mockApi({ delay: 0 })} />);
+    await openAndScan(user);
+    await user.click(nav(/Docker karşılaştırması/));
+    await user.selectOptions(await screen.findByRole("combobox", { name: "Veritabanı" }), await screen.findByRole("option", { name: "Canlı kopya: magaza (127.0.0.1)" }));
+    expect(screen.getByText(/Canlı veritabanınıza yazılmaz/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Karşılaştırmayı başlat" }));
+    expect(await screen.findByText("İstekler sonrası farklı tablolar: 1")).toBeInTheDocument();
+    expect(screen.getByText("orders")).toBeInTheDocument();
+  });
+
   it("removes prepared Docker images from the settings", async () => {
     const user = userEvent.setup();
     render(<App api={mockApi({ delay: 0 })} />);

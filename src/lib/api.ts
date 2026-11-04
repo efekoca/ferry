@@ -1,4 +1,6 @@
 import type {
+  DatabaseChoice,
+  DatabasePlan,
   DockerImageUsage,
   DockerResponse,
   DockerStep,
@@ -48,7 +50,8 @@ export interface Api {
   installRector(): Promise<ToolchainStatus>;
   rectorPreview(path: string, target: string, mode: RectorMode): Promise<RectorPreview>;
   cancelPreview(path?: string): Promise<void>;
-  dockerCompare(path: string, source: string, target: string, extensions: boolean, cleanImages: boolean, pages: string[]): Promise<DockerResponse>;
+  dockerCompare(path: string, source: string, target: string, extensions: boolean, cleanImages: boolean, pages: string[], database: DatabaseChoice | null): Promise<DockerResponse>;
+  databasePlan(path: string): Promise<DatabasePlan>;
   dockerImageUsage(): Promise<DockerImageUsage>;
   removeDockerImages(): Promise<number>;
   cancelDockerCompare(path: string): Promise<void>;
@@ -111,7 +114,8 @@ async function tauriApi(): Promise<Api> {
     installRector: () => invoke("install_rector"),
     rectorPreview: (path, target, mode) => invoke("rector_preview", { path, target, mode }),
     cancelPreview: (path) => invoke("cancel_rector_preview", { path }),
-    dockerCompare: (path, source, target, extensions, cleanImages, pages) => invoke("docker_compare", { path, source, target, extensions, cleanImages, pages }),
+    dockerCompare: (path, source, target, extensions, cleanImages, pages, database) => invoke("docker_compare", { path, source, target, extensions, cleanImages, pages, database }),
+    databasePlan: (path) => invoke("database_plan", { path }),
     dockerImageUsage: () => invoke("docker_image_usage"),
     removeDockerImages: () => invoke("remove_docker_images"),
     cancelDockerCompare: (path) => invoke("cancel_docker_compare", { path }),
