@@ -858,6 +858,7 @@ async fn apply_changes(
     path: String,
     preview_id: u64,
     files: Vec<String>,
+    skipped: Option<HashMap<String, Vec<usize>>>,
     label: String,
 ) -> CmdResult<ApplyResult> {
     let path = normalize_path(path);
@@ -886,6 +887,19 @@ async fn apply_changes(
         let _guard = writes.lock().unwrap_or_else(|e| e.into_inner());
         let refs: Vec<&FileChange> = selected.iter().collect();
         rector::check_fresh(&root, &refs).map_err(|e| e.to_string())?;
+        let selected: Vec<FileChange> = selected
+            .iter()
+            .map(|change| {
+                let mut change = change.clone();
+                if let Some(hunks) = skipped.as_ref().and_then(|s| s.get(&change.file)).filter(|h| !h.is_empty()) {
+                    let original = std::fs::read_to_string(root.join(&change.file)).map_err(|e| e.to_string())?;
+                    change.new_content = diff::without_hunks(&original, &change.new_content, hunks, 3);
+                    change.diff = diff::compute(&original, &change.new_content, 3);
+                }
+                Ok(change)
+            })
+            .collect::<Result<_, String>>()?;
+        let refs: Vec<&FileChange> = selected.iter().collect();
         let snapshot = store.create(&root, &applied_files, &label).map_err(|e| e.to_string())?;
         let written_hashes: HashMap<&str, String> =
             selected.iter().map(|c| (c.file.as_str(), content_hash(c.new_content.as_bytes()))).collect();

@@ -2110,6 +2110,12 @@ select.input {
   width: 20px;
 }
 
+.diff__choice {
+  display: inline-block;
+  margin-right: var(--space-2);
+  vertical-align: middle;
+}
+
 .diff__hunk td {
   padding: 4px var(--space-4);
   background: var(--surface-2);

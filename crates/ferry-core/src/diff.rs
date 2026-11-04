@@ -38,6 +38,29 @@ fn strip_eol(s: &str) -> &str {
     s.strip_suffix('\n').map(|s| s.strip_suffix('\r').unwrap_or(s)).unwrap_or(s)
 }
 
+/// The new text with the listed hunks of `compute` left as they were.
+pub fn without_hunks(old: &str, new: &str, skipped: &[usize], context: usize) -> String {
+    let diff = TextDiff::from_lines(old, new);
+    let old_lines: Vec<&str> = diff.iter_old_slices().collect();
+    let new_lines: Vec<&str> = diff.iter_new_slices().collect();
+    let mut out = String::with_capacity(new.len());
+    let mut at = 0;
+    for (index, group) in diff.grouped_ops(context).iter().enumerate() {
+        for op in group.iter().filter(|op| op.tag() != similar::DiffTag::Equal) {
+            let (from, to) = (op.old_range(), op.new_range());
+            out.extend(old_lines[at..from.start].iter().copied());
+            if skipped.contains(&index) {
+                out.extend(old_lines[from.clone()].iter().copied());
+            } else {
+                out.extend(new_lines[to].iter().copied());
+            }
+            at = from.end;
+        }
+    }
+    out.extend(old_lines[at..].iter().copied());
+    out
+}
+
 pub fn compute(old: &str, new: &str, context: usize) -> FileDiff {
     let diff = TextDiff::from_lines(old, new);
     let mut hunks = Vec::new();
@@ -255,6 +278,17 @@ mod tests {
     use super::*;
 
     const ORIGINAL: &str = "<?php\n\nfunction f(Foo $a = null)\n{\n    return utf8_encode($a);\n}\n";
+
+    #[test]
+    fn skipped_hunks_keep_the_old_lines() {
+        let old: String = (1..=30).map(|n| format!("line {n}\r\n")).collect();
+        let new = old.replace("line 3\r", "LINE 3\r").replace("line 25\r", "LINE 25\r");
+        assert_eq!(compute(&old, &new, 3).hunks.len(), 2);
+        assert_eq!(without_hunks(&old, &new, &[], 3), new);
+        assert_eq!(without_hunks(&old, &new, &[0, 1], 3), old);
+        assert_eq!(without_hunks(&old, &new, &[0], 3), old.replace("line 25\r", "LINE 25\r"));
+        assert_eq!(without_hunks(&old, &new, &[1], 3), old.replace("line 3\r", "LINE 3\r"));
+    }
 
     #[test]
     fn computes_numbered_hunks() {

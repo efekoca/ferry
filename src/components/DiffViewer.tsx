@@ -52,7 +52,12 @@ function renderText(text: string, other: string | undefined): ReactNode {
 
 const SIGN = { add: "+", del: "−", context: " " } as const;
 
-export function DiffViewer({ diff, file }: { diff: FileDiff; file: string }) {
+export interface HunkChoice {
+  isOn(hunk: number): boolean;
+  toggle(hunk: number): void;
+}
+
+export function DiffViewer({ diff, file, choice }: { diff: FileDiff; file: string; choice?: HunkChoice }) {
   const { t } = useI18n();
   return (
     <div className="diff" role="region" aria-label={t.changes.diffLabel(file)}>
@@ -70,6 +75,15 @@ export function DiffViewer({ diff, file }: { diff: FileDiff; file: string }) {
               <Fragment key={h}>
                 <tr className="diff__hunk">
                   <td colSpan={4}>
+                    {choice && (
+                      <input
+                        type="checkbox"
+                        className="checkbox diff__choice"
+                        aria-label={t.changes.applyHunk(hunk.oldStart)}
+                        checked={choice.isOn(h)}
+                        onChange={() => choice.toggle(h)}
+                      />
+                    )}
                     @@ −{hunk.oldStart} +{hunk.newStart} @@
                   </td>
                 </tr>

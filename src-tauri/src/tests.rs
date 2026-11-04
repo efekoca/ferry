@@ -577,6 +577,20 @@ fn database_plans_never_include_the_password() {
 }
 
 #[test]
+fn skipped_hunks_stay_out_of_the_applied_file() {
+    let h = harness();
+    let root = PathBuf::from(normalize_path(h.root.clone()));
+    let before: String = (1..=30).map(|n| format!("// line {n}\n")).collect();
+    std::fs::write(root.join("a.php"), format!("<?php\n{before}")).unwrap();
+    let after = format!("<?php\n{}", before.replace("line 3\n", "LINE 3\n").replace("line 25\n", "LINE 25\n"));
+    let id = stage_preview(&h, &[("a.php", &after)]);
+    let args = json!({ "path": h.root, "previewId": id, "files": ["a.php"], "skipped": { "a.php": [1] }, "label": "x" });
+    assert_eq!(h.ok("apply_changes", args)["written"], json!(["a.php"]));
+    let written = std::fs::read_to_string(root.join("a.php")).unwrap();
+    assert!(written.contains("LINE 3") && !written.contains("LINE 25"), "{written}");
+}
+
+#[test]
 fn a_folder_without_php_is_an_incomplete_scan() {
     let h = harness();
     let dir = tempfile::tempdir().unwrap();

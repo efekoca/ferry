@@ -327,6 +327,7 @@ export const tr = {
     confirmText: (add: number, del: number) =>
       `+${add} / −${del} satır değişecek. Önce bu dosyaların yedeği alınır, Geçmiş'ten tek tıkla geri dönebilirsiniz.`,
     failed: (n: number) => `${n} dosya işlenemedi.`,
+    applyHunk: (line: number) => `${line}. satırdaki değişikliği uygula`,
     diffLabel: (f: string) => `${f} değişiklikleri`,
     added: "eklendi: ",
     removed: "silindi: ",
