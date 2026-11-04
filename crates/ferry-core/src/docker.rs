@@ -75,6 +75,11 @@ const LINT_SCRIPT: &str = "find /app -type f -name '*.php' -not -path '/app/vend
 const TEST_SCRIPT: &str = "flags='--display-deprecations --display-warnings --no-progress'; \
     php vendor/bin/phpunit --version | grep -qE 'PHPUnit [0-9]\\.' && flags=''; \
     exec php -d error_reporting=-1 -d display_errors=1 -d memory_limit=1G vendor/bin/phpunit $flags";
+/// For suites that stop the whole process, such as tests that end it on purpose.
+const TEST_BY_FILE_SCRIPT: &str = "flags='--display-deprecations --display-warnings --no-progress'; \
+    php vendor/bin/phpunit --version | grep -qE 'PHPUnit [0-9]\\.' && flags=''; \
+    bad=0; for f in $(find . -name '*Test.php' -not -path './vendor/*' | sort); do \
+    timeout 120 php -d error_reporting=-1 -d display_errors=1 -d memory_limit=1G vendor/bin/phpunit $flags \"$f\" 2>&1 || bad=1; done; exit $bad";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -82,6 +87,7 @@ pub struct TestRun {
     pub exit_code: Option<i32>,
     pub timed_out: bool,
     pub passed: bool,
+    pub by_file: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -91,6 +97,7 @@ pub struct VersionRun {
     pub image: String,
     pub lint_errors: usize,
     pub tests: Option<TestRun>,
+    pub failed_tests: Vec<String>,
     pub missing_extensions: Vec<String>,
     pub installed_extensions: Vec<String>,
     pub image_failed: bool,
@@ -104,6 +111,8 @@ pub struct Comparison {
     pub source: VersionRun,
     pub target: VersionRun,
     pub dependencies_installed: bool,
+    pub install_log: String,
+    pub new_failures: Vec<String>,
     pub new_on_target: Vec<Event>,
     pub gone_on_target: Vec<Event>,
 }
@@ -356,18 +365,61 @@ fn run_version(
     let lint_errors = lint_lines(&lint_output).count();
     let missing_extensions = used.iter().filter(|e| !modules.contains(*e)).cloned().collect();
     let mut log = lint_output;
-    let has_tests = project.join("vendor/bin/phpunit").exists();
+    let has_tests = project.join("vendor/bin/phpunit").exists() && project.join("vendor/autoload.php").is_file();
+    let mut failed = Vec::new();
     let tests = if has_tests {
         step(Step::Tests(version));
         let run = container.run(&format!("tests-{}", version.compact()), project, &image, false, TEST_SCRIPT, TEST_TIMEOUT)?;
+        let mut run = run;
+        let crashed = run.stopped.is_none() && !matches!(run.status.and_then(|s| s.code()), Some(0..=2));
+        if crashed {
+            run =
+                container.run(&format!("tests-files-{}", version.compact()), project, &image, false, TEST_BY_FILE_SCRIPT, TEST_TIMEOUT)?;
+        }
         log.push_str(&output(&run));
+        failed = failed_tests(&output(&run));
         let exit_code = run.status.and_then(|s| s.code());
-        Some(TestRun { exit_code, timed_out: run.stopped == Some(Stop::TimedOut), passed: exit_code == Some(0) && run.stopped.is_none() })
+        Some(TestRun {
+            exit_code,
+            timed_out: run.stopped == Some(Stop::TimedOut),
+            passed: exit_code == Some(0) && run.stopped.is_none(),
+            by_file: crashed,
+        })
     } else {
         None
     };
     let events = runtime::parse(&log);
-    Ok(VersionRun { version, image, lint_errors, tests, missing_extensions, installed_extensions, image_failed, events, log: tail(&log) })
+    Ok(VersionRun {
+        version,
+        image,
+        lint_errors,
+        tests,
+        failed_tests: failed,
+        missing_extensions,
+        installed_extensions,
+        image_failed,
+        events,
+        log: tail(&log),
+    })
+}
+
+/// The tests PHPUnit lists under its errors and failures, leaving out skipped and risky ones.
+fn failed_tests(output: &str) -> Vec<String> {
+    let mut failing = false;
+    let mut found = Vec::new();
+    for line in output.lines() {
+        if let Some(rest) = line.strip_prefix("There w") {
+            failing = rest.contains("error") || rest.contains("failure");
+        } else if line.contains(" triggered ") {
+            failing = false;
+        } else if let Some((number, name)) = line.split_once(") ") {
+            let test = name.contains("::") && !name.starts_with('/');
+            if failing && test && !number.is_empty() && number.bytes().all(|b| b.is_ascii_digit()) && !found.iter().any(|f| f == name) {
+                found.push(name.to_string());
+            }
+        }
+    }
+    found
 }
 
 fn differs(events: &[Event], other: &[Event]) -> Vec<Event> {
@@ -397,16 +449,22 @@ pub fn compare(
     let container = Container { docker: &docker, cancel, prefix: format!("ferry-{}", std::process::id()) };
     let needs_install = base.join("composer.json").is_file() && !base.join("vendor/autoload.php").is_file();
     let mut dependencies_installed = !needs_install;
+    let mut install_log = String::new();
     if needs_install {
         step(Step::Installing);
         let install = "composer install --no-interaction --no-progress --no-scripts --no-plugins";
         let script = if base.join("composer.lock").is_file() {
             format!("{install} --ignore-platform-reqs")
         } else {
-            format!("composer config platform.php {source}.0 && {install} '--ignore-platform-req=ext-*'")
+            let advisories = "composer remove --no-update --dev roave/security-advisories 2>/dev/null";
+            format!("{advisories}; composer config platform.php {source}.0 && {install} '--ignore-platform-req=ext-*'")
         };
+        let script = format!("mkdir /tmp/build && cp -a /app/. /tmp/build && cd /tmp/build && {{ {script}; }} && cp -a vendor /app/");
         let done = container.run("install", &base, "composer:2", true, &script, INSTALL_TIMEOUT)?;
         dependencies_installed = done.status.is_some_and(|s| s.success());
+        if !dependencies_installed {
+            install_log = tail(&output(&done));
+        }
     }
     let files = crate::project::collect_php_files(root, &[]);
     let used: Vec<String> = crate::extensions::used(root, &files).into_iter().map(|e| e.name.to_ascii_lowercase()).collect();
@@ -420,9 +478,18 @@ pub fn compare(
         let _ = remove(&docker, &setup.built.borrow());
     }
     let (source_run, target_run) = runs?;
+    let new_failures = target_run.failed_tests.iter().filter(|t| !source_run.failed_tests.contains(t)).cloned().collect();
     let new_on_target = differs(&target_run.events, &source_run.events);
     let gone_on_target = differs(&source_run.events, &target_run.events);
-    Ok(Comparison { source: source_run, target: target_run, dependencies_installed, new_on_target, gone_on_target })
+    Ok(Comparison {
+        source: source_run,
+        target: target_run,
+        dependencies_installed,
+        install_log,
+        new_failures,
+        new_on_target,
+        gone_on_target,
+    })
 }
 
 #[cfg(test)]
@@ -484,6 +551,36 @@ mod tests {
             assert!(run.missing_extensions.is_empty() && run.image.starts_with(IMAGE_PREFIX), "{run:?}");
             assert!(!left.contains(&run.image), "{left:?}");
         }
+    }
+
+    #[test]
+    fn stopping_ends_the_run_quickly() {
+        if std::env::var_os("FERRY_TEST_DOCKER").is_none() {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.php"), "<?php\necho gmp_add(1, 2);\n").unwrap();
+        let cancel = AtomicBool::new(false);
+        let options = Options { install_extensions: true, clean_images: true };
+        let started = std::time::Instant::now();
+        let result = std::thread::scope(|scope| {
+            scope.spawn(|| {
+                std::thread::sleep(Duration::from_secs(6));
+                cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+            });
+            compare(dir.path(), PhpVersion::new(7, 3), PhpVersion::new(8, 3), options, &cancel, |s| {
+                eprintln!("{s:?} {:?}", started.elapsed())
+            })
+        });
+        eprintln!("{:?} {:?}", started.elapsed(), result.as_ref().map(|_| "done"));
+        assert!(result.is_err());
+        assert!(started.elapsed() < Duration::from_secs(30), "{:?}", started.elapsed());
+    }
+
+    #[test]
+    fn only_real_failures_count_as_failed_tests() {
+        let out = "There were 2 errors:\n\n1) A::one\nError: x\n\n/app/a.php:1\n\n2) A::two with data set #1\nboom\n\n--\n\nThere was 1 failure:\n\n1) B::three\nnope\n\nThere were 3 skipped tests:\n\n1) C::four\nskip\n\nThere was 1 error:\n\n1) D::five\nx\n\n2 tests triggered 2 PHP deprecations:\n\n1) /app/src/Logger.php:331\nold\n\n2) E::six\nold\n";
+        assert_eq!(failed_tests(out), ["A::one", "A::two with data set #1", "B::three", "D::five"]);
     }
 
     #[test]

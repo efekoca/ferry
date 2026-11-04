@@ -26,6 +26,7 @@ const write = (path, content) => {
 
 const unicode = join(fixtures, "Proje Ğüş klasörü");
 write(join(unicode, "composer.json"), JSON.stringify({ require: { php: ">=7.4" } }, null, 2));
+write(join(unicode, "src/b.php"), "<?php\necho bcadd('1', '2');\n");
 write(join(unicode, "src/a.php"), '<?php\nfunction greet(string $name = null) {\n    return "Merhaba ${name}";\n}\n');
 
 write(join(fixtures, "php_errors.log"), "PHP Warning:  Undefined variable $x in /other-project/src/a.php on line 2\n");

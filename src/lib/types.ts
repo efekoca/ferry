@@ -133,7 +133,8 @@ export interface DockerRun {
   version: string;
   image: string;
   lintErrors: number;
-  tests: { exitCode: number | null; timedOut: boolean; passed: boolean } | null;
+  tests: { exitCode: number | null; timedOut: boolean; passed: boolean; byFile: boolean } | null;
+  failedTests: string[];
   missingExtensions: string[];
   installedExtensions: string[];
   imageFailed: boolean;
@@ -145,6 +146,8 @@ export interface DockerComparison {
   source: DockerRun;
   target: DockerRun;
   dependenciesInstalled: boolean;
+  installLog: string;
+  newFailures: string[];
   newOnTarget: DockerEvent[];
   goneOnTarget: DockerEvent[];
 }
