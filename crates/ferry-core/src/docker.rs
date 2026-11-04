@@ -16,6 +16,8 @@ const INSTALL_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const LINT_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const TEST_TIMEOUT: Duration = Duration::from_secs(20 * 60);
 const PAGE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+/// Symfony's entry points need the file this one plugin generates, so it alone may run.
+const SYMFONY_RUNTIME_ONLY: &str = r#"'$j = json_decode(file_get_contents("composer.json"), true); $j["config"]["allow-plugins"] = ["symfony/runtime" => true, "*" => false]; file_put_contents("composer.json", json_encode($j));'"#;
 const BUILD_TIMEOUT: Duration = Duration::from_secs(20 * 60);
 const LOG_LIMIT: usize = 64 * 1024;
 const IMAGE_PREFIX: &str = "ferry-php:";
@@ -237,7 +239,7 @@ fn owner_flag(path: &Path) -> Vec<String> {
     Vec::new()
 }
 
-type SharedDatabase = (String, Vec<(String, String)>);
+type SharedDatabase = (Option<String>, Vec<(String, String)>);
 
 pub(crate) struct Container<'a> {
     pub docker: &'a Path,
@@ -248,8 +250,8 @@ pub(crate) struct Container<'a> {
 
 impl Container<'_> {
     /// Later runs share the network of `database` and receive its settings.
-    pub fn attach(&self, database: &str, env: Vec<(String, String)>) {
-        *self.shared.borrow_mut() = Some((database.to_string(), env));
+    pub fn attach(&self, database: Option<&str>, env: Vec<(String, String)>) {
+        *self.shared.borrow_mut() = Some((database.map(str::to_string), env));
     }
 
     pub fn detach(&self) {
@@ -274,7 +276,10 @@ impl Container<'_> {
             .arg(format!("{}:{CONTAINER_ROOT}", dir.display()));
         match &*self.shared.borrow() {
             Some((database, env)) if !network => {
-                cmd.arg("--network").arg(format!("container:{database}"));
+                match database {
+                    Some(database) => cmd.arg("--network").arg(format!("container:{database}")),
+                    None => cmd.args(["--network", "none"]),
+                };
                 for (key, value) in env {
                     cmd.arg("-e").arg(key).env(key, value);
                 }
@@ -421,11 +426,16 @@ fn run_version(
     let lint_errors = lint_lines(&lint_output).count();
     let missing_extensions = used.iter().filter(|e| !modules.contains(*e)).cloned().collect();
     let mut log = lint_output;
+    let sqlite = setup.database.filter(|p| p.connection.engine == crate::database::Engine::Sqlite);
     let database = match setup.database {
+        Some(prepared) if sqlite.is_some() => {
+            container.attach(None, crate::database::environment(&prepared.connection));
+            None
+        }
         Some(prepared) => {
             step(Step::Database);
             let running = crate::database::start(container, &version.compact(), &prepared.connection, prepared.dump.as_deref())?;
-            container.attach(&running.name, crate::database::environment(&prepared.connection));
+            container.attach(Some(&running.name), crate::database::environment(&prepared.connection));
             Some(running)
         }
         None => None,
@@ -442,6 +452,9 @@ fn run_version(
     }
     if let Some(running) = &database {
         data = running.snapshot();
+    }
+    if let Some(prepared) = sqlite {
+        data = crate::database::sqlite_snapshot(container, version, project, &image, &prepared.connection);
     }
     let has_tests = project.join("vendor/bin/phpunit").exists() && project.join("vendor/autoload.php").is_file();
     let mut failed = Vec::new();
@@ -534,7 +547,12 @@ pub fn compare(
     let mut install_log = String::new();
     if needs_install {
         step(Step::Installing);
-        let install = "composer install --no-interaction --no-progress --no-scripts --no-plugins --no-security-blocking";
+        let runtime = std::fs::read_to_string(base.join("composer.json")).is_ok_and(|t| t.contains("symfony/runtime"));
+        let install = if runtime {
+            format!("php -r {SYMFONY_RUNTIME_ONLY} && composer install --no-interaction --no-progress --no-scripts --no-security-blocking")
+        } else {
+            "composer install --no-interaction --no-progress --no-scripts --no-plugins --no-security-blocking".to_string()
+        };
         let script = if base.join("composer.lock").is_file() {
             format!("{install} --ignore-platform-reqs")
         } else {
@@ -575,7 +593,7 @@ pub fn compare(
     let prepared = match &options.database {
         Some(choice) => {
             let seed_image = || prepare_image(&container, source, &base, &setup, &step).map(|p| p.image);
-            Some(crate::database::prepare(&container, &base, choice, &work.path().join("data"), &seed_image, source, &step)?)
+            Some(crate::database::prepare(&container, root, &base, choice, &work.path().join("data"), &seed_image, source, &step)?)
         }
         None => None,
     };
@@ -698,6 +716,25 @@ mod tests {
             assert!(result.data_changes.is_empty(), "{sql}: {:?}", result.data_changes);
             assert_eq!(result.source.data.get("items").map(|r| r.0), Some(2), "{sql}");
         }
+    }
+
+    #[test]
+    fn sqlite_files_stay_separate_for_each_version() {
+        if std::env::var_os("FERRY_TEST_DOCKER").is_none() {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(".env"), "DB_CONNECTION=sqlite\nDB_DATABASE=data/app.sqlite\n").unwrap();
+        let page = "<?php $d = new PDO('sqlite:' . getenv('DB_DATABASE')); foreach ($d->query('select name from items') as $r) { echo $r[0], ' '; }";
+        std::fs::write(dir.path().join("index.php"), page).unwrap();
+        let dump = dir.path().join("seed.sql");
+        std::fs::write(&dump, "PRAGMA foreign_keys=OFF;\nCREATE TABLE items (name TEXT);\nINSERT INTO items VALUES ('elma');\n").unwrap();
+        let options = Options { pages: vec!["/".to_string()], database: Some(crate::database::Source::Dump(dump)), ..Options::default() };
+        let result = compare(dir.path(), PhpVersion::new(8, 3), PhpVersion::new(8, 4), options, &AtomicBool::new(false), |_| {}).unwrap();
+        assert!(result.pages[0].source_text.contains("elma"), "{:?}", result.pages);
+        assert_eq!(result.source.data.get("items").map(|r| r.0), Some(1), "{:?}", result.source.data);
+        assert_eq!(result.source.data, result.target.data);
+        assert!(!dir.path().join("data").exists(), "the project stays untouched");
     }
 
     #[test]

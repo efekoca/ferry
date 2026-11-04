@@ -13,12 +13,15 @@ const READY_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const SEED_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const LOCAL_ADDRESS: &str = "127.0.0.1";
 const ROOT_PASSWORD: &str = "ferry";
+const DEFAULT_SQLITE: &str = "database/database.sqlite";
+const SQLITE_DUMP: &str = ".ferry-dump.sql";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Engine {
     Mysql,
     Postgres,
+    Sqlite,
 }
 
 impl Engine {
@@ -26,6 +29,7 @@ impl Engine {
         match self {
             Engine::Mysql => "mysql:8.0",
             Engine::Postgres => "postgres:16",
+            Engine::Sqlite => "",
         }
     }
 
@@ -33,6 +37,7 @@ impl Engine {
         match self {
             Engine::Mysql => 3306,
             Engine::Postgres => 5432,
+            Engine::Sqlite => 0,
         }
     }
 
@@ -40,6 +45,7 @@ impl Engine {
         match self {
             Engine::Mysql => ["mysqli", "pdo_mysql"],
             Engine::Postgres => ["pgsql", "pdo_pgsql"],
+            Engine::Sqlite => ["sqlite3", "pdo_sqlite"],
         }
     }
 }
@@ -66,8 +72,21 @@ impl Connection {
         }
     }
 
+    /// Where the file sits inside the containers.
+    fn sqlite_path(&self) -> String {
+        if self.name.starts_with('/') {
+            format!("{}/{DEFAULT_SQLITE}", crate::docker::CONTAINER_ROOT)
+        } else {
+            format!("{}/{}", crate::docker::CONTAINER_ROOT, self.name)
+        }
+    }
+
+    fn sqlite_copy(&self, project: &Path) -> PathBuf {
+        project.join(self.sqlite_path().trim_start_matches(crate::docker::CONTAINER_ROOT).trim_start_matches('/'))
+    }
+
     fn is_local(&self) -> bool {
-        ["localhost", "127.0.0.1", "::1", "host.docker.internal"].contains(&self.host.as_str())
+        self.engine == Engine::Sqlite || ["localhost", "127.0.0.1", "::1", "host.docker.internal"].contains(&self.host.as_str())
     }
 }
 
@@ -123,13 +142,22 @@ fn engine_named(name: &str) -> Option<Engine> {
     match name {
         "mysql" | "mariadb" | "mysqli" | "pdo_mysql" => Some(Engine::Mysql),
         "pgsql" | "postgres" | "postgresql" | "pdo_pgsql" => Some(Engine::Postgres),
+        "sqlite" | "sqlite3" | "pdo_sqlite" => Some(Engine::Sqlite),
         _ => None,
     }
+}
+
+fn sqlite_at(path: &str) -> Connection {
+    let name = path.trim_start_matches("%kernel.project_dir%/").to_string();
+    Connection { engine: Engine::Sqlite, host: String::new(), port: 0, name, user: String::new(), password: String::new() }
 }
 
 fn from_url(url: &str) -> Option<Connection> {
     let (scheme, rest) = url.split_once("://")?;
     let engine = engine_named(scheme)?;
+    if engine == Engine::Sqlite {
+        return Some(sqlite_at(rest.strip_prefix('/').unwrap_or(rest)));
+    }
     let (auth, rest) = rest.rsplit_once('@')?;
     let (user, password) = auth.split_once(':').unwrap_or((auth, ""));
     let (address, name) = rest.split_once('/')?;
@@ -157,6 +185,9 @@ pub fn detect(root: &Path) -> Option<Connection> {
         return Some(found);
     }
     if let Some(engine) = values.get("DB_CONNECTION").and_then(|c| engine_named(c)) {
+        if engine == Engine::Sqlite {
+            return Some(sqlite_at(values.get("DB_DATABASE").filter(|v| !v.is_empty()).map_or(DEFAULT_SQLITE, |v| v.as_str())));
+        }
         let value = |key: &str, default: &str| values.get(key).filter(|v| !v.is_empty()).cloned().unwrap_or_else(|| default.to_string());
         return Some(Connection {
             engine,
@@ -185,10 +216,15 @@ fn seed_commands(root: &Path) -> Option<(&'static str, &'static str)> {
     if root.join("artisan").is_file() {
         return Some(("laravel", "php artisan migrate --seed --force"));
     }
-    if root.join("bin/console").is_file() && root.join("migrations").is_dir() {
+    let migrations = std::fs::read_dir(root.join("migrations"))
+        .is_ok_and(|mut d| d.any(|e| e.is_ok_and(|e| e.path().extension().is_some_and(|x| x == "php"))));
+    if root.join("bin/console").is_file() && migrations {
         let migrate = "php bin/console doctrine:migrations:migrate -n";
         let both = "php bin/console doctrine:migrations:migrate -n && php bin/console doctrine:fixtures:load -n";
         return Some(("symfony", if root.join("src/DataFixtures").is_dir() { both } else { migrate }));
+    }
+    if root.join("bin/console").is_file() && root.join("src/DataFixtures").is_dir() {
+        return Some(("symfony", "php bin/console doctrine:schema:create -n && php bin/console doctrine:fixtures:load -n"));
     }
     None
 }
@@ -256,9 +292,17 @@ fn point_copy_at(project: &Path, connection: &Connection) -> std::io::Result<()>
     if env.is_file() || example.is_file() {
         let text = std::fs::read_to_string(if env.is_file() { &env } else { &example })?;
         let key = "base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".to_string();
-        let scheme = if connection.engine == Engine::Mysql { "mysql" } else { "postgresql" };
-        let url = format!("{scheme}://{}:{}@{LOCAL_ADDRESS}:{}/{}", connection.user, connection.password, connection.port, connection.name);
-        let mut values = vec![("DB_HOST", LOCAL_ADDRESS.to_string()), ("DB_PORT", connection.port.to_string())];
+        let url = match connection.engine {
+            Engine::Sqlite => format!("sqlite:///{}", connection.sqlite_path()),
+            engine => {
+                let scheme = if engine == Engine::Mysql { "mysql" } else { "postgresql" };
+                format!("{scheme}://{}:{}@{LOCAL_ADDRESS}:{}/{}", connection.user, connection.password, connection.port, connection.name)
+            }
+        };
+        let mut values = match connection.engine {
+            Engine::Sqlite => vec![("DB_DATABASE", connection.sqlite_path())],
+            _ => vec![("DB_HOST", LOCAL_ADDRESS.to_string()), ("DB_PORT", connection.port.to_string())],
+        };
         if text.contains("DATABASE_URL") {
             values.push(("DATABASE_URL", url));
         }
@@ -271,6 +315,9 @@ fn point_copy_at(project: &Path, connection: &Connection) -> std::io::Result<()>
 }
 
 pub(crate) fn environment(connection: &Connection) -> Vec<(String, String)> {
+    if connection.engine == Engine::Sqlite {
+        return vec![("DB_CONNECTION".to_string(), "sqlite".to_string()), ("DB_DATABASE".to_string(), connection.sqlite_path())];
+    }
     let pairs = [
         ("DB_HOST", LOCAL_ADDRESS.to_string()),
         ("DB_PORT", connection.port.to_string()),
@@ -307,7 +354,7 @@ impl Running<'_> {
                 "export MYSQL_PWD=\"$MYSQL_ROOT_PASSWORD\"; c='mysql --protocol=tcp -h127.0.0.1 -P{} -uroot -N'; ",
                 self.connection.port
             ),
-            Engine::Postgres => format!(
+            Engine::Postgres | Engine::Sqlite => format!(
                 "export PGPASSWORD=\"$POSTGRES_PASSWORD\"; c='psql -h 127.0.0.1 -p {} -U {} -d {} -At'; ",
                 self.connection.port, self.connection.user, self.connection.name
             ),
@@ -317,7 +364,7 @@ impl Running<'_> {
     fn ready(&self, cancel: &std::sync::atomic::AtomicBool) -> Result<(), String> {
         let check = match self.connection.engine {
             Engine::Mysql => format!("{}$c -e 'select 1'", self.client()),
-            Engine::Postgres => format!("pg_isready -h 127.0.0.1 -p {}", self.connection.port),
+            Engine::Postgres | Engine::Sqlite => format!("pg_isready -h 127.0.0.1 -p {}", self.connection.port),
         };
         let started = Instant::now();
         while started.elapsed() < READY_TIMEOUT {
@@ -350,7 +397,7 @@ impl Running<'_> {
                  r=$($c {name} -e \"select count(*) from \\`$t\\`\"); s=$($c {name} -e \"checksum table \\`$t\\`\" | cut -f2); echo \"$t|$r|$s\"; done",
                 self.client()
             ),
-            Engine::Postgres => format!(
+            Engine::Postgres | Engine::Sqlite => format!(
                 "{}$c -c \"select tablename from pg_tables where schemaname='public'\" | while read t; do \
                  r=$($c -c \"select count(*) from \\\"$t\\\"\"); s=$($c -c \"select md5(coalesce(string_agg(x::text, '|' order by x::text), '')) from \\\"$t\\\" x\"); echo \"$t|$r|$s\"; done",
                 self.client()
@@ -365,7 +412,7 @@ impl Running<'_> {
                 "export MYSQL_PWD=\"$MYSQL_ROOT_PASSWORD\"; mysqldump --protocol=tcp -h127.0.0.1 -P{} -uroot --single-transaction --no-tablespaces {}",
                 self.connection.port, self.connection.name
             ),
-            Engine::Postgres => {
+            Engine::Postgres | Engine::Sqlite => {
                 format!("export PGPASSWORD=\"$POSTGRES_PASSWORD\"; pg_dump -h 127.0.0.1 -p {} -U {} {}", self.connection.port, self.connection.user, self.connection.name)
             }
         };
@@ -427,7 +474,7 @@ pub(crate) fn start<'a>(
             }
             cmd.args(["--tmpfs", "/var/lib/mysql:uid=999,gid=999"]);
         }
-        Engine::Postgres => {
+        Engine::Postgres | Engine::Sqlite => {
             pass("POSTGRES_USER", &connection.user);
             pass("POSTGRES_PASSWORD", &connection.password);
             pass("POSTGRES_DB", &connection.name);
@@ -470,7 +517,7 @@ fn dump_live(docker: &Path, connection: &Connection, file: &Path) -> Result<(), 
             cmd.args(["mysqldump", "-hhost.docker.internal", &format!("-P{port}"), &format!("-u{user}")]);
             cmd.args(["--single-transaction", "--no-tablespaces", "--column-statistics=0", "--set-gtid-purged=OFF", name]);
         }
-        Engine::Postgres => {
+        Engine::Postgres | Engine::Sqlite => {
             cmd.args(["-e", "PGPASSWORD"]).env("PGPASSWORD", &connection.password).arg(Engine::Postgres.image());
             cmd.args(["pg_dump", "-h", "host.docker.internal", "-p", &port, "-U", user, name]);
         }
@@ -488,6 +535,8 @@ fn dump_engine(file: &Path) -> Engine {
     let head = std::fs::read(file).map(|b| String::from_utf8_lossy(&b[..b.len().min(8192)]).to_string()).unwrap_or_default();
     if head.contains("PostgreSQL") || head.contains("pg_dump") {
         Engine::Postgres
+    } else if head.contains("sqlite_sequence") || head.contains("PRAGMA foreign_keys") {
+        Engine::Sqlite
     } else {
         Engine::Mysql
     }
@@ -502,14 +551,49 @@ pub fn engine_for(root: &Path, source: &Source) -> Engine {
     }
 }
 
+const SQLITE_SNAPSHOT: &str = r#"<?php
+$db = new PDO('sqlite:' . $argv[1]);
+foreach ($db->query("select name from sqlite_master where type = 'table' and name not like 'sqlite_%'")->fetchAll(PDO::FETCH_NUM) as $table) {
+    $rows = $db->query('select * from "' . $table[0] . '"')->fetchAll(PDO::FETCH_NUM);
+    sort($rows);
+    echo $table[0], '|', count($rows), '|', md5(serialize($rows)), "\n";
+}
+"#;
+
+const SQLITE_IMPORT: &str = r#"<?php
+$text = file_get_contents($argv[2]);
+$db = new PDO('sqlite:' . $argv[1]);
+$db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+$db->exec(substr($text, 0, 2) === "\x1f\x8b" ? gzdecode($text) : $text);
+"#;
+
+fn sqlite_script(php: &str, args: &str) -> String {
+    format!("cat > /tmp/ferry.php <<'FERRYEOF'\n{php}\nFERRYEOF\nphp /tmp/ferry.php {args}\n")
+}
+
+pub(crate) fn sqlite_snapshot(
+    container: &Container,
+    version: PhpVersion,
+    project: &Path,
+    image: &str,
+    connection: &Connection,
+) -> Snapshot {
+    let script = sqlite_script(SQLITE_SNAPSHOT, &connection.sqlite_path());
+    let name = format!("data-{}", version.compact());
+    let run = container.run(&name, project, image, false, &script, Duration::from_secs(120));
+    run.map(|done| parse_snapshot(&crate::docker::output(&done))).unwrap_or_default()
+}
+
 pub(crate) struct Prepared {
     pub connection: Connection,
     pub dump: Option<PathBuf>,
 }
 
 /// Finds the connection and gathers the data once, so both versions start from the same rows.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn prepare(
     container: &Container,
+    root: &Path,
     project: &Path,
     source: &Source,
     dir: &Path,
@@ -520,13 +604,45 @@ pub(crate) fn prepare(
     let failed = |e: std::io::Error| e.to_string();
     std::fs::create_dir_all(dir).map_err(failed)?;
     let detected = detect(project);
+    let sqlite = detected.as_ref().is_some_and(|c| c.engine == Engine::Sqlite);
     match source {
+        Source::Dump(file) if sqlite || dump_engine(file) == Engine::Sqlite => {
+            let connection = detected.unwrap_or_else(|| sqlite_at(DEFAULT_SQLITE));
+            let copy = connection.sqlite_copy(project);
+            std::fs::create_dir_all(copy.parent().unwrap_or(project)).map_err(failed)?;
+            let _ = std::fs::remove_file(&copy);
+            std::fs::copy(file, project.join(SQLITE_DUMP)).map_err(failed)?;
+            point_copy_at(project, &connection).map_err(failed)?;
+            step(Step::Database);
+            let image = seed_image()?;
+            let script = sqlite_script(SQLITE_IMPORT, &format!("{} /app/{SQLITE_DUMP}", connection.sqlite_path()));
+            let run = container.run(&format!("import-{}", version.compact()), project, &image, false, &script, SEED_TIMEOUT)?;
+            let _ = std::fs::remove_file(project.join(SQLITE_DUMP));
+            if !run.status.is_some_and(|s| s.success()) {
+                let reason = crate::docker::tail(&crate::docker::output(&run));
+                return Err(crate::t!("Döküm içe aktarılamadı: {reason}", "The dump couldn't be imported: {reason}"));
+            }
+            Ok(Prepared { connection, dump: None })
+        }
         Source::Dump(file) => {
             let gz = file.to_string_lossy().ends_with(".gz");
             let connection = detected.unwrap_or_else(|| Connection::fallback(dump_engine(file)));
             std::fs::copy(file, dir.join(if gz { "dump.sql.gz" } else { "dump.sql" })).map_err(failed)?;
             point_copy_at(project, &connection).map_err(failed)?;
             Ok(Prepared { connection, dump: Some(dir.to_path_buf()) })
+        }
+        Source::Live if sqlite => {
+            let connection = detected.ok_or_else(String::new)?;
+            let copy = connection.sqlite_copy(project);
+            let original = if connection.name.starts_with('/') { PathBuf::from(&connection.name) } else { root.join(&connection.name) };
+            if !original.is_file() {
+                let shown = original.display().to_string();
+                return Err(crate::t!("SQLite dosyası bulunamadı: {shown}", "The SQLite file wasn't found: {shown}"));
+            }
+            std::fs::create_dir_all(copy.parent().unwrap_or(project)).map_err(failed)?;
+            std::fs::copy(original, &copy).map_err(failed)?;
+            point_copy_at(project, &connection).map_err(failed)?;
+            Ok(Prepared { connection, dump: None })
         }
         Source::Live => {
             let connection = detected
@@ -543,8 +659,22 @@ pub(crate) fn prepare(
             point_copy_at(project, &connection).map_err(failed)?;
             step(Step::Database);
             let image = seed_image()?;
+            if connection.engine == Engine::Sqlite {
+                let copy = connection.sqlite_copy(project);
+                std::fs::create_dir_all(copy.parent().unwrap_or(project)).map_err(failed)?;
+                std::fs::write(&copy, "").map_err(failed)?;
+                container.attach(None, environment(&connection));
+                let run = container.run(&format!("seed-{}", version.compact()), project, &image, false, command, SEED_TIMEOUT);
+                container.detach();
+                let run = run?;
+                if !run.status.is_some_and(|s| s.success()) {
+                    let reason = crate::docker::tail(&crate::docker::output(&run));
+                    return Err(crate::t!("Test verisi oluşturulamadı: {reason}", "The test data couldn't be created: {reason}"));
+                }
+                return Ok(Prepared { connection, dump: None });
+            }
             let database = start(container, "seed", &connection, None)?;
-            container.attach(&database.name, environment(&connection));
+            container.attach(Some(&database.name), environment(&connection));
             let run = container.run(&format!("seed-{}", version.compact()), project, &image, false, command, SEED_TIMEOUT);
             container.detach();
             let run = run?;
@@ -600,6 +730,24 @@ mod tests {
         assert!(!env.contains("db.internal"));
         let config = std::fs::read_to_string(dir.path().join("wp-config.php")).unwrap();
         assert!(config.contains("'DB_HOST', '127.0.0.1:3307'") && config.contains("WP_HOME"), "{config}");
+    }
+
+    #[test]
+    fn sqlite_settings_are_understood() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(".env"), "DB_CONNECTION=sqlite\n").unwrap();
+        let found = detect(dir.path()).unwrap();
+        assert_eq!(
+            (found.engine, found.name.as_str(), found.sqlite_path().as_str()),
+            (Engine::Sqlite, DEFAULT_SQLITE, "/app/database/database.sqlite")
+        );
+        assert!(found.is_local());
+        let symfony = from_url("sqlite:///%kernel.project_dir%/data/database.sqlite").unwrap();
+        assert_eq!((symfony.engine, symfony.name.as_str()), (Engine::Sqlite, "data/database.sqlite"));
+        assert_eq!(sqlite_at("/home/me/app.sqlite").sqlite_path(), "/app/database/database.sqlite");
+        point_copy_at(dir.path(), &found).unwrap();
+        let env = std::fs::read_to_string(dir.path().join(".env")).unwrap();
+        assert!(env.contains("DB_DATABASE=\"/app/database/database.sqlite\""), "{env}");
     }
 
     #[test]
