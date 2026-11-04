@@ -362,8 +362,10 @@ pub(crate) fn check(tokens: &[Token], index: &ProjectIndex) -> Vec<(usize, &'sta
         }
         if SORTS.contains(&name.as_str()) {
             if let Some((from, to)) = sort_comparison(tokens, k, close) {
-                let fixable = ordering_operator(tokens, from, to).is_some();
-                out.push((k, if fixable { &BOOL_COMPARATOR } else { &BOOL_EQUALITY_COMPARATOR }));
+                match ordering_operator(tokens, from, to) {
+                    Some(op) => out.push((op, &BOOL_COMPARATOR)),
+                    None => out.push((k, &BOOL_EQUALITY_COMPARATOR)),
+                }
             }
         }
         if let Some((_, slot)) = VALUE_CALLBACKS.iter().find(|(f, _)| *f == name) {

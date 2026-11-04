@@ -5,7 +5,7 @@ import { ScoreRing } from "../components/ScoreRing";
 import { DICTS } from "../i18n";
 import { commonTitle, dependencyBlockers, formatBytes, formatDuration, formatRelative, joinPath, scoreHeadline, scoreTone } from "../lib/labels";
 import { NO_FILTER, type FindingsFilter } from "../lib/store";
-import { filterFindings } from "../screens/Findings";
+import { filterFindings, prioritizeFindings } from "../screens/Findings";
 import { isVulnerable, patchedFor } from "../lib/security";
 import type { ExtensionUse, FileDiff, Finding } from "../lib/types";
 import { compareProbe, parseProbe } from "../lib/probe";
@@ -124,6 +124,12 @@ describe("filterFindings", () => {
     expect(f({ query: "örtük" })).toEqual(["2"]);
     expect(f({ fix: "auto", severity: "deprecated" })).toEqual([]);
     expect(f({ rule: "removed.mysql" })).toEqual(["3"]);
+  });
+
+  it("keeps files together and lists findings seen at runtime first", () => {
+    const at = (id: string, file: string, runtimeHits = 0): Finding => ({ ...findings[0], id, file, runtimeHits });
+    expect(ids(prioritizeFindings([at("1", "a.php"), at("2", "b.php"), at("3", "a.php")]))).toEqual(["1", "3", "2"]);
+    expect(ids(prioritizeFindings([at("1", "a.php"), at("2", "b.php"), at("3", "c.php", 2), at("4", "c.php"), at("5", "b.php", 1)]))).toEqual(["3", "4", "5", "2", "1"]);
   });
 });
 
