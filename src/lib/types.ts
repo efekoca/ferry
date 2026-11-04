@@ -183,6 +183,21 @@ export interface DockerComparison {
   goneOnTarget: DockerEvent[];
 }
 
+export interface DockerSummary {
+  at: number;
+  source: string;
+  target: string;
+  regressed: boolean;
+  testsCompared: boolean;
+  pages: number;
+  brokenPages: number;
+  differingPages: number;
+  unverifiedPages: number;
+  newFailures: number;
+  newMessages: number;
+  dataChanges: number;
+}
+
 export interface DockerImageUsage {
   images: number;
   bytes: number;
