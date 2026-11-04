@@ -2,6 +2,7 @@ use crate::runtime::{self, Event};
 use crate::toolchain::{self, Stop};
 use crate::version::PhpVersion;
 use serde::Serialize;
+use std::cell::RefCell;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
@@ -16,6 +17,7 @@ const LINT_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const TEST_TIMEOUT: Duration = Duration::from_secs(20 * 60);
 const BUILD_TIMEOUT: Duration = Duration::from_secs(20 * 60);
 const LOG_LIMIT: usize = 64 * 1024;
+const IMAGE_PREFIX: &str = "ferry-php:";
 
 const INSTALLER_URL: &str = "https://github.com/mlocati/docker-php-extension-installer/releases/download/2.12.2/install-php-extensions";
 const INSTALLER_SHA256: &str = "ed854df3ed4366fa498c5a784e9d2b4c601fa29f5c04c7f21658a427dc151e9a";
@@ -106,6 +108,19 @@ pub struct Comparison {
     pub gone_on_target: Vec<Event>,
 }
 
+#[derive(Debug, Clone, Copy, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageUsage {
+    pub images: usize,
+    pub bytes: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Options {
+    pub install_extensions: bool,
+    pub clean_images: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Step {
     Installing,
@@ -122,6 +137,48 @@ pub fn available() -> Result<PathBuf, String> {
     } else {
         Err(crate::t!("Docker çalışmıyor; önce Docker'ı başlatın.", "Docker isn't running. Start it first."))
     }
+}
+
+fn built_images(docker: &Path) -> Result<Vec<String>, String> {
+    let listed = toolchain::command(docker)
+        .args(["image", "ls", "ferry-php", "--format", "{{.Repository}}:{{.Tag}}"])
+        .output()
+        .map_err(|e| e.to_string())?;
+    Ok(String::from_utf8_lossy(&listed.stdout).lines().filter(|l| l.starts_with(IMAGE_PREFIX)).map(str::to_string).collect())
+}
+
+/// Only the images Ferry built. The official `php` images stay, since they may be in use elsewhere.
+pub fn image_usage() -> Result<ImageUsage, String> {
+    let docker = available()?;
+    let images = built_images(&docker)?;
+    if images.is_empty() {
+        return Ok(ImageUsage::default());
+    }
+    let inspected = toolchain::command(&docker)
+        .args(["image", "inspect", "--format", "{{.Size}}"])
+        .args(&images)
+        .output()
+        .map_err(|e| e.to_string())?;
+    let bytes = String::from_utf8_lossy(&inspected.stdout).lines().filter_map(|l| l.trim().parse::<u64>().ok()).sum();
+    Ok(ImageUsage { images: images.len(), bytes })
+}
+
+fn remove(docker: &Path, images: &[String]) -> Result<usize, String> {
+    if images.is_empty() {
+        return Ok(0);
+    }
+    let done = toolchain::command(docker).args(["image", "rm"]).args(images).output().map_err(|e| e.to_string())?;
+    if done.status.success() {
+        Ok(images.len())
+    } else {
+        let reason = String::from_utf8_lossy(&done.stderr).trim().to_string();
+        Err(crate::t!("Kalıplar silinemedi: {reason}", "Couldn't remove the images: {reason}"))
+    }
+}
+
+pub fn remove_images() -> Result<usize, String> {
+    let docker = available()?;
+    remove(&docker, &built_images(&docker)?)
 }
 
 /// Copies the project without following links: inside a container a link can only reach what was copied.
@@ -240,7 +297,7 @@ fn extended_image(
     extensions: &[String],
     dir: &Path,
 ) -> Result<Option<String>, String> {
-    let tag = format!("ferry-php:{version}-{:016x}", crate::snapshot::fnv1a(dockerfile(base, extensions).as_bytes()));
+    let tag = format!("{IMAGE_PREFIX}{version}-{:016x}", crate::snapshot::fnv1a(dockerfile(base, extensions).as_bytes()));
     let cached = toolchain::command(container.docker).args(["image", "inspect", &tag]).output();
     if cached.is_ok_and(|o| o.status.success()) {
         return Ok(Some(tag));
@@ -264,6 +321,7 @@ struct Setup<'a> {
     used: &'a [String],
     install_extensions: bool,
     images: &'a Path,
+    built: RefCell<Vec<String>>,
 }
 
 fn run_version(
@@ -284,6 +342,7 @@ fn run_version(
         step(Step::Extensions(version));
         match extended_image(container, &base, version, &wanted, &setup.images.join(version.compact()))? {
             Some(tag) => {
+                setup.built.borrow_mut().push(tag.clone());
                 modules = loaded(container, version, project, &tag)?;
                 image = tag;
             }
@@ -318,11 +377,12 @@ fn differs(events: &[Event], other: &[Event]) -> Vec<Event> {
 
 /// Lints the project and runs its tests on both versions, each in a fresh copy with no network.
 /// Only Composer and image builds use the network, and neither runs the project's code, scripts or plugins.
+/// With `clean_images`, the images used are removed afterwards, also when the run fails or is stopped.
 pub fn compare(
     root: &Path,
     source: PhpVersion,
     target: PhpVersion,
-    install_extensions: bool,
+    options: Options,
     cancel: &AtomicBool,
     step: impl Fn(Step),
 ) -> Result<Comparison, String> {
@@ -353,9 +413,13 @@ pub fn compare(
     let target_dir = work.path().join("target");
     copy_project(&base, &target_dir).map_err(|e| crate::t!("Proje kopyalanamadı: {e}", "Couldn't copy the project: {e}"))?;
     let images = work.path().join("images");
-    let setup = Setup { used: &used, install_extensions, images: &images };
-    let source_run = run_version(&container, source, &base, &setup, &step)?;
-    let target_run = run_version(&container, target, &target_dir, &setup, &step)?;
+    let setup = Setup { used: &used, install_extensions: options.install_extensions, images: &images, built: RefCell::new(Vec::new()) };
+    let runs = run_version(&container, source, &base, &setup, &step)
+        .and_then(|first| run_version(&container, target, &target_dir, &setup, &step).map(|second| (first, second)));
+    if options.clean_images {
+        let _ = remove(&docker, &setup.built.borrow());
+    }
+    let (source_run, target_run) = runs?;
     let new_on_target = differs(&target_run.events, &source_run.events);
     let gone_on_target = differs(&source_run.events, &target_run.events);
     Ok(Comparison { source: source_run, target: target_run, dependencies_installed, new_on_target, gone_on_target })
@@ -365,6 +429,8 @@ pub fn compare(
 mod tests {
     use super::*;
     use crate::runtime::Level;
+
+    const PLAIN: Options = Options { install_extensions: false, clean_images: false };
 
     fn event(path: &str, line: usize, message: &str) -> Event {
         Event { path: path.into(), line, level: Level::Warning, message: message.into(), count: 1 }
@@ -409,10 +475,14 @@ mod tests {
         }
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("a.php"), "<?php\n$b = new mysqli('h');\necho bcadd('1', '2');\n").unwrap();
-        let result = compare(dir.path(), PhpVersion::new(7, 4), PhpVersion::new(8, 4), true, &AtomicBool::new(false), |_| {}).unwrap();
+        let options = Options { install_extensions: true, clean_images: true };
+        let result = compare(dir.path(), PhpVersion::new(7, 4), PhpVersion::new(8, 4), options, &AtomicBool::new(false), |_| {}).unwrap();
+        let docker = available().unwrap();
+        let left = built_images(&docker).unwrap();
         for run in [&result.source, &result.target] {
             assert_eq!(run.installed_extensions, ["bcmath", "mysqli"], "{run:?}");
-            assert!(run.missing_extensions.is_empty() && run.image.starts_with("ferry-php:"), "{run:?}");
+            assert!(run.missing_extensions.is_empty() && run.image.starts_with(IMAGE_PREFIX), "{run:?}");
+            assert!(!left.contains(&run.image), "{left:?}");
         }
     }
 
@@ -431,7 +501,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("a.php"), "<?php\nfunction f(int $a = null) {}\n$x = (real) 1;\n").unwrap();
         std::fs::write(dir.path().join("b.php"), "<?php\necho 1;\n").unwrap();
-        let result = compare(dir.path(), PhpVersion::new(7, 4), PhpVersion::new(8, 4), false, &AtomicBool::new(false), |_| {}).unwrap();
+        let result = compare(dir.path(), PhpVersion::new(7, 4), PhpVersion::new(8, 4), PLAIN, &AtomicBool::new(false), |_| {}).unwrap();
         assert_eq!((result.source.lint_errors, result.target.lint_errors), (0, 1), "{}", result.target.log);
         assert!(result.target.events.iter().all(|e| e.path == "/app/a.php"), "{:?}", result.target.events);
         assert!(result.new_on_target.iter().any(|e| e.level == Level::Fatal), "{:?}", result.new_on_target);

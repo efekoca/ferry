@@ -172,6 +172,7 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
   let runtimeLog: string | null = null;
   let runtimeCheck: CheckRun | null = null;
   let runtimeRoots: string[] = [];
+  let dockerImages = 0;
   const withRuntime = (findings: Finding[]): { findings: Finding[]; runtime: ScanResult["runtime"] } => {
     if (!runtimeLog) return { findings: findings.map((f) => ({ ...f, runtimeHits: 0 })), runtime: null };
     const hit = new Set(findings.filter((f) => f.ruleId.startsWith("removed.")).slice(0, 3).map((f) => f.id));
@@ -248,7 +249,13 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
       runtimeRoots = roots.split(",").map((r) => r.trim()).filter(Boolean);
       return withIgnores(lastScan);
     },
-    dockerCompare: async (_path, source, target, extensions) => {
+    dockerImageUsage: async () => ({ images: dockerImages, bytes: dockerImages * 650_000_000 }),
+    removeDockerImages: async () => {
+      const removed = dockerImages;
+      dockerImages = 0;
+      return removed;
+    },
+    dockerCompare: async (_path, source, target, extensions, cleanImages) => {
       if (!lastScan) throw new Error("Scan the project first.");
       const run = (version: string, lintErrors: number, passed: boolean, log: string) => ({
         version,
@@ -263,6 +270,7 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
       });
       const event = { path: "/app/includes/cart.php", line: 44, level: "fatal" as const, message: "Error: Call to undefined function each()", count: 1 };
       await new Promise((r) => setTimeout(r, opts.delay ?? 0));
+      dockerImages = extensions && !cleanImages ? 2 : dockerImages;
       runtimeLog = `Docker · PHP ${source} → ${target}`;
       runtimeCheck = null;
       return {

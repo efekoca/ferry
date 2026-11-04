@@ -149,6 +149,11 @@ export interface DockerComparison {
   goneOnTarget: DockerEvent[];
 }
 
+export interface DockerImageUsage {
+  images: number;
+  bytes: number;
+}
+
 export interface DockerStep {
   step: "install" | "extensions" | "lint" | "tests";
   version: string | null;

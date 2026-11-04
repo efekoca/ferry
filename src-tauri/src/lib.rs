@@ -314,6 +314,7 @@ async fn docker_compare<R: Runtime>(
     source: String,
     target: String,
     extensions: bool,
+    clean_images: bool,
 ) -> CmdResult<DockerResponse> {
     let path = normalize_path(path);
     let source: PhpVersion = source.parse().map_err(|_| t!("Geçersiz sürüm.", "Invalid version."))?;
@@ -329,7 +330,8 @@ async fn docker_compare<R: Runtime>(
     let result = blocking(move || {
         let _running = RunningGuard(running);
         let root = project_root(&key)?;
-        let comparison = docker::compare(&root, source, target, extensions, &mine, |step| {
+        let options = docker::Options { install_extensions: extensions, clean_images };
+        let comparison = docker::compare(&root, source, target, options, &mine, |step| {
             let (step, version) = match step {
                 docker::Step::Installing => ("install", None),
                 docker::Step::Extensions(v) => ("extensions", Some(v.to_string())),
@@ -359,6 +361,16 @@ async fn docker_compare<R: Runtime>(
         state.runtime.lock().unwrap().insert(path, entry.clone());
     }
     Ok(DockerResponse { comparison, scan: scan.map(|scan| respond(&root, scan, Some(&entry))) })
+}
+
+#[tauri::command]
+async fn docker_image_usage() -> CmdResult<docker::ImageUsage> {
+    blocking(docker::image_usage).await
+}
+
+#[tauri::command]
+async fn remove_docker_images() -> CmdResult<usize> {
+    blocking(docker::remove_images).await
 }
 
 #[tauri::command]
@@ -1131,6 +1143,8 @@ pub fn with_commands<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R
         set_runtime_roots,
         docker_compare,
         cancel_docker_compare,
+        docker_image_usage,
+        remove_docker_images,
         clear_runtime_log,
         local_php_versions,
         run_local_check,

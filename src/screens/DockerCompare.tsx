@@ -96,6 +96,7 @@ export function DockerCompare() {
   const { project, target, toolchain, docker, dockerStep, runDocker, cancelDocker } = useStore();
   const [picked, setPicked] = useState<string | null>(null);
   const [extensions, setExtensions] = useState(true);
+  const [cleanImages, setCleanImages] = useState(false);
   if (!project) return null;
   const sources = KNOWN_SOURCES.filter((v) => Number(v) < Number(target));
   const source = picked ?? project.currentVersion ?? "";
@@ -131,7 +132,7 @@ export function DockerCompare() {
                     {t.docker.stop}
                   </Button>
                 ) : (
-                  <Button variant="primary" icon={<Play size={14} />} disabled={!source} onClick={() => void runDocker(source, extensions)}>
+                  <Button variant="primary" icon={<Play size={14} />} disabled={!source} onClick={() => void runDocker(source, extensions, extensions && cleanImages)}>
                     {docker ? t.docker.again : t.docker.start}
                   </Button>
                 )}
@@ -139,6 +140,10 @@ export function DockerCompare() {
               <label className="docker-option">
                 <input type="checkbox" className="checkbox" checked={extensions} disabled={running} onChange={(e) => setExtensions(e.target.checked)} />
                 <span>{t.docker.installExtensions}</span>
+              </label>
+              <label className="docker-option">
+                <input type="checkbox" className="checkbox" checked={extensions && cleanImages} disabled={running || !extensions} onChange={(e) => setCleanImages(e.target.checked)} />
+                <span>{t.docker.cleanAfter}</span>
               </label>
               {stepText && (
                 <p className="subtle" role="status">
