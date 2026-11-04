@@ -195,6 +195,7 @@ pub fn collect_php_files(root: &Path, excluded: &[String]) -> Vec<PathBuf> {
         })
         .collect();
     files.sort();
+    files.dedup();
     files
 }
 
