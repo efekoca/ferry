@@ -83,6 +83,20 @@ jobs:
           cargo clippy -p ferry-core -p ferry-cli --all-targets -- -D warnings
           cargo test -p ferry-core -p ferry-cli
 
+  docker:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Real Docker comparison
+        env:
+          FERRY_TEST_DOCKER: "1"
+        run: cargo test -p ferry-core --lib docker::tests -- --test-threads=1
+
   windows:
     needs: changes
     if: needs.changes.outputs.code == 'true'
@@ -113,6 +127,9 @@ jobs:
           echo "FERRY_TEST_TOOLS=$RUNNER_TEMP/tools" >> "$GITHUB_ENV"
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace --no-fail-fast
+      - name: Docker engine
+        shell: bash
+        run: docker version --format 'Docker server runs {{.Server.Os}} containers' || echo 'Docker server is unavailable'
       - name: Native e2e
         run: pnpm e2e:native
 
