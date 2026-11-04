@@ -555,7 +555,7 @@ fn docker_comparison_feeds_the_findings() {
     h.ok("scan_project", json!({ "path": dir.path(), "target": "8.4", "run": 1 }));
     let result = h.ok(
         "docker_compare",
-        json!({ "path": dir.path(), "source": "7.4", "target": "8.4", "extensions": false, "cleanImages": false, "pages": [], "database": null }),
+        json!({ "path": dir.path(), "source": "7.4", "target": "8.4", "extensions": false, "cleanImages": false, "pages": [], "database": null, "prepare": null }),
     );
     assert!(!result["comparison"]["newOnTarget"].as_array().unwrap().is_empty(), "{result}");
     assert_eq!(result["scan"]["runtime"]["outside"], 0, "{result}");

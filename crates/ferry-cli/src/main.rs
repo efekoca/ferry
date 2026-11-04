@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 const USAGE: &str = "Usage: ferry-cli scan <project> --target <8.2|8.3|8.4|8.5> [options]
-       ferry-cli compare <project> --target <version> [--source <version>] [--no-extensions] [--clean-images] [--page <path>] [--no-pages] [--db-dump <file>] [--db-live] [--db-seed] [--format <text|json>]
+       ferry-cli compare <project> --target <version> [--source <version>] [--no-extensions] [--clean-images] [--page <path>] [--no-pages] [--db-dump <file>] [--db-live] [--db-seed] [--prepare <command>] [--format <text|json>]
        ferry-cli clean-images
 
 Options:
@@ -36,6 +36,7 @@ Pages are served inside the containers and compared, starting at / and following
 --page adds a starting path (repeatable), and --no-pages skips this.
 Each version can get its own copy of the database: --db-dump imports a .sql or .sql.gz file,
 --db-live copies a database on this computer, and --db-seed runs the project's migrations and seeders.
+--prepare runs a command once in the project copy with network access, for example to build assets.
 
 Exit codes: 0 passed, 1 findings at the --fail-on level, 2 usage or run error,
 3 some files couldn't be scanned (unless --allow-incomplete).
@@ -645,6 +646,7 @@ fn run_compare(args: &[String]) -> Result<bool, String> {
     let mut clean_images = false;
     let mut pages = vec!["/".to_string()];
     let mut database = None;
+    let mut prepare = None;
     let mut it = args.iter();
     while let Some(arg) = it.next() {
         let mut value = |name: &str| it.next().cloned().ok_or_else(|| format!("{name} needs a value"));
@@ -654,6 +656,7 @@ fn run_compare(args: &[String]) -> Result<bool, String> {
             "--no-extensions" => extensions = false,
             "--clean-images" => clean_images = true,
             "--no-pages" => pages.clear(),
+            "--prepare" => prepare = Some(value("--prepare")?),
             "--db-dump" => database = Some(ferry_core::database::Source::Dump(PathBuf::from(value("--db-dump")?))),
             "--db-live" => database = Some(ferry_core::database::Source::Live),
             "--db-seed" => database = Some(ferry_core::database::Source::Seed),
@@ -674,12 +677,13 @@ fn run_compare(args: &[String]) -> Result<bool, String> {
     let current = project::inspect(&root).map_err(|e| e.to_string())?.current_version;
     let source = source.or(current).ok_or("--source is required: the project's version couldn't be detected")?;
     let cancel = std::sync::atomic::AtomicBool::new(false);
-    let options = ferry_core::docker::Options { install_extensions: extensions, clean_images, pages, database };
+    let options = ferry_core::docker::Options { install_extensions: extensions, clean_images, pages, database, prepare };
     let result = ferry_core::docker::compare(&root, source, target, options, &cancel, |step| match step {
         ferry_core::docker::Step::Installing => eprintln!("ferry-cli: installing dependencies"),
         ferry_core::docker::Step::Extensions(v) => eprintln!("ferry-cli: preparing extensions for PHP {v}"),
         ferry_core::docker::Step::Lint(v) => eprintln!("ferry-cli: linting on PHP {v}"),
         ferry_core::docker::Step::Database => eprintln!("ferry-cli: preparing the database"),
+        ferry_core::docker::Step::Prepare => eprintln!("ferry-cli: running the prepare command"),
         ferry_core::docker::Step::Pages(v) => eprintln!("ferry-cli: requesting pages on PHP {v}"),
         ferry_core::docker::Step::Tests(v) => eprintln!("ferry-cli: running tests on PHP {v}"),
     })?;

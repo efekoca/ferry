@@ -4,7 +4,24 @@ use std::path::Path;
 
 const PORT: u16 = 8080;
 const PAGE_LIMIT: usize = 60;
+const EXCERPT: usize = 200;
 pub const LOG_MARKER: &str = "FERRY-SERVER-LOG";
+
+/// PHP's built-in server treats paths with a dot differently between versions, so one script decides.
+const ROUTER: &str = r#"<?php
+$path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+if ($path !== '/' && is_file($_SERVER['DOCUMENT_ROOT'] . $path)) {
+    return false;
+}
+if (!is_file($_SERVER['DOCUMENT_ROOT'] . '/index.php')) {
+    http_response_code(404);
+    return true;
+}
+$_SERVER['SCRIPT_NAME'] = '/index.php';
+$_SERVER['SCRIPT_FILENAME'] = $_SERVER['DOCUMENT_ROOT'] . '/index.php';
+chdir($_SERVER['DOCUMENT_ROOT']);
+require 'index.php';
+"#;
 
 const CRAWLER: &str = r#"<?php
 $queue = array_slice($argv, 2);
@@ -28,16 +45,17 @@ while ($queue && count($seen) < $limit) {
     $seen[$path] = true;
     list($status, $location, $body) = $fetch($path);
     list(, , $again) = $fetch($path);
+    $plain = function ($html) { return preg_replace('/\b[a-f0-9]{6,}\b|\d+(?:\.\d+)? ?(?:ms|MiB)|\d{1,2}[:.]\d{2}[:.]\d{2}(?: ?[AP]M)?/i', '', $html); };
     preg_match_all('/(?:Fatal error|Parse error|Uncaught|Warning|Deprecated|Notice):? [^<\n]{0,200}/', $body, $errors);
-    $text = trim(preg_replace('/\s+/', ' ', strip_tags($body)));
+    $raw = trim(preg_replace('/\s+/', ' ', $plain($body)));
     echo 'FERRYPAGE ' . json_encode(array(
         'path' => $path,
         'status' => $status,
         'location' => $location,
-        'stable' => $body === $again,
-        'hash' => md5($body),
+        'stable' => $plain($body) === $plain($again),
+        'hash' => md5($plain($body)),
         'errors' => array_values(array_unique(array_map('utf8_clean', $errors[0]))),
-        'text' => utf8_clean(substr($text, 0, 600)),
+        'text' => utf8_clean(substr($raw, 0, 60000)),
     )) . "\n";
     preg_match_all('/href=["\']([^"\'#?]+)/i', $body, $links);
     foreach ($links[1] as $link) {
@@ -116,7 +134,9 @@ pub fn script(project: &Path, paths: &[String]) -> String {
     let list: Vec<String> = paths.iter().map(|p| quoted(p)).collect();
     format!(
         "cat > /tmp/crawl.php <<'FERRYEOF'\n{CRAWLER}\nFERRYEOF\n\
-         php -d display_errors=1 -d error_reporting=-1 -S 127.0.0.1:{PORT} -t {root} > /tmp/server.log 2>&1 &\n\
+         cat > /tmp/router.php <<'FERRYEOF'\n{ROUTER}\nFERRYEOF\n\
+         export APP_ENV=prod APP_DEBUG=0\n\
+         php -d display_errors=0 -d log_errors=1 -d error_reporting=-1 -S 127.0.0.1:{PORT} -t {root} /tmp/router.php > /tmp/server.log 2>&1 &\n\
          sleep 1\nphp /tmp/crawl.php {PAGE_LIMIT} {}\necho {LOG_MARKER}\ncat /tmp/server.log\n",
         list.join(" ")
     )
@@ -133,6 +153,13 @@ pub fn server_log(output: &str) -> &str {
 
 fn failed(status: u16) -> bool {
     status == 0 || status >= 500
+}
+
+/// The first place two texts differ, with a little context on each side.
+fn first_difference(source: &str, target: &str) -> (String, String) {
+    let at = source.chars().zip(target.chars()).take_while(|(a, b)| a == b).count();
+    let excerpt = |text: &str| text.chars().skip(at.saturating_sub(EXCERPT)).take(EXCERPT * 2).collect::<String>();
+    (excerpt(source), excerpt(target))
 }
 
 fn fatal(errors: &[String]) -> bool {
@@ -166,14 +193,15 @@ pub fn compare(source: &Crawl, target: &Crawl) -> Vec<PageDiff> {
         .map(|s| match by_path.get(s.path.as_str()) {
             Some(t) => {
                 let new_errors: Vec<String> = t.errors.iter().filter(|e| !s.errors.contains(e)).cloned().collect();
+                let (source_text, target_text) = first_difference(&s.text, &t.text);
                 PageDiff {
                     path: s.path.clone(),
                     change: classify(s, t, &new_errors),
                     source_status: s.status,
                     target_status: t.status,
                     new_errors,
-                    source_text: s.text.clone(),
-                    target_text: t.text.clone(),
+                    source_text,
+                    target_text,
                 }
             }
             None => PageDiff {
@@ -222,6 +250,14 @@ mod tests {
         assert_eq!(change(page("/", 200, "a", &fatal), page("/", 200, "a", &fatal)), PageChange::Unverified);
         let moving = Fetched { stable: false, ..page("/", 200, "a", &[]) };
         assert_eq!(change(moving.clone(), page("/", 200, "b", &[])), PageChange::Unstable);
+    }
+
+    #[test]
+    fn excerpts_show_where_pages_differ() {
+        let long = "a".repeat(1000);
+        let (source, target) = first_difference(&format!("{long}old tail"), &format!("{long}new tail"));
+        assert!(source.contains("old tail") && target.contains("new tail"), "{source}");
+        assert!(source.len() < 500);
     }
 
     #[test]

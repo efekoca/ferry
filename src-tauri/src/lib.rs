@@ -342,6 +342,7 @@ async fn docker_compare<R: Runtime>(
     clean_images: bool,
     pages: Vec<String>,
     database: Option<DatabaseChoice>,
+    prepare: Option<String>,
 ) -> CmdResult<DockerResponse> {
     let path = normalize_path(path);
     let source: PhpVersion = source.parse().map_err(|_| t!("Geçersiz sürüm.", "Invalid version."))?;
@@ -357,14 +358,20 @@ async fn docker_compare<R: Runtime>(
     let result = blocking(move || {
         let _running = RunningGuard(running);
         let root = project_root(&key)?;
-        let options =
-            docker::Options { install_extensions: extensions, clean_images, pages, database: database.map(DatabaseChoice::into_source) };
+        let options = docker::Options {
+            install_extensions: extensions,
+            clean_images,
+            pages,
+            database: database.map(DatabaseChoice::into_source),
+            prepare,
+        };
         let comparison = docker::compare(&root, source, target, options, &mine, |step| {
             let (step, version) = match step {
                 docker::Step::Installing => ("install", None),
                 docker::Step::Extensions(v) => ("extensions", Some(v.to_string())),
                 docker::Step::Lint(v) => ("lint", Some(v.to_string())),
                 docker::Step::Database => ("database", None),
+                docker::Step::Prepare => ("prepare", None),
                 docker::Step::Pages(v) => ("pages", Some(v.to_string())),
                 docker::Step::Tests(v) => ("tests", Some(v.to_string())),
             };

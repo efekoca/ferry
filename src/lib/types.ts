@@ -189,7 +189,7 @@ export interface DockerImageUsage {
 }
 
 export interface DockerStep {
-  step: "install" | "extensions" | "lint" | "database" | "pages" | "tests";
+  step: "install" | "extensions" | "lint" | "database" | "prepare" | "pages" | "tests";
   version: string | null;
 }
 
