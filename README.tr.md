@@ -14,7 +14,7 @@ Ferry, macOS, Windows ve Linux'ta çalışan bir masaüstü uygulamasıdır. PHP
 
 ![PHP 7.4'ten 8.4'e geçecek bir WordPress projesi için Ferry genel bakış ekranı: 39 puanlık hazırlık skoru ve geçişi hâlâ engelleyenler, otomatik, gözden geçirilecek ve elle yapılacak düzeltmelerin dağılımı ve Düzeltmeler sayfasından kurucu parametrelerini açıkça nullable yapan bir fark](assets/readme/hero-tr.webp)
 
-- **Sorunları kullanıcılarınızdan önce görün.** PHP 7.0 ile 8.5 arasında kaldırılan ya da değişen her kullanım; dosyası, satırı ve neden önemli olduğuyla listelenir.
+- **Sorunları kullanıcılarınızdan önce görün.** PHP 7.0 ile 8.5 arasında kaldırılan ya da değişen kod; dosyası, satırı ve neden önemli olduğuyla listelenir. Taramanın neyi bulup neyi bulamayacağını [docs/COVERAGE.md](docs/COVERAGE.md) gösterir.
 - **Siz onaylamadan hiçbir şey değişmez.** Rector yalnızca deneme modunda çalışır. Her değişikliği satır satır inceler, yalnızca seçtiğiniz dosyaları uygularsınız.
 - **Her değişikliği tek tıkla geri alın.** Her uygulamadan önce yedek alınır. Geri dönmek için Git kullanmanız gerekmez.
 

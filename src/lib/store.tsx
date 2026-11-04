@@ -160,6 +160,7 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const generation = useRef(0);
   const previewSeq = useRef(0);
+  const openSeq = useRef(0);
   const cancelledSeq = useRef(0);
   const rootRef = useRef<string | null>(null);
 
@@ -237,6 +238,7 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
   const openProject = useCallback(
     async (path?: string) => {
       if (!api) return;
+      const seq = ++openSeq.current;
       let chosen: string | null | undefined = path;
       try {
         chosen ??= await api.pickProjectFolder(t.dialogs.pickProject);
@@ -248,6 +250,7 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
       setOpening(true);
       try {
         const info = await api.inspectProject(chosen);
+        if (seq !== openSeq.current) return;
         if (rootRef.current && rootRef.current !== info.root) void api.closeProject(rootRef.current).catch(() => {});
         rootRef.current = info.root;
         resetResults();
@@ -263,9 +266,9 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
           return next;
         });
       } catch (e) {
-        fail(t.toast.openFailed, e);
+        if (seq === openSeq.current) fail(t.toast.openFailed, e);
       } finally {
-        setOpening(false);
+        if (seq === openSeq.current) setOpening(false);
       }
     },
     [api, resetResults, fail, t],
