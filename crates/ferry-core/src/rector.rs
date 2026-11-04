@@ -108,6 +108,9 @@ const MODERNIZATION_RULES: &[&str] = &[
 
 const LIKELY_RULES: &[&str] = &[
     "QuoteBarewordKeys",
+    "KeepIndirectAccessOrder",
+    "BooleanComparatorToSpaceship",
+    "StringIncrementToFunction",
     "ParenthesizeNestedTernaryRector",
     "ParseStrWithResultArgumentRector",
     "SensitiveDefineRector",
@@ -154,6 +157,10 @@ const RULE_TITLES: &[(&str, Text)] = &[
     ("QuoteBarewordKeys", Text::same("$row[id] → $row['id']")),
     ("AssignNewWithoutReference", Text::same("= &new → = new")),
     ("DefaultColonAfterSwitch", Text::same("default; → default:")),
+    ("NamespacedNameWithoutWhitespace", Text::same("Foo \\ Bar → Foo\\Bar")),
+    ("KeepIndirectAccessOrder", Text::same("$a->$b['c'] → $a->{$b['c']}")),
+    ("BooleanComparatorToSpaceship", Text::same("usort: $a > $b → $a <=> $b")),
+    ("StringIncrementToFunction", Text::same("$s++ → str_increment($s)")),
     ("AssignBuiltinResultWithoutReference", Text::same("= &func_get_args() → = func_get_args()")),
     (
         "ParenthesizeNestedTernaryRector",
@@ -319,8 +326,10 @@ struct StagedFile {
 }
 
 impl Staging {
-    fn prepare(root: &Path, excluded_dirs: &[String], dir: PathBuf) -> Result<Self, RectorError> {
+    fn prepare(root: &Path, excluded_dirs: &[String], dir: PathBuf, target: PhpVersion) -> Result<Self, RectorError> {
         let _ = std::fs::remove_dir_all(&dir);
+        let source = crate::project::inspect(root).ok().and_then(|info| info.current_version);
+        let no_constants = std::collections::HashSet::new();
         let mut files = Vec::new();
         let mut scope = std::collections::HashSet::new();
         let mut constants = std::collections::HashSet::new();
@@ -336,7 +345,7 @@ impl Staging {
                 }
             };
             constants.extend(crate::analyzer::constant_names(&text));
-            if crate::analyzer::fix_legacy_syntax(&text).is_some() {
+            if crate::analyzer::fix_legacy_syntax_with(&text, &no_constants, target, source).is_some() {
                 candidates.push((path, text));
             }
         }
@@ -346,7 +355,7 @@ impl Staging {
             }
         }
         for (path, text) in candidates {
-            let Some((fixed, applied)) = crate::analyzer::fix_legacy_syntax_with(&text, &constants) else {
+            let Some((fixed, applied)) = crate::analyzer::fix_legacy_syntax_with(&text, &constants, target, source) else {
                 continue;
             };
             let rel = crate::analyzer::relative_path(root, &path);
@@ -569,7 +578,7 @@ pub fn preview(
     std::fs::create_dir_all(&dir).map_err(|e| RectorError::Io(dir.display().to_string(), e))?;
     let run = tempfile::Builder::new().prefix("run-").tempdir_in(&dir).map_err(|e| RectorError::Io(dir.display().to_string(), e))?;
     let config_path = run.path().join("rector.php");
-    let staging = Staging::prepare(root, excluded_dirs, run.path().join("staged"))?;
+    let staging = Staging::prepare(root, excluded_dirs, run.path().join("staged"), target)?;
     let config = build_config(root, target, mode, excluded_dirs, &staging, &dir.join("cache"));
     std::fs::write(&config_path, config).map_err(|e| RectorError::Io(config_path.display().to_string(), e))?;
 
@@ -799,7 +808,7 @@ mod tests {
         }
         #[cfg(unix)]
         std::os::unix::fs::symlink(root.join("src/a.php"), root.join("src/link.php")).unwrap();
-        let staging = Staging::prepare(root, &[], root.join(".ferry-staged")).unwrap();
+        let staging = Staging::prepare(root, &[], root.join(".ferry-staged"), PhpVersion::new(8, 5)).unwrap();
         let diffs: Vec<String> =
             ["src/a.php", ".ddev/b.php", ".git/hooks/c.php", "src/link.php"].iter().map(|f| nullable_diff(f)).collect();
         let stdout = format!(r#"{{"file_diffs": [{}]}}"#, diffs.join(","));
@@ -815,7 +824,7 @@ mod tests {
         let root = dir.path();
         std::fs::write(root.join("config.php"), "<?php define('active', 'actual-key'); const other_key = 1;").unwrap();
         std::fs::write(root.join("a.php"), "<?php\nrequire 'config.php';\necho $a[active] . $a[other_key] . $a[missing];\n").unwrap();
-        let staging = Staging::prepare(root, &[], root.join(".ferry-staged")).unwrap();
+        let staging = Staging::prepare(root, &[], root.join(".ferry-staged"), PhpVersion::new(8, 5)).unwrap();
         let (changes, errors) = parse_output(root, r#"{"file_diffs": []}"#, &staging).unwrap();
         assert!(errors.is_empty(), "{errors:?}");
         assert_eq!(changes.len(), 1);
@@ -833,7 +842,7 @@ mod tests {
         std::fs::write(root.join("vendor/lib/c.php"), "<?php const other_key = 1;").unwrap();
         std::fs::write(root.join("vendor/composer/autoload_files.php"), "<?php return ['x' => $vendorDir . '/lib/c.php'];").unwrap();
         std::fs::write(root.join("a.php"), "<?php\necho $a[active] . $a[other_key] . $a[missing];\n").unwrap();
-        let staging = Staging::prepare(root, &["vendor".to_string()], root.join(".ferry-staged")).unwrap();
+        let staging = Staging::prepare(root, &["vendor".to_string()], root.join(".ferry-staged"), PhpVersion::new(8, 5)).unwrap();
         let (changes, _) = parse_output(root, r#"{"file_diffs": []}"#, &staging).unwrap();
         assert_eq!(changes[0].new_content, "<?php\necho $a[active] . $a[other_key] . $a['missing'];\n");
     }
@@ -843,7 +852,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         std::fs::write(root.join("a.php"), "<?php\necho $s{0};\nfunction f(Foo $a = null) {}\n").unwrap();
-        let staging = Staging::prepare(root, &[], root.join("[staged]")).unwrap();
+        let staging = Staging::prepare(root, &[], root.join("[staged]"), PhpVersion::new(8, 5)).unwrap();
         assert_eq!(staging.files.len(), 1);
         let staged = root.join("[staged]/a.php").to_string_lossy().replace('\\', "/");
         let stdout = format!(

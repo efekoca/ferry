@@ -51,6 +51,34 @@ fn statement_start(tokens: &[Token], k: usize) -> bool {
     k == 0 || [";", "{", "}"].iter().any(|p| tokens[k - 1].is_punct(p)) || tokens[k - 1].kind == TokenKind::CloseTag
 }
 
+/// The first mention after `$k = 'text';` when it increments that string.
+fn incremented_string(tokens: &[Token], k: usize) -> Option<usize> {
+    let literal = tokens[k].kind == TokenKind::Variable
+        && statement_start(tokens, k)
+        && tokens.get(k + 1).is_some_and(|n| n.is_punct("="))
+        && tokens.get(k + 2).and_then(string_value).is_some_and(non_numeric)
+        && tokens.get(k + 3).is_some_and(|s| s.is_punct(";"));
+    if !literal {
+        return None;
+    }
+    let m = next_mention(tokens, k, &tokens[k].text)?;
+    (tokens.get(m + 1).is_some_and(|n| n.is_punct("++")) || tokens[m - 1].is_punct("++")).then_some(m)
+}
+
+/// The tokens of `$s++;` or `++$s;` when that is the whole statement.
+fn increment_statement(tokens: &[Token], m: usize) -> Option<(usize, usize)> {
+    let (from, to) = if tokens[m - 1].is_punct("++") { (m - 1, m) } else { (m, m + 1) };
+    (statement_start(tokens, from) && tokens.get(to + 1).is_some_and(|s| s.is_punct(";"))).then_some((from, to))
+}
+
+/// Non-numeric string increments that `str_increment()` can replace, as `(variable, first token, last token)`.
+pub(crate) fn string_increments(tokens: &[Token]) -> Vec<(usize, usize, usize)> {
+    (0..tokens.len())
+        .filter_map(|k| incremented_string(tokens, k))
+        .filter_map(|m| increment_statement(tokens, m).map(|(from, to)| (m, from, to)))
+        .collect()
+}
+
 fn non_numeric(text: &str) -> bool {
     !text.is_empty() && text.trim().parse::<f64>().is_err() && text.chars().all(|c| c.is_ascii_alphanumeric())
 }
@@ -193,13 +221,8 @@ pub(crate) fn check(tokens: &[Token]) -> Vec<(usize, &'static PatternRule)> {
                     out.push((m, &FALSE_TO_ARRAY));
                 }
             }
-            if single && string_value(value).is_some_and(non_numeric) {
-                if let Some(m) = mention {
-                    let incremented = tokens.get(m + 1).is_some_and(|n| n.is_punct("++")) || tokens[m - 1].is_punct("++");
-                    if incremented {
-                        out.push((m, &STRING_INCREMENT));
-                    }
-                }
+            if let Some(m) = incremented_string(tokens, k) {
+                out.push((m, if increment_statement(tokens, m).is_some() { &STRING_INCREMENT } else { &STRING_INCREMENT_EXPRESSION }));
             }
             if single && string_value(value).is_some_and(|s| RESTRICTED.contains(&s.to_ascii_lowercase().as_str())) {
                 if let Some(m) = mention.filter(|&m| tokens.get(m + 1).is_some_and(|n| n.is_punct("("))) {
@@ -306,7 +329,9 @@ const FALSE_TO_ARRAY: PatternRule = rule(
     ),
 );
 
-const STRING_INCREMENT: PatternRule = rule(
+const STRING_INCREMENT: PatternRule = PatternRule { fix: FixKind::Likely, ..STRING_INCREMENT_EXPRESSION };
+
+const STRING_INCREMENT_EXPRESSION: PatternRule = rule(
     "deprecated.string_increment",
     Text::new("Sayı olmayan metni artırma", "Incrementing a non-numeric string"),
     Severity::Deprecated,
