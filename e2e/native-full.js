@@ -386,6 +386,28 @@
       await click("Log'u kaldır");
     },
 
+    async function dockerStopAndClean() {
+      if (!P.docker) return emit("  skipped: FERRY_TEST_DOCKER isn't set");
+      const before = seen.length;
+      const images = (await invoke("docker_image_usage")).images;
+      await openRecent(projects.unicode);
+      await scan();
+      await nav("Docker karşılaştırması");
+      await click("Karşılaştırmayı başlat");
+      await click("Durdur", undefined, 30000);
+      await until(() => button("Karşılaştırmayı başlat"), "start button back after stop", 60000);
+      noErrorToast(before);
+      check(!text().includes("sürümünde yeni"), "no result after a stop");
+      const clean = $$(".docker-option").find((l) => l.textContent.includes("bitince"));
+      clean.querySelector("input").click();
+      await click("Karşılaştırmayı başlat");
+      await until(() => text().includes("Kurulan eklentiler"), "extension installed", 600000);
+      noErrorToast(before);
+      const after = (await invoke("docker_image_usage")).images;
+      await emit(`  images before=${images} after=${after}`);
+      check(after <= images, "the run removed the images it used");
+    },
+
     async function missingProject() {
       const before = seen.length;
       const item = await until(() => $$(".recent__item").find((b) => b.querySelector(".recent__path")?.textContent === projects.missing), "missing recent");

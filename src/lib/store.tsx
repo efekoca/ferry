@@ -171,6 +171,7 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
   const previewSeq = useRef(0);
   const openSeq = useRef(0);
   const cancelledSeq = useRef(0);
+  const dockerStopped = useRef(false);
   const rootRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -390,8 +391,8 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
     async (source: string, extensions: boolean, cleanImages: boolean) => {
       if (!api || !project) return false;
       const root = project.root;
-      setDockerStep({ step: "lint", version: source });
       const stop = await api.onDockerStep(setDockerStep);
+      setDockerStep({ step: "lint", version: source });
       try {
         const result = await api.dockerCompare(root, source, target, extensions, cleanImages);
         if (rootRef.current !== root) return false;
@@ -399,9 +400,10 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
         if (result.scan) setScan(result.scan);
         return true;
       } catch (e) {
-        fail(t.docker.failed, e);
+        if (!dockerStopped.current) fail(t.docker.failed, e);
         return false;
       } finally {
+        dockerStopped.current = false;
         stop();
         setDockerStep(null);
       }
@@ -409,6 +411,7 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
     [api, project, target, fail, t],
   );
   const cancelDocker = useCallback(() => {
+    dockerStopped.current = true;
     if (project) api?.cancelDockerCompare(project.root).catch(() => {});
   }, [api, project]);
 

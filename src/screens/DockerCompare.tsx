@@ -16,14 +16,17 @@ function RunCard({ run }: { run: DockerRun }) {
       ? t.docker.testsTimedOut
       : run.tests.passed
         ? t.docker.testsPassed
-        : t.docker.testsFailed(run.tests.exitCode);
+        : t.docker.testsFailed(run.failedTests.length, run.tests.exitCode);
   return (
     <Card title={`PHP ${run.version}`}>
       <dl className="docker-run">
         <dt>{t.docker.syntax}</dt>
         <dd>{t.docker.syntaxErrors(run.lintErrors)}</dd>
         <dt>{t.docker.tests}</dt>
-        <dd>{tests}</dd>
+        <dd>
+          {tests}
+          {run.tests?.byFile && ` ${t.docker.byFile}`}
+        </dd>
         <dt>{t.docker.messages}</dt>
         <dd>{run.events.length}</dd>
         {run.installedExtensions.length > 0 && (
@@ -48,7 +51,7 @@ function Result({ result }: { result: DockerComparison }) {
   const { t } = useI18n();
   const { showFindings } = useStore();
   const fatal = result.newOnTarget.filter((e) => e.level === "fatal").length;
-  const regressed = !!result.target.tests && !result.target.tests.passed && !!result.source.tests?.passed;
+  const regressed = result.newFailures.length > 0 || (!!result.target.tests && !result.target.tests.passed && !!result.source.tests?.passed);
   const tested = !!result.source.tests?.passed && !!result.target.tests;
   const missing = [...new Set([...result.source.missingExtensions, ...result.target.missingExtensions])];
   const bad = fatal > 0 || regressed || result.target.lintErrors > result.source.lintErrors;
@@ -57,13 +60,35 @@ function Result({ result }: { result: DockerComparison }) {
       <Callout tone={bad ? "danger" : tested ? "success" : "warn"} icon={bad ? <CircleAlert size={15} /> : <CircleCheck size={15} />}>
         {bad ? t.docker.worse(result.target.version) : tested ? t.docker.same(result.target.version) : t.docker.notTested}
       </Callout>
-      {!result.dependenciesInstalled && <Callout tone="warn">{t.docker.notInstalled}</Callout>}
+      {!result.dependenciesInstalled && (
+        <Callout tone="warn">
+          {t.docker.notInstalled}
+          {result.installLog && (
+            <details className="check-log">
+              <summary>{t.findings.showOutput}</summary>
+              <pre>{result.installLog}</pre>
+            </details>
+          )}
+        </Callout>
+      )}
       {(result.source.imageFailed || result.target.imageFailed) && <Callout tone="warn">{t.docker.imageFailed}</Callout>}
       {missing.length > 0 && <Callout tone="warn">{t.docker.missing(missing.join(", "))}</Callout>}
       <div className="grid-2">
         <RunCard run={result.source} />
         <RunCard run={result.target} />
       </div>
+      {result.newFailures.length > 0 && (
+        <Card title={t.docker.failuresTitle(result.target.version, result.newFailures.length)}>
+          <ul className="docker-events">
+            {result.newFailures.map((name) => (
+              <li key={name}>
+                <code>{name}</code>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
+      {result.source.tests && !result.source.tests.passed && <Callout tone="warn">{t.docker.sourceFailing(result.source.version)}</Callout>}
       <Card title={t.docker.newTitle(result.target.version, result.newOnTarget.length)}>
         {result.newOnTarget.length === 0 ? (
           <p className="subtle">{t.docker.noneNew}</p>

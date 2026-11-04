@@ -670,17 +670,17 @@ fn run_compare(args: &[String]) -> Result<bool, String> {
         ferry_core::docker::Step::Lint(v) => eprintln!("ferry-cli: linting on PHP {v}"),
         ferry_core::docker::Step::Tests(v) => eprintln!("ferry-cli: running tests on PHP {v}"),
     })?;
-    let failed = |run: &ferry_core::docker::VersionRun| run.tests.as_ref().is_some_and(|t| !t.passed);
     let fatal = result.new_on_target.iter().any(|e| e.level == ferry_core::runtime::Level::Fatal);
     if json_output {
         println!("{}", serde_json::to_string_pretty(&result).map_err(|e| e.to_string())?);
     } else {
         for run in [&result.source, &result.target] {
+            let count = run.failed_tests.len();
             let tests = run.tests.as_ref().map_or("no tests".to_string(), |t| {
                 if t.passed {
                     "tests passed".into()
                 } else {
-                    format!("tests failed ({:?})", t.exit_code)
+                    format!("{count} tests failed (exit {:?})", t.exit_code)
                 }
             });
             println!("PHP {}: {} syntax errors, {tests}, {} messages", run.version, run.lint_errors, run.events.len());
@@ -695,14 +695,20 @@ fn run_compare(args: &[String]) -> Result<bool, String> {
             }
         }
         if !result.dependencies_installed {
-            println!("Dependencies couldn't be installed, so tests may not have run.");
+            println!("Dependencies couldn't be installed, so tests may not have run:\n{}", result.install_log.trim());
+        }
+        println!("{} tests fail only on PHP {target}", result.new_failures.len());
+        for name in &result.new_failures {
+            println!("  {name}");
         }
         println!("{} new on PHP {target}, {} gone", result.new_on_target.len(), result.gone_on_target.len());
         for e in &result.new_on_target {
             println!("  {}:{} {}", e.path.trim_start_matches("/app/"), e.line, e.message);
         }
     }
-    Ok(fatal || failed(&result.target) && !failed(&result.source))
+    let broke = !result.new_failures.is_empty();
+    let regressed = result.source.tests.as_ref().is_some_and(|t| t.passed) && result.target.tests.as_ref().is_some_and(|t| !t.passed);
+    Ok(fatal || broke || regressed)
 }
 
 fn main() -> ExitCode {

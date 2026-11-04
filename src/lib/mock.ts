@@ -261,7 +261,8 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
         version,
         image: `php:${version}-cli`,
         lintErrors,
-        tests: { exitCode: passed ? 0 : 2, timedOut: false, passed },
+        tests: { exitCode: passed ? 0 : 2, timedOut: false, passed, byFile: false },
+        failedTests: passed ? [] : ["CartTest::testTotal"],
         missingExtensions: extensions ? [] : ["mysqli"],
         installedExtensions: extensions ? ["mysqli"] : [],
         imageFailed: false,
@@ -274,7 +275,7 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
       runtimeLog = `Docker · PHP ${source} → ${target}`;
       runtimeCheck = null;
       return {
-        comparison: { source: run(source, 0, true, "OK (12 tests)"), target: { ...run(target, 1, false, "ERRORS!"), events: [event] }, dependenciesInstalled: true, newOnTarget: [event], goneOnTarget: [] },
+        comparison: { source: run(source, 0, true, "OK (12 tests)"), target: { ...run(target, 1, false, "ERRORS!"), events: [event] }, dependenciesInstalled: true, installLog: "", newFailures: ["CartTest::testTotal"], newOnTarget: [event], goneOnTarget: [] },
         scan: withIgnores(lastScan),
       };
     },
