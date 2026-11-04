@@ -255,7 +255,7 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
       dockerImages = 0;
       return removed;
     },
-    dockerCompare: async (_path, source, target, extensions, cleanImages) => {
+    dockerCompare: async (_path, source, target, extensions, cleanImages, pages) => {
       if (!lastScan) throw new Error("Scan the project first.");
       const run = (version: string, lintErrors: number, passed: boolean, log: string) => ({
         version,
@@ -275,7 +275,7 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
       runtimeLog = `Docker · PHP ${source} → ${target}`;
       runtimeCheck = null;
       return {
-        comparison: { source: run(source, 0, true, "OK (12 tests)"), target: { ...run(target, 1, false, "ERRORS!"), events: [event] }, dependenciesInstalled: true, installLog: "", newFailures: ["CartTest::testTotal"], newOnTarget: [event], goneOnTarget: [] },
+        comparison: { source: run(source, 0, true, "OK (12 tests)"), target: { ...run(target, 1, false, "ERRORS!"), events: [event] }, dependenciesInstalled: true, installLog: "", newFailures: ["CartTest::testTotal"], pages: pages.length ? [{ path: "/cart.php", change: "errors" as const, sourceStatus: 200, targetStatus: 200, newErrors: ["Uncaught Error: Call to undefined function each()"], sourceText: "Sepet", targetText: "Fatal error" }, { path: "/", change: "same" as const, sourceStatus: 200, targetStatus: 200, newErrors: [], sourceText: "Mağaza", targetText: "Mağaza" }] : [], newOnTarget: [event], goneOnTarget: [] },
         scan: withIgnores(lastScan),
       };
     },

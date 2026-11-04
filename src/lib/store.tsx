@@ -120,7 +120,7 @@ interface AppStore {
   cancelPreview(): void;
   docker: DockerComparison | null;
   dockerStep: DockerStep | null;
-  runDocker(source: string, extensions: boolean, cleanImages: boolean): Promise<boolean>;
+  runDocker(source: string, extensions: boolean, cleanImages: boolean, pages: string[]): Promise<boolean>;
   cancelDocker(): void;
   applying: boolean;
   applyChanges(files: string[]): Promise<boolean>;
@@ -388,13 +388,13 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
   }, [api, project]);
 
   const runDocker = useCallback(
-    async (source: string, extensions: boolean, cleanImages: boolean) => {
+    async (source: string, extensions: boolean, cleanImages: boolean, pages: string[]) => {
       if (!api || !project) return false;
       const root = project.root;
       const stop = await api.onDockerStep(setDockerStep);
       setDockerStep({ step: "lint", version: source });
       try {
-        const result = await api.dockerCompare(root, source, target, extensions, cleanImages);
+        const result = await api.dockerCompare(root, source, target, extensions, cleanImages, pages);
         if (rootRef.current !== root) return false;
         setDocker(result.comparison);
         if (result.scan) setScan(result.scan);

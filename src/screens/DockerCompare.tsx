@@ -4,9 +4,10 @@ import { PageHeader } from "../components/Shell";
 import { Badge, Button, Callout, Card, EmptyState } from "../components/ui";
 import { useI18n } from "../i18n";
 import { useStore } from "../lib/store";
-import { KNOWN_SOURCES, type DockerComparison, type DockerRun, type Target } from "../lib/types";
+import { KNOWN_SOURCES, type DockerComparison, type DockerPage, type DockerRun, type Target } from "../lib/types";
 
 const shortPath = (path: string) => path.replace(/^\/app\//, "");
+const parsePaths = (text: string) => text.split(",").map((p) => p.trim()).filter(Boolean).map((p) => (p.startsWith("/") ? p : `/${p}`));
 
 function RunCard({ run }: { run: DockerRun }) {
   const { t } = useI18n();
@@ -47,6 +48,31 @@ function RunCard({ run }: { run: DockerRun }) {
   );
 }
 
+function PagesCard({ pages, version }: { pages: DockerPage[]; version: string }) {
+  const { t } = useI18n();
+  const changed = pages.filter((p) => p.change !== "same");
+  return (
+    <Card title={t.docker.pagesTitle(version, changed.length, pages.length)}>
+      {changed.length === 0 ? (
+        <p className="subtle">{t.docker.pagesSame}</p>
+      ) : (
+        <ul className="docker-events">
+          {changed.map((p) => (
+            <li key={p.path}>
+              <Badge tone={p.change === "unstable" || p.change === "unverified" ? "neutral" : "danger"}>{t.docker.pageChange[p.change]}</Badge>
+              <code>{p.path}</code>
+              <span>
+                {p.sourceStatus} → {p.targetStatus}
+              </span>
+              {p.newErrors[0] && <span>{p.newErrors[0]}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
 function Result({ result }: { result: DockerComparison }) {
   const { t } = useI18n();
   const { showFindings } = useStore();
@@ -54,7 +80,8 @@ function Result({ result }: { result: DockerComparison }) {
   const regressed = result.newFailures.length > 0 || (!!result.target.tests && !result.target.tests.passed && !!result.source.tests?.passed);
   const tested = !!result.source.tests?.passed && !!result.target.tests;
   const missing = [...new Set([...result.source.missingExtensions, ...result.target.missingExtensions])];
-  const bad = fatal > 0 || regressed || result.target.lintErrors > result.source.lintErrors;
+  const brokenPages = result.pages.some((p) => p.change === "status" || p.change === "errors" || p.change === "missing");
+  const bad = fatal > 0 || regressed || brokenPages || result.target.lintErrors > result.source.lintErrors;
   return (
     <>
       <Callout tone={bad ? "danger" : tested ? "success" : "warn"} icon={bad ? <CircleAlert size={15} /> : <CircleCheck size={15} />}>
@@ -77,6 +104,7 @@ function Result({ result }: { result: DockerComparison }) {
         <RunCard run={result.source} />
         <RunCard run={result.target} />
       </div>
+      {result.pages.length > 0 && <PagesCard pages={result.pages} version={result.target.version} />}
       {result.newFailures.length > 0 && (
         <Card title={t.docker.failuresTitle(result.target.version, result.newFailures.length)}>
           <ul className="docker-events">
@@ -122,11 +150,13 @@ export function DockerCompare() {
   const [picked, setPicked] = useState<string | null>(null);
   const [extensions, setExtensions] = useState(true);
   const [cleanImages, setCleanImages] = useState(false);
+  const [comparePages, setComparePages] = useState(true);
+  const [paths, setPaths] = useState("/");
   if (!project) return null;
   const sources = KNOWN_SOURCES.filter((v) => Number(v) < Number(target));
   const source = picked ?? project.currentVersion ?? "";
   const running = !!dockerStep;
-  const stepText = dockerStep && (dockerStep.step === "install" ? t.docker.installing : dockerStep.step === "extensions" ? t.docker.preparing(dockerStep.version ?? "") : dockerStep.step === "lint" ? t.docker.linting(dockerStep.version ?? "") : t.docker.testing(dockerStep.version ?? ""));
+  const stepText = dockerStep && (dockerStep.step === "install" ? t.docker.installing : dockerStep.step === "extensions" ? t.docker.preparing(dockerStep.version ?? "") : dockerStep.step === "pages" ? t.docker.requesting(dockerStep.version ?? "") : dockerStep.step === "lint" ? t.docker.linting(dockerStep.version ?? "") : t.docker.testing(dockerStep.version ?? ""));
   return (
     <>
       <PageHeader title={t.docker.title} subtitle={t.docker.subtitle(source || "?", target as Target)} />
@@ -157,7 +187,7 @@ export function DockerCompare() {
                     {t.docker.stop}
                   </Button>
                 ) : (
-                  <Button variant="primary" icon={<Play size={14} />} disabled={!source} onClick={() => void runDocker(source, extensions, extensions && cleanImages)}>
+                  <Button variant="primary" icon={<Play size={14} />} disabled={!source} onClick={() => void runDocker(source, extensions, extensions && cleanImages, comparePages ? parsePaths(paths) : [])}>
                     {docker ? t.docker.again : t.docker.start}
                   </Button>
                 )}
@@ -170,6 +200,13 @@ export function DockerCompare() {
                 <input type="checkbox" className="checkbox" checked={extensions && cleanImages} disabled={running || !extensions} onChange={(e) => setCleanImages(e.target.checked)} />
                 <span>{t.docker.cleanAfter}</span>
               </label>
+              <label className="docker-option">
+                <input type="checkbox" className="checkbox" checked={comparePages} disabled={running} onChange={(e) => setComparePages(e.target.checked)} />
+                <span>{t.docker.comparePages}</span>
+              </label>
+              {comparePages && (
+                <input className="input docker-paths" aria-label={t.docker.pagesLabel} placeholder="/, /login" value={paths} disabled={running} onChange={(e) => setPaths(e.target.value)} />
+              )}
               {stepText && (
                 <p className="subtle" role="status">
                   {stepText}

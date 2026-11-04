@@ -15,6 +15,7 @@ pub const CONTAINER_ROOT: &str = "/app";
 const INSTALL_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const LINT_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const TEST_TIMEOUT: Duration = Duration::from_secs(20 * 60);
+const PAGE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const BUILD_TIMEOUT: Duration = Duration::from_secs(20 * 60);
 const LOG_LIMIT: usize = 64 * 1024;
 const IMAGE_PREFIX: &str = "ferry-php:";
@@ -98,6 +99,8 @@ pub struct VersionRun {
     pub lint_errors: usize,
     pub tests: Option<TestRun>,
     pub failed_tests: Vec<String>,
+    #[serde(skip)]
+    pub crawl: crate::web::Crawl,
     pub missing_extensions: Vec<String>,
     pub installed_extensions: Vec<String>,
     pub image_failed: bool,
@@ -113,6 +116,7 @@ pub struct Comparison {
     pub dependencies_installed: bool,
     pub install_log: String,
     pub new_failures: Vec<String>,
+    pub pages: Vec<crate::web::PageDiff>,
     pub new_on_target: Vec<Event>,
     pub gone_on_target: Vec<Event>,
 }
@@ -124,10 +128,12 @@ pub struct ImageUsage {
     pub bytes: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Options {
     pub install_extensions: bool,
     pub clean_images: bool,
+    /// Pages to start crawling from. Empty skips the page comparison.
+    pub pages: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -135,6 +141,7 @@ pub enum Step {
     Installing,
     Extensions(PhpVersion),
     Lint(PhpVersion),
+    Pages(PhpVersion),
     Tests(PhpVersion),
 }
 
@@ -329,6 +336,7 @@ fn lint_lines(text: &str) -> impl Iterator<Item = &str> {
 struct Setup<'a> {
     used: &'a [String],
     install_extensions: bool,
+    pages: &'a [String],
     images: &'a Path,
     built: RefCell<Vec<String>>,
 }
@@ -365,6 +373,15 @@ fn run_version(
     let lint_errors = lint_lines(&lint_output).count();
     let missing_extensions = used.iter().filter(|e| !modules.contains(*e)).cloned().collect();
     let mut log = lint_output;
+    let mut crawl = crate::web::Crawl::default();
+    if !setup.pages.is_empty() {
+        step(Step::Pages(version));
+        let script = crate::web::script(project, setup.pages);
+        let run = container.run(&format!("pages-{}", version.compact()), project, &image, false, &script, PAGE_TIMEOUT)?;
+        let text = output(&run);
+        crawl = crate::web::parse(&text);
+        log.push_str(crate::web::server_log(&text));
+    }
     let has_tests = project.join("vendor/bin/phpunit").exists() && project.join("vendor/autoload.php").is_file();
     let mut failed = Vec::new();
     let tests = if has_tests {
@@ -395,6 +412,7 @@ fn run_version(
         lint_errors,
         tests,
         failed_tests: failed,
+        crawl,
         missing_extensions,
         installed_extensions,
         image_failed,
@@ -471,13 +489,20 @@ pub fn compare(
     let target_dir = work.path().join("target");
     copy_project(&base, &target_dir).map_err(|e| crate::t!("Proje kopyalanamadı: {e}", "Couldn't copy the project: {e}"))?;
     let images = work.path().join("images");
-    let setup = Setup { used: &used, install_extensions: options.install_extensions, images: &images, built: RefCell::new(Vec::new()) };
+    let setup = Setup {
+        used: &used,
+        install_extensions: options.install_extensions,
+        pages: &options.pages,
+        images: &images,
+        built: RefCell::new(Vec::new()),
+    };
     let runs = run_version(&container, source, &base, &setup, &step)
         .and_then(|first| run_version(&container, target, &target_dir, &setup, &step).map(|second| (first, second)));
     if options.clean_images {
         let _ = remove(&docker, &setup.built.borrow());
     }
     let (source_run, target_run) = runs?;
+    let pages = crate::web::compare(&source_run.crawl, &target_run.crawl);
     let new_failures = target_run.failed_tests.iter().filter(|t| !source_run.failed_tests.contains(t)).cloned().collect();
     let new_on_target = differs(&target_run.events, &source_run.events);
     let gone_on_target = differs(&source_run.events, &target_run.events);
@@ -487,6 +512,7 @@ pub fn compare(
         dependencies_installed,
         install_log,
         new_failures,
+        pages,
         new_on_target,
         gone_on_target,
     })
@@ -496,8 +522,6 @@ pub fn compare(
 mod tests {
     use super::*;
     use crate::runtime::Level;
-
-    const PLAIN: Options = Options { install_extensions: false, clean_images: false };
 
     fn event(path: &str, line: usize, message: &str) -> Event {
         Event { path: path.into(), line, level: Level::Warning, message: message.into(), count: 1 }
@@ -542,7 +566,7 @@ mod tests {
         }
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("a.php"), "<?php\n$b = new mysqli('h');\necho bcadd('1', '2');\n").unwrap();
-        let options = Options { install_extensions: true, clean_images: true };
+        let options = Options { install_extensions: true, clean_images: true, pages: Vec::new() };
         let result = compare(dir.path(), PhpVersion::new(7, 4), PhpVersion::new(8, 4), options, &AtomicBool::new(false), |_| {}).unwrap();
         let docker = available().unwrap();
         let left = built_images(&docker).unwrap();
@@ -554,6 +578,22 @@ mod tests {
     }
 
     #[test]
+    fn pages_are_compared_between_versions() {
+        if std::env::var_os("FERRY_TEST_DOCKER").is_none() {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("index.php"), "<?php echo '<a href=\"/old.php\">old</a><a href=\"/same.php\">same</a>';").unwrap();
+        std::fs::write(dir.path().join("old.php"), "<?php $a = [1]; reset($a); print_r(each($a));").unwrap();
+        std::fs::write(dir.path().join("same.php"), "<?php echo 'same';").unwrap();
+        let options = Options { pages: vec!["/".to_string()], ..Options::default() };
+        let result = compare(dir.path(), PhpVersion::new(7, 4), PhpVersion::new(8, 4), options, &AtomicBool::new(false), |_| {}).unwrap();
+        let change = |path: &str| result.pages.iter().find(|p| p.path == path).map(|p| p.change);
+        assert_eq!(change("/same.php"), Some(crate::web::PageChange::Same), "{:?}", result.pages);
+        assert_eq!(change("/old.php"), Some(crate::web::PageChange::Errors), "{:?}", result.pages);
+    }
+
+    #[test]
     fn stopping_ends_the_run_quickly() {
         if std::env::var_os("FERRY_TEST_DOCKER").is_none() {
             return;
@@ -561,7 +601,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("a.php"), "<?php\necho gmp_add(1, 2);\n").unwrap();
         let cancel = AtomicBool::new(false);
-        let options = Options { install_extensions: true, clean_images: true };
+        let options = Options { install_extensions: true, clean_images: true, pages: Vec::new() };
         let started = std::time::Instant::now();
         let result = std::thread::scope(|scope| {
             scope.spawn(|| {
@@ -598,7 +638,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("a.php"), "<?php\nfunction f(int $a = null) {}\n$x = (real) 1;\n").unwrap();
         std::fs::write(dir.path().join("b.php"), "<?php\necho 1;\n").unwrap();
-        let result = compare(dir.path(), PhpVersion::new(7, 4), PhpVersion::new(8, 4), PLAIN, &AtomicBool::new(false), |_| {}).unwrap();
+        let result =
+            compare(dir.path(), PhpVersion::new(7, 4), PhpVersion::new(8, 4), Options::default(), &AtomicBool::new(false), |_| {}).unwrap();
         assert_eq!((result.source.lint_errors, result.target.lint_errors), (0, 1), "{}", result.target.log);
         assert!(result.target.events.iter().all(|e| e.path == "/app/a.php"), "{:?}", result.target.events);
         assert!(result.new_on_target.iter().any(|e| e.level == Level::Fatal), "{:?}", result.new_on_target);
