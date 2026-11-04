@@ -161,6 +161,8 @@ target/release/ferry-cli scan . --target 8.4 --format github
 - `--output <file>` writes the report to a file, and `--lang tr` switches the messages to Turkish.
 - `--write-baseline <file>` saves today's findings, and `--baseline <file>` compares with them: only findings that aren't in the baseline count toward `--fail-on`, and `--fail-on new` fails on any of them. This lets a project with hundreds of old findings stop new ones from coming in.
 
+With Docker running, `ferry-cli compare <project> --target 8.5` lints the project and runs its PHPUnit tests in `php:X.Y-cli` containers on the current and target versions, and lists what's new on the target. The containers work on copies and have no network; only `composer install` does, without the project's scripts or plugins. The images don't include extensions such as `mysqli` or `gd`, so code that needs them is listed as missing and its tests can fail on both versions.
+
 The repository is also a GitHub Action that builds `ferry-cli` and annotates pull requests:
 
 ```yaml
