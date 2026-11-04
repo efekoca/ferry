@@ -190,7 +190,7 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
       snippet: "$qty = $item['qty'];",
       runtimeHits: 7,
     };
-    return { findings: [...marked, extra], runtime: { file: runtimeLog, events: 31, confirmed: hit.size, added: 1, outside: 4, check: runtimeCheck } };
+    return { findings: [...marked, extra], runtime: { file: runtimeLog, events: 31, confirmed: hit.size, added: 1, outside: 4, outsideFatals: 0, check: runtimeCheck } };
   };
   const history = new Map<string, { at: number; score: number; total: number; ids: string[] }[]>();
   const track = (scan: ScanResult): ScanResult => {

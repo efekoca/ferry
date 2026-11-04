@@ -125,6 +125,7 @@ export interface RuntimeSummary {
   confirmed: number;
   added: number;
   outside: number;
+  outsideFatals: number;
   check?: CheckRun | null;
 }
 
