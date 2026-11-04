@@ -58,18 +58,23 @@ fn closure_at(tokens: &[Token], k: usize) -> Option<Function> {
     function_at(tokens, at).filter(|f| f.name.is_none())
 }
 
-fn top_level(tokens: &[Token], from: usize, to: usize, found: impl Fn(&Token) -> bool) -> bool {
+fn top_level_at(tokens: &[Token], from: usize, to: usize, found: impl Fn(&Token) -> bool) -> Vec<usize> {
     let mut depth = 0usize;
-    for t in &tokens[from..to] {
+    let mut out = Vec::new();
+    for (k, t) in tokens.iter().enumerate().take(to).skip(from) {
         if t.is_punct("(") || t.is_punct("[") || t.is_punct("{") {
             depth += 1;
         } else if t.is_punct(")") || t.is_punct("]") || t.is_punct("}") {
             depth = depth.saturating_sub(1);
         } else if depth == 0 && found(t) {
-            return true;
+            out.push(k);
         }
     }
-    false
+    out
+}
+
+fn top_level(tokens: &[Token], from: usize, to: usize, found: impl Fn(&Token) -> bool) -> bool {
+    !top_level_at(tokens, from, to, found).is_empty()
 }
 
 /// The tokens of a callback that only evaluates one expression.
@@ -90,6 +95,55 @@ fn boolean_comparison(tokens: &[Token], from: usize, to: usize) -> bool {
     let compares = |t: &Token| ["<", ">", "<=", ">=", "==", "!=", "===", "!==", "<>"].iter().any(|o| t.is_punct(o));
     let other = |t: &Token| ["?", "??", "<=>", "&&", "||", "+", "-", "*", "/"].iter().any(|o| t.is_punct(o));
     top_level(tokens, from, to, compares) && !top_level(tokens, from, to, other)
+}
+
+fn sort_comparison(tokens: &[Token], k: usize, close: usize) -> Option<(usize, usize)> {
+    let args = starts(tokens, k + 1);
+    let end = args.get(2).map_or(close, |&n| n - 1);
+    let expr = closure_at(tokens, *args.get(1)?).and_then(|f| single_expression(tokens, &f, end))?;
+    boolean_comparison(tokens, expr.0, expr.1).then_some(expr)
+}
+
+/// The operator of a comparison that `<=>` can replace without regrouping its operands.
+fn ordering_operator(tokens: &[Token], from: usize, to: usize) -> Option<usize> {
+    let compares = |t: &Token| ["<", ">", "<=", ">=", "==", "!=", "===", "!==", "<>"].iter().any(|o| t.is_punct(o));
+    let looser = |t: &Token| {
+        ["&", "|", "^", "=", ".", "%", ","].iter().any(|o| t.is_punct(o)) || ["and", "or", "xor"].iter().any(|w| t.is_ident_ci(w))
+    };
+    let ops = top_level_at(tokens, from, to, compares);
+    let op = *ops.first().filter(|_| ops.len() == 1)?;
+    let ordering = ["<", ">", "<=", ">="].iter().any(|o| tokens[op].is_punct(o));
+    (ordering && from < op && op + 1 < to && !top_level(tokens, from, to, looser)).then_some(op)
+}
+
+/// `(first operand, operator, end)` of each boolean sort comparator that `<=>` can replace.
+pub(crate) fn ordering_comparators(tokens: &[Token]) -> Vec<(usize, usize, usize)> {
+    let mut out = Vec::new();
+    for k in 0..tokens.len().saturating_sub(1) {
+        let name = tokens[k].text.trim_start_matches('\\').to_ascii_lowercase();
+        if tokens[k].kind != TokenKind::Ident || !tokens[k + 1].is_punct("(") || !SORTS.contains(&name.as_str()) {
+            continue;
+        }
+        if k > 0 && ["->", "?->", "::"].iter().any(|p| tokens[k - 1].is_punct(p)) || k > 0 && tokens[k - 1].is_ident_ci("function") {
+            continue;
+        }
+        let expr = close_of(tokens, k + 1).and_then(|close| sort_comparison(tokens, k, close));
+        if let Some((from, op, to)) = expr.and_then(|(from, to)| ordering_operator(tokens, from, to).map(|op| (from, op, to))) {
+            out.push((from, op, to));
+        }
+    }
+    out
+}
+
+/// A variable after `->` or `::` that PHP 5 read together with its offsets and PHP 7 reads left to right.
+pub(crate) fn indirect_access(tokens: &[Token], k: usize) -> bool {
+    if tokens[k].kind != TokenKind::Variable || !tokens.get(k + 1).is_some_and(|n| n.is_punct("[")) || k == 0 {
+        return false;
+    }
+    let then_call = close_of(tokens, k + 1).is_some_and(|c| tokens.get(c + 1).is_some_and(|n| n.is_punct("(")));
+    let own = k >= 2 && ["self", "static", "parent"].iter().any(|w| tokens[k - 2].is_ident_ci(w));
+    let created = k >= 3 && tokens[k - 3].is_ident_ci("new");
+    tokens[k - 1].is_punct("->") || tokens[k - 1].is_punct("::") && then_call && !own && !created
 }
 
 fn fractional(t: &Token) -> bool {
@@ -142,13 +196,8 @@ pub(crate) fn check(tokens: &[Token], index: &ProjectIndex) -> Vec<(usize, &'sta
             }
         }
 
-        if t.kind == TokenKind::Variable && next.is_some_and(|n| n.is_punct("[")) {
-            let then_call = close_of(tokens, k + 1).is_some_and(|c| tokens.get(c + 1).is_some_and(|n| n.is_punct("(")));
-            let own = k >= 2 && ["self", "static", "parent"].iter().any(|w| tokens[k - 2].is_ident_ci(w));
-            let created = k >= 3 && tokens[k - 3].is_ident_ci("new");
-            if prev.is_some_and(|p| p.is_punct("->") || p.is_punct("?->") || p.is_punct("::") && then_call && !own && !created) {
-                out.push((k, &INDIRECT_ORDER));
-            }
+        if indirect_access(tokens, k) {
+            out.push((k, &INDIRECT_ORDER));
         }
 
         if t.kind == TokenKind::Ident && !member && !declared && !open_call && !next.is_some_and(|n| n.is_punct("::")) {
@@ -312,12 +361,9 @@ pub(crate) fn check(tokens: &[Token], index: &ProjectIndex) -> Vec<(usize, &'sta
             }
         }
         if SORTS.contains(&name.as_str()) {
-            if let Some(&a) = args.get(1) {
-                let end = args.get(2).map_or(close, |&n| n - 1);
-                let expr = closure_at(tokens, a).and_then(|f| single_expression(tokens, &f, end));
-                if expr.is_some_and(|(from, to)| boolean_comparison(tokens, from, to)) {
-                    out.push((k, &BOOL_COMPARATOR));
-                }
+            if let Some((from, to)) = sort_comparison(tokens, k, close) {
+                let fixable = ordering_operator(tokens, from, to).is_some();
+                out.push((k, if fixable { &BOOL_COMPARATOR } else { &BOOL_EQUALITY_COMPARATOR }));
             }
         }
         if let Some((_, slot)) = VALUE_CALLBACKS.iter().find(|(f, _)| *f == name) {
@@ -510,7 +556,9 @@ const HANDLER_OUTPUT: PatternRule = rule(
     ),
 );
 
-const BOOL_COMPARATOR: PatternRule = rule(
+const BOOL_COMPARATOR: PatternRule = PatternRule { fix: FixKind::Likely, ..BOOL_EQUALITY_COMPARATOR };
+
+const BOOL_EQUALITY_COMPARATOR: PatternRule = rule(
     "deprecated.bool_sort_comparator",
     Text::new("Sıralama fonksiyonu bool dönüyor", "Sort comparator returns a boolean"),
     Severity::Deprecated,
