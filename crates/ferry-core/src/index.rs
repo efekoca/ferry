@@ -637,7 +637,7 @@ fn type_decl(tokens: &[Token], kw: usize, names: &Names) -> Option<TypeDecl> {
     Some(TypeDecl { open, close, info })
 }
 
-fn composer_files(root: &Path) -> Vec<PathBuf> {
+pub(crate) fn composer_files(root: &Path) -> Vec<PathBuf> {
     let Ok(text) = std::fs::read_to_string(root.join("vendor/composer/autoload_files.php")) else {
         return Vec::new();
     };
