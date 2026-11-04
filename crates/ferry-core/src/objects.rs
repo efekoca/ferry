@@ -71,6 +71,16 @@ pub(crate) fn check(tokens: &[Token], is_user_type: impl Fn(&str) -> bool) -> Ve
             if called {
                 let keys: Vec<String> = builtin.iter().map(|c| format!("{c}::{name}")).collect();
                 argument_rule(tokens, &keys, k + 1, k, &mut out);
+                if name == "connect" && builtin.iter().any(|c| *c == "mysqli") {
+                    let close = crate::declarations::close_of(tokens, k + 1);
+                    let null = close.is_some_and(|c| {
+                        tokens.get(c + 1).is_some_and(|o| ["===", "!==", "==", "!="].iter().any(|p| o.is_punct(p)))
+                            && tokens.get(c + 2).is_some_and(|v| v.is_ident_ci("null"))
+                    });
+                    if null {
+                        out.push(issue(k, &MYSQLI_CONNECT_RESULT));
+                    }
+                }
             } else if let Some((_, _, rule)) = PROPERTIES.iter().find(|(c, p, _)| *p == name && builtin.iter().any(|b| b == c)) {
                 out.push(issue(k, rule));
             }
@@ -134,6 +144,18 @@ pub(crate) fn check(tokens: &[Token], is_user_type: impl Fn(&str) -> bool) -> Ve
 const fn rule(id: &'static str, title: Text, severity: Severity, since: (u32, u32), replacement: Option<Text>, note: Text) -> PatternRule {
     PatternRule { id, title, severity, since, replacement, fix: FixKind::Manual, note }
 }
+
+const MYSQLI_CONNECT_RESULT: PatternRule = rule(
+    "behavior.mysqli_connect_result",
+    Text::new("mysqli::connect() sonucu", "mysqli::connect() result"),
+    Severity::Behavior,
+    (8, 1),
+    Some(Text::new("sonucu true ile karşılaştırın", "compare the result with true")),
+    Text::new(
+        "PHP 8.1'den beri mysqli::connect() başarılı olduğunda null değil, true döndürür.",
+        "Since PHP 8.1 mysqli::connect() returns true on success instead of null.",
+    ),
+);
 
 const MYSQLI_STAT: PatternRule = rule(
     "removed.mysqli_stat_property",
