@@ -328,7 +328,6 @@ fn restore_refuses_files_edited_after_the_confirmation() {
     assert_eq!(std::fs::read_to_string(&file).unwrap(), second);
 }
 
-#[cfg(unix)]
 fn stage_preview(h: &Harness, files: &[(&str, &str)]) -> u64 {
     let root = PathBuf::from(normalize_path(h.root.clone()));
     let changes = files
