@@ -1,7 +1,7 @@
 use crate::runtime::{self, Event};
 use crate::toolchain::{self, Stop};
 use crate::version::PhpVersion;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -145,6 +145,72 @@ pub struct Options {
     pub database: Option<crate::database::Source>,
     /// Runs once on the source version with network access, before anything is compared.
     pub prepare: Option<String>,
+}
+
+const HISTORY_LIMIT: usize = 20;
+
+/// What a past comparison found, kept after its full result is gone.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Summary {
+    pub at: u64,
+    pub source: String,
+    pub target: String,
+    pub regressed: bool,
+    pub tests_compared: bool,
+    pub pages: usize,
+    pub broken_pages: usize,
+    pub differing_pages: usize,
+    pub unverified_pages: usize,
+    pub new_failures: usize,
+    pub new_messages: usize,
+    pub data_changes: usize,
+}
+
+impl Comparison {
+    pub fn regressed(&self) -> bool {
+        let fatal = self.new_on_target.iter().any(|e| e.level == runtime::Level::Fatal);
+        let tests = self.source.tests.as_ref().is_some_and(|t| t.passed) && self.target.tests.as_ref().is_some_and(|t| !t.passed);
+        fatal
+            || tests
+            || !self.new_failures.is_empty()
+            || self.pages.iter().any(crate::web::PageDiff::broke)
+            || self.target.lint_errors > self.source.lint_errors
+    }
+
+    pub fn summary(&self, at: u64) -> Summary {
+        use crate::web::PageChange;
+        let count = |wanted: &[PageChange]| self.pages.iter().filter(|p| wanted.contains(&p.change)).count();
+        Summary {
+            at,
+            source: self.source.version.to_string(),
+            target: self.target.version.to_string(),
+            regressed: self.regressed(),
+            tests_compared: self.source.tests.as_ref().is_some_and(|t| t.passed) && self.target.tests.is_some(),
+            pages: self.pages.len(),
+            broken_pages: self.pages.iter().filter(|p| p.broke()).count(),
+            differing_pages: count(&[PageChange::Status, PageChange::Redirect, PageChange::Errors, PageChange::Body, PageChange::Missing]),
+            unverified_pages: count(&[PageChange::Unverified, PageChange::Unstable]),
+            new_failures: self.new_failures.len(),
+            new_messages: self.new_on_target.len(),
+            data_changes: self.data_changes.len(),
+        }
+    }
+}
+
+pub fn history(file: &Path) -> Vec<Summary> {
+    std::fs::read(file).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+}
+
+pub fn record(file: &Path, summary: Summary) -> std::io::Result<Vec<Summary>> {
+    let mut entries = history(file);
+    entries.insert(0, summary);
+    entries.truncate(HISTORY_LIMIT);
+    if let Some(parent) = file.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(file, serde_json::to_vec(&entries)?)?;
+    Ok(entries)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -482,7 +548,7 @@ fn run_version(
         Some(TestRun {
             exit_code,
             timed_out: run.stopped == Some(Stop::TimedOut),
-            passed: exit_code == Some(0) && run.stopped.is_none(),
+            passed: run.stopped.is_none() && (exit_code == Some(0) || failed.is_empty() && !crashed && tests_passed(&output(&run))),
             by_file: crashed,
         })
     } else {
@@ -505,6 +571,11 @@ fn run_version(
         events,
         log: tail(&log),
     })
+}
+
+/// Symfony's bridge exits with 1 over deprecations even though every test passed.
+fn tests_passed(output: &str) -> bool {
+    output.lines().any(|l| l.starts_with("OK (") || l.starts_with("OK, but"))
 }
 
 /// The tests PHPUnit lists under its errors and failures, leaving out skipped and risky ones.
@@ -850,6 +921,38 @@ mod tests {
         std::fs::write(dir.path().join("composer.json"), r#"{"require-dev":{"symfony/phpunit-bridge":"^7.0","phpunit/phpunit":"^10"}}"#)
             .unwrap();
         assert_eq!(phpunit_bridge_version(dir.path()), None);
+    }
+
+    #[test]
+    fn history_keeps_the_latest_runs_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("deep/history.json");
+        let entry = |at| Summary {
+            at,
+            source: "7.4".into(),
+            target: "8.4".into(),
+            regressed: false,
+            tests_compared: true,
+            pages: 1,
+            broken_pages: 0,
+            differing_pages: 0,
+            unverified_pages: 0,
+            new_failures: 0,
+            new_messages: 0,
+            data_changes: 0,
+        };
+        for at in 0..25 {
+            record(&file, entry(at)).unwrap();
+        }
+        let kept = history(&file);
+        assert_eq!((kept.len(), kept[0].at, kept[19].at), (20, 24, 5));
+    }
+
+    #[test]
+    fn a_bridge_exit_with_ok_output_counts_as_passed() {
+        assert!(tests_passed("PHPUnit\n\nOK (51 tests, 115 assertions)\n\nRemaining indirect deprecation notices (3)\n"));
+        assert!(tests_passed("OK, but there were issues!\n"));
+        assert!(!tests_passed("ERRORS!\nTests: 1, Errors: 1.\n"));
     }
 
     #[test]

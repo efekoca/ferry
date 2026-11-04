@@ -457,7 +457,7 @@ function ServerProbe({ target, extensions }: { target: string; extensions: Exten
 
 export function History() {
   const { t } = useI18n();
-  const { api, project, snapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots } = useStore();
+  const { api, project, snapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, dockerHistory } = useStore();
   const [clearing, setClearing] = useState(false);
   const [pending, setPending] = useState<{ snapshot: Snapshot; action: "restore" | "delete" } | null>(null);
   const [reviewing, setReviewing] = useState<Snapshot | null>(null);
@@ -494,6 +494,22 @@ export function History() {
       />
       <div className="page-scroll">
         <div className="page-body stack">
+          {dockerHistory.length > 0 && (
+            <Card title={t.history.dockerTitle}>
+              <ul className="docker-events">
+                {dockerHistory.map((run) => (
+                  <li key={run.at}>
+                    <Badge tone={run.regressed ? "danger" : run.testsCompared ? "auto" : "neutral"}>{t.overview.readiness.dockerState[run.regressed ? "failed" : run.testsCompared ? "passed" : "partial"]}</Badge>
+                    <code>
+                      PHP {run.source} → {run.target}
+                    </code>
+                    <span>{formatRelative(run.at * 1000, t)}</span>
+                    <span>{t.history.dockerCounts(run.differingPages, run.pages, run.newFailures, run.dataChanges)}</span>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
           {snapshots.length === 0 ? (
             <EmptyState icon={<HistoryIcon size={24} />} title={t.history.empty}>
               {t.history.emptyText}

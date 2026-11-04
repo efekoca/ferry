@@ -3,6 +3,7 @@ import type {
   DatabasePlan,
   DockerImageUsage,
   DockerResponse,
+  DockerSummary,
   DockerStep,
   SnapshotConflict,
   ApplyResult,
@@ -53,6 +54,7 @@ export interface Api {
   dockerCompare(path: string, source: string, target: string, extensions: boolean, cleanImages: boolean, pages: string[], database: DatabaseChoice | null, prepare: string | null): Promise<DockerResponse>;
   databasePlan(path: string): Promise<DatabasePlan>;
   dockerImageUsage(): Promise<DockerImageUsage>;
+  dockerHistory(path: string): Promise<DockerSummary[]>;
   removeDockerImages(): Promise<number>;
   cancelDockerCompare(path: string): Promise<void>;
   onDockerStep(handler: (step: DockerStep) => void): Promise<() => void>;
@@ -117,6 +119,7 @@ async function tauriApi(): Promise<Api> {
     dockerCompare: (path, source, target, extensions, cleanImages, pages, database, prepare) => invoke("docker_compare", { path, source, target, extensions, cleanImages, pages, database, prepare }),
     databasePlan: (path) => invoke("database_plan", { path }),
     dockerImageUsage: () => invoke("docker_image_usage"),
+    dockerHistory: (path) => invoke("docker_history", { path }),
     removeDockerImages: () => invoke("remove_docker_images"),
     cancelDockerCompare: (path) => invoke("cancel_docker_compare", { path }),
     onDockerStep: (handler) => listen<DockerStep>("docker://step", (e) => handler(e.payload)),

@@ -17,6 +17,7 @@ import type {
   DatabaseChoice,
   DockerComparison,
   DockerStep,
+  DockerSummary,
 } from "./types";
 import { TARGETS } from "./types";
 import { isBlockedTarget } from "./security";
@@ -120,6 +121,7 @@ interface AppStore {
   loadPreview(mode: RectorMode): Promise<boolean>;
   cancelPreview(): void;
   docker: DockerComparison | null;
+  dockerHistory: DockerSummary[];
   dockerStep: DockerStep | null;
   runDocker(source: string, extensions: boolean, cleanImages: boolean, pages: string[], database: DatabaseChoice | null, prepare: string | null): Promise<boolean>;
   cancelDocker(): void;
@@ -162,6 +164,7 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
   const [toolchain, setToolchain] = useState<ToolchainStatus | null>(null);
   const [docker, setDocker] = useState<DockerComparison | null>(null);
   const [dockerStep, setDockerStep] = useState<DockerStep | null>(null);
+  const [dockerHistory, setDockerHistory] = useState<DockerSummary[]>([]);
   const [installingRector, setInstallingRector] = useState(false);
   const [preview, setPreview] = useState<RectorPreview | null>(null);
   const [previewMode, setPreviewMode] = useState<RectorMode>("compat");
@@ -268,6 +271,8 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
         resetResults();
         setFindingsFilter(NO_FILTER);
         setProject(info);
+        setDockerHistory([]);
+        void api.dockerHistory(info.root).then(setDockerHistory).catch(() => {});
         setView("overview");
         setRecent((list) => {
           const next = [
@@ -398,6 +403,7 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
         const result = await api.dockerCompare(root, source, target, extensions, cleanImages, pages, database, prepare);
         if (rootRef.current !== root) return false;
         setDocker(result.comparison);
+        void api.dockerHistory(root).then(setDockerHistory).catch(() => {});
         if (result.scan) setScan(result.scan);
         return true;
       } catch (e) {
@@ -571,13 +577,13 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
     () => ({
       api, view, setView, findingsFilter, setFindingsFilter, showFindings, theme, setTheme, recent, forgetRecent, project, opening, openProject, closeProject,
       target, setTarget, scan, scanning, progress, runScan, deps, toolchain, refreshToolchain, installingRector,
-      installRector, preview, previewMode, previewing, loadPreview, cancelPreview, docker, dockerStep, runDocker, cancelDocker, applying, applyChanges, snapshots,
+      installRector, preview, previewMode, previewing, loadPreview, cancelPreview, docker, dockerHistory, dockerStep, runDocker, cancelDocker, applying, applyChanges, snapshots,
       refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport, ignoreFinding, unignoreFinding, pruneIgnores, importRuntimeLog, setRuntimeRoots, clearRuntimeLog, runLocalCheck,
     }),
     [
       api, view, findingsFilter, showFindings, theme, setTheme, recent, forgetRecent, project, opening, openProject, closeProject, target,
       setTarget, scan, scanning, progress, runScan, deps, toolchain, refreshToolchain, installingRector,
-      installRector, preview, previewMode, previewing, loadPreview, cancelPreview, docker, dockerStep, runDocker, cancelDocker, applying, applyChanges, snapshots,
+      installRector, preview, previewMode, previewing, loadPreview, cancelPreview, docker, dockerHistory, dockerStep, runDocker, cancelDocker, applying, applyChanges, snapshots,
       refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport, ignoreFinding, unignoreFinding, pruneIgnores, importRuntimeLog, setRuntimeRoots, clearRuntimeLog, runLocalCheck,
     ],
   );
