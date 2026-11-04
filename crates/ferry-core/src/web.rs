@@ -43,7 +43,7 @@ while ($queue && count($seen) < $limit) {
     foreach ($links[1] as $link) {
         $link = preg_replace('#^https?://127\.0\.0\.1:8080#', '', $link);
         if ($link === '') { continue; }
-        $unsafe = preg_match('#logout|logoff|signout|delete|remove|destroy|\.(css|js|png|jpe?g|gif|svg|ico|woff2?|pdf|zip)$#i', $link);
+        $unsafe = preg_match('#logout|logoff|signout|delete|remove|destroy|_profiler|_wdt|_debugbar|telescope|horizon|\.(css|js|png|jpe?g|gif|svg|ico|woff2?|pdf|zip)$#i', $link);
         if ($link[0] === '/' && substr($link, 0, 2) !== '//' && !$unsafe) { $queue[] = $link; }
     }
 }
