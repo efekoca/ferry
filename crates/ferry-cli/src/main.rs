@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 const USAGE: &str = "Usage: ferry-cli scan <project> --target <8.2|8.3|8.4|8.5> [options]
+       ferry-cli compare <project> --target <version> [--source <version>] [--format <text|json>]
 
 Options:
   --format <text|json|sarif|github|junit|checkstyle|csv>
@@ -26,8 +27,12 @@ Options:
   --lang <en|tr>                     Language of messages (default: en)
   -h, --help                         Show this help
 
+compare lints the project and runs its PHPUnit tests in php:X.Y-cli containers on both
+versions, without network access. It needs Docker. --source defaults to the project's version.
+
 Exit codes: 0 passed, 1 findings at the --fail-on level, 2 usage or run error,
-3 some files couldn't be scanned (unless --allow-incomplete)";
+3 some files couldn't be scanned (unless --allow-incomplete).
+compare exits with 1 when the target adds fatal errors or failing tests";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Format {
@@ -628,8 +633,76 @@ fn run(o: &Options) -> Result<Outcome, String> {
     })
 }
 
+fn run_compare(args: &[String]) -> Result<bool, String> {
+    let (mut root, mut source, mut target, mut json_output) = (None, None, None, false);
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        let mut value = |name: &str| it.next().cloned().ok_or_else(|| format!("{name} needs a value"));
+        match arg.as_str() {
+            "--target" => target = Some(value("--target")?.parse::<PhpVersion>().map_err(|e| e.to_string())?),
+            "--source" => source = Some(value("--source")?.parse::<PhpVersion>().map_err(|e| e.to_string())?),
+            "--format" => {
+                json_output = match value("--format")?.as_str() {
+                    "json" => true,
+                    "text" => false,
+                    other => return Err(format!("unknown format: {other}")),
+                }
+            }
+            other if !other.starts_with('-') && root.is_none() => root = Some(PathBuf::from(other)),
+            other => return Err(format!("unknown option: {other}")),
+        }
+    }
+    let root = std::fs::canonicalize(root.ok_or("compare needs a project folder")?).map_err(|e| e.to_string())?;
+    let target = target.ok_or("--target is required")?;
+    let current = project::inspect(&root).map_err(|e| e.to_string())?.current_version;
+    let source = source.or(current).ok_or("--source is required: the project's version couldn't be detected")?;
+    let cancel = std::sync::atomic::AtomicBool::new(false);
+    let result = ferry_core::docker::compare(&root, source, target, &cancel, |step| match step {
+        ferry_core::docker::Step::Installing => eprintln!("ferry-cli: installing dependencies"),
+        ferry_core::docker::Step::Lint(v) => eprintln!("ferry-cli: linting on PHP {v}"),
+        ferry_core::docker::Step::Tests(v) => eprintln!("ferry-cli: running tests on PHP {v}"),
+    })?;
+    let failed = |run: &ferry_core::docker::VersionRun| run.tests.as_ref().is_some_and(|t| !t.passed);
+    let fatal = result.new_on_target.iter().any(|e| e.level == ferry_core::runtime::Level::Fatal);
+    if json_output {
+        println!("{}", serde_json::to_string_pretty(&result).map_err(|e| e.to_string())?);
+    } else {
+        for run in [&result.source, &result.target] {
+            let tests = run.tests.as_ref().map_or("no tests".to_string(), |t| {
+                if t.passed {
+                    "tests passed".into()
+                } else {
+                    format!("tests failed ({:?})", t.exit_code)
+                }
+            });
+            println!("PHP {}: {} syntax errors, {tests}, {} messages", run.version, run.lint_errors, run.events.len());
+            if !run.missing_extensions.is_empty() {
+                println!("  missing in {}: {}", run.image, run.missing_extensions.join(", "));
+            }
+        }
+        if !result.dependencies_installed {
+            println!("Dependencies couldn't be installed, so tests may not have run.");
+        }
+        println!("{} new on PHP {target}, {} gone", result.new_on_target.len(), result.gone_on_target.len());
+        for e in &result.new_on_target {
+            println!("  {}:{} {}", e.path.trim_start_matches("/app/"), e.line, e.message);
+        }
+    }
+    Ok(fatal || failed(&result.target) && !failed(&result.source))
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().is_some_and(|a| a == "compare") {
+        return match run_compare(&args[1..]) {
+            Ok(false) => ExitCode::SUCCESS,
+            Ok(true) => ExitCode::from(1),
+            Err(e) => {
+                eprintln!("ferry-cli: {e}");
+                ExitCode::from(2)
+            }
+        };
+    }
     let options = match parse(&args) {
         Ok(o) => o,
         Err(e) if e.is_empty() => {

@@ -10,6 +10,7 @@ pub mod compare;
 mod declarations;
 pub mod deps;
 pub mod diff;
+pub mod docker;
 pub mod extensions;
 #[rustfmt::skip]
 mod ext_map;

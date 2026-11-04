@@ -155,6 +155,8 @@ cargo build --release -p ferry-cli
 target/release/ferry-cli scan . --target 8.4 --format github
 ```
 
+With Docker running, `ferry-cli compare <project> --target 8.5` lints the project and runs its PHPUnit tests in `php:X.Y-cli` containers on the current and target versions, and lists what's new on the target. The containers work on copies and have no network; only `composer install` does, without the project's scripts or plugins. The images don't include extensions such as `mysqli` or `gd`, so code that needs them is listed as missing and its tests can fail on both versions.
+
 - `--format text|json|sarif|github|junit|checkstyle|csv`: plain text, JSON with the summary and ignored findings, SARIF 2.1.0 for GitHub code scanning and other viewers, GitHub Actions annotations on the changed lines, JUnit XML for Jenkins and GitLab test reports, Checkstyle XML, or CSV for spreadsheets. `--blame` adds the `git blame` author of each line to the CSV, so the work can be split across a team.
 - `--fail-on breaking|deprecated|any|none`: the lowest severity that makes the command exit with code 1 (default `breaking`). Errors such as a missing folder exit with code 2.
 - `--allow-incomplete`: by default a scan that couldn't read some files (for example one over 2 MB) exits with code 3, lists them on stderr and reports them in every format (`complete`, `filesFound` and `errors` in JSON, `executionSuccessful` in SARIF). This flag lets such a scan pass; the action has a matching `allow-incomplete` input.

@@ -24,11 +24,15 @@ pub struct Event {
     pub count: usize,
 }
 
+fn throwable(lower: &str) -> bool {
+    lower.split(':').next().is_some_and(|head| head.ends_with("error") && !head.contains(' '))
+}
+
 fn level_of(text: &str) -> Option<Level> {
     let t = text.to_ascii_lowercase();
     if t.contains("deprecat") {
         Some(Level::Deprecated)
-    } else if t.contains("fatal error") || t.contains("uncaught") || t.contains("parse error") {
+    } else if t.contains("fatal error") || t.contains("uncaught") || t.contains("parse error") || throwable(&t) {
         Some(Level::Fatal)
     } else if t.contains("warning") {
         Some(Level::Warning)
@@ -351,6 +355,14 @@ PHP Deprecated:  Function utf8_encode() is deprecated in /srv/app/a.php on line 
         let fatal = findings.iter().find(|f| f.rule_id == "runtime.fatal").expect("a fatal is never folded into a deprecation");
         assert_eq!((fatal.line, fatal.severity), (1, Severity::Breaking));
         assert!(findings.iter().any(|f| f.rule_id == "runtime.deprecated" && f.line == 1));
+    }
+
+    #[test]
+    fn phpunit_errors_count_as_fatal() {
+        let log = "1) OldTest::testFirst\nError: Call to undefined function each()\n\n/app/src/Old.php:3\n/app/tests/OldTest.php:4\n\n2) T::x\nTypeError: count() bad\n\n/app/a.php:9\n\n3) T::y\nFailed asserting that false is true.\n\n/app/b.php:1\n";
+        let events = parse(log);
+        let found: Vec<_> = events.iter().map(|e| (e.path.as_str(), e.line, e.level)).collect();
+        assert_eq!(found, [("/app/a.php", 9, Level::Fatal), ("/app/src/Old.php", 3, Level::Fatal)]);
     }
 
     #[test]
