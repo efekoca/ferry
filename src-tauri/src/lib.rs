@@ -308,7 +308,13 @@ struct DockerResponse {
 }
 
 #[tauri::command]
-async fn docker_compare<R: Runtime>(app: AppHandle<R>, path: String, source: String, target: String) -> CmdResult<DockerResponse> {
+async fn docker_compare<R: Runtime>(
+    app: AppHandle<R>,
+    path: String,
+    source: String,
+    target: String,
+    extensions: bool,
+) -> CmdResult<DockerResponse> {
     let path = normalize_path(path);
     let source: PhpVersion = source.parse().map_err(|_| t!("Geçersiz sürüm.", "Invalid version."))?;
     let target = parse_target(&target)?;
@@ -323,9 +329,10 @@ async fn docker_compare<R: Runtime>(app: AppHandle<R>, path: String, source: Str
     let result = blocking(move || {
         let _running = RunningGuard(running);
         let root = project_root(&key)?;
-        let comparison = docker::compare(&root, source, target, &mine, |step| {
+        let comparison = docker::compare(&root, source, target, extensions, &mine, |step| {
             let (step, version) = match step {
                 docker::Step::Installing => ("install", None),
+                docker::Step::Extensions(v) => ("extensions", Some(v.to_string())),
                 docker::Step::Lint(v) => ("lint", Some(v.to_string())),
                 docker::Step::Tests(v) => ("tests", Some(v.to_string())),
             };

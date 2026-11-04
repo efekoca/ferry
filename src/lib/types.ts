@@ -135,6 +135,8 @@ export interface DockerRun {
   lintErrors: number;
   tests: { exitCode: number | null; timedOut: boolean; passed: boolean } | null;
   missingExtensions: string[];
+  installedExtensions: string[];
+  imageFailed: boolean;
   events: DockerEvent[];
   log: string;
 }
@@ -148,7 +150,7 @@ export interface DockerComparison {
 }
 
 export interface DockerStep {
-  step: "install" | "lint" | "tests";
+  step: "install" | "extensions" | "lint" | "tests";
   version: string | null;
 }
 

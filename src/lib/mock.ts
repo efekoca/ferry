@@ -248,14 +248,16 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
       runtimeRoots = roots.split(",").map((r) => r.trim()).filter(Boolean);
       return withIgnores(lastScan);
     },
-    dockerCompare: async (_path, source, target) => {
+    dockerCompare: async (_path, source, target, extensions) => {
       if (!lastScan) throw new Error("Scan the project first.");
       const run = (version: string, lintErrors: number, passed: boolean, log: string) => ({
         version,
         image: `php:${version}-cli`,
         lintErrors,
         tests: { exitCode: passed ? 0 : 2, timedOut: false, passed },
-        missingExtensions: ["mysqli"],
+        missingExtensions: extensions ? [] : ["mysqli"],
+        installedExtensions: extensions ? ["mysqli"] : [],
+        imageFailed: false,
         events: [],
         log,
       });
