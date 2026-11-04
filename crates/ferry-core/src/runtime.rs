@@ -151,19 +151,28 @@ fn symbol(f: &Finding) -> Option<String> {
     valid.then(|| name.rsplit('\\').next().unwrap_or(name).to_ascii_lowercase())
 }
 
+fn names_symbol(message: &str, name: &str) -> bool {
+    let word = |c: char| c.is_ascii_alphanumeric() || c == '_';
+    message
+        .match_indices(name)
+        .any(|(at, _)| !message[..at].chars().next_back().is_some_and(word) && !message[at + name.len()..].chars().next().is_some_and(word))
+}
+
 pub struct Merged {
     pub confirmed: usize,
     pub added: usize,
     pub outside: usize,
+    pub outside_fatals: usize,
 }
 
 pub fn merge(root: &Path, findings: &mut Vec<Finding>, events: &[Event], target: PhpVersion) -> Merged {
-    let mut merged = Merged { confirmed: 0, added: 0, outside: 0 };
+    let mut merged = Merged { confirmed: 0, added: 0, outside: 0, outside_fatals: 0 };
     let files = project_files(root, events);
     for (e, file) in events.iter().zip(files) {
         let skipped = |rel: &str| rel.split('/').any(|part| crate::project::ALWAYS_SKIP.contains(&part));
         let Some(file) = file.filter(|rel| !skipped(rel)) else {
             merged.outside += 1;
+            merged.outside_fatals += usize::from(e.level == Level::Fatal);
             continue;
         };
         let message = e.message.to_ascii_lowercase();
@@ -173,7 +182,7 @@ pub fn merge(root: &Path, findings: &mut Vec<Finding>, events: &[Event], target:
                 Level::Warning => matches!(f.severity, Severity::Behavior | Severity::Breaking),
                 Level::Deprecated => matches!(f.severity, Severity::Deprecated | Severity::Breaking),
             };
-            let named = symbol(f).map(|s| message.contains(&s));
+            let named = symbol(f).map(|s| names_symbol(&message, &s));
             compatible
                 && match f.line.abs_diff(e.line) {
                     0 => named != Some(false),
@@ -191,21 +200,24 @@ pub fn merge(root: &Path, findings: &mut Vec<Finding>, events: &[Event], target:
             Level::Warning => ("runtime.warning", Severity::Behavior),
             Level::Deprecated => ("runtime.deprecated", Severity::Deprecated),
         };
-        if let Some(f) = findings.iter_mut().find(|f| f.file == file && f.line == e.line && f.rule_id == rule) {
+        let title = e.message.chars().take(120).collect::<String>();
+        if let Some(f) = findings.iter_mut().find(|f| f.file == file && f.line == e.line && f.rule_id == rule && f.title.en == title) {
             f.runtime_hits += e.count;
             continue;
         }
         let snippet = std::fs::read_to_string(root.join(&file))
             .ok()
-            .and_then(|t| t.lines().nth(e.line.saturating_sub(1)).map(|l| l.trim().chars().take(200).collect()))
+            .and_then(|t| t.lines().nth(e.line.saturating_sub(1)).map(crate::analyzer::clip_snippet))
             .unwrap_or_default();
+        let id = format!("{file}:{}:1:{rule}", e.line);
+        let taken = findings.iter().any(|f| f.id == id);
         findings.push(Finding {
-            id: format!("{file}:{}:1:{rule}", e.line),
+            id: if taken { format!("{id}:{:x}", crate::snapshot::fnv1a(title.as_bytes())) } else { id },
             file,
             line: e.line,
             column: 1,
             rule_id: rule.to_string(),
-            title: Localized::same(e.message.chars().take(120).collect::<String>()),
+            title: Localized::same(title),
             message: Localized {
                 tr: format!("Bu mesaj çalışma anı log'unda {} kez görüldü; statik tarama burada bir şey bulmadı.", e.count),
                 en: format!("This message appeared {} times in the runtime log; the static scan found nothing here.", e.count),
@@ -336,5 +348,36 @@ PHP Deprecated:  Function utf8_encode() is deprecated in /srv/app/a.php on line 
         );
         assert_eq!(merged_with(&warn("/srv/shop/../shop/a.php")).1, 1);
         assert_eq!(merged_with(&warn("C:\\inetpub\\shop\\src\\c.php")).0, 1);
+    }
+
+    #[test]
+    fn a_fatal_outside_the_project_is_counted() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("mysite");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("index.php"), "<?php\necho 1;\n").unwrap();
+        let events = parse("PHP Fatal error:  Boom in /var/www/html/index.php on line 2\n");
+        let merged = merge(&root, &mut Vec::new(), &events, PhpVersion::new(8, 5));
+        assert_eq!((merged.outside, merged.outside_fatals, merged.added), (1, 1, 0));
+    }
+
+    #[test]
+    fn a_symbol_only_matches_whole_words() {
+        assert!(!names_symbol("reached the limit", "each"));
+        assert!(names_symbol("call to undefined function each()", "each"));
+    }
+
+    #[test]
+    fn different_messages_on_a_line_stay_apart() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir(root.join("src")).unwrap();
+        std::fs::write(root.join("src/a.php"), format!("<?php\n{}\n", "x".repeat(300))).unwrap();
+        let events = parse("PHP Warning:  First in /w/src/a.php on line 2\nPHP Warning:  Second in /w/src/a.php on line 2\n");
+        let mut findings = Vec::new();
+        merge(root, &mut findings, &events, PhpVersion::new(8, 5));
+        assert_eq!(findings.len(), 2);
+        assert_ne!(findings[0].id, findings[1].id);
+        assert!(findings[0].snippet.ends_with('…'));
     }
 }

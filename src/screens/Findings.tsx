@@ -160,11 +160,12 @@ export function Findings() {
   const runtime = scan?.runtime;
   const lastCheck = runtime?.check;
   const runtimeNotice = runtime && (
-    <Callout tone={lastCheck && !lastCheck.passed ? "warn" : "info"} icon={<Activity size={15} />}>
+    <Callout tone={(lastCheck && !lastCheck.passed) || runtime.outsideFatals > 0 ? "warn" : "info"} icon={<Activity size={15} />}>
       <div className="row row--wrap">
         <span>
           {lastCheck && <strong className="check-result">{t.findings.checkResult(lastCheck)} </strong>}
           {t.findings.runtimeSummary(runtime.file, runtime.events, runtime.confirmed, runtime.added, runtime.outside)}
+          {runtime.outsideFatals > 0 && ` ${t.findings.outsideFatals(runtime.outsideFatals)}`}
         </span>
         <Button size="sm" variant="ghost" onClick={() => void clearRuntimeLog()}>
           {t.findings.clearLog}

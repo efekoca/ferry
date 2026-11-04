@@ -539,6 +539,7 @@ fn run(o: &Options) -> Result<Outcome, String> {
     let info = project::inspect(&root).map_err(|e| e.to_string())?;
     let files = project::collect_php_files(&root, &info.excluded_dirs);
     let mut scan = analyzer::analyze_files(&root, &files, o.target, |_, _, _| {});
+    let mut outside_fatals = 0;
     if let Some(path) = &o.runtime_log {
         let text = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
         let events = ferry_core::runtime::parse(&String::from_utf8_lossy(&text));
@@ -550,6 +551,10 @@ fn run(o: &Options) -> Result<Outcome, String> {
             merged.added,
             merged.outside
         );
+        outside_fatals = merged.outside_fatals;
+        if outside_fatals > 0 {
+            eprintln!("ferry-cli: runtime log: {outside_fatals} fatal errors could not be tied to a project file");
+        }
     }
     let applied = ignore::apply(&root, std::mem::take(&mut scan.findings), &ignore::load(&root));
     let (findings, ignored) = (applied.kept, applied.ignored);
@@ -599,7 +604,7 @@ fn run(o: &Options) -> Result<Outcome, String> {
     }
     Ok(if fresh.iter().any(|f| fails(f, o.fail_on)) {
         Outcome::Failed
-    } else if !scan.errors.is_empty() && !o.allow_incomplete {
+    } else if (!scan.errors.is_empty() || outside_fatals > 0) && !o.allow_incomplete {
         Outcome::Incomplete
     } else {
         Outcome::Passed

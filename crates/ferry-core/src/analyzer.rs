@@ -678,6 +678,14 @@ const EXPR_KEYWORDS: [&str; 17] = [
 const DECL_KEYWORDS: [&str; 13] =
     ["function", "fn", "new", "const", "class", "interface", "trait", "enum", "use", "goto", "instanceof", "extends", "implements"];
 
+pub(crate) fn clip_snippet(line: &str) -> String {
+    let text = line.trim_start_matches('\u{FEFF}').trim();
+    match text.char_indices().nth(200) {
+        Some((cut, _)) => format!("{}…", &text[..cut]),
+        None => text.to_string(),
+    }
+}
+
 impl<'a> Ctx<'a> {
     fn applies(&self, since: PhpVersion) -> bool {
         since <= self.target
@@ -688,11 +696,7 @@ impl<'a> Ctx<'a> {
             return String::new();
         };
         let end = self.line_starts.get(line).map_or(self.src.len(), |&e| e - 1);
-        let text = self.src[start..end].trim_start_matches('\u{FEFF}').trim();
-        match text.char_indices().nth(200) {
-            Some((cut, _)) => format!("{}…", &text[..cut]),
-            None => text.to_string(),
-        }
+        clip_snippet(&self.src[start..end])
     }
 
     fn push(&mut self, hit: Hit<'_>, line: usize, column: usize) {
