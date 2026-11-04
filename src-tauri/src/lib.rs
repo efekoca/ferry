@@ -306,6 +306,7 @@ enum DatabaseChoice {
     Dump { path: String },
     Live,
     Seed,
+    Ssh { host: String, engine: database::Engine, name: String, user: String },
 }
 
 impl DatabaseChoice {
@@ -314,8 +315,14 @@ impl DatabaseChoice {
             DatabaseChoice::Dump { path } => database::Source::Dump(PathBuf::from(path)),
             DatabaseChoice::Live => database::Source::Live,
             DatabaseChoice::Seed => database::Source::Seed,
+            DatabaseChoice::Ssh { host, engine, name, user } => database::Source::Ssh(database::Remote { host, engine, name, user }),
         }
     }
+}
+
+#[tauri::command]
+fn ssh_hosts() -> Vec<String> {
+    database::ssh_hosts()
 }
 
 #[tauri::command]
@@ -1209,6 +1216,7 @@ pub fn with_commands<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R
         set_runtime_roots,
         docker_compare,
         database_plan,
+        ssh_hosts,
         cancel_docker_compare,
         docker_image_usage,
         docker_history,

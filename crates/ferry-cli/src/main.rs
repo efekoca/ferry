@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 const USAGE: &str = "Usage: ferry-cli scan <project> --target <8.2|8.3|8.4|8.5> [options]
-       ferry-cli compare <project> --target <version> [--source <version>] [--no-extensions] [--clean-images] [--page <path>] [--no-pages] [--db-dump <file>] [--db-live] [--db-seed] [--prepare <command>] [--format <text|json>]
+       ferry-cli compare <project> --target <version> [--source <version>] [--no-extensions] [--clean-images] [--page <path>] [--no-pages] [--db-dump <file>] [--db-live] [--db-seed] [--db-ssh <host:database:user>] [--prepare <command>] [--format <text|json>]
        ferry-cli clean-images
 
 Options:
@@ -36,6 +36,7 @@ Pages are served inside the containers and compared, starting at / and following
 --page adds a starting path (repeatable), and --no-pages skips this.
 Each version can get its own copy of the database: --db-dump imports a .sql or .sql.gz file,
 --db-live copies a database on this computer, and --db-seed runs the project's migrations and seeders.
+--db-ssh reads a dump through your own ssh, read-only. Add --db-engine postgres for PostgreSQL.
 --prepare runs a command once in the project copy with network access, for example to build assets.
 
 Exit codes: 0 passed, 1 findings at the --fail-on level, 2 usage or run error,
@@ -647,6 +648,7 @@ fn run_compare(args: &[String]) -> Result<bool, String> {
     let mut pages = vec!["/".to_string()];
     let mut database = None;
     let mut prepare = None;
+    let (mut remote, mut postgres) = (None::<String>, false);
     let mut it = args.iter();
     while let Some(arg) = it.next() {
         let mut value = |name: &str| it.next().cloned().ok_or_else(|| format!("{name} needs a value"));
@@ -660,6 +662,8 @@ fn run_compare(args: &[String]) -> Result<bool, String> {
             "--db-dump" => database = Some(ferry_core::database::Source::Dump(PathBuf::from(value("--db-dump")?))),
             "--db-live" => database = Some(ferry_core::database::Source::Live),
             "--db-seed" => database = Some(ferry_core::database::Source::Seed),
+            "--db-ssh" => remote = Some(value("--db-ssh")?),
+            "--db-engine" => postgres = value("--db-engine")? == "postgres",
             "--page" => pages.push(value("--page")?),
             "--format" => {
                 json_output = match value("--format")?.as_str() {
@@ -671,6 +675,13 @@ fn run_compare(args: &[String]) -> Result<bool, String> {
             other if !other.starts_with('-') && root.is_none() => root = Some(PathBuf::from(other)),
             other => return Err(format!("unknown option: {other}")),
         }
+    }
+    if let Some(text) = remote {
+        let mut parts = text.splitn(3, ':');
+        let (host, name, user) = (parts.next().unwrap_or_default(), parts.next().unwrap_or_default(), parts.next().unwrap_or_default());
+        let engine = if postgres { ferry_core::database::Engine::Postgres } else { ferry_core::database::Engine::Mysql };
+        let remote = ferry_core::database::Remote { host: host.into(), engine, name: name.into(), user: user.into() };
+        database = Some(ferry_core::database::Source::Ssh(remote));
     }
     let root = std::fs::canonicalize(root.ok_or("compare needs a project folder")?).map_err(|e| e.to_string())?;
     let target = target.ok_or("--target is required")?;

@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 use walkdir::WalkDir;
 
 const READY_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+const SSH_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 const SEED_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const LOCAL_ADDRESS: &str = "127.0.0.1";
 const ROOT_PASSWORD: &str = "ferry";
@@ -17,7 +18,7 @@ const SOCKET_DIR: &str = "/var/run/mysqld";
 const DEFAULT_SQLITE: &str = "database/database.sqlite";
 const SQLITE_DUMP: &str = ".ferry-dump.sql";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Engine {
     Mysql,
@@ -97,6 +98,102 @@ pub enum Source {
     Dump(PathBuf),
     Live,
     Seed,
+    Ssh(Remote),
+}
+
+/// A database reached through the person's own `ssh`. Ferry never sees a key or stores a password.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Remote {
+    pub host: String,
+    pub engine: Engine,
+    pub name: String,
+    pub user: String,
+}
+
+impl Remote {
+    fn check(&self) -> Result<(), String> {
+        let safe = |text: &str, extra: &str| {
+            !text.is_empty()
+                && !text.starts_with('-')
+                && text.chars().all(|c| c.is_ascii_alphanumeric() || "_.-".contains(c) || extra.contains(c))
+        };
+        if safe(&self.host, "@") && safe(&self.name, "") && safe(&self.user, "") && self.engine != Engine::Sqlite {
+            Ok(())
+        } else {
+            Err(crate::t!("Sunucu, veritabanı ya da kullanıcı adı geçersiz.", "The server, database or user name isn't valid."))
+        }
+    }
+
+    /// Reads the password from stdin so it never appears in a process list.
+    fn command(&self) -> String {
+        let (user, name) = (&self.user, &self.name);
+        match self.engine {
+            Engine::Postgres => format!("IFS= read -r p; [ -n \"$p\" ] && export PGPASSWORD=\"$p\"; exec pg_dump -h 127.0.0.1 --no-owner --no-privileges -U {user} {name}"),
+            _ => format!("IFS= read -r p; [ -n \"$p\" ] && export MYSQL_PWD=\"$p\"; exec mysqldump --single-transaction --quick --no-tablespaces -u {user} {name}"),
+        }
+    }
+}
+
+/// Host names from the person's SSH config, leaving out patterns.
+pub fn ssh_hosts() -> Vec<String> {
+    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(PathBuf::from).unwrap_or_default();
+    let text = std::fs::read_to_string(home.join(".ssh/config")).unwrap_or_default();
+    config_hosts(&text)
+}
+
+fn config_hosts(text: &str) -> Vec<String> {
+    let mut hosts: Vec<String> = text
+        .lines()
+        .filter_map(|l| l.trim().strip_prefix("Host ").or_else(|| l.trim().strip_prefix("host ")))
+        .flat_map(str::split_whitespace)
+        .filter(|h| !h.contains(['*', '?', '!']))
+        .map(str::to_string)
+        .collect();
+    hosts.sort();
+    hosts.dedup();
+    hosts
+}
+
+fn dump_ssh(remote: &Remote, password: &str, file: &Path, cancel: &std::sync::atomic::AtomicBool) -> Result<(), String> {
+    use std::io::{Read, Write};
+    remote.check()?;
+    let ssh = toolchain::find_executable("ssh").ok_or_else(|| crate::t!("ssh komutu bulunamadı.", "The ssh command wasn't found."))?;
+    let out = std::fs::File::create(file).map_err(|e| e.to_string())?;
+    let mut child = toolchain::command(&ssh)
+        .args(["-C", "-o", "BatchMode=yes", "-o", "ConnectTimeout=20", "--", &remote.host, &remote.command()])
+        .stdin(Stdio::piped())
+        .stdout(out)
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = writeln!(stdin, "{password}");
+    }
+    let mut pipe = child.stderr.take();
+    let errors = std::thread::spawn(move || {
+        let mut text = String::new();
+        if let Some(pipe) = pipe.as_mut() {
+            let _ = pipe.read_to_string(&mut text);
+        }
+        text
+    });
+    let started = Instant::now();
+    loop {
+        if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
+            let reason = errors.join().unwrap_or_default().trim().to_string();
+            let empty = std::fs::metadata(file).map_or(true, |m| m.len() == 0);
+            if status.success() && !empty {
+                return Ok(());
+            }
+            return Err(crate::t!("Sunucudan kopyalanamadı: {reason}", "Couldn't copy from the server: {reason}"));
+        }
+        if cancel.load(Ordering::Relaxed) || started.elapsed() > SSH_TIMEOUT {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(crate::t!("Sunucudan kopyalama durduruldu.", "Copying from the server was stopped."));
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
 }
 
 /// What a project offers, without its password.
@@ -561,6 +658,7 @@ fn dump_engine(file: &Path) -> Engine {
 pub fn engine_for(root: &Path, source: &Source) -> Engine {
     match (detect(root), source) {
         (Some(connection), _) => connection.engine,
+        (_, Source::Ssh(remote)) => remote.engine,
         (None, Source::Dump(file)) => dump_engine(file),
         (None, _) => Engine::Mysql,
     }
@@ -667,6 +765,19 @@ pub(crate) fn prepare(
             point_copy_at(project, &connection).map_err(failed)?;
             Ok(Prepared { connection, dump: Some(dir.to_path_buf()) })
         }
+        Source::Ssh(remote) => {
+            let known = detected.filter(|c| c.engine == remote.engine);
+            let password = known.as_ref().filter(|c| c.user == remote.user).map_or(String::new(), |c| c.password.clone());
+            let connection = known.unwrap_or_else(|| Connection {
+                name: remote.name.clone(),
+                user: remote.user.clone(),
+                ..Connection::fallback(remote.engine)
+            });
+            step(Step::Database);
+            dump_ssh(remote, &password, &dir.join("dump.sql"), container.cancel)?;
+            point_copy_at(project, &connection).map_err(failed)?;
+            Ok(Prepared { connection, dump: Some(dir.to_path_buf()) })
+        }
         Source::Seed => {
             let (_, command) = seed_commands(project)
                 .ok_or_else(|| crate::t!("Bu projede migration ya da seeder bulunamadı.", "This project has no migrations or seeders."))?;
@@ -763,6 +874,28 @@ mod tests {
         point_copy_at(dir.path(), &found).unwrap();
         let env = std::fs::read_to_string(dir.path().join(".env")).unwrap();
         assert!(env.contains("DB_DATABASE=\"/app/database/database.sqlite\""), "{env}");
+    }
+
+    #[test]
+    fn remote_names_cannot_inject_commands() {
+        let remote =
+            |host: &str, name: &str, user: &str| Remote { host: host.into(), engine: Engine::Mysql, name: name.into(), user: user.into() };
+        assert!(remote("prod", "shop_db", "app").check().is_ok());
+        assert!(remote("deploy@prod.example.com", "shop", "app").check().is_ok());
+        assert!(remote("-oProxyCommand=x", "shop", "app").check().is_err());
+        assert!(remote("prod", "shop; rm -rf /", "app").check().is_err());
+        assert!(remote("prod", "shop", "$(id)").check().is_err());
+        assert!(remote("prod", "", "app").check().is_err());
+        let sqlite = Remote { engine: Engine::Sqlite, ..remote("prod", "shop", "app") };
+        assert!(sqlite.check().is_err());
+        let command = remote("prod", "shop", "app").command();
+        assert!(command.contains("mysqldump") && !command.contains("--password"), "{command}");
+    }
+
+    #[test]
+    fn ssh_config_hosts_skip_patterns() {
+        let text = "Host *\n  AddKeysToAgent yes\nHost prod staging\n  User a\n  Host nested\nhost db-?\nMatch all\n";
+        assert_eq!(config_hosts(text), ["nested", "prod", "staging"]);
     }
 
     #[test]
