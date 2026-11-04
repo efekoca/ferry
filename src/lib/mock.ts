@@ -171,6 +171,7 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
   let lastScan: ScanResult | null = null;
   let runtimeLog: string | null = null;
   let runtimeCheck: CheckRun | null = null;
+  let runtimeRoots: string[] = [];
   const withRuntime = (findings: Finding[]): { findings: Finding[]; runtime: ScanResult["runtime"] } => {
     if (!runtimeLog) return { findings: findings.map((f) => ({ ...f, runtimeHits: 0 })), runtime: null };
     const hit = new Set(findings.filter((f) => f.ruleId.startsWith("removed.")).slice(0, 3).map((f) => f.id));
@@ -190,7 +191,7 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
       snippet: "$qty = $item['qty'];",
       runtimeHits: 7,
     };
-    return { findings: [...marked, extra], runtime: { file: runtimeLog, events: 31, confirmed: hit.size, added: 1, outside: 4, outsideFatals: 0, check: runtimeCheck } };
+    return { findings: [...marked, extra], runtime: { file: runtimeLog, events: 31, confirmed: hit.size, added: 1, outside: runtimeRoots.length ? 9 : 4, outsideFatals: 0, check: runtimeCheck, roots: runtimeRoots } };
   };
   const history = new Map<string, { at: number; score: number; total: number; ids: string[] }[]>();
   const track = (scan: ScanResult): ScanResult => {
@@ -240,6 +241,11 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
       if (!lastScan) throw new Error("Scan the project first.");
       runtimeLog = log.split("/").pop() ?? log;
       runtimeCheck = null;
+      return withIgnores(lastScan);
+    },
+    setRuntimeRoots: async (_path, roots) => {
+      if (!lastScan) throw new Error("Scan the project first.");
+      runtimeRoots = roots.split(",").map((r) => r.trim()).filter(Boolean);
       return withIgnores(lastScan);
     },
     localPhpVersions: async () => [

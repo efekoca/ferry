@@ -254,6 +254,10 @@ export const tr = {
     runtimeSummary: (file: string, events: number, confirmed: number, added: number, outside: number) =>
       `${file}: ${events} farklı mesaj. ${confirmed} bulgu çalışırken doğrulandı, ${added} mesaj statik taramanın bulmadığı yeni bulgu olarak eklendi, ${outside} mesaj proje dışındaki dosyalardan.`,
     clearLog: "Log'u kaldır",
+    runtimeRoot: "Sunucudaki proje kökü",
+    runtimeRootActive: (roots: string) => `Sunucudaki proje kökü: ${roots}`,
+    runtimeRootHint: "Log başka bir projeden mesaj içeriyorsa kökü yazın; yalnızca bu yolun altındaki mesajlar projeye bağlanır. Birden fazlasını virgülle ayırın. Boş bırakırsanız Ferry yollardan tahmin eder.",
+    runtimeRootApply: "Uygula",
     checkResult: (c: CheckRun) => {
       if (c.kind === "lint") {
         if (c.passed) return `${c.files} dosya lint edildi, sözdizimi hatası yok.`;

@@ -113,9 +113,35 @@ struct Located {
     rel: String,
 }
 
+fn path_parts(path: &str) -> Vec<String> {
+    path.replace('\\', "/").split('/').filter(|p| !p.is_empty() && *p != ".").map(str::to_string).collect()
+}
+
+/// Splits the project roots someone typed for a log's server or container.
+pub fn parse_roots(text: &str) -> Vec<String> {
+    text.split([',', '\n']).map(str::trim).filter(|r| !path_parts(r).is_empty()).map(str::to_string).collect()
+}
+
+fn under_root(root: &Path, path: &str, remote_roots: &[String]) -> Option<String> {
+    let parts = path_parts(path);
+    if parts.iter().any(|p| p == "..") {
+        return None;
+    }
+    remote_roots.iter().find_map(|remote| {
+        let remote = path_parts(remote);
+        let drive = remote[0].ends_with(':');
+        let same = |(a, b): (&String, &String)| a == b || drive && a.eq_ignore_ascii_case(b);
+        if parts.len() <= remote.len() || !parts.iter().zip(&remote).all(same) {
+            return None;
+        }
+        let rel = parts[remote.len()..].join("/");
+        crate::safefs::resolve(root, &rel).is_ok_and(|p| p.is_file()).then_some(rel)
+    })
+}
+
 fn locate(root: &Path, path: &str) -> Option<Located> {
-    let normalized = path.replace('\\', "/");
-    let parts: Vec<&str> = normalized.split('/').filter(|p| !p.is_empty() && *p != ".").collect();
+    let parts = path_parts(path);
+    let parts: Vec<&str> = parts.iter().map(String::as_str).collect();
     if parts.contains(&"..") {
         return None;
     }
@@ -123,7 +149,10 @@ fn locate(root: &Path, path: &str) -> Option<Located> {
     Some(Located { prefix: parts[..k].join("/").to_ascii_lowercase(), rel: parts[k..].join("/") })
 }
 
-fn project_files(root: &Path, events: &[Event]) -> Vec<Option<String>> {
+fn project_files(root: &Path, events: &[Event], remote_roots: &[String]) -> Vec<Option<String>> {
+    if !remote_roots.is_empty() {
+        return events.iter().map(|e| under_root(root, &e.path, remote_roots)).collect();
+    }
     let found: Vec<Option<Located>> = events.iter().map(|e| locate(root, &e.path)).collect();
     let mut files_by_prefix: std::collections::HashMap<&str, std::collections::HashSet<&str>> = std::collections::HashMap::new();
     for l in found.iter().flatten() {
@@ -165,9 +194,10 @@ pub struct Merged {
     pub outside_fatals: usize,
 }
 
-pub fn merge(root: &Path, findings: &mut Vec<Finding>, events: &[Event], target: PhpVersion) -> Merged {
+/// With `remote_roots`, only paths under one of those roots count as part of the project.
+pub fn merge(root: &Path, findings: &mut Vec<Finding>, events: &[Event], target: PhpVersion, remote_roots: &[String]) -> Merged {
     let mut merged = Merged { confirmed: 0, added: 0, outside: 0, outside_fatals: 0 };
-    let files = project_files(root, events);
+    let files = project_files(root, events, remote_roots);
     for (e, file) in events.iter().zip(files) {
         let skipped = |rel: &str| rel.split('/').any(|part| crate::project::ALWAYS_SKIP.contains(&part));
         let Some(file) = file.filter(|rel| !skipped(rel)) else {
@@ -293,7 +323,7 @@ Undefined array key \"total\"
         std::fs::create_dir_all(dir.path().join("vendor/x")).unwrap();
         std::fs::write(dir.path().join("vendor/x/y.php"), "<?php\n").unwrap();
         let mut findings = analyze_source("src/Cart.php", src, "8.2".parse().unwrap());
-        let merged = merge(dir.path(), &mut findings, &events, "8.2".parse().unwrap());
+        let merged = merge(dir.path(), &mut findings, &events, "8.2".parse().unwrap(), &[]);
         assert_eq!((merged.confirmed, merged.added, merged.outside), (1, 4, 1));
         let each = findings.iter().find(|f| f.rule_id == "removed.each").unwrap();
         assert_eq!(each.runtime_hits, 1);
@@ -315,12 +345,43 @@ PHP Deprecated:  Function utf8_encode() is deprecated in /srv/app/a.php on line 
 ";
         let mut findings = analyze_source("a.php", src, target);
         assert_eq!(findings.len(), 1);
-        let merged = merge(&root, &mut findings, &parse(log), target);
+        let merged = merge(&root, &mut findings, &parse(log), target, &[]);
         assert_eq!((merged.confirmed, merged.added), (1, 2));
         assert_eq!(findings.iter().find(|f| f.rule_id == "deprecated.utf8_encode").unwrap().runtime_hits, 1);
         let fatal = findings.iter().find(|f| f.rule_id == "runtime.fatal").expect("a fatal is never folded into a deprecation");
         assert_eq!((fatal.line, fatal.severity), (1, Severity::Breaking));
         assert!(findings.iter().any(|f| f.rule_id == "runtime.deprecated" && f.line == 1));
+    }
+
+    #[test]
+    fn remote_roots_decide_what_belongs_to_the_project() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("shop");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        for f in ["a.php", "src/c.php"] {
+            std::fs::write(root.join(f), "<?php\n$x = 1;\n").unwrap();
+        }
+        let warn = |path: &str| format!("PHP Warning:  Undefined variable $y in {path} on line 2\n");
+        let log = [
+            "/var/www/site/a.php",
+            "/other/src/c.php",
+            "/var/www/site2/a.php",
+            "/var/www/site/missing.php",
+            "C:\\inetpub\\site\\src\\c.php",
+        ]
+        .map(warn)
+        .concat();
+        let events = parse(&log);
+        let mut guessed = Vec::new();
+        assert_eq!(merge(&root, &mut guessed, &events, "8.4".parse().unwrap(), &[]).outside, 3);
+        let mut findings = Vec::new();
+        let roots = parse_roots(" /var/www/site/ , c:/INETPUB/site\n,/ ");
+        assert_eq!(roots, ["/var/www/site/", "c:/INETPUB/site"]);
+        let merged = merge(&root, &mut findings, &events, "8.4".parse().unwrap(), &roots);
+        assert_eq!((merged.added, merged.outside), (2, 3));
+        let mut files: Vec<&str> = findings.iter().map(|f| f.file.as_str()).collect();
+        files.sort();
+        assert_eq!(files, ["a.php", "src/c.php"]);
     }
 
     #[test]
@@ -334,7 +395,7 @@ PHP Deprecated:  Function utf8_encode() is deprecated in /srv/app/a.php on line 
         let target = "8.4".parse().unwrap();
         let merged_with = |log: &str| {
             let mut findings = Vec::new();
-            let merged = merge(&root, &mut findings, &parse(log), target);
+            let merged = merge(&root, &mut findings, &parse(log), target, &[]);
             (merged.added, merged.outside, findings.into_iter().map(|f| f.file).collect::<Vec<_>>())
         };
         let warn = |path: &str| format!("PHP Warning:  Undefined variable $y in {path} on line 2\n");
@@ -357,7 +418,7 @@ PHP Deprecated:  Function utf8_encode() is deprecated in /srv/app/a.php on line 
         std::fs::create_dir(&root).unwrap();
         std::fs::write(root.join("index.php"), "<?php\necho 1;\n").unwrap();
         let events = parse("PHP Fatal error:  Boom in /var/www/html/index.php on line 2\n");
-        let merged = merge(&root, &mut Vec::new(), &events, PhpVersion::new(8, 5));
+        let merged = merge(&root, &mut Vec::new(), &events, PhpVersion::new(8, 5), &[]);
         assert_eq!((merged.outside, merged.outside_fatals, merged.added), (1, 1, 0));
     }
 
@@ -375,7 +436,7 @@ PHP Deprecated:  Function utf8_encode() is deprecated in /srv/app/a.php on line 
         std::fs::write(root.join("src/a.php"), format!("<?php\n{}\n", "x".repeat(300))).unwrap();
         let events = parse("PHP Warning:  First in /w/src/a.php on line 2\nPHP Warning:  Second in /w/src/a.php on line 2\n");
         let mut findings = Vec::new();
-        merge(root, &mut findings, &events, PhpVersion::new(8, 5));
+        merge(root, &mut findings, &events, PhpVersion::new(8, 5), &[]);
         assert_eq!(findings.len(), 2);
         assert_ne!(findings[0].id, findings[1].id);
         assert!(findings[0].snippet.ends_with('…'));

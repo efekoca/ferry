@@ -254,6 +254,10 @@ export const en: Dict = {
     runtimeSummary: (file, events, confirmed, added, outside) =>
       `${file}: ${events} distinct messages. ${confirmed} findings confirmed at runtime, ${added} messages added as findings the static scan missed, ${outside} from files outside the project.`,
     clearLog: "Remove log",
+    runtimeRoot: "Project root on the server",
+    runtimeRootActive: (roots) => `Project root on the server: ${roots}`,
+    runtimeRootHint: "If the log has messages from other projects, enter the root. Only messages under that path are tied to this project. Separate several with commas. Leave it empty and Ferry guesses from the paths.",
+    runtimeRootApply: "Apply",
     checkResult: (c) => {
       if (c.kind === "lint") {
         if (c.passed) return `Linted ${c.files === 1 ? "1 file" : `${c.files} files`}, no syntax errors.`;

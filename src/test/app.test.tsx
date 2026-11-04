@@ -417,6 +417,19 @@ describe("Ferry app", () => {
     expect(screen.getByText("Testler geçti.")).toBeInTheDocument();
   });
 
+  it("narrows an imported log to the project root on the server", async () => {
+    const user = userEvent.setup();
+    render(<App api={mockApi({ delay: 0 })} />);
+    await openAndScan(user);
+    await user.click(nav(/Bulgular/));
+    await user.click(await screen.findByRole("button", { name: "Log içe aktar" }));
+    expect(await screen.findByText(/php_errors.log: 31 farklı mesaj/)).toBeInTheDocument();
+    await user.click(screen.getByText("Sunucudaki proje kökü"));
+    await user.type(screen.getByRole("textbox", { name: "Sunucudaki proje kökü" }), "/var/www/site");
+    await user.click(screen.getByRole("button", { name: "Uygula" }));
+    expect(await screen.findByText("Sunucudaki proje kökü: /var/www/site")).toBeInTheDocument();
+  });
+
   it("shows a failed test run even when it reports no PHP messages", async () => {
     const user = userEvent.setup();
     const api = mockApi({ delay: 0 });
