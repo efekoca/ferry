@@ -56,7 +56,7 @@ export interface Api {
   removeDockerImages(): Promise<number>;
   cancelDockerCompare(path: string): Promise<void>;
   onDockerStep(handler: (step: DockerStep) => void): Promise<() => void>;
-  applyChanges(path: string, previewId: number, files: string[], label: string): Promise<ApplyResult>;
+  applyChanges(path: string, previewId: number, files: string[], label: string, skipped?: Record<string, number[]>): Promise<ApplyResult>;
   listSnapshots(path: string): Promise<Snapshot[]>;
   restoreSnapshot(path: string, id: string, acknowledged: SnapshotConflict[]): Promise<string[]>;
   deleteSnapshot(path: string, id: string): Promise<void>;
@@ -120,7 +120,7 @@ async function tauriApi(): Promise<Api> {
     removeDockerImages: () => invoke("remove_docker_images"),
     cancelDockerCompare: (path) => invoke("cancel_docker_compare", { path }),
     onDockerStep: (handler) => listen<DockerStep>("docker://step", (e) => handler(e.payload)),
-    applyChanges: (path, previewId, files, label) => invoke("apply_changes", { path, previewId, files, label }),
+    applyChanges: (path, previewId, files, label, skipped) => invoke("apply_changes", { path, previewId, files, skipped: skipped ?? null, label }),
     listSnapshots: (path) => invoke("list_snapshots", { path }),
     restoreSnapshot: (path, id, acknowledged) => invoke("restore_snapshot", { path, id, acknowledged }),
     deleteSnapshot: (path, id) => invoke("delete_snapshot", { path, id }),

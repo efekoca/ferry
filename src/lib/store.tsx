@@ -124,7 +124,7 @@ interface AppStore {
   runDocker(source: string, extensions: boolean, cleanImages: boolean, pages: string[], database: DatabaseChoice | null): Promise<boolean>;
   cancelDocker(): void;
   applying: boolean;
-  applyChanges(files: string[]): Promise<boolean>;
+  applyChanges(files: string[], skipped?: Record<string, number[]>): Promise<boolean>;
 
   snapshots: Snapshot[];
   refreshSnapshots(): Promise<void>;
@@ -417,14 +417,14 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
   }, [api, project]);
 
   const applyChanges = useCallback(
-    async (files: string[]) => {
+    async (files: string[], skipped?: Record<string, number[]>) => {
       if (!api || !project || files.length === 0) return false;
       setApplying(true);
       const root = project.root;
       try {
         const label = t.changes.snapshotLabel(previewMode === "compat", target);
         if (!preview) return false;
-        const result = await api.applyChanges(root, preview.id, files, label);
+        const result = await api.applyChanges(root, preview.id, files, label, skipped);
         if (rootRef.current !== root) return true;
         setPreview((p) => (p ? { ...p, changes: p.changes.filter((c) => !result.written.includes(c.file)) } : p));
         if (result.lintErrors.length > 0) {

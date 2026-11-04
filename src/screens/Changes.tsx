@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { CircleAlert, CircleCheck, CircleStop, Download, GitBranch, GitCompareArrows, RotateCw, ShieldCheck, Sparkles, Wand2 } from "lucide-react";
-import { DiffViewer } from "../components/DiffViewer";
+import { DiffViewer, type HunkChoice } from "../components/DiffViewer";
 import { ConfirmDialog } from "../components/Modal";
 import { PageHeader } from "../components/Shell";
 import { Splitter } from "../components/Splitter";
@@ -44,10 +44,39 @@ export function Changes() {
     setViewed({ previewId: preview.id, files: new Set([...(seen ?? []), current.file]) });
   }, [preview, current, seen]);
   const chosen = useMemo(() => changes.filter((c) => selected.has(c.file)), [changes, selected]);
-  const totals = chosen.reduce((sum, c) => ({ add: sum.add + c.diff.additions, del: sum.del + c.diff.deletions }), { add: 0, del: 0 });
+  const [skips, setSkips] = useState<{ previewId: number | null; files: Record<string, number[]> }>({ previewId: null, files: {} });
+  const skipped = useMemo(() => (preview && skips.previewId === preview.id ? skips.files : {}), [preview, skips]);
+  const totals = chosen.reduce(
+    (sum, c) => {
+      const lines = c.diff.hunks.filter((_, h) => !skipped[c.file]?.includes(h)).flatMap((h) => h.lines);
+      return { add: sum.add + lines.filter((l) => l.kind === "add").length, del: sum.del + lines.filter((l) => l.kind === "del").length };
+    },
+    { add: 0, del: 0 },
+  );
   const allSelected = changes.length > 0 && chosen.length === changes.length;
   const reviewChosen = chosen.filter((c) => c.fix !== "auto");
   const unseen = reviewChosen.filter((c) => !seen?.has(c.file)).length;
+
+  const saveSkips = (file: string, hunks: number[]) => setSkips({ previewId: preview?.id ?? null, files: { ...skipped, [file]: hunks } });
+  const hunkChoice = (change: FileChange): HunkChoice => ({
+    isOn: (h) => selected.has(change.file) && !skipped[change.file]?.includes(h),
+    toggle: (h) => {
+      const count = change.diff.hunks.length;
+      const others = change.diff.hunks.map((_, i) => i).filter((i) => i !== h);
+      const current = skipped[change.file] ?? [];
+      if (!selected.has(change.file)) {
+        setSelected(new Set([...selected, change.file]));
+        saveSkips(change.file, others);
+      } else if (current.includes(h)) {
+        saveSkips(change.file, current.filter((i) => i !== h));
+      } else if (current.length + 1 === count) {
+        setSelected(new Set([...selected].filter((f) => f !== change.file)));
+        saveSkips(change.file, []);
+      } else {
+        saveSkips(change.file, [...current, h]);
+      }
+    },
+  });
 
   const setSelected = (next: Set<string>) =>
     setExcluded({ previewId: preview?.id ?? null, files: new Set(changes.filter((c) => !next.has(c.file)).map((c) => c.file)) });
@@ -342,7 +371,7 @@ export function Changes() {
                   </Callout>
                 </div>
               )}
-              <DiffViewer diff={current.diff} file={current.file} />
+              <DiffViewer diff={current.diff} file={current.file} choice={hunkChoice(current)} />
             </>
           ) : (
             <EmptyState icon={<GitCompareArrows size={24} />} title={t.changes.pickFile} />
@@ -359,7 +388,7 @@ export function Changes() {
         onCancel={() => setConfirming(false)}
         onConfirm={async () => {
           const all = chosen.length === changes.length;
-          const ok = await applyChanges(chosen.map((c) => c.file));
+          const ok = await applyChanges(chosen.map((c) => c.file), skipped);
           if (ok) {
             setConfirming(false);
             setAppliedAll(all);

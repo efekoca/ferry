@@ -330,6 +330,7 @@ export const en: Dict = {
     confirmText: (add, del) =>
       `+${add} / −${del} lines will change. These files are backed up first, so you can undo from History in one click.`,
     failed: (n) => `${n} files couldn't be processed.`,
+    applyHunk: (line) => `Apply the change at line ${line}`,
     diffLabel: (f) => `Changes in ${f}`,
     added: "added: ",
     removed: "removed: ",

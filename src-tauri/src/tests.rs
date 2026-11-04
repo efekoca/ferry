@@ -328,7 +328,6 @@ fn restore_refuses_files_edited_after_the_confirmation() {
     assert_eq!(std::fs::read_to_string(&file).unwrap(), second);
 }
 
-#[cfg(unix)]
 fn stage_preview(h: &Harness, files: &[(&str, &str)]) -> u64 {
     let root = PathBuf::from(normalize_path(h.root.clone()));
     let changes = files
@@ -574,6 +573,20 @@ fn database_plans_never_include_the_password() {
     assert_eq!((plan["engine"].as_str(), plan["name"].as_str(), plan["live"].as_bool()), (Some("postgres"), Some("shop"), Some(true)));
     assert_eq!(plan["dumps"], json!(["database/dump.sql"]));
     assert!(!plan.to_string().contains("hunter2"));
+}
+
+#[test]
+fn skipped_hunks_stay_out_of_the_applied_file() {
+    let h = harness();
+    let root = PathBuf::from(normalize_path(h.root.clone()));
+    let before: String = (1..=30).map(|n| format!("// line {n}\n")).collect();
+    std::fs::write(root.join("a.php"), format!("<?php\n{before}")).unwrap();
+    let after = format!("<?php\n{}", before.replace("line 3\n", "LINE 3\n").replace("line 25\n", "LINE 25\n"));
+    let id = stage_preview(&h, &[("a.php", &after)]);
+    let args = json!({ "path": h.root, "previewId": id, "files": ["a.php"], "skipped": { "a.php": [1] }, "label": "x" });
+    assert_eq!(h.ok("apply_changes", args)["written"], json!(["a.php"]));
+    let written = std::fs::read_to_string(root.join("a.php")).unwrap();
+    assert!(written.contains("LINE 3") && !written.contains("LINE 25"), "{written}");
 }
 
 #[test]

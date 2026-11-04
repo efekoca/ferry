@@ -435,6 +435,25 @@ describe("Ferry app", () => {
     expect(screen.queryByText("Sunucudaki proje kökü")).not.toBeInTheDocument();
   });
 
+  it("applies only the hunks left on", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    const apply = vi.spyOn(api, "applyChanges");
+    render(<App api={api} />);
+    await openAndScan(user);
+    await user.click(nav(/Düzeltmeler/));
+    await user.click(await screen.findByRole("button", { name: "Değişiklikleri hesapla" }));
+    const hunks = await screen.findAllByRole("checkbox", { name: /satırdaki değişikliği uygula/ });
+    const file = hunks[0].closest("[role=region]")?.getAttribute("aria-label")?.replace(" değişiklikleri", "") ?? "";
+    await user.click(hunks[0]);
+    expect(hunks[0]).toBeChecked();
+    await user.click(screen.getByRole("button", { name: /dosyayı uygula/ }));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: /uygula/i }));
+    await waitFor(() => expect(apply).toHaveBeenCalled());
+    expect(apply.mock.calls[0][2]).toContain(file);
+  });
+
   it("compares with a copy of the project's database", async () => {
     const user = userEvent.setup();
     render(<App api={mockApi({ delay: 0 })} />);
