@@ -40,10 +40,14 @@ fn tail(text: &str) -> String {
     format!("…\n{}", &text[start..])
 }
 
+const STEP_TIMEOUT: Duration = Duration::from_secs(60);
+
 pub fn lint(php: &Path, files: &[PathBuf]) -> CheckRun {
     let started = Instant::now();
     let workers = std::thread::available_parallelism().map_or(4, |n| n.get()).clamp(1, 8);
     let chunk = files.len().div_ceil(workers).max(1);
+    let never = std::sync::atomic::AtomicBool::new(false);
+    let never = &never;
     let parts: Vec<(String, usize, usize)> = std::thread::scope(|scope| {
         let handles: Vec<_> = files
             .chunks(chunk)
@@ -51,15 +55,17 @@ pub fn lint(php: &Path, files: &[PathBuf]) -> CheckRun {
                 scope.spawn(move || {
                     let (mut out, mut failed, mut not_run) = (String::new(), 0, 0);
                     for file in part {
-                        let Ok(result) = crate::toolchain::command(php)
-                            .args(["-n", "-d", "error_reporting=-1", "-d", "display_errors=stderr", "-d", "log_errors=0", "-l"])
-                            .arg(file)
-                            .output()
-                        else {
+                        let mut cmd = crate::toolchain::command(php);
+                        cmd.args(["-n", "-d", "error_reporting=-1", "-d", "display_errors=stderr", "-d", "log_errors=0", "-l"]).arg(file);
+                        let Ok(result) = crate::toolchain::run_process(cmd, php, never, STEP_TIMEOUT) else {
                             not_run += 1;
                             continue;
                         };
-                        if !result.status.success() {
+                        let Some(status) = result.status.filter(|_| result.stopped.is_none()) else {
+                            not_run += 1;
+                            continue;
+                        };
+                        if !status.success() {
                             failed += 1;
                         }
                         for line in String::from_utf8_lossy(&result.stderr).lines().filter(|l| l.contains(" on line ")) {
@@ -97,7 +103,9 @@ pub fn phpunit(root: &Path) -> Option<PathBuf> {
 
 pub fn run_tests(php: &Path, root: &Path, timeout: Duration, cancel: &std::sync::atomic::AtomicBool) -> Result<CheckRun, String> {
     let phpunit = phpunit(root).ok_or_else(|| crate::t!("Projede vendor/bin/phpunit yok.", "The project has no vendor/bin/phpunit."))?;
-    let version = crate::toolchain::command(php).arg(&phpunit).arg("--version").current_dir(root).output().ok();
+    let mut probe = crate::toolchain::command(php);
+    probe.arg(&phpunit).arg("--version").current_dir(root);
+    let version = crate::toolchain::run_process(probe, php, cancel, STEP_TIMEOUT).ok();
     let modern = version.is_some_and(|v| {
         !String::from_utf8_lossy(&v.stdout).contains("PHPUnit 9") && !String::from_utf8_lossy(&v.stdout).contains("PHPUnit 8")
     });
