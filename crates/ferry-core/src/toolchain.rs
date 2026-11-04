@@ -344,6 +344,8 @@ pub enum Stop {
     TimedOut,
 }
 
+const READER_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
+
 pub struct Finished {
     pub status: Option<std::process::ExitStatus>,
     pub stdout: Vec<u8>,
@@ -364,16 +366,23 @@ pub fn run_process(
     std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
     let mut child = cmd.spawn().map_err(|source| ToolError::Spawn { program: program.display().to_string(), source })?;
     let read = |pipe: Option<Box<dyn std::io::Read + Send>>| {
-        std::thread::spawn(move || {
-            let mut buf = Vec::new();
-            if let Some(mut pipe) = pipe {
-                let _ = pipe.read_to_end(&mut buf);
+        let buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = buf.clone();
+        let reader = std::thread::spawn(move || {
+            let Some(mut pipe) = pipe else { return };
+            use std::io::Read;
+            let mut chunk = [0u8; 8192];
+            while let Ok(n) = pipe.read(&mut chunk) {
+                if n == 0 {
+                    break;
+                }
+                sink.lock().unwrap().extend_from_slice(&chunk[..n]);
             }
-            buf
-        })
+        });
+        (buf, reader)
     };
-    let stdout = read(child.stdout.take().map(|p| Box::new(p) as _));
-    let stderr = read(child.stderr.take().map(|p| Box::new(p) as _));
+    let (stdout, out_reader) = read(child.stdout.take().map(|p| Box::new(p) as _));
+    let (stderr, err_reader) = read(child.stderr.take().map(|p| Box::new(p) as _));
     let started = std::time::Instant::now();
     let mut stopped = None;
     let status = loop {
@@ -394,13 +403,20 @@ pub fn run_process(
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
     };
-    Ok(Finished {
-        status,
-        stdout: stdout.join().unwrap_or_default(),
-        stderr: stderr.join().unwrap_or_default(),
-        stopped,
-        duration: started.elapsed(),
-    })
+    let done = || out_reader.is_finished() && err_reader.is_finished();
+    let settle = |limit: std::time::Duration| {
+        let since = std::time::Instant::now();
+        while !done() && since.elapsed() < limit {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    };
+    settle(READER_GRACE);
+    if !done() {
+        kill_tree(&mut child);
+        settle(READER_GRACE);
+    }
+    let taken = |buf: &std::sync::Arc<std::sync::Mutex<Vec<u8>>>| std::mem::take(&mut *buf.lock().unwrap());
+    Ok(Finished { status, stdout: taken(&stdout), stderr: taken(&stderr), stopped, duration: started.elapsed() })
 }
 
 fn kill_tree(child: &mut std::process::Child) {
@@ -409,6 +425,10 @@ fn kill_tree(child: &mut std::process::Child) {
         if pgid > 1 {
             unsafe { libc::kill(-pgid, libc::SIGKILL) };
         }
+    }
+    #[cfg(windows)]
+    {
+        let _ = command(Path::new("taskkill")).args(["/T", "/F", "/PID", &child.id().to_string()]).output();
     }
     let _ = child.kill();
 }
@@ -522,6 +542,18 @@ pub fn install_rector(tools_dir: &Path, php_override: Option<&Path>, cancel: &st
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    #[test]
+    fn a_background_child_holding_the_pipes_does_not_hang_the_run() {
+        let mut cmd = Command::new("sh");
+        cmd.args(["-c", "sleep 30 & echo started"]);
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        let started = std::time::Instant::now();
+        let done = run_process(cmd, Path::new("sh"), &cancel, std::time::Duration::from_secs(5)).unwrap();
+        assert!(started.elapsed() < std::time::Duration::from_secs(10));
+        assert_eq!(String::from_utf8_lossy(&done.stdout).trim(), "started");
+    }
+
     use super::*;
 
     #[test]
