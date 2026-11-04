@@ -346,9 +346,29 @@
       await openRecent(projects.empty);
       const score = await scan();
       await emit(`  score=${score} text=${$("main").innerText.replace(/\n+/g, " / ").slice(0, 400)}`);
+      check(text().includes("Tarama eksik kaldı"), "an empty folder isn't reported as ready");
       const files = await preview();
       check(files.length === 0, "empty project has no changes");
       check(text().includes("Yapılacak değişiklik yok"), "nothing state");
+    },
+
+    async function runtimeRoot() {
+      await openRecent(projects.unicode);
+      await scan();
+      await invoke("import_runtime_log", { path: projects.unicode, log: `${FX}/php_errors.log` });
+      await click("Tekrar tara");
+      await sleep(1000);
+      await until(() => button("Tekrar tara"), "rescan done");
+      await nav("Bulgular");
+      await until(() => text().includes("php_errors.log:"), "log summary");
+      const summary = () => $(".check-log").closest(".callout").innerText;
+      check(/0 mesaj proje dışındaki/.test(summary()), `the guess ties the message to the project: ${summary()}`);
+      $(".check-log").open = true;
+      $('input[name="roots"]').value = "/srv/app";
+      await click("Uygula");
+      await until(() => text().includes("Sunucudaki proje kökü: /srv/app"), "root shown");
+      await until(() => /1 mesaj proje dışındaki/.test(summary()), "message moved outside");
+      await click("Log'u kaldır");
     },
 
     async function missingProject() {
