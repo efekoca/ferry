@@ -15,18 +15,18 @@ The data lives in `docs/coverage.json`; this page is generated from it with
 
 | Version | Covered | Partial | Gap | Runtime only | Not applicable | Total |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| [7.0](#php-70) | 45 | 3 | 1 | 14 | 19 | 82 |
+| [7.0](#php-70) | 47 | 1 | 1 | 14 | 19 | 82 |
 | [7.1](#php-71) | 11 | 0 | 0 | 13 | 4 | 28 |
 | [7.2](#php-72) | 24 | 1 | 0 | 5 | 4 | 34 |
 | [7.3](#php-73) | 16 | 0 | 0 | 12 | 6 | 34 |
-| [7.4](#php-74) | 35 | 1 | 0 | 25 | 4 | 65 |
-| [8.0](#php-80) | 123 | 2 | 0 | 48 | 11 | 184 |
-| [8.1](#php-81) | 51 | 1 | 2 | 6 | 2 | 62 |
+| [7.4](#php-74) | 36 | 0 | 0 | 25 | 4 | 65 |
+| [8.0](#php-80) | 124 | 1 | 0 | 48 | 11 | 184 |
+| [8.1](#php-81) | 52 | 0 | 2 | 6 | 2 | 62 |
 | [8.2](#php-82) | 11 | 0 | 0 | 7 | 0 | 18 |
-| [8.3](#php-83) | 22 | 1 | 0 | 10 | 2 | 35 |
-| [8.4](#php-84) | 69 | 3 | 0 | 22 | 5 | 99 |
+| [8.3](#php-83) | 23 | 0 | 0 | 10 | 2 | 35 |
+| [8.4](#php-84) | 72 | 0 | 0 | 22 | 5 | 99 |
 | [8.5](#php-85) | 52 | 0 | 0 | 22 | 5 | 79 |
-| **All** | **459** | **12** | **3** | **184** | **62** | **720** |
+| **All** | **468** | **3** | **3** | **184** | **62** | **720** |
 
 ## PHP 7.0
 
@@ -34,7 +34,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-7.0/UPGRADING)
 
 | Area | Change | Status | Rules | Note |
 | --- | --- | --- | --- | --- |
-| Changes to variable handling | Indirect variable, property and method references are now interpreted with left-to-right semantics. | Partial | `review.variable_variable` | $$foo['bar']['baz'] is flagged as a variable variable, but $foo->$bar['baz'], $foo->$bar['baz']() and Foo::$bar['baz']() are not reported. |
+| Changes to variable handling | Indirect variable, property and method references are now interpreted with left-to-right semantics. | Covered | `review.variable_variable`<br>`behavior.indirect_access_order` | $$foo['bar'] is flagged as a variable variable. $foo->$bar['baz'], $foo->$bar['baz']() and Foo::$bar['baz']() are reported; self::, static:: and parent:: calls are skipped because modern code writes them on purpose. |
 | Changes to variable handling | The global keyword now only accepts simple variables. | Covered | `review.variable_variable` | global $$foo->bar is reported as a variable variable. |
 | Changes to variable handling | Parentheses around variables or function calls no longer have any influence on behavior. | Covered | `behavior.parenthesized_reference` | A function result wrapped in extra parentheses and passed to a by-reference built-in such as array_pop() is reported. |
 | Changes to variable handling | Array elements or object properties that are automatically created during by-reference assignments will now result in a different order. | Runtime only |  | Ordering of elements auto-created by reference assignment only shows at runtime. |
@@ -73,7 +73,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-7.0/UPGRADING)
 | Other language changes | Removed support for static calls to non-static methods from an incompatible $this context. | Covered | `removed.static_call_to_instance_method` | A::test() called from unrelated class B is reported. |
 | Other language changes | It is no longer possible to use the following class, interface and trait names (case-insensitive): | Covered | `removed.reserved_name`<br>`removed.reserved_alias` | Class declarations, use aliases and class_alias() with the reserved name are reported. |
 | Other language changes | The yield language construct no longer requires parentheses when used in an expression context. | Gap |  | Statically detectable, but deliberately not reported: yield -1 is correct modern generator code, and it only differs from PHP 5. |
-| Other language changes | Removed ASP (&lt;%) and script (&lt;script language=php>) tags. | Partial | `removed.script_tag` | &lt;script language="php"> in HTML is reported; ASP tags (&lt;% %>) are not, because the same markers appear in other template languages. |
+| Other language changes | Removed ASP (&lt;%) and script (&lt;script language=php>) tags. | Partial | `removed.script_tag` | &lt;script language="php"> in HTML is reported. ASP tags (&lt;% %>) are deliberately not reported, because the same markers appear in JavaScript templates inside PHP files. |
 | Other language changes | Removed support for assigning the result of new by reference. | Covered | `removed.assign_new_by_ref` | $a = &new Foo is reported. |
 | Other language changes | Removed support for scoped calls to non-static methods from an incompatible $this context. | Covered | `removed.static_call_to_instance_method` | Scoped call A::test() from an incompatible context is reported. |
 | Other language changes | Removed support for #-style comments in ini files. | Covered | `removed.ini_hash_comment` | Lines starting with # in php.ini and .user.ini are reported. |
@@ -90,7 +90,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-7.0/UPGRADING)
 | Date | dba_delete() now returns false if the key was not found for the inifile handler, too. | Runtime only |  | dba_delete() return value depends on the handler and key at runtime. |
 | Date | Requires libgmp version 4.2 or newer now. | Not applicable |  | libgmp build requirement. |
 | Date | gmp_setbit() and gmp_clrbit() now return FALSE for negative indices, making them consistent with other GMP functions. | Covered | `removed.gmp_setbit_negative` | gmp_setbit($g, -1) is reported. |
-| Intl | Removed deprecated aliases datefmt_set_timezone_id() and IntlDateFormatter::setTimeZoneID(). | Partial | `removed.datefmt_set_timezone_id` | datefmt_set_timezone_id() is reported, but IntlDateFormatter::setTimeZoneID() is not, even on a new IntlDateFormatter receiver. |
+| Intl | Removed deprecated aliases datefmt_set_timezone_id() and IntlDateFormatter::setTimeZoneID(). | Covered | `removed.datefmt_set_timezone_id` | datefmt_set_timezone_id() and setTimeZoneID() on a known IntlDateFormatter object are reported. |
 | libxml | Added LIBXML_BIGLINES parser option. | Not applicable |  | New libxml constant added. |
 | libxml | Removed deprecated mcrypt_generic_end() alias in favor of mcrypt_generic_deinit(). | Covered | `removed.mcrypt` | mcrypt_generic_end() is reported. |
 | libxml | Removed deprecated mcrypt_ecb(), mcrypt_cbc(), mcrypt_cfb() and mcrypt_ofb() functions in favor of mcrypt_encrypt() and mcrypt_decrypt() with an MCRYPT_MODE_* flag. | Covered | `removed.mcrypt` | mcrypt_ecb() and mcrypt_cbc() are reported. |
@@ -163,7 +163,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-7.2/UPGRADING)
 | Core | Support for Netware operating systems has been removed. | Not applicable |  | Netware OS support removal. |
 | Core | Casting arrays to objects (with (object) or settype()) will now convert integer keys to string property names. | Runtime only |  | Depends on array keys at runtime. |
 | Core | Casting objects to arrays (with (array) or settype()), and retrieving object properties in an array with get_object_vars(), will now convert numeric string property names (that is, property names… | Runtime only |  | Depends on property names at runtime. |
-| Core | Unqualified references to undefined constants now generate a Warning instead of a notice. | Partial | `removed.bareword_key` | Bareword array keys $a[key] are reported, but other undefined bare constants like echo FOO_UNDEF are not. |
+| Core | Unqualified references to undefined constants now generate a Warning instead of a notice. | Partial | `removed.bareword_key` | Bareword array keys $a[key] are reported. Other bare constants are deliberately not reported, because a constant can be defined at runtime or by an extension the scan doesn't know about. |
 | Core | Minimum supported Windows versions are Windows 7/Server 2008 R2. | Not applicable |  | Windows platform requirement. |
 | Core | Initial trait property value compatibility check will no longer perform any casts. | Covered | `removed.trait_property_default` | A class redeclaring a property of a trait from the same file with a different literal default is reported. |
 | Core | "object" (in any case) can no longer be used as a class name. | Covered | `removed.reserved_name` | class Object {} is reported. |
@@ -292,7 +292,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-7.4/UPGRADING)
 | Reflection | Calls to ReflectionType::__toString() now generate a deprecation notice. | Not applicable |  | Only PHP 7.4 raises this deprecation; it was withdrawn in 8.0, so no upgrade target past 7.4 sees it. |
 | Reflection | The export() methods on all Reflection classes are deprecated. | Covered | `removed.reflection_export` | ReflectionClass::export() and ReflectionFunction::export() are reported. |
 | Socket | The AI_IDN_ALLOW_UNASSIGNED and AI_IDN_USE_STD3_ASCII_RULES flags for socket_addrinfo_lookup() are deprecated, due to an upstream deprecation in glibc. | Covered | `removed.ai_idn_constant` | AI_IDN_ALLOW_UNASSIGNED and AI_IDN_USE_STD3_ASCII_RULES are reported. |
-| Standard | Passing invalid characters to ''base_convert()'', ''bindec()'', ''octdec()'' and ''hexdec()'' will now generate a deprecation notice. | Partial | `deprecated.invalid_digits` | bindec(), hexdec() and octdec() with literal invalid digits are reported; base_convert() is not. |
+| Standard | Passing invalid characters to ''base_convert()'', ''bindec()'', ''octdec()'' and ''hexdec()'' will now generate a deprecation notice. | Covered | `deprecated.invalid_digits` | bindec(), hexdec(), octdec() and base_convert() with literal invalid digits are reported. |
 | Standard | Using array_key_exists() on objects is deprecated. | Covered | `removed.array_key_exists_object` | array_key_exists() on $this or a new object is reported; other objects need the argument type. |
 | Standard | The is_real() function is deprecated, use is_float() instead. | Covered | `removed.is_real` | is_real() is reported. |
 | Standard | The get_magic_quotes_gpc() and get_magic_quotes_runtime() functions are deprecated. | Covered | `removed.get_magic_quotes_gpc`<br>`removed.get_magic_quotes_runtime` | get_magic_quotes_gpc() and get_magic_quotes_runtime() are reported. |
@@ -315,12 +315,12 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.0/UPGRADING)
 | Core | `match` is now a reserved keyword. | Covered | `removed.reserved_name` | function match() and class Match are reported; a bare call to an externally defined match() function is not. |
 | Core | Assertion failures now throw by default. | Runtime only |  | Whether an assert() fails depends on runtime values; assert.exception default change is not visible in source. |
 | Core | Methods with the same name as the class are no longer interpreted as constructors. | Covered | `removed.php4_constructor` | class Foo { function Foo() {} } is reported. |
-| Core | Removed ability to call non-static methods statically. | Partial | `removed.static_call_to_instance_method` | A::f() on a non-static method is reported, but is_callable(['A', 'f']) / is_callable('A::f') checks are not. |
+| Core | Removed ability to call non-static methods statically. | Covered | `removed.static_call_to_instance_method` | A::f() on a non-static method, and is_callable() on a literal class and method pair, are reported. |
 | Core | Removed (real) cast. | Covered | `removed.real_cast` | (real) $y is reported. |
 | Core | Removed (unset) cast. | Covered | `removed.unset_cast` | (unset) $y is reported. |
 | Core | Removed track_errors ini directive. | Covered | `removed.magic_variable`<br>`removed.ini_setting`<br>`deprecated.ini_setting` | $php_errormsg, ini_set('track_errors') and track_errors in php.ini/.htaccess are reported. |
 | Core | Removed the ability to define case-insensitive constants. | Covered | `removed.case_insensitive_constant` | define('FOO', 1, true) is reported. |
-| Core | Access to undefined constants now always results in an Error exception. | Partial | `removed.bareword_key` | Unquoted array keys ($a[foo]) are reported, but bareword constants elsewhere ($x = bar;) are not. |
+| Core | Access to undefined constants now always results in an Error exception. | Partial | `removed.bareword_key` | Unquoted array keys ($a[foo]) are reported. Other bare constants are deliberately not reported, because a constant can be defined at runtime or by an extension the scan doesn't know about. |
 | Core | Removed ability to specify an autoloader using an __autoload() function. | Covered | `removed.__autoload` | function __autoload() is reported. |
 | Core | Removed the $errcontext argument for custom error handlers. | Covered | `removed.error_handler_context` | set_error_handler with a five-parameter closure is reported. |
 | Core | Removed create_function(). | Covered | `removed.create_function` | create_function() is reported. |
@@ -550,7 +550,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.1/UPGRADING)
 | Filter | The filter.default ini setting is deprecated. | Covered | `deprecated.ini_setting` | filter.default in php.ini and in ini_set() is reported. |
 | GD | The $num_points parameter of image(open\|filled)polygon has been deprecated. | Covered | `deprecated.polygon_num_points` | imagepolygon($im, $pts, 3, $col) is reported. |
 | Hash | The mhash(), mhash_keygen_s2k(), mhash_count(), mhash_get_block_size() and mhash_get_hash_name() functions are deprecated. | Covered | `deprecated.mhash`<br>`deprecated.mhash_constant` | mhash(), mhash_count() and MHASH_* constants are reported. |
-| IMAP | The NIL constant has been deprecated. | Partial | `removed.imap` | IMAP function calls are reported via the imap removal, but a standalone NIL constant (echo NIL;) is not. |
+| IMAP | The NIL constant has been deprecated. | Covered | `removed.imap`<br>`deprecated.imap_nil_constant` | IMAP function calls are reported through the imap removal, and the NIL constant is reported unless the project defines it. |
 | Intl | Calling IntlCalendar::roll() with bool argument is deprecated. | Covered | `deprecated.intlcal_roll_bool` | $cal = new IntlGregorianCalendar(); $cal->roll(IntlCalendar::FIELD_DAY_OF_MONTH, true) is reported when the receiver's class is visible in the code. |
 | Mbstring | Calling mb_check_encoding() without an argument is deprecated. | Covered | `deprecated.implicit_argument` | mb_check_encoding() without arguments is reported. |
 | MySQLi | The mysqli_driver::$driver_version property has been deprecated. | Covered | `deprecated.mysqli_driver_version` | $d = new mysqli_driver(); echo $d->driver_version is reported when the receiver's class is visible in the code. |
@@ -602,7 +602,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.3/UPGRADING)
 | Core | Zend Max Execution Timers is now enabled by default for ZTS builds on Linux. | Not applicable |  | ZTS build / SAPI internals. |
 | Core | Uses of traits with static properties will now redeclare static properties inherited from the parent class. | Covered | `behavior.trait_static_property` | A class using a trait whose static property an ancestor class also declares is reported. |
 | Core | Assigning a negative index n to an empty array will now make sure that the next index is n+1 instead of 0. | Covered | `behavior.negative_index_assignment` | $a = []; $a[-n] = ...; $a[] = ...; as consecutive uses is reported; the array literal form is covered by behavior.negative_array_key. |
-| Core | Class constant visibility variance is now correctly checked when inherited from interfaces. | Partial | `removed.interface_constant_visibility` | Reported when the interface is declared in the same file; an interface from another file is not checked. |
+| Core | Class constant visibility variance is now correctly checked when inherited from interfaces. | Covered | `removed.interface_constant_visibility` | Reported for interfaces the project declares, in any file and through parent interfaces. |
 | Core | WeakMaps entries whose key maps to itself (possibly transitively) may now be removed during cycle collection if the key is not reachable except by iterating over the WeakMap (reachability via… | Runtime only |  | Garbage-collection behavior of WeakMap entries at runtime. |
 | Core | In addition to whitespace characters, now comments are allowed between `yield` and `from`. | Not applicable |  | yield /* comment */ from was a syntax error before; only tokenizer output changes. |
 | DOM | DOMChildNode::after(), DOMChildNode::before(), DOMChildNode::replaceWith() on a node that has no parent is now a no-op instead of a hierarchy exception, which is the behaviour spec demands. | Runtime only |  | Depends on whether the DOM node has a parent at runtime. |
@@ -695,7 +695,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.4/UPGRADING)
 | Standard | http_build_query() now correctly handles backed enums. | Runtime only |  | Backed enums in http_build_query() data depend on runtime values. |
 | Standard | stream_bucket_make_writeable() and stream_bucket_new() will now return a StreamBucket instance instead of an instance of stdClass. | Runtime only |  | StreamBucket vs stdClass only matters for runtime type checks inside stream filters. |
 | Tidy | Failures in the constructor now throw exceptions rather than emitting warnings and having a broken object. | Runtime only |  | Tidy constructor failures depend on runtime input. |
-| XML | The xml_set_*_handler() functions now declare and check for an effective signature of callable\|string\|null for the $handler parameters. | Partial | `deprecated.xml_set_object` | xml_set_object() is reported, but calling xml_set_*_handler() with method-name strings before xml_set_object() and passing '' are not. |
+| XML | The xml_set_*_handler() functions now declare and check for an effective signature of callable\|string\|null for the $handler parameters. | Covered | `deprecated.xml_set_object`<br>`deprecated.xml_handler_string` | xml_set_object() is reported, as are xml_set_*_handler() calls with an empty string or, next to xml_set_object(), a method-name string. |
 | Core | Implicitly nullable parameter types are now deprecated. | Covered | `deprecated.implicit_nullable` | `int $x = null` parameter is reported. |
 | Core | Passing E_USER_ERROR to trigger_error() is now deprecated. | Covered | `deprecated.e_user_error` | trigger_error('x', E_USER_ERROR) is reported. |
 | Core | Using "_" as a class name is now deprecated. | Covered | `deprecated.underscore_class_name` | class _ {} is reported. |
@@ -724,7 +724,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.4/UPGRADING)
 | Reflection | Calling ReflectionMethod::__construct() with 1 argument is deprecated. | Covered | `deprecated.reflection_method_string` | new ReflectionMethod('A::b') is reported. |
 | Session | Calling session_set_save_handler() with more than 2 arguments is deprecated. | Covered | `deprecated.session_set_save_handler` | session_set_save_handler() with six callables is reported. |
 | Session | Changing the INI settings session.sid_length and session.sid_bits_per_character is deprecated. | Covered | `deprecated.ini_setting` | session.sid_length/sid_bits_per_character in ini_set() and php.ini are reported. |
-| Session | Changing the INI settings session.use_only_cookies, session.use_trans_sid, session.trans_sid_tags, session.trans_sid_hosts, and session.referer_check is deprecated. | Partial | `deprecated.ini_setting` | session.use_trans_sid, referer_check and use_only_cookies are reported; the SID constant is not. |
+| Session | Changing the INI settings session.use_only_cookies, session.use_trans_sid, session.trans_sid_tags, session.trans_sid_hosts, and session.referer_check is deprecated. | Covered | `deprecated.ini_setting`<br>`deprecated.sid_constant` | The session ini settings are reported, and the SID constant is reported unless the project defines it. |
 | SOAP | Passing an int to SoapServer::addFunction() is now deprecated. | Covered | `deprecated.soap_functions_all` | $s = new SoapServer(null); $s->addFunction(999) is reported when the receiver's class is visible in the code. |
 | SOAP | The SOAP_FUNCTIONS_ALL constant is now deprecated. | Covered | `deprecated.soap_functions_all` | SOAP_FUNCTIONS_ALL is reported. |
 | SPL | The SplFixedArray::__wakeup() method has been deprecated as it implements __serialize() and __unserialize() which need to be overwritten instead. | Covered | `deprecated.builtin_method`<br>`deprecated.splfixedarray_wakeup` | Overriding and calling SplFixedArray::__wakeup() are reported. |
@@ -733,7 +733,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.4/UPGRADING)
 | Standard | Unserializing strings using the uppercase 'S' tag is deprecated. | Covered | `deprecated.unserialize_upper_s` | Literal serialized strings with the S: tag passed to unserialize() are reported. |
 | Standard | Using the default value for $escape parameter of: | Covered | `deprecated.csv_escape` | fputcsv()/fgetcsv()/str_getcsv() without $escape are reported. |
 | XML | The xml_set_object() function has been deprecated. | Covered | `deprecated.xml_set_object` | xml_set_object() is reported. |
-| XML | Passing non-callable strings to the xml_set_*_handler() functions is now deprecated. | Partial | `deprecated.xml_set_object` | xml_set_object() is reported, but the xml_set_*_handler() calls with non-callable method-name strings or '' are not. |
+| XML | Passing non-callable strings to the xml_set_*_handler() functions is now deprecated. | Covered | `deprecated.xml_set_object`<br>`deprecated.xml_handler_string` | xml_set_object() is reported, as are xml_set_*_handler() calls with an empty string or, next to xml_set_object(), a method-name string. |
 | IMAP | The IMAP extension has been unbundled and moved to PECL. | Covered | `removed.imap` | imap_open() is reported. |
 | OCI8 | The OCI8 extension has been unbundled and moved to PECL. | Covered | `removed.oci8` | oci_connect() is reported. |
 | PDO_OCI | The PDO_OCI extension has been unbundled and moved to PECL. | Covered | `removed.pdo_oci` | new PDO('oci:dbname=x') is reported. |

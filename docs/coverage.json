@@ -4,11 +4,12 @@
   "section": "Backward Incompatible Changes",
   "ext": "Changes to variable handling",
   "change": "Indirect variable, property and method references are now interpreted with left-to-right semantics.",
-  "status": "partial",
+  "status": "covered",
   "rules": [
-   "review.variable_variable"
+   "review.variable_variable",
+   "behavior.indirect_access_order"
   ],
-  "note": "$$foo['bar']['baz'] is flagged as a variable variable, but $foo->$bar['baz'], $foo->$bar['baz']() and Foo::$bar['baz']() are not reported."
+  "note": "$$foo['bar'] is flagged as a variable variable. $foo->$bar['baz'], $foo->$bar['baz']() and Foo::$bar['baz']() are reported; self::, static:: and parent:: calls are skipped because modern code writes them on purpose."
  },
  {
   "version": "7.0",
@@ -372,7 +373,7 @@
   "ext": "Other language changes",
   "change": "Removed ASP (<%) and script (<script language=php>) tags.",
   "status": "partial",
-  "note": "<script language=\"php\"> in HTML is reported; ASP tags (<% %>) are not, because the same markers appear in other template languages.",
+  "note": "<script language=\"php\"> in HTML is reported. ASP tags (<% %>) are deliberately not reported, because the same markers appear in JavaScript templates inside PHP files.",
   "rules": [
    "removed.script_tag"
   ]
@@ -544,11 +545,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Intl",
   "change": "Removed deprecated aliases datefmt_set_timezone_id() and IntlDateFormatter::setTimeZoneID().",
-  "status": "partial",
+  "status": "covered",
   "rules": [
    "removed.datefmt_set_timezone_id"
   ],
-  "note": "datefmt_set_timezone_id() is reported, but IntlDateFormatter::setTimeZoneID() is not, even on a new IntlDateFormatter receiver."
+  "note": "datefmt_set_timezone_id() and setTimeZoneID() on a known IntlDateFormatter object are reported."
  },
  {
   "version": "7.0",
@@ -1107,7 +1108,7 @@
   "rules": [
    "removed.bareword_key"
   ],
-  "note": "Bareword array keys $a[key] are reported, but other undefined bare constants like echo FOO_UNDEF are not."
+  "note": "Bareword array keys $a[key] are reported. Other bare constants are deliberately not reported, because a constant can be defined at runtime or by an extension the scan doesn't know about."
  },
  {
   "version": "7.2",
@@ -2193,8 +2194,8 @@
   "section": "Deprecated Functionality",
   "ext": "Standard",
   "change": "Passing invalid characters to ''base_convert()'', ''bindec()'', ''octdec()'' and ''hexdec()'' will now generate a deprecation notice.",
-  "status": "partial",
-  "note": "bindec(), hexdec() and octdec() with literal invalid digits are reported; base_convert() is not.",
+  "status": "covered",
+  "note": "bindec(), hexdec(), octdec() and base_convert() with literal invalid digits are reported.",
   "rules": [
    "deprecated.invalid_digits"
   ]
@@ -2367,11 +2368,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Core",
   "change": "Removed ability to call non-static methods statically.",
-  "status": "partial",
+  "status": "covered",
   "rules": [
    "removed.static_call_to_instance_method"
   ],
-  "note": "A::f() on a non-static method is reported, but is_callable(['A', 'f']) / is_callable('A::f') checks are not."
+  "note": "A::f() on a non-static method, and is_callable() on a literal class and method pair, are reported."
  },
  {
   "version": "8.0",
@@ -2428,7 +2429,7 @@
   "rules": [
    "removed.bareword_key"
   ],
-  "note": "Unquoted array keys ($a[foo]) are reported, but bareword constants elsewhere ($x = bar;) are not."
+  "note": "Unquoted array keys ($a[foo]) are reported. Other bare constants are deliberately not reported, because a constant can be defined at runtime or by an extension the scan doesn't know about."
  },
  {
   "version": "8.0",
@@ -4693,11 +4694,12 @@
   "section": "Deprecated Functionality",
   "ext": "IMAP",
   "change": "The NIL constant has been deprecated.",
-  "status": "partial",
+  "status": "covered",
   "rules": [
-   "removed.imap"
+   "removed.imap",
+   "deprecated.imap_nil_constant"
   ],
-  "note": "IMAP function calls are reported via the imap removal, but a standalone NIL constant (echo NIL;) is not."
+  "note": "IMAP function calls are reported through the imap removal, and the NIL constant is reported unless the project defines it."
  },
  {
   "version": "8.1",
@@ -5084,8 +5086,8 @@
   "section": "Backward Incompatible Changes",
   "ext": "Core",
   "change": "Class constant visibility variance is now correctly checked when inherited from interfaces.",
-  "status": "partial",
-  "note": "Reported when the interface is declared in the same file; an interface from another file is not checked.",
+  "status": "covered",
+  "note": "Reported for interfaces the project declares, in any file and through parent interfaces.",
   "rules": [
    "removed.interface_constant_visibility"
   ]
@@ -5913,11 +5915,12 @@
   "section": "Backward Incompatible Changes",
   "ext": "XML",
   "change": "The xml_set_*_handler() functions now declare and check for an effective signature of callable|string|null for the $handler parameters.",
-  "status": "partial",
+  "status": "covered",
   "rules": [
-   "deprecated.xml_set_object"
+   "deprecated.xml_set_object",
+   "deprecated.xml_handler_string"
   ],
-  "note": "xml_set_object() is reported, but calling xml_set_*_handler() with method-name strings before xml_set_object() and passing '' are not."
+  "note": "xml_set_object() is reported, as are xml_set_*_handler() calls with an empty string or, next to xml_set_object(), a method-name string."
  },
  {
   "version": "8.4",
@@ -6237,11 +6240,12 @@
   "section": "Deprecated Functionality",
   "ext": "Session",
   "change": "Changing the INI settings session.use_only_cookies, session.use_trans_sid, session.trans_sid_tags, session.trans_sid_hosts, and session.referer_check is deprecated.",
-  "status": "partial",
+  "status": "covered",
   "rules": [
-   "deprecated.ini_setting"
+   "deprecated.ini_setting",
+   "deprecated.sid_constant"
   ],
-  "note": "session.use_trans_sid, referer_check and use_only_cookies are reported; the SID constant is not."
+  "note": "The session ini settings are reported, and the SID constant is reported unless the project defines it."
  },
  {
   "version": "8.4",
@@ -6337,11 +6341,12 @@
   "section": "Deprecated Functionality",
   "ext": "XML",
   "change": "Passing non-callable strings to the xml_set_*_handler() functions is now deprecated.",
-  "status": "partial",
+  "status": "covered",
   "rules": [
-   "deprecated.xml_set_object"
+   "deprecated.xml_set_object",
+   "deprecated.xml_handler_string"
   ],
-  "note": "xml_set_object() is reported, but the xml_set_*_handler() calls with non-callable method-name strings or '' are not."
+  "note": "xml_set_object() is reported, as are xml_set_*_handler() calls with an empty string or, next to xml_set_object(), a method-name string."
  },
  {
   "version": "8.4",

@@ -346,14 +346,6 @@ pub(crate) fn check(tokens: &[Token], index: &crate::index::ProjectIndex) -> Vec
             out.push(issue(*at, &CONSTANT_REDECLARED));
         }
     }
-    let mut interfaces: HashMap<String, HashSet<String>> = HashMap::new();
-    for b in bodies.iter().filter(|b| tokens[b.keyword].is_ident_ci("interface")) {
-        if let Some(name) = tokens.get(b.keyword + 1) {
-            let consts = constants(tokens, b).iter().map(|c| tokens[c.name].text.clone()).collect();
-            interfaces.insert(names.declared(b.keyword, &name.text), consts);
-        }
-    }
-
     for k in 0..tokens.len() {
         let Some(f) = function_at(tokens, k) else { continue };
         let mut seen = HashSet::new();
@@ -568,8 +560,7 @@ pub(crate) fn check(tokens: &[Token], index: &crate::index::ProjectIndex) -> Vec
             for c in &consts {
                 let name = &tokens[c.name].text;
                 let hidden = c.visibility.as_deref().is_some_and(|v| v != "public");
-                let interface_const =
-                    parents.iter().any(|&p| interfaces.get(&names.resolve(p, &tokens[p].text)).is_some_and(|s| s.contains(name)));
+                let interface_const = parents.iter().any(|&p| index.interface_declares_constant(&names.resolve(p, &tokens[p].text), name));
                 if hidden && interface_const {
                     out.push(issue(c.name, &INTERFACE_CONSTANT_VISIBILITY));
                 }

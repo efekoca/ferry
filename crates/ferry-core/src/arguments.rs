@@ -27,6 +27,7 @@ pub enum Check {
     StrContains(usize, &'static str),
     ArrayLit(usize),
     This(usize),
+    InvalidForBase(usize, usize),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -107,6 +108,7 @@ impl Check {
             | Check::New(n)
             | Check::StrContains(n, _)
             | Check::This(n)
+            | Check::InvalidForBase(n, _)
             | Check::ArrayLit(n) => Some(n),
         }
     }
@@ -153,6 +155,20 @@ impl Check {
                     && arg.windows(2).any(|w| matches!(w[0].kind, TokenKind::Str { .. }) && w[1].is_punct("=>"))
             }
             Check::StrStarts(_, list) => text().is_some_and(|s| list.iter().any(|p| s.to_ascii_lowercase().starts_with(p))),
+            Check::InvalidForBase(_, from) => {
+                let base = args.get(from).and_then(|b| match literal(b) {
+                    Lit::Num(v, true) => Some(v as u32),
+                    _ => None,
+                });
+                let digits = text().map(|s| s.to_ascii_lowercase());
+                match (digits, base) {
+                    (Some(s), Some(base @ 2..=36)) => {
+                        let prefix = [(16, "0x"), (2, "0b"), (8, "0o")].iter().find(|(b, _)| *b == base).map_or("", |(_, p)| p);
+                        s.strip_prefix(prefix).unwrap_or(&s).chars().any(|c| !c.is_digit(base))
+                    }
+                    _ => false,
+                }
+            }
             Check::This(_) => arg.len() == 1 && arg[0].kind == TokenKind::Variable && arg[0].text == "this",
             Check::New(_) => arg.first().is_some_and(|t| t.is_ident_ci("new")),
             Check::StrContains(_, part) => arg.len() == 1 && matches!(arg[0].kind, TokenKind::Str { .. }) && arg[0].text.contains(part),
@@ -360,6 +376,18 @@ pub const ARGUMENTS: &[ArgRule] = &[
             "Geçersiz basamak içeren bir metni çevirmek PHP 7.4'ten beri uyarı verir; bu basamaklar yok sayılır.",
             "Converting a string with invalid digits raises a deprecation since PHP 7.4; those digits are ignored.",
         ),
+    )),
+    arg(&["base_convert"], &[InvalidForBase(0, 1)], rule(
+        "deprecated.invalid_digits",
+        Text::new("Geçersiz basamak", "Invalid digit"),
+        D, (7, 4), None,
+        Text::new("base_convert()'e tabanda bulunmayan basamak vermek PHP 7.4'te kullanımdan kalktı; bu basamaklar yok sayılır.", "Passing digits that aren't in the base to base_convert() is deprecated since PHP 7.4; they're ignored."),
+    )),
+    arg(&["intldateformatter::settimezoneid"], &[], rule(
+        "removed.datefmt_set_timezone_id",
+        Text::new("IntlDateFormatter::setTimeZoneID()", "IntlDateFormatter::setTimeZoneID()"),
+        R, (7, 0), code("setTimeZone()"),
+        Text::new("IntlDateFormatter::setTimeZoneID() PHP 7.0'da kaldırıldı; setTimeZone() kullanın.", "IntlDateFormatter::setTimeZoneID() was removed in PHP 7.0; use setTimeZone()."),
     )),
     arg(&["octdec"], &[StrOutside(0, "01234567")], rule(
         "deprecated.invalid_digits",
