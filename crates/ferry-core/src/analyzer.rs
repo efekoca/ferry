@@ -2340,7 +2340,8 @@ fn case_semicolons(tokens: &[Token]) -> Vec<usize> {
 
 pub(crate) fn receiver_types(tokens: &[Token]) -> std::collections::HashMap<&str, std::collections::HashSet<String>> {
     let mut out: std::collections::HashMap<&str, std::collections::HashSet<String>> = std::collections::HashMap::new();
-    let class = |t: &Token| t.text.rsplit('\\').next().unwrap_or_default().to_ascii_lowercase();
+    let names = crate::index::Names::new(tokens);
+    let class = |k: usize| names.resolve(k, &tokens[k].text).rsplit('\\').next().unwrap_or_default().to_string();
     for k in 0..tokens.len() {
         let t = &tokens[k];
         if t.kind != TokenKind::Variable {
@@ -2349,18 +2350,17 @@ pub(crate) fn receiver_types(tokens: &[Token]) -> std::collections::HashMap<&str
         let mut add = |name: String| {
             out.entry(t.text.as_str()).or_default().insert(name);
         };
-        if let Some(p) = k.checked_sub(1).map(|p| &tokens[p]).filter(|p| p.kind == TokenKind::Ident && !p.is_ident_ci("as")) {
-            add(class(p));
+        if k > 0 && tokens[k - 1].kind == TokenKind::Ident && !tokens[k - 1].is_ident_ci("as") {
+            add(class(k - 1));
         }
-        if tokens.get(k + 1).is_some_and(|n| n.is_punct("=")) && tokens.get(k + 2).is_some_and(|n| n.is_ident_ci("new")) {
-            if let Some(c) = tokens.get(k + 3).filter(|n| n.kind == TokenKind::Ident) {
-                add(class(c));
-            }
+        if tokens.get(k + 1).is_some_and(|n| n.is_punct("="))
+            && tokens.get(k + 2).is_some_and(|n| n.is_ident_ci("new"))
+            && tokens.get(k + 3).is_some_and(|n| n.kind == TokenKind::Ident)
+        {
+            add(class(k + 3));
         }
-        if tokens.get(k + 1).is_some_and(|n| n.is_ident_ci("instanceof")) {
-            if let Some(c) = tokens.get(k + 2).filter(|n| n.kind == TokenKind::Ident) {
-                add(class(c));
-            }
+        if tokens.get(k + 1).is_some_and(|n| n.is_ident_ci("instanceof")) && tokens.get(k + 2).is_some_and(|n| n.kind == TokenKind::Ident) {
+            add(class(k + 2));
         }
         let looped = k > 0
             && tokens[k - 1].is_ident_ci("as")
@@ -3661,6 +3661,7 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
             ("<?php namespace App; class D extends DateTime { const ATOM = 'x'; }", "removed.typed_constant_override", 0),
             ("<?php #[Attribute] abstract class A {} #[Attribute] interface I {} #[Attribute, Other] enum E {} #[Attribute] final class B {} #[Other] trait T {}", "removed.attribute_on_non_class", 3),
             ("<?php trait T { static function f() {} public static $p; } class C { use T; } T::f(); T::$p = 1; C::f(); T::class;", "deprecated.trait_static_access", 2),
+            ("<?php use ReflectionFunction as RF; $r = new RF('f'); $r->isDisabled();", "deprecated.reflection_method", 1),
             ("<?php $a->$b['c']; $a->$b['c'](); A::$b['c'](); A::$b['c']; $a->b['c']; $$a['b']; self::$b['c'](); new A::$b['c']();", "behavior.indirect_access_order", 3),
             ("<?php echo SID; echo NIL; echo Foo::SID; class SID {} const NIL2 = 1; echo sid;", "deprecated.sid_constant", 1),
             ("<?php echo NIL; define('NIL', 1);", "deprecated.imap_nil_constant", 0),

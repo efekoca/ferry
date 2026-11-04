@@ -220,3 +220,18 @@ fn laravel_projects_get_framework_findings() {
     );
     assert_eq!(scan(root), ["app/Http/Controllers/PostController.php:6:Input::get()", "composer.json:3:Laravel 5"]);
 }
+
+#[test]
+fn a_polyfill_behind_a_dead_version_check_does_not_hide_a_removed_function() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("poly.php"), "<?php function each(&$a) { return null; }\n").unwrap();
+    std::fs::write(root.join("a.php"), "<?php\nif (PHP_VERSION_ID < 80000) { require 'poly.php'; }\neach($x);\n").unwrap();
+    let files = vec![root.join("a.php"), root.join("poly.php")];
+    let scan = ferry_core::analyzer::analyze_files(root, &files, PhpVersion::new(8, 5), |_, _, _| {});
+    assert!(
+        scan.findings.iter().any(|f| f.file == "a.php" && f.line == 3),
+        "{:?}",
+        scan.findings.iter().map(|f| &f.rule_id).collect::<Vec<_>>()
+    );
+}

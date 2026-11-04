@@ -109,14 +109,7 @@ impl Constraint {
         }
         let mut alternatives = Vec::new();
         for alt in input.split("||").flat_map(|a| a.split('|')) {
-            let alt = alt.trim();
-            if alt.is_empty() {
-                continue;
-            }
-            alternatives.push(parse_and_group(alt)?);
-        }
-        if alternatives.is_empty() {
-            return None;
+            alternatives.push(parse_and_group(alt.trim())?);
         }
         Some(Self { alternatives })
     }
@@ -453,6 +446,8 @@ mod tests {
 
     #[test]
     fn lowest_known_line() {
+        assert!(Constraint::parse(">=8.0 ||").is_none());
+        assert!(Constraint::parse("|| >=8.0").is_none());
         let c = Constraint::parse("^7.4 || ^8.0").unwrap();
         assert_eq!(c.lowest_known_line(), Some(v("7.4")));
         let c = Constraint::parse(">=8.2").unwrap();
