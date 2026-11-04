@@ -18,6 +18,8 @@ const TEST_TIMEOUT: Duration = Duration::from_secs(20 * 60);
 const PAGE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 /// Symfony's entry points need the file this one plugin generates, so it alone may run.
 const SYMFONY_RUNTIME_ONLY: &str = r#"'$j = json_decode(file_get_contents("composer.json"), true); $j["config"]["allow-plugins"] = ["symfony/runtime" => true, "*" => false]; file_put_contents("composer.json", json_encode($j));'"#;
+/// Keeps container names apart when two projects run at once.
+static RUNS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 const BUILD_TIMEOUT: Duration = Duration::from_secs(20 * 60);
 const LOG_LIMIT: usize = 64 * 1024;
 const IMAGE_PREFIX: &str = "ferry-php:";
@@ -141,6 +143,8 @@ pub struct Options {
     /// Pages to start crawling from. Empty skips the page comparison.
     pub pages: Vec<String>,
     pub database: Option<crate::database::Source>,
+    /// Runs once on the source version with network access, before anything is compared.
+    pub prepare: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -149,6 +153,7 @@ pub enum Step {
     Extensions(PhpVersion),
     Lint(PhpVersion),
     Database,
+    Prepare,
     Pages(PhpVersion),
     Tests(PhpVersion),
 }
@@ -517,6 +522,21 @@ fn failed_tests(output: &str) -> Vec<String> {
     found
 }
 
+/// Symfony's bridge downloads PHPUnit on first use, which the offline test run can't do.
+fn phpunit_bridge_version(project: &Path) -> Option<String> {
+    let manifest = std::fs::read_to_string(project.join("composer.json")).ok()?;
+    if !manifest.contains("symfony/phpunit-bridge") || manifest.contains("\"phpunit/phpunit\"") {
+        return None;
+    }
+    let config = std::fs::read_to_string(project.join("phpunit.xml.dist"))
+        .or_else(|_| std::fs::read_to_string(project.join("phpunit.xml")))
+        .unwrap_or_default();
+    let version = config.split("SYMFONY_PHPUNIT_VERSION\" value=\"").nth(1).and_then(|r| r.split('"').next()).unwrap_or("9.6");
+    let safe = version.chars().all(|c| c.is_ascii_digit() || c == '.');
+    let version = if safe { version } else { "9.6" };
+    Some(format!("composer require --dev 'phpunit/phpunit:^{version}' --no-interaction --no-progress --no-scripts --no-plugins --no-security-blocking --ignore-platform-reqs"))
+}
+
 fn differs(events: &[Event], other: &[Event]) -> Vec<Event> {
     let known: HashSet<(&str, usize, &str)> = other.iter().map(|e| (e.path.as_str(), e.line, e.message.as_str())).collect();
     events.iter().filter(|e| !known.contains(&(e.path.as_str(), e.line, e.message.as_str()))).cloned().collect()
@@ -541,7 +561,12 @@ pub fn compare(
         Ok::<PathBuf, String>(dest)
     };
     let base = copy("base")?;
-    let container = Container { docker: &docker, cancel, prefix: format!("ferry-{}", std::process::id()), shared: RefCell::new(None) };
+    let container = Container {
+        docker: &docker,
+        cancel,
+        prefix: format!("ferry-{}-{}", std::process::id(), RUNS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)),
+        shared: RefCell::new(None),
+    };
     let needs_install = base.join("composer.json").is_file() && !base.join("vendor/autoload.php").is_file();
     let mut dependencies_installed = !needs_install;
     let mut install_log = String::new();
@@ -559,7 +584,9 @@ pub fn compare(
             let advisories = "composer remove --no-update --dev roave/security-advisories 2>/dev/null";
             format!("{advisories}; composer config platform.php {source}.0 && {install} '--ignore-platform-req=ext-*'")
         };
-        let script = format!("mkdir /tmp/build && cp -a /app/. /tmp/build && cd /tmp/build && {{ {script}; }} && cp -a vendor /app/");
+        let bridge = phpunit_bridge_version(&base).map_or(String::new(), |v| format!(" && {v}"));
+        let script =
+            format!("mkdir /tmp/build && cp -a /app/. /tmp/build && cd /tmp/build && {{ {script}{bridge}; }} && cp -a vendor /app/");
         let done = container.run("install", &base, "composer:2", true, &script, INSTALL_TIMEOUT)?;
         dependencies_installed = done.status.is_some_and(|s| s.success());
         if !dependencies_installed {
@@ -598,6 +625,15 @@ pub fn compare(
         None => None,
     };
     setup.database = prepared.as_ref();
+    if let Some(command) = &options.prepare {
+        step(Step::Prepare);
+        let image = prepare_image(&container, source, &base, &setup, &step)?.image;
+        let run = container.run("prepare", &base, &image, true, command, INSTALL_TIMEOUT)?;
+        if !run.status.is_some_and(|s| s.success()) {
+            let reason = tail(&output(&run));
+            return Err(crate::t!("Hazırlık komutu başarısız oldu: {reason}", "The prepare command failed: {reason}"));
+        }
+    }
     let target_dir = work.path().join("target");
     copy_project(&base, &target_dir).map_err(|e| crate::t!("Proje kopyalanamadı: {e}", "Couldn't copy the project: {e}"))?;
     let runs = run_version(&container, source, &base, &setup, &step)
@@ -707,6 +743,7 @@ mod tests {
                 clean_images: true,
                 pages: vec!["/".to_string()],
                 database: Some(crate::database::Source::Dump(file)),
+                prepare: None,
             };
             let result =
                 compare(dir.path(), PhpVersion::new(8, 3), PhpVersion::new(8, 4), options, &AtomicBool::new(false), |_| {}).unwrap();
@@ -750,7 +787,7 @@ mod tests {
         let result = compare(dir.path(), PhpVersion::new(7, 4), PhpVersion::new(8, 4), options, &AtomicBool::new(false), |_| {}).unwrap();
         let change = |path: &str| result.pages.iter().find(|p| p.path == path).map(|p| p.change);
         assert_eq!(change("/same.php"), Some(crate::web::PageChange::Same), "{:?}", result.pages);
-        assert_eq!(change("/old.php"), Some(crate::web::PageChange::Errors), "{:?}", result.pages);
+        assert_eq!(change("/old.php"), Some(crate::web::PageChange::Status), "{:?}", result.pages);
     }
 
     #[test]
@@ -775,6 +812,19 @@ mod tests {
         eprintln!("{:?} {:?}", started.elapsed(), result.as_ref().map(|_| "done"));
         assert!(result.is_err());
         assert!(started.elapsed() < Duration::from_secs(30), "{:?}", started.elapsed());
+    }
+
+    #[test]
+    fn the_phpunit_bridge_gets_a_real_phpunit() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("composer.json"), r#"{"require-dev":{"symfony/phpunit-bridge":"^7.0"}}"#).unwrap();
+        std::fs::write(dir.path().join("phpunit.xml.dist"), r#"<server name="SYMFONY_PHPUNIT_VERSION" value="10.5"/>"#).unwrap();
+        assert!(phpunit_bridge_version(dir.path()).unwrap().contains("phpunit/phpunit:^10.5"));
+        std::fs::write(dir.path().join("phpunit.xml.dist"), r#"<server name="SYMFONY_PHPUNIT_VERSION" value="1; rm -rf /"/>"#).unwrap();
+        assert!(phpunit_bridge_version(dir.path()).unwrap().contains("phpunit/phpunit:^9.6"));
+        std::fs::write(dir.path().join("composer.json"), r#"{"require-dev":{"symfony/phpunit-bridge":"^7.0","phpunit/phpunit":"^10"}}"#)
+            .unwrap();
+        assert_eq!(phpunit_bridge_version(dir.path()), None);
     }
 
     #[test]

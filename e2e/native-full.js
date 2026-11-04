@@ -71,7 +71,7 @@
   const stage = Number(sessionStorage.getItem("ferry.e2e.stage") ?? "-1");
   const next = () => {
     leaving = true;
-    const wanted = ["kuzey", "kuzey", "laravel", "wp", "wp", "unicode", "odd", "empty", "missing", "missing"][stage + 1];
+    const wanted = ["kuzey", "kuzey", "laravel", "wp", "wp", "unicode", "unicode", "odd", "empty", "missing", "missing"][stage + 1];
     if (wanted) {
       const now = Date.now();
       const order = [projects[wanted], ...Object.values(projects).filter((p) => p !== projects[wanted])];
@@ -286,6 +286,19 @@
       await click("Geri yükle", await dialog());
       await until(() => seen.slice(before).includes("Geri yüklendi"), "restored", 30000);
       await until(() => !$('[role="dialog"]'), "restore dialog closed");
+    },
+
+    async function hunkSelection() {
+      await openRecent(projects.unicode);
+      await scan();
+      const files = await preview();
+      check(files.length > 0, "changes to choose from");
+      const hunk = await until(() => $(".diff__choice"), "hunk checkbox");
+      const applyLabel = () => $(".apply-bar button").textContent;
+      const on = hunk.checked;
+      hunk.click();
+      await until(() => $(".diff__choice").checked !== on, "hunk toggled");
+      if (!on) await emit(`  after ticking: ${applyLabel()}`);
     },
 
     async function unicodePath() {

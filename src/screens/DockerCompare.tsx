@@ -182,11 +182,12 @@ export function DockerCompare() {
   const [cleanImages, setCleanImages] = useState(false);
   const [comparePages, setComparePages] = useState(true);
   const [paths, setPaths] = useState("/");
+  const [prepare, setPrepare] = useState("");
   if (!project) return null;
   const sources = KNOWN_SOURCES.filter((v) => Number(v) < Number(target));
   const source = picked ?? project.currentVersion ?? "";
   const running = !!dockerStep;
-  const stepText = dockerStep && (dockerStep.step === "install" ? t.docker.installing : dockerStep.step === "extensions" ? t.docker.preparing(dockerStep.version ?? "") : dockerStep.step === "database" ? t.docker.preparingData : dockerStep.step === "pages" ? t.docker.requesting(dockerStep.version ?? "") : dockerStep.step === "lint" ? t.docker.linting(dockerStep.version ?? "") : t.docker.testing(dockerStep.version ?? ""));
+  const stepText = dockerStep && (dockerStep.step === "install" ? t.docker.installing : dockerStep.step === "extensions" ? t.docker.preparing(dockerStep.version ?? "") : dockerStep.step === "database" ? t.docker.preparingData : dockerStep.step === "prepare" ? t.docker.runningPrepare : dockerStep.step === "pages" ? t.docker.requesting(dockerStep.version ?? "") : dockerStep.step === "lint" ? t.docker.linting(dockerStep.version ?? "") : t.docker.testing(dockerStep.version ?? ""));
   return (
     <>
       <PageHeader title={t.docker.title} subtitle={t.docker.subtitle(source || "?", target as Target)} />
@@ -217,7 +218,7 @@ export function DockerCompare() {
                     {t.docker.stop}
                   </Button>
                 ) : (
-                  <Button variant="primary" icon={<Play size={14} />} disabled={!source || (dataSource === "file" && !dumpFile)} onClick={() => void runDocker(source, extensions, extensions && cleanImages, comparePages ? parsePaths(paths) : [], choice(dataSource, dumpFile, project.root))}>
+                  <Button variant="primary" icon={<Play size={14} />} disabled={!source || (dataSource === "file" && !dumpFile)} onClick={() => void runDocker(source, extensions, extensions && cleanImages, comparePages ? parsePaths(paths) : [], choice(dataSource, dumpFile, project.root), prepare.trim() || null)}>
                     {docker ? t.docker.again : t.docker.start}
                   </Button>
                 )}
@@ -262,6 +263,11 @@ export function DockerCompare() {
                 </Button>
               )}
               {dataSource === "live" && <p className="subtle">{t.docker.dataLiveNote}</p>}
+              <label className="docker-field">
+                <span>{t.docker.prepare}</span>
+                <input className="input docker-paths" placeholder="php bin/console sass:build" value={prepare} disabled={running} onChange={(e) => setPrepare(e.target.value)} />
+                {prepare.trim() && <span className="subtle">{t.docker.prepareNote}</span>}
+              </label>
               {stepText && (
                 <p className="subtle" role="status">
                   {stepText}
