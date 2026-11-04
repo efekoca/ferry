@@ -166,7 +166,7 @@ pub(crate) fn check(src: &str, tokens: &[Token], html: &[(usize, usize)]) -> Vec
                 out.push(at(t, &PASSWORD_ALGO_INT));
             }
         }
-        if t.is_punct("\\") && k > 0 && tokens[k - 1].kind == TokenKind::Ident && next.is_some_and(|n| n.kind == TokenKind::Ident) {
+        if name_separator(tokens, k) {
             out.push(at(t, &NAME_WHITESPACE));
         }
         if t.is_punct("\u{7f}") {
@@ -337,17 +337,27 @@ pub(crate) const PASSWORD_ALGO_INT: PatternRule = rule(
     ),
 );
 
-pub(crate) const NAME_WHITESPACE: PatternRule = rule(
-    "removed.namespaced_name_whitespace",
-    Text::new("Namespace adında boşluk", "Whitespace in a namespaced name"),
-    Severity::Breaking,
-    (8, 0),
-    Some(Text::new("adın içindeki boşlukları silin", "remove the whitespace inside the name")),
-    Text::new(
-        "PHP 8.0'dan beri namespace'li adlar tek bir belirteçtir, içinde boşluk bulunamaz; dosya derlenmez.",
-        "Since PHP 8.0 a namespaced name is a single token and can't contain whitespace; the file doesn't compile.",
-    ),
-);
+pub(crate) fn name_separator(tokens: &[Token], k: usize) -> bool {
+    k > 0
+        && tokens[k].is_punct("\\")
+        && tokens[k - 1].kind == TokenKind::Ident
+        && tokens.get(k + 1).is_some_and(|n| n.kind == TokenKind::Ident)
+}
+
+pub(crate) const NAME_WHITESPACE: PatternRule = PatternRule {
+    fix: FixKind::Auto,
+    ..rule(
+        "removed.namespaced_name_whitespace",
+        Text::new("Namespace adında boşluk", "Whitespace in a namespaced name"),
+        Severity::Breaking,
+        (8, 0),
+        Some(Text::new("adın içindeki boşlukları silin", "remove the whitespace inside the name")),
+        Text::new(
+            "PHP 8.0'dan beri namespace'li adlar tek bir belirteçtir, içinde boşluk bulunamaz; dosya derlenmez.",
+            "Since PHP 8.0 a namespaced name is a single token and can't contain whitespace; the file doesn't compile.",
+        ),
+    )
+};
 
 pub(crate) const DELETE_IDENTIFIER: PatternRule = rule(
     "removed.delete_in_identifier",

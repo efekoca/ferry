@@ -221,26 +221,36 @@ pub const BAREWORD_FIX: &str = "Ferry\\QuoteBarewordKeys";
 pub const NEW_BY_REF_FIX: &str = "Ferry\\Php70\\AssignNewWithoutReference";
 pub const DEFAULT_COLON_FIX: &str = "Ferry\\Php85\\DefaultColonAfterSwitch";
 pub const BUILTIN_BY_REF_FIX: &str = "Ferry\\Php70\\AssignBuiltinResultWithoutReference";
+pub const NAME_WHITESPACE_FIX: &str = "Ferry\\Php80\\NamespacedNameWithoutWhitespace";
+pub const INDIRECT_ACCESS_FIX: &str = "Ferry\\Php70\\KeepIndirectAccessOrder";
+pub const SORT_COMPARATOR_FIX: &str = "Ferry\\Php80\\BooleanComparatorToSpaceship";
+pub const STRING_INCREMENT_FIX: &str = "Ferry\\Php85\\StringIncrementToFunction";
 
 pub fn fix_legacy_syntax(src: &str) -> Option<(String, Vec<&'static str>)> {
-    fix_legacy_syntax_with(src, &std::collections::HashSet::new())
+    fix_legacy_syntax_with(src, &std::collections::HashSet::new(), PhpVersion::new(8, 5), None)
 }
 
 pub fn constant_names(src: &str) -> std::collections::HashSet<String> {
     defined_constants(&tokenize(src))
 }
 
-pub fn fix_legacy_syntax_with(src: &str, project_constants: &std::collections::HashSet<String>) -> Option<(String, Vec<&'static str>)> {
+/// `source` is the version the project runs on today: a fix that depends on the old meaning needs it.
+pub fn fix_legacy_syntax_with(
+    src: &str,
+    project_constants: &std::collections::HashSet<String>,
+    target: PhpVersion,
+    source: Option<PhpVersion>,
+) -> Option<(String, Vec<&'static str>)> {
     let tokens = tokenize(src);
-    let mut edits: Vec<(usize, usize, &str)> = Vec::new();
+    let mut edits: Vec<(usize, usize, std::borrow::Cow<str>)> = Vec::new();
     let mut applied = Vec::new();
     let mut defined = defined_constants(&tokens);
     defined.extend(project_constants.iter().cloned());
     let mut keys = bareword_keys(&tokens, |name| defined.contains(name));
     for (_, pairs) in curly_offsets(&tokens) {
         for (open, close) in pairs {
-            edits.push((tokens[open].start, tokens[open].end, "["));
-            edits.push((tokens[close].start, tokens[close].end, "]"));
+            edits.push((tokens[open].start, tokens[open].end, "[".into()));
+            edits.push((tokens[close].start, tokens[close].end, "]".into()));
             if close == open + 2 && is_bareword(&tokens[open + 1]) && !defined.contains(&tokens[open + 1].text) {
                 keys.push(open + 1);
             }
@@ -250,8 +260,8 @@ pub fn fix_legacy_syntax_with(src: &str, project_constants: &std::collections::H
         applied.push(CURLY_FIX);
     }
     for &k in &keys {
-        edits.push((tokens[k].start, tokens[k].start, "'"));
-        edits.push((tokens[k].end, tokens[k].end, "'"));
+        edits.push((tokens[k].start, tokens[k].start, "'".into()));
+        edits.push((tokens[k].end, tokens[k].end, "'".into()));
     }
     if !keys.is_empty() {
         applied.push(BAREWORD_FIX);
@@ -260,7 +270,7 @@ pub fn fix_legacy_syntax_with(src: &str, project_constants: &std::collections::H
         .filter(|&k| tokens[k].is_punct("&") && tokens[k - 1].is_punct("=") && tokens[k + 1].is_ident_ci("new"))
         .collect();
     for &k in &by_ref {
-        edits.push((tokens[k].start, tokens[k].end, ""));
+        edits.push((tokens[k].start, tokens[k].end, "".into()));
     }
     if !by_ref.is_empty() {
         applied.push(NEW_BY_REF_FIX);
@@ -268,17 +278,72 @@ pub fn fix_legacy_syntax_with(src: &str, project_constants: &std::collections::H
     let builtin_refs = builtin_results_by_ref(&tokens);
     for &(k, _) in &builtin_refs {
         let end = if tokens[k].start > tokens[k - 1].end { tokens[k + 1].start } else { tokens[k].end };
-        edits.push((tokens[k].start, end, ""));
+        edits.push((tokens[k].start, end, "".into()));
     }
     if !builtin_refs.is_empty() {
         applied.push(BUILTIN_BY_REF_FIX);
     }
     let defaults: Vec<usize> = case_semicolons(&tokens).into_iter().filter(|&k| tokens[k].is_ident_ci("default")).collect();
     for &k in &defaults {
-        edits.push((tokens[k + 1].start, tokens[k + 1].end, ":"));
+        edits.push((tokens[k + 1].start, tokens[k + 1].end, ":".into()));
     }
     if !defaults.is_empty() {
         applied.push(DEFAULT_COLON_FIX);
+    }
+    let blank = |from: usize, to: usize| src[from..to].chars().all(char::is_whitespace);
+    let names: Vec<usize> = (0..tokens.len())
+        .filter(|&k| crate::syntax::name_separator(&tokens, k))
+        .filter(|&k| blank(tokens[k - 1].end, tokens[k].start) && blank(tokens[k].end, tokens[k + 1].start))
+        .collect();
+    for &k in &names {
+        if !EXPR_KEYWORDS.iter().any(|w| tokens[k - 1].is_ident_ci(w)) {
+            edits.push((tokens[k - 1].end, tokens[k].start, "".into()));
+        }
+        edits.push((tokens[k].end, tokens[k + 1].start, "".into()));
+    }
+    if !names.is_empty() {
+        applied.push(NAME_WHITESPACE_FIX);
+    }
+    if source.is_some_and(|v| v < PhpVersion::new(7, 0)) {
+        let indirect: Vec<usize> = (0..tokens.len()).filter(|&k| crate::calls::indirect_access(&tokens, k)).collect();
+        for &k in &indirect {
+            let mut end = k;
+            while tokens.get(end + 1).is_some_and(|n| n.is_punct("[")) {
+                let Some(close) = crate::declarations::close_of(&tokens, end + 1) else { break };
+                end = close;
+            }
+            edits.push((tokens[k].start, tokens[k].start, "{".into()));
+            edits.push((tokens[end].end, tokens[end].end, "}".into()));
+        }
+        if !indirect.is_empty() {
+            applied.push(INDIRECT_ACCESS_FIX);
+        }
+    }
+    let mut comparators = 0;
+    for (from, op, to) in crate::calls::ordering_comparators(&tokens) {
+        if tokens[op].is_punct(">") || tokens[op].is_punct(">=") {
+            edits.push((tokens[op].start, tokens[op].end, "<=>".into()));
+            comparators += 1;
+            continue;
+        }
+        let (start, end) = (tokens[from].start, tokens[to - 1].end);
+        if edits.iter().any(|e| e.0 >= start && e.1 <= end) {
+            continue;
+        }
+        let (left, right) = (&src[start..tokens[op - 1].end], &src[tokens[op + 1].start..end]);
+        edits.push((start, end, format!("{right} <=> {left}").into()));
+        comparators += 1;
+    }
+    if comparators > 0 {
+        applied.push(SORT_COMPARATOR_FIX);
+    }
+    let increments = if target >= PhpVersion::new(8, 5) { crate::flow::string_increments(&tokens) } else { Vec::new() };
+    for &(var, from, to) in &increments {
+        let name = &tokens[var].text;
+        edits.push((tokens[from].start, tokens[to].end, format!("${name} = str_increment(${name})").into()));
+    }
+    if !increments.is_empty() {
+        applied.push(STRING_INCREMENT_FIX);
     }
     if edits.is_empty() {
         return None;
@@ -286,7 +351,7 @@ pub fn fix_legacy_syntax_with(src: &str, project_constants: &std::collections::H
     edits.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)));
     let mut out = src.to_string();
     for (start, end, text) in edits {
-        out.replace_range(start..end, text);
+        out.replace_range(start..end, &text);
     }
     Some((out, applied))
 }
@@ -3856,6 +3921,69 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
         let (fixed, applied) = fix_legacy_syntax("<?php function g() { $args = & func_get_args(); $v = &end($a); }").unwrap();
         assert_eq!(fixed, "<?php function g() { $args = func_get_args(); $v = &end($a); }");
         assert_eq!(applied, [BUILTIN_BY_REF_FIX]);
+    }
+
+    fn fixed_for(src: &str, target: PhpVersion, source: Option<PhpVersion>) -> Option<(String, Vec<&'static str>)> {
+        fix_legacy_syntax_with(src, &std::collections::HashSet::new(), target, source)
+    }
+
+    #[test]
+    fn namespaced_names_lose_their_whitespace() {
+        let (fixed, applied) = fix_legacy_syntax("<?php\nnamespace Foo \\ Bar;\n$a = new Baz \\\n  Qux();\n").unwrap();
+        assert_eq!(fixed, "<?php\nnamespace Foo\\Bar;\n$a = new Baz\\Qux();\n");
+        assert_eq!(applied, [NAME_WHITESPACE_FIX]);
+        assert_eq!(crate::rector::describe_rule(NAME_WHITESPACE_FIX).fix, FixKind::Auto);
+        assert_eq!(fix_legacy_syntax("<?php namespace Foo \\ /* x */ Bar;"), None);
+        assert_eq!(fix_legacy_syntax("<?php $a = new \\Foo\\Bar();"), None);
+    }
+
+    #[test]
+    fn indirect_access_keeps_the_old_meaning_only_for_php5_projects() {
+        let src = "<?php\n$a = $foo->$bar['baz']['q'];\n$b = Foo::$bar['baz']();\n";
+        let php5 = Some(PhpVersion::new(5, 6));
+        let (fixed, applied) = fixed_for(src, PhpVersion::new(8, 5), php5).unwrap();
+        assert_eq!(fixed, "<?php\n$a = $foo->{$bar['baz']['q']};\n$b = Foo::{$bar['baz']}();\n");
+        assert_eq!(applied, [INDIRECT_ACCESS_FIX]);
+        assert_eq!(crate::rector::describe_rule(INDIRECT_ACCESS_FIX).fix, FixKind::Likely);
+        assert_eq!(fixed_for(src, PhpVersion::new(8, 5), Some(PhpVersion::new(7, 0))), None);
+        assert_eq!(fixed_for(src, PhpVersion::new(8, 5), None), None);
+    }
+
+    #[test]
+    fn boolean_sort_comparators_become_spaceships() {
+        let fix = |src: &str| fix_legacy_syntax(src).map(|f| f.0);
+        assert_eq!(fix("<?php usort($r, fn($a, $b) => $a > $b);").unwrap(), "<?php usort($r, fn($a, $b) => $a <=> $b);");
+        assert_eq!(
+            fix("<?php uasort($r, function ($a, $b) { return $a['n'] < $b['n']; });").unwrap(),
+            "<?php uasort($r, function ($a, $b) { return $b['n'] <=> $a['n']; });"
+        );
+        assert_eq!(fix("<?php usort($r, fn($a, $b) => $a == $b);"), None);
+        assert_eq!(fix("<?php usort($r, fn($a, $b) => $a & 1 > $b);"), None);
+        assert_eq!(fix("<?php $o->usort($r, fn($a, $b) => $a > $b);"), None);
+        assert_eq!(fix("<?php usort($r, fn($a, $b) => $a <=> $b);"), None);
+        let overlapping = fix("<?php usort($r, fn($a, $b) => $a[n] < $b[n]);").unwrap();
+        assert_eq!(overlapping, "<?php usort($r, fn($a, $b) => $a['n'] < $b['n']);");
+        assert_eq!(rule_fix("<?php usort($r, fn($a, $b) => $a > $b);"), Some(FixKind::Likely));
+        assert_eq!(rule_fix("<?php usort($r, fn($a, $b) => $a == $b);"), Some(FixKind::Manual));
+    }
+
+    fn rule_fix(src: &str) -> Option<FixKind> {
+        analyze_source("a.php", src, PhpVersion::new(8, 5)).iter().find(|f| f.rule_id == "deprecated.bool_sort_comparator").map(|f| f.fix)
+    }
+
+    #[test]
+    fn string_increments_use_str_increment_on_the_right_target() {
+        let src = "<?php\n$s = 'Az';\n$s++;\n$t = 'b';\n++$t;\n$u = 'c';\necho $u++;\n";
+        let (fixed, applied) = fix_legacy_syntax(src).unwrap();
+        assert_eq!(fixed, "<?php\n$s = 'Az';\n$s = str_increment($s);\n$t = 'b';\n$t = str_increment($t);\n$u = 'c';\necho $u++;\n");
+        assert_eq!(applied, [STRING_INCREMENT_FIX]);
+        assert_eq!(fixed_for(src, PhpVersion::new(8, 4), None), None);
+        let fixes: Vec<FixKind> = analyze_source("a.php", src, PhpVersion::new(8, 5))
+            .iter()
+            .filter(|f| f.rule_id == "deprecated.string_increment")
+            .map(|f| f.fix)
+            .collect();
+        assert_eq!(fixes, [FixKind::Likely, FixKind::Likely, FixKind::Manual]);
     }
 
     #[test]
