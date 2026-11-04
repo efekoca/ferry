@@ -998,7 +998,9 @@ fn save_settings(state: State<'_, AppState>, settings: Settings) -> CmdResult<()
     let failed = |e: &dyn std::fmt::Display| t!("Ayarlar kaydedilemedi: {e}", "Couldn't save the settings: {e}");
     let json = serde_json::to_vec_pretty(&settings).map_err(|e| failed(&e))?;
     std::fs::create_dir_all(&state.data_dir).map_err(|e| failed(&e))?;
-    std::fs::write(state.settings_path(), json).map_err(|e| failed(&e))?;
+    let path = state.settings_path();
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, json).and_then(|_| std::fs::rename(&tmp, &path)).map_err(|e| failed(&e))?;
     *state.settings.lock().unwrap() = settings;
     Ok(())
 }

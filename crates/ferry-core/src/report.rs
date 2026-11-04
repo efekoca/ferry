@@ -202,6 +202,16 @@ pub fn to_markdown(project: &ProjectInfo, scan: &ScanResult, deps: Option<&Depen
                 Lang::En => format!("All {} packages look compatible with PHP {}.\n\n", deps.packages.len(), deps.target),
             });
         } else {
+            if unknown > 0 {
+                md.push_str(&match lang {
+                    Lang::Tr => format!("Ayrıca {unknown} paketin PHP {} ile uyumu doğrulanamadı.\n\n", deps.target),
+                    Lang::En => format!(
+                        "{} also couldn't be confirmed for PHP {}.\n\n",
+                        if unknown == 1 { "1 package".to_string() } else { format!("{unknown} packages") },
+                        deps.target
+                    ),
+                });
+            }
             md.push_str(l(Text::new("| Paket | Sürüm | PHP gereksinimi |\n", "| Package | Version | PHP requirement |\n")));
             md.push_str("|---|---|---|\n");
             for p in bad {
@@ -227,6 +237,44 @@ mod tests {
 
     fn findings(src: &str) -> Vec<Finding> {
         analyze_source("x.php", src, "8.4".parse().unwrap())
+    }
+
+    #[test]
+    fn blocked_dependencies_still_report_unconfirmed_packages() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("composer.lock"),
+            r#"{"packages": [
+                {"name": "a/old", "version": "1.0.0", "require": {"php": "<7.0"}},
+                {"name": "b/free", "version": "1.0.0"}
+            ]}"#,
+        )
+        .unwrap();
+        let deps = crate::deps::check_packages(dir.path(), "8.4".parse().unwrap());
+        let project = ProjectInfo {
+            root: "/p".into(),
+            name: "demo".into(),
+            framework: Framework::Generic,
+            php_files: 0,
+            php_constraint: None,
+            current_version: None,
+            has_composer_lock: true,
+            has_vendor: false,
+            is_git_repo: false,
+            excluded_dirs: vec![],
+        };
+        let scan = ScanResult {
+            target: deps.target,
+            files_found: 0,
+            files_scanned: 0,
+            lines_scanned: 0,
+            findings: vec![],
+            errors: vec![],
+            duration_ms: 1,
+        };
+        let md = to_markdown(&project, &scan, Some(&deps), Lang::En);
+        assert!(md.contains("1 package also couldn't be confirmed for PHP 8.4."), "{md}");
+        assert!(md.contains("a/old"), "{md}");
     }
 
     #[test]
