@@ -202,7 +202,7 @@ pub fn plan(root: &Path) -> Plan {
         .filter_entry(|e| e.depth() == 0 || !skipped(&e.file_name().to_string_lossy()))
         .flatten()
         .filter(|e| e.file_type().is_file())
-        .map(|e| e.path().strip_prefix(root).map_or_else(|_| e.path().display().to_string(), |p| p.display().to_string()))
+        .map(|e| crate::analyzer::relative_path(root, e.path()))
         .filter(|p| p.ends_with(".sql") || p.ends_with(".sql.gz"))
         .collect();
     Plan {
