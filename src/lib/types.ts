@@ -153,7 +153,7 @@ export interface DockerPage {
 }
 
 export interface DatabasePlan {
-  engine: "mysql" | "postgres" | null;
+  engine: "mysql" | "postgres" | "sqlite" | null;
   host: string | null;
   name: string | null;
   user: string | null;
