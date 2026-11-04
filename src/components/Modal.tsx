@@ -5,6 +5,19 @@ import { useI18n } from "../i18n";
 
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]';
 
+function hideBackground(dialog: Element) {
+  const hidden: Element[] = [];
+  for (let node = dialog; node.parentElement; node = node.parentElement) {
+    for (const sibling of node.parentElement.children) {
+      const skip = sibling === node || sibling.hasAttribute("inert") || sibling.matches("script, style, [aria-live]");
+      if (skip) continue;
+      sibling.setAttribute("inert", "");
+      hidden.push(sibling);
+    }
+  }
+  return hidden;
+}
+
 function useModal(open: boolean, dialogRef: RefObject<HTMLElement | null>, initialRef: RefObject<HTMLElement | null>, onEscape: () => void) {
   const escapeRef = useRef(onEscape);
   useLayoutEffect(() => {
@@ -18,6 +31,7 @@ function useModal(open: boolean, dialogRef: RefObject<HTMLElement | null>, initi
     const field = dialog?.querySelector<HTMLElement>("input:not([disabled]), textarea:not([disabled]), select:not([disabled])");
     (field ?? initialRef.current)?.focus();
     if (dialog && !dialog.contains(document.activeElement)) dialog.focus();
+    const hidden = dialog ? hideBackground(dialog) : [];
     const onKey = (e: KeyboardEvent) => {
       const dialog = dialogRef.current;
       const top = [...document.querySelectorAll('[role="dialog"][aria-modal="true"]')].pop();
@@ -47,6 +61,7 @@ function useModal(open: boolean, dialogRef: RefObject<HTMLElement | null>, initi
     window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("keydown", onKey);
+      hidden.forEach((el) => el.removeAttribute("inert"));
       previous?.focus?.();
     };
   }, [open, dialogRef, initialRef]);

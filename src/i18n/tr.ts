@@ -67,7 +67,7 @@ export const tr = {
   },
   welcome: {
     title: "Kodunuz yeni sürüme hazır olsun",
-    lead: "Ferry kodunuzu tarar, neyin bozulacağını önceden gösterir ve düzeltmeleri siz onayladıkça uygular. Her adım geri alınabilir.",
+    lead: "Ferry kodunuzu tarar, neyin bozulacağını önceden gösterir ve düzeltmeleri siz onayladıkça uygular. Uygulanan düzeltmeler geri alınabilir.",
     pick: "Proje klasörü seçin",
     drop: "Proje klasörünü seçin ya da buraya sürükleyin",
     dropping: "Bırakabilirsiniz",

@@ -67,7 +67,7 @@ export const en: Dict = {
   },
   welcome: {
     title: "Get your code ready for the new PHP",
-    lead: "Ferry scans your code, shows what will break before it does, and applies fixes only when you approve them. Every step can be undone.",
+    lead: "Ferry scans your code, shows what will break before it does, and applies fixes only when you approve them. Applied fixes can be undone.",
     pick: "Choose project folder",
     drop: "Choose a project folder or drop it here",
     dropping: "Drop to open",

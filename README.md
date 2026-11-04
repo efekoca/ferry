@@ -14,7 +14,7 @@ A desktop app for macOS, Windows and Linux that scans your PHP code, shows what 
 
 ![The Ferry overview for a WordPress project moving from PHP 7.4 to 8.4: a readiness score of 39 with what still blocks the upgrade, the split into automatic, review and manual fixes, and a diff from the Fixes page making constructor parameters explicitly nullable](assets/readme/hero-en.webp)
 
-- **See the problems before your users do.** Every use of code that was removed or changed between PHP 7.0 and 8.5 is listed with its file, line, and the reason it matters.
+- **See the problems before your users do.** Code that was removed or changed between PHP 7.0 and 8.5 is listed with its file, line, and the reason it matters. [docs/COVERAGE.md](docs/COVERAGE.md) shows what a scan can and can't find.
 - **Nothing changes without your approval.** Rector runs in dry-run mode only. You review each change line by line and apply only the files you pick.
 - **Undo any change in one click.** A backup is taken before every apply, so you can go back without Git.
 
