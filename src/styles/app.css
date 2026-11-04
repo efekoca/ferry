@@ -1838,6 +1838,25 @@ select.input {
   margin-top: var(--space-2);
 }
 
+.runtime-root {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.runtime-root .input {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+}
+
+.runtime-root__hint {
+  margin-top: var(--space-1);
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  color: var(--text-3);
+}
+
 .check-log summary {
   cursor: pointer;
   font-weight: 500;

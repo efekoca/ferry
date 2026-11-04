@@ -546,6 +546,24 @@ fn runtime_and_inline_ignores_behave() {
 }
 
 #[test]
+fn runtime_roots_narrow_an_imported_log() {
+    let h = harness();
+    let root = h.root.clone();
+    h.ok("scan_project", json!({ "path": root, "target": "8.4", "run": 1 }));
+    let log = Path::new(&root).join("php_errors.log");
+    std::fs::write(&log, "PHP Warning:  Undefined variable $x in /other/src/Greeter.php on line 3\n").unwrap();
+    let guessed = h.ok("import_runtime_log", json!({ "path": root, "log": log }));
+    assert_eq!(guessed["runtime"]["outside"], 0);
+    let narrowed = h.ok("set_runtime_roots", json!({ "path": root, "roots": "/srv/app" }));
+    assert_eq!(narrowed["runtime"]["outside"], 1);
+    assert_eq!(narrowed["runtime"]["roots"], json!(["/srv/app"]));
+    let again = h.ok("import_runtime_log", json!({ "path": root, "log": log }));
+    assert_eq!(again["runtime"]["outside"], 1, "a new log keeps the root");
+    let widened = h.ok("set_runtime_roots", json!({ "path": root, "roots": "" }));
+    assert_eq!(widened["runtime"]["outside"], 0);
+}
+
+#[test]
 fn runtime_logs_confirm_and_add_findings() {
     let _lang = turkish();
     let h = harness();

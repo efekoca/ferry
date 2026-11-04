@@ -153,6 +153,7 @@ struct RuntimeLog {
     file: String,
     events: Vec<runtime::Event>,
     check: Option<ferry_core::localcheck::CheckRun>,
+    roots: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -165,19 +166,20 @@ struct RuntimeSummary {
     outside: usize,
     outside_fatals: usize,
     check: Option<ferry_core::localcheck::CheckRun>,
+    roots: Vec<String>,
 }
 
 fn presented(root: &Path, scan: &ScanResult, log: Option<&RuntimeLog>) -> Vec<ferry_core::analyzer::Finding> {
     let mut findings = scan.findings.clone();
     if let Some(log) = log {
-        runtime::merge(root, &mut findings, &log.events, scan.target);
+        runtime::merge(root, &mut findings, &log.events, scan.target, &log.roots);
     }
     findings
 }
 
 fn respond(root: &Path, mut scan: ScanResult, log: Option<&RuntimeLog>) -> ScanResponse {
     let runtime = log.map(|log| {
-        let merged = runtime::merge(root, &mut scan.findings, &log.events, scan.target);
+        let merged = runtime::merge(root, &mut scan.findings, &log.events, scan.target, &log.roots);
         RuntimeSummary {
             file: log.file.clone(),
             events: log.events.len(),
@@ -186,6 +188,7 @@ fn respond(root: &Path, mut scan: ScanResult, log: Option<&RuntimeLog>) -> ScanR
             outside: merged.outside,
             outside_fatals: merged.outside_fatals,
             check: log.check.clone(),
+            roots: log.roots.clone(),
         }
     });
     let applied = ignore::apply(root, std::mem::take(&mut scan.findings), &ignore::load(root));
@@ -220,11 +223,28 @@ async fn import_runtime_log(state: State<'_, AppState>, path: String, log: Strin
             ));
         }
         let name = Path::new(&log).file_name().map_or(log.clone(), |n| n.to_string_lossy().to_string());
-        Ok((root, RuntimeLog { file: name, events, check: None }))
+        Ok((root, RuntimeLog { file: name, events, check: None, roots: Vec::new() }))
     })
     .await?;
+    let mut entry = entry;
     let key = root.to_string_lossy().to_string();
-    state.runtime.lock().unwrap().insert(key, entry.clone());
+    let mut logs = state.runtime.lock().unwrap();
+    entry.roots = logs.get(&key).map(|l| l.roots.clone()).unwrap_or_default();
+    logs.insert(key, entry.clone());
+    drop(logs);
+    Ok(respond(&root, scan, Some(&entry)))
+}
+
+#[tauri::command]
+async fn set_runtime_roots(state: State<'_, AppState>, path: String, roots: String) -> CmdResult<ScanResponse> {
+    let path = normalize_path(path);
+    let scan = state.scans.lock().unwrap().get(&path).cloned().ok_or_else(|| t!("Önce projeyi tarayın.", "Scan the project first."))?;
+    let root = project_root(&path)?;
+    let mut logs = state.runtime.lock().unwrap();
+    let log = logs.get_mut(&path).ok_or_else(|| t!("Önce bir log içe aktarın.", "Import a log first."))?;
+    log.roots = runtime::parse_roots(&roots);
+    let entry = log.clone();
+    drop(logs);
     Ok(respond(&root, scan, Some(&entry)))
 }
 
@@ -265,7 +285,7 @@ async fn run_local_check(state: State<'_, AppState>, path: String, target: Strin
             ),
             _ => return Err(t!("Bilinmeyen kontrol.", "Unknown check.")),
         };
-        Ok((root, RuntimeLog { file: label, events: runtime::parse(&run.output), check: Some(run) }))
+        Ok((root, RuntimeLog { file: label, events: runtime::parse(&run.output), check: Some(run), roots: Vec::new() }))
     })
     .await?;
     state.runtime.lock().unwrap().insert(root.to_string_lossy().to_string(), entry.clone());
@@ -1032,6 +1052,7 @@ pub fn with_commands<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R
         unignore_finding,
         prune_ignores,
         import_runtime_log,
+        set_runtime_roots,
         clear_runtime_log,
         local_php_versions,
         run_local_check,

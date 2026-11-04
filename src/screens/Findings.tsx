@@ -45,7 +45,7 @@ export function prioritizeFindings(findings: Finding[]): Finding[] {
 
 export function Findings() {
   const { t, loc } = useI18n();
-  const { scan, setView, project, api, runScan, scanning, findingsFilter: filter, setFindingsFilter, ignoreFinding, unignoreFinding, pruneIgnores, importRuntimeLog, clearRuntimeLog, runLocalCheck, target } = useStore();
+  const { scan, setView, project, api, runScan, scanning, findingsFilter: filter, setFindingsFilter, ignoreFinding, unignoreFinding, pruneIgnores, importRuntimeLog, setRuntimeRoots, clearRuntimeLog, runLocalCheck, target } = useStore();
   const [localPhp, setLocalPhp] = useState<LocalPhp[]>([]);
   const [checking, setChecking] = useState<"lint" | "tests" | null>(null);
   const [confirmTests, setConfirmTests] = useState(false);
@@ -182,6 +182,25 @@ export function Findings() {
           {t.findings.clearLog}
         </Button>
       </div>
+      {!lastCheck && (
+        <details className="check-log">
+          <summary>{runtime.roots.length > 0 ? t.findings.runtimeRootActive(runtime.roots.join(", ")) : t.findings.runtimeRoot}</summary>
+          <form
+            key={runtime.roots.join()}
+            className="runtime-root"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void setRuntimeRoots(String(new FormData(e.currentTarget).get("roots") ?? ""));
+            }}
+          >
+            <input className="input" name="roots" aria-label={t.findings.runtimeRoot} placeholder="/var/www/site" defaultValue={runtime.roots.join(", ")} />
+            <Button type="submit" size="sm" variant="secondary">
+              {t.findings.runtimeRootApply}
+            </Button>
+          </form>
+          <p className="runtime-root__hint">{t.findings.runtimeRootHint}</p>
+        </details>
+      )}
       {lastCheck?.log && (
         <details className="check-log">
           <summary>{t.findings.showOutput}</summary>

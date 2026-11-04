@@ -127,6 +127,7 @@ export interface RuntimeSummary {
   outside: number;
   outsideFatals: number;
   check?: CheckRun | null;
+  roots: string[];
 }
 
 export interface ScanProgress {

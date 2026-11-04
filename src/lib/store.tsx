@@ -130,6 +130,7 @@ interface AppStore {
   unignoreFinding(id: string): Promise<boolean>;
   pruneIgnores(): Promise<boolean>;
   importRuntimeLog(): Promise<boolean>;
+  setRuntimeRoots(roots: string): Promise<boolean>;
   clearRuntimeLog(): Promise<boolean>;
   runLocalCheck(kind: "lint" | "tests"): Promise<boolean>;
 }
@@ -512,6 +513,10 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
     const picked = log;
     return updateIgnores((root) => api.importRuntimeLog(root, picked), t.toast.runtimeFailed);
   }, [api, updateIgnores, fail, t]);
+  const setRuntimeRoots = useCallback(
+    (roots: string) => (api ? updateIgnores((root) => api.setRuntimeRoots(root, roots), t.toast.runtimeFailed) : Promise.resolve(false)),
+    [api, updateIgnores, t],
+  );
   const clearRuntimeLog = useCallback(
     () => (api ? updateIgnores((root) => api.clearRuntimeLog(root), t.toast.runtimeFailed) : Promise.resolve(false)),
     [api, updateIgnores, t],
@@ -528,13 +533,13 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
       api, view, setView, findingsFilter, setFindingsFilter, showFindings, theme, setTheme, recent, forgetRecent, project, opening, openProject, closeProject,
       target, setTarget, scan, scanning, progress, runScan, deps, toolchain, refreshToolchain, installingRector,
       installRector, preview, previewMode, previewing, loadPreview, cancelPreview, applying, applyChanges, snapshots,
-      refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport, ignoreFinding, unignoreFinding, pruneIgnores, importRuntimeLog, clearRuntimeLog, runLocalCheck,
+      refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport, ignoreFinding, unignoreFinding, pruneIgnores, importRuntimeLog, setRuntimeRoots, clearRuntimeLog, runLocalCheck,
     }),
     [
       api, view, findingsFilter, showFindings, theme, setTheme, recent, forgetRecent, project, opening, openProject, closeProject, target,
       setTarget, scan, scanning, progress, runScan, deps, toolchain, refreshToolchain, installingRector,
       installRector, preview, previewMode, previewing, loadPreview, cancelPreview, applying, applyChanges, snapshots,
-      refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport, ignoreFinding, unignoreFinding, pruneIgnores, importRuntimeLog, clearRuntimeLog, runLocalCheck,
+      refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport, ignoreFinding, unignoreFinding, pruneIgnores, importRuntimeLog, setRuntimeRoots, clearRuntimeLog, runLocalCheck,
     ],
   );
 

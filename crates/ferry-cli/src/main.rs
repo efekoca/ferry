@@ -21,6 +21,7 @@ Options:
   --baseline <file>                  Compare with a baseline written by --write-baseline
   --write-baseline <file>            Save the current findings as a baseline
   --runtime-log <file>               Merge a PHP error log or PHPUnit deprecation output into the results
+  --runtime-root <path>              Project root in the log's paths; only paths under it count (repeatable)
   --allow-incomplete                 Don't fail when some files couldn't be scanned
   --lang <en|tr>                     Language of messages (default: en)
   -h, --help                         Show this help
@@ -59,6 +60,7 @@ struct Options {
     baseline: Option<PathBuf>,
     write_baseline: Option<PathBuf>,
     runtime_log: Option<PathBuf>,
+    runtime_roots: Vec<String>,
     blame: bool,
     allow_incomplete: bool,
 }
@@ -80,6 +82,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
     let (mut root, mut target, mut format, mut output, mut fail_on, mut lang) =
         (None, None, Format::Text, None, FailOn::Breaking, Lang::En);
     let (mut baseline, mut write_baseline, mut runtime_log, mut blame, mut allow_incomplete) = (None, None, None, false, false);
+    let mut runtime_roots = Vec::new();
     while let Some(arg) = it.next() {
         let mut value = |name: &str| it.next().cloned().ok_or_else(|| format!("{name} needs a value"));
         match arg.as_str() {
@@ -111,6 +114,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
             "--baseline" => baseline = Some(PathBuf::from(value("--baseline")?)),
             "--write-baseline" => write_baseline = Some(PathBuf::from(value("--write-baseline")?)),
             "--runtime-log" => runtime_log = Some(PathBuf::from(value("--runtime-log")?)),
+            "--runtime-root" => runtime_roots.extend(ferry_core::runtime::parse_roots(&value("--runtime-root")?)),
             "--blame" => blame = true,
             "--allow-incomplete" => allow_incomplete = true,
             "--lang" => {
@@ -137,7 +141,20 @@ fn parse(args: &[String]) -> Result<Options, String> {
     if fail_on == FailOn::New && baseline.is_none() {
         return Err("--fail-on new needs --baseline".into());
     }
-    Ok(Options { root, target, format, output, fail_on, lang, baseline, write_baseline, runtime_log, blame, allow_incomplete })
+    Ok(Options {
+        root,
+        target,
+        format,
+        output,
+        fail_on,
+        lang,
+        baseline,
+        write_baseline,
+        runtime_log,
+        runtime_roots,
+        blame,
+        allow_incomplete,
+    })
 }
 
 fn text(l: &Localized, lang: Lang) -> &str {
@@ -549,7 +566,7 @@ fn run(o: &Options) -> Result<Outcome, String> {
     if let Some(path) = &o.runtime_log {
         let text = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
         let events = ferry_core::runtime::parse(&String::from_utf8_lossy(&text));
-        let merged = ferry_core::runtime::merge(&root, &mut scan.findings, &events, o.target);
+        let merged = ferry_core::runtime::merge(&root, &mut scan.findings, &events, o.target, &o.runtime_roots);
         eprintln!(
             "ferry-cli: runtime log: {} events, {} matched findings, {} new, {} outside the project",
             events.len(),
@@ -676,6 +693,7 @@ mod tests {
             baseline: None,
             write_baseline: None,
             runtime_log: None,
+            runtime_roots: Vec::new(),
             blame: false,
             allow_incomplete: false,
         };
@@ -709,6 +727,7 @@ mod tests {
             baseline,
             write_baseline: write,
             runtime_log: None,
+            runtime_roots: Vec::new(),
             blame: false,
             allow_incomplete: false,
         };
@@ -740,6 +759,7 @@ mod tests {
                 baseline: None,
                 write_baseline: None,
                 runtime_log: None,
+                runtime_roots: Vec::new(),
                 blame,
                 allow_incomplete: false,
             };
