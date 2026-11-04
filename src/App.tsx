@@ -10,6 +10,7 @@ import { isTauri } from "./lib/api";
 import { StoreProvider, useStore } from "./lib/store";
 import { Changes } from "./screens/Changes";
 import { Findings } from "./screens/Findings";
+import { DockerCompare } from "./screens/DockerCompare";
 import { Dependencies, History, Roadmap, SettingsScreen } from "./screens/Other";
 import { Overview } from "./screens/Overview";
 import { Welcome } from "./screens/Welcome";
@@ -60,9 +61,9 @@ function Screen() {
     case "history":
       return <History />;
     case "runtime":
-      return <Roadmap kind="runtime" />;
+      return <DockerCompare />;
     case "ai":
-      return <Roadmap kind="ai" />;
+      return <Roadmap />;
     default:
       return <Overview />;
   }

@@ -5,7 +5,6 @@ import {
   CircleAlert,
   CircleCheck,
   CircleHelp,
-  Container,
   Eye,
   FileClock,
   FolderOpen,
@@ -21,7 +20,6 @@ import {
   Sun,
   Trash2,
   ShieldAlert,
-  Activity,
 } from "lucide-react";
 import { DiffViewer } from "../components/DiffViewer";
 import { ConfirmDialog, Sheet } from "../components/Modal";
@@ -996,16 +994,17 @@ export function SettingsScreen() {
   );
 }
 
-export function Roadmap({ kind }: { kind: "runtime" | "ai" }) {
+export function Roadmap() {
   const { t } = useI18n();
-  const { scan, showFindings } = useStore();
-  const content = t.roadmap[kind];
+  const content = t.roadmap.ai;
   return (
     <>
       <PageHeader title={content.title} />
       <div className="page-scroll">
         <div className="roadmap">
-          <div className="roadmap__icon">{kind === "runtime" ? <Container size={26} /> : <Bot size={26} />}</div>
+          <div className="roadmap__icon">
+            <Bot size={26} />
+          </div>
           <Badge tone="accent">{t.common.soon}</Badge>
           <h2>{content.title}</h2>
           <p>{content.text}</p>
@@ -1017,18 +1016,6 @@ export function Roadmap({ kind }: { kind: "runtime" | "ai" }) {
               </li>
             ))}
           </ul>
-          {kind === "runtime" && (
-            <div className="roadmap__today">
-              <Callout tone="info" icon={<Activity size={15} />}>
-                {t.roadmap.runtime.today}
-              </Callout>
-              {scan && (
-                <Button variant="secondary" size="sm" onClick={() => showFindings()}>
-                  {t.roadmap.runtime.openFindings}
-                </Button>
-              )}
-            </div>
-          )}
         </div>
       </div>
     </>

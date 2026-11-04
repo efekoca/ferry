@@ -158,7 +158,7 @@ export function Overview() {
                 <Step state="active" icon={<ScanSearch size={14} />} title={t.overview.steps.scan.title} desc={t.overview.steps.scan.text} />
                 <Step icon={<Sparkles size={14} />} title={t.overview.steps.fix.title} desc={t.overview.steps.fix.text} />
                 <Step icon={<Package size={14} />} title={t.overview.steps.deps.title} desc={t.overview.steps.deps.text} />
-                <Step icon={<Layers size={14} />} title={t.overview.steps.live.title} desc={t.overview.steps.live.text} badge={t.common.soon} />
+                <Step icon={<Layers size={14} />} title={t.overview.steps.live.title} desc={t.overview.steps.live.text} />
               </div>
             </Card>
           )}

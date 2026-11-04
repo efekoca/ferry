@@ -248,6 +248,28 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
       runtimeRoots = roots.split(",").map((r) => r.trim()).filter(Boolean);
       return withIgnores(lastScan);
     },
+    dockerCompare: async (_path, source, target) => {
+      if (!lastScan) throw new Error("Scan the project first.");
+      const run = (version: string, lintErrors: number, passed: boolean, log: string) => ({
+        version,
+        image: `php:${version}-cli`,
+        lintErrors,
+        tests: { exitCode: passed ? 0 : 2, timedOut: false, passed },
+        missingExtensions: ["mysqli"],
+        events: [],
+        log,
+      });
+      const event = { path: "/app/includes/cart.php", line: 44, level: "fatal" as const, message: "Error: Call to undefined function each()", count: 1 };
+      await new Promise((r) => setTimeout(r, opts.delay ?? 0));
+      runtimeLog = `Docker · PHP ${source} → ${target}`;
+      runtimeCheck = null;
+      return {
+        comparison: { source: run(source, 0, true, "OK (12 tests)"), target: { ...run(target, 1, false, "ERRORS!"), events: [event] }, dependenciesInstalled: true, newOnTarget: [event], goneOnTarget: [] },
+        scan: withIgnores(lastScan),
+      };
+    },
+    cancelDockerCompare: async () => {},
+    onDockerStep: async () => () => {},
     localPhpVersions: async () => [
       { line: "8.4", version: "8.4.27", path: "/opt/homebrew/opt/php@8.4/bin/php" },
       { line: "8.5", version: "8.5.12", path: "/opt/homebrew/bin/php" },

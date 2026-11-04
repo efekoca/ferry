@@ -417,6 +417,20 @@ describe("Ferry app", () => {
     expect(screen.getByText("Testler geçti.")).toBeInTheDocument();
   });
 
+  it("compares two versions in Docker and feeds the findings", async () => {
+    const user = userEvent.setup();
+    render(<App api={mockApi({ delay: 0 })} />);
+    await openAndScan(user);
+    await user.click(nav(/Docker karşılaştırması/));
+    await user.click(await screen.findByRole("button", { name: "Karşılaştırmayı başlat" }));
+    expect(await screen.findByText("PHP 8.4 sürümünde yeni sorunlar var.")).toBeInTheDocument();
+    expect(screen.getByText("Error: Call to undefined function each()")).toBeInTheDocument();
+    expect(screen.getByText("Başarısız (çıkış kodu 2)")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Bulgularda göster" }));
+    expect(await screen.findByText(/Docker · PHP .* → 8.4: 31 farklı mesaj/)).toBeInTheDocument();
+    expect(screen.queryByText("Sunucudaki proje kökü")).not.toBeInTheDocument();
+  });
+
   it("narrows an imported log to the project root on the server", async () => {
     const user = userEvent.setup();
     render(<App api={mockApi({ delay: 0 })} />);

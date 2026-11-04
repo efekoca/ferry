@@ -119,6 +119,44 @@ export interface CheckRun {
   log: string;
 }
 
+export const KNOWN_SOURCES = ["5.6", "7.0", "7.1", "7.2", "7.3", "7.4", "8.0", "8.1", "8.2", "8.3", "8.4"];
+
+export interface DockerEvent {
+  path: string;
+  line: number;
+  level: "fatal" | "warning" | "deprecated";
+  message: string;
+  count: number;
+}
+
+export interface DockerRun {
+  version: string;
+  image: string;
+  lintErrors: number;
+  tests: { exitCode: number | null; timedOut: boolean; passed: boolean } | null;
+  missingExtensions: string[];
+  events: DockerEvent[];
+  log: string;
+}
+
+export interface DockerComparison {
+  source: DockerRun;
+  target: DockerRun;
+  dependenciesInstalled: boolean;
+  newOnTarget: DockerEvent[];
+  goneOnTarget: DockerEvent[];
+}
+
+export interface DockerStep {
+  step: "install" | "lint" | "tests";
+  version: string | null;
+}
+
+export interface DockerResponse {
+  comparison: DockerComparison;
+  scan: ScanResult | null;
+}
+
 export interface RuntimeSummary {
   file: string;
   events: number;
