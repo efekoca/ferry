@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 const USAGE: &str = "Usage: ferry-cli scan <project> --target <8.2|8.3|8.4|8.5> [options]
-       ferry-cli compare <project> --target <version> [--source <version>] [--no-extensions] [--clean-images] [--page <path>] [--no-pages] [--format <text|json>]
+       ferry-cli compare <project> --target <version> [--source <version>] [--no-extensions] [--clean-images] [--page <path>] [--no-pages] [--db-dump <file>] [--db-live] [--db-seed] [--format <text|json>]
        ferry-cli clean-images
 
 Options:
@@ -34,6 +34,8 @@ Extensions the project uses are built into a local image first, unless --no-exte
 --clean-images removes those images afterwards, and clean-images removes all that Ferry built.
 Pages are served inside the containers and compared, starting at / and following links with GET.
 --page adds a starting path (repeatable), and --no-pages skips this.
+Each version can get its own copy of the database: --db-dump imports a .sql or .sql.gz file,
+--db-live copies a database on this computer, and --db-seed runs the project's migrations and seeders.
 
 Exit codes: 0 passed, 1 findings at the --fail-on level, 2 usage or run error,
 3 some files couldn't be scanned (unless --allow-incomplete).
@@ -642,6 +644,7 @@ fn run_compare(args: &[String]) -> Result<bool, String> {
     let (mut root, mut source, mut target, mut json_output, mut extensions) = (None, None, None, false, true);
     let mut clean_images = false;
     let mut pages = vec!["/".to_string()];
+    let mut database = None;
     let mut it = args.iter();
     while let Some(arg) = it.next() {
         let mut value = |name: &str| it.next().cloned().ok_or_else(|| format!("{name} needs a value"));
@@ -651,6 +654,9 @@ fn run_compare(args: &[String]) -> Result<bool, String> {
             "--no-extensions" => extensions = false,
             "--clean-images" => clean_images = true,
             "--no-pages" => pages.clear(),
+            "--db-dump" => database = Some(ferry_core::database::Source::Dump(PathBuf::from(value("--db-dump")?))),
+            "--db-live" => database = Some(ferry_core::database::Source::Live),
+            "--db-seed" => database = Some(ferry_core::database::Source::Seed),
             "--page" => pages.push(value("--page")?),
             "--format" => {
                 json_output = match value("--format")?.as_str() {
@@ -668,11 +674,12 @@ fn run_compare(args: &[String]) -> Result<bool, String> {
     let current = project::inspect(&root).map_err(|e| e.to_string())?.current_version;
     let source = source.or(current).ok_or("--source is required: the project's version couldn't be detected")?;
     let cancel = std::sync::atomic::AtomicBool::new(false);
-    let options = ferry_core::docker::Options { install_extensions: extensions, clean_images, pages };
+    let options = ferry_core::docker::Options { install_extensions: extensions, clean_images, pages, database };
     let result = ferry_core::docker::compare(&root, source, target, options, &cancel, |step| match step {
         ferry_core::docker::Step::Installing => eprintln!("ferry-cli: installing dependencies"),
         ferry_core::docker::Step::Extensions(v) => eprintln!("ferry-cli: preparing extensions for PHP {v}"),
         ferry_core::docker::Step::Lint(v) => eprintln!("ferry-cli: linting on PHP {v}"),
+        ferry_core::docker::Step::Database => eprintln!("ferry-cli: preparing the database"),
         ferry_core::docker::Step::Pages(v) => eprintln!("ferry-cli: requesting pages on PHP {v}"),
         ferry_core::docker::Step::Tests(v) => eprintln!("ferry-cli: running tests on PHP {v}"),
     })?;
@@ -707,6 +714,12 @@ fn run_compare(args: &[String]) -> Result<bool, String> {
         println!("{} of {} pages differ", changed.len(), result.pages.len());
         for p in changed {
             println!("  {} {:?} ({} -> {})", p.path, p.change, p.source_status, p.target_status);
+        }
+        if result.database_used {
+            println!("{} tables differ", result.data_changes.len());
+            for c in &result.data_changes {
+                println!("  {} ({:?} -> {:?} rows)", c.table, c.source_rows, c.target_rows);
+            }
         }
         println!("{} tests fail only on PHP {target}", result.new_failures.len());
         for name in &result.new_failures {

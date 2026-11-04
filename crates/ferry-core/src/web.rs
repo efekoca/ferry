@@ -41,6 +41,8 @@ while ($queue && count($seen) < $limit) {
     )) . "\n";
     preg_match_all('/href=["\']([^"\'#?]+)/i', $body, $links);
     foreach ($links[1] as $link) {
+        $link = preg_replace('#^https?://127\.0\.0\.1:8080#', '', $link);
+        if ($link === '') { continue; }
         $unsafe = preg_match('#logout|logoff|signout|delete|remove|destroy|\.(css|js|png|jpe?g|gif|svg|ico|woff2?|pdf|zip)$#i', $link);
         if ($link[0] === '/' && substr($link, 0, 2) !== '//' && !$unsafe) { $queue[] = $link; }
     }
@@ -91,8 +93,7 @@ pub struct PageDiff {
 impl PageDiff {
     /// Whether a page that worked on the source breaks on the target.
     pub fn broke(&self) -> bool {
-        let fatal = self.new_errors.iter().any(|e| e.contains("Fatal error") || e.contains("Uncaught") || e.contains("Parse error"));
-        !failed(self.source_status) && (failed(self.target_status) || fatal)
+        !failed(self.source_status) && (failed(self.target_status) || fatal(&self.new_errors))
     }
 }
 
@@ -134,8 +135,13 @@ fn failed(status: u16) -> bool {
     status == 0 || status >= 500
 }
 
+fn fatal(errors: &[String]) -> bool {
+    errors.iter().any(|e| e.contains("Fatal error") || e.contains("Uncaught") || e.contains("Parse error"))
+}
+
 fn classify(source: &Fetched, target: &Fetched, new_errors: &[String]) -> PageChange {
-    if failed(source.status) && failed(target.status) {
+    let broken = |page: &Fetched| failed(page.status) || fatal(&page.errors);
+    if broken(source) && broken(target) {
         PageChange::Unverified
     } else if source.status != target.status {
         PageChange::Status
@@ -212,6 +218,8 @@ mod tests {
         assert_eq!(change(page("/", 200, "a", &[]), page("/", 200, "a", &["Deprecated: x"])), PageChange::Errors);
         assert_eq!(change(page("/", 200, "a", &[]), page("/", 200, "b", &[])), PageChange::Body);
         assert_eq!(change(page("/", 500, "a", &[]), page("/", 500, "a", &[])), PageChange::Unverified);
+        let fatal = ["Uncaught PDOException: could not find driver"];
+        assert_eq!(change(page("/", 200, "a", &fatal), page("/", 200, "a", &fatal)), PageChange::Unverified);
         let moving = Fetched { stable: false, ..page("/", 200, "a", &[]) };
         assert_eq!(change(moving.clone(), page("/", 200, "b", &[])), PageChange::Unstable);
     }

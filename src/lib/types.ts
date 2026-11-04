@@ -152,6 +152,24 @@ export interface DockerPage {
   targetText: string;
 }
 
+export interface DatabasePlan {
+  engine: "mysql" | "postgres" | null;
+  host: string | null;
+  name: string | null;
+  user: string | null;
+  live: boolean;
+  seed: string | null;
+  dumps: string[];
+}
+
+export type DatabaseChoice = { kind: "dump"; path: string } | { kind: "live" } | { kind: "seed" };
+
+export interface DockerDataChange {
+  table: string;
+  sourceRows: number | null;
+  targetRows: number | null;
+}
+
 export interface DockerComparison {
   source: DockerRun;
   target: DockerRun;
@@ -159,6 +177,8 @@ export interface DockerComparison {
   installLog: string;
   newFailures: string[];
   pages: DockerPage[];
+  dataChanges: DockerDataChange[];
+  databaseUsed: boolean;
   newOnTarget: DockerEvent[];
   goneOnTarget: DockerEvent[];
 }
@@ -169,7 +189,7 @@ export interface DockerImageUsage {
 }
 
 export interface DockerStep {
-  step: "install" | "extensions" | "lint" | "pages" | "tests";
+  step: "install" | "extensions" | "lint" | "database" | "pages" | "tests";
   version: string | null;
 }
 

@@ -408,6 +408,21 @@
       check(after <= images, "the run removed the images it used");
     },
 
+    async function dockerDatabase() {
+      if (!P.docker) return emit("  skipped: FERRY_TEST_DOCKER isn't set");
+      const before = seen.length;
+      await openRecent(projects.unicode);
+      await scan();
+      await nav("Docker karşılaştırması");
+      const select = await until(() => $$("select").find((s) => [...s.options].some((o) => o.value.startsWith("dump:"))), "database choices");
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set;
+      setter.call(select, "dump:database/dump.sql");
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+      await click("Karşılaştırmayı başlat");
+      await until(() => text().includes("İstekler sonrası"), "data comparison", 300000);
+      noErrorToast(before);
+    },
+
     async function missingProject() {
       const before = seen.length;
       const item = await until(() => $$(".recent__item").find((b) => b.querySelector(".recent__path")?.textContent === projects.missing), "missing recent");

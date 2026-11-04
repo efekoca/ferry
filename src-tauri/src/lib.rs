@@ -9,7 +9,7 @@ use ferry_core::rules::FixKind;
 use ferry_core::runtime;
 use ferry_core::snapshot::{content_hash, fnv1a, Snapshot, SnapshotStore};
 use ferry_core::toolchain::{self, ToolchainStatus};
-use ferry_core::{diff, docker, report, t, PhpVersion};
+use ferry_core::{database, diff, docker, report, t, PhpVersion};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -294,6 +294,30 @@ async fn run_local_check(state: State<'_, AppState>, path: String, target: Strin
     Ok(respond(&root, scan, Some(&entry)))
 }
 
+#[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+enum DatabaseChoice {
+    Dump { path: String },
+    Live,
+    Seed,
+}
+
+impl DatabaseChoice {
+    fn into_source(self) -> database::Source {
+        match self {
+            DatabaseChoice::Dump { path } => database::Source::Dump(PathBuf::from(path)),
+            DatabaseChoice::Live => database::Source::Live,
+            DatabaseChoice::Seed => database::Source::Seed,
+        }
+    }
+}
+
+#[tauri::command]
+async fn database_plan(path: String) -> CmdResult<database::Plan> {
+    let root = project_root(&normalize_path(path))?;
+    blocking(move || Ok(database::plan(&root))).await
+}
+
 #[derive(Clone, Serialize)]
 struct DockerStep {
     step: &'static str,
@@ -307,6 +331,7 @@ struct DockerResponse {
     scan: Option<ScanResponse>,
 }
 
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 async fn docker_compare<R: Runtime>(
     app: AppHandle<R>,
@@ -316,6 +341,7 @@ async fn docker_compare<R: Runtime>(
     extensions: bool,
     clean_images: bool,
     pages: Vec<String>,
+    database: Option<DatabaseChoice>,
 ) -> CmdResult<DockerResponse> {
     let path = normalize_path(path);
     let source: PhpVersion = source.parse().map_err(|_| t!("Geçersiz sürüm.", "Invalid version."))?;
@@ -331,12 +357,14 @@ async fn docker_compare<R: Runtime>(
     let result = blocking(move || {
         let _running = RunningGuard(running);
         let root = project_root(&key)?;
-        let options = docker::Options { install_extensions: extensions, clean_images, pages };
+        let options =
+            docker::Options { install_extensions: extensions, clean_images, pages, database: database.map(DatabaseChoice::into_source) };
         let comparison = docker::compare(&root, source, target, options, &mine, |step| {
             let (step, version) = match step {
                 docker::Step::Installing => ("install", None),
                 docker::Step::Extensions(v) => ("extensions", Some(v.to_string())),
                 docker::Step::Lint(v) => ("lint", Some(v.to_string())),
+                docker::Step::Database => ("database", None),
                 docker::Step::Pages(v) => ("pages", Some(v.to_string())),
                 docker::Step::Tests(v) => ("tests", Some(v.to_string())),
             };
@@ -1144,6 +1172,7 @@ pub fn with_commands<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R
         import_runtime_log,
         set_runtime_roots,
         docker_compare,
+        database_plan,
         cancel_docker_compare,
         docker_image_usage,
         remove_docker_images,
