@@ -91,6 +91,7 @@ pub struct ProjectIndex {
     functions: HashSet<String>,
     function_required: HashMap<String, usize>,
     version_includes: HashSet<String>,
+    dead_includes: HashSet<String>,
     types: HashMap<String, Vec<TypeInfo>>,
     interfaces: HashMap<String, Vec<InterfaceInfo>>,
     constants: HashSet<String>,
@@ -118,6 +119,7 @@ impl ProjectIndex {
     pub fn build_for(root: &Path, files: &[PathBuf], target: Option<crate::version::PhpVersion>) -> Self {
         let mut index = Self { framework: Some(crate::project::detect_framework(root)), target, ..Self::default() };
         let mut seen = HashSet::new();
+        let mut declared = Vec::new();
         for path in files.iter().cloned().chain(composer_files(root)) {
             if !seen.insert(std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone())) {
                 continue;
@@ -126,7 +128,17 @@ impl ProjectIndex {
                 continue;
             }
             if let Ok(bytes) = std::fs::read(&path) {
-                index.add(&lex(&String::from_utf8_lossy(&bytes)).tokens);
+                let added = index.add(&lex(&String::from_utf8_lossy(&bytes)).tokens);
+                let base = path.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+                declared.push((base, added));
+            }
+        }
+        for (base, names) in declared {
+            if index.dead_includes.contains(&base) {
+                for name in names {
+                    index.functions.remove(&name);
+                    index.function_required.remove(&name);
+                }
             }
         }
         index
@@ -171,7 +183,8 @@ impl ProjectIndex {
         self.constants.contains(name)
     }
 
-    fn add(&mut self, tokens: &[Token]) {
+    fn add(&mut self, tokens: &[Token]) -> Vec<String> {
+        let mut added = Vec::new();
         self.constants.extend(crate::analyzer::defined_constants(tokens));
         self.mysqli_report |= tokens.iter().any(|t| t.is_ident_ci("mysqli_report") || t.is_ident_ci("report_mode"));
         let methods = crate::analyzer::method_tokens(tokens);
@@ -200,10 +213,13 @@ impl ProjectIndex {
                 if known {
                     *entry = (*entry).min(required);
                 }
-                self.functions.insert(qualified);
+                if self.functions.insert(qualified.clone()) {
+                    added.push(qualified);
+                }
             }
         }
         self.version_includes.extend(version_includes(tokens));
+        self.dead_includes.extend(dead_includes(tokens, &dead));
         for decl in type_decls(tokens) {
             let name = decl.name;
             self.types.entry(name).or_default().push(decl.decl.info);
@@ -252,6 +268,7 @@ impl ProjectIndex {
                 constants,
             });
         }
+        added
     }
 
     pub(crate) fn instance_method(&self, fqn: &str, method: &str) -> Option<bool> {
@@ -674,6 +691,24 @@ fn version_condition(tokens: &[Token], close: usize) -> bool {
     open > 0
         && (tokens[open - 1].is_ident_ci("if") || tokens[open - 1].is_ident_ci("elseif"))
         && tokens[open..close].iter().any(|t| VERSION_CHECKS.iter().any(|c| t.text.trim_start_matches('\\').eq_ignore_ascii_case(c)))
+}
+
+fn included_name(tokens: &[Token], k: usize) -> Option<String> {
+    let file = tokens[k + 1..].iter().take_while(|t| !t.is_punct(";")).filter(|t| matches!(t.kind, TokenKind::Str { .. })).last()?;
+    let name = file.text.trim_matches(|c| c == '\'' || c == '"');
+    Some(name.rsplit(['/', '\\']).next().unwrap_or(name).to_ascii_lowercase())
+}
+
+const INCLUDES: [&str; 4] = ["require", "require_once", "include", "include_once"];
+
+fn dead_includes(tokens: &[Token], dead: &[crate::guards::Span]) -> Vec<String> {
+    (0..tokens.len())
+        .filter(|&k| INCLUDES.iter().any(|w| tokens[k].is_ident_ci(w)))
+        .filter(|&k| {
+            dead.iter().any(|&(start, end)| (tokens[k].line, tokens[k].column) >= start && (tokens[k].line, tokens[k].column) <= end)
+        })
+        .filter_map(|k| included_name(tokens, k))
+        .collect()
 }
 
 fn version_includes(tokens: &[Token]) -> Vec<String> {
