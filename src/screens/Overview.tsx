@@ -49,7 +49,7 @@ function topRules(findings: Finding[], loc: (f: Finding) => string) {
 
 export function Overview() {
   const { t, loc } = useI18n();
-  const { project, target, setTarget, scan, scanning, progress, runScan, deps, setView, showFindings, toolchain, exportReport, preview } =
+  const { project, target, setTarget, scan, scanning, progress, runScan, deps, setView, showFindings, toolchain, exportReport, preview, dockerHistory } =
     useStore();
   const [pendingTarget, setPendingTarget] = useState<Target | null>(null);
   if (!project) return null;
@@ -62,8 +62,8 @@ export function Overview() {
 
   const pct = progress && progress.total > 0 ? (progress.done / progress.total) * 100 : null;
   const s = scan?.summary;
-  const ready = scan ? readiness(scan, deps) : null;
-  const settled = !!ready && ready.blockers === 0 && ready.unscanned === 0 && ready.deps.state === "verified" && ready.check.state === "passed";
+  const ready = scan ? readiness(scan, deps, dockerHistory) : null;
+  const settled = !!ready && ready.blockers === 0 && ready.unscanned === 0 && ready.deps.state === "verified" && ready.check.state === "passed" && ready.docker !== "failed";
   const baseTone = s ? scoreTone(s.score) : "auto";
   const tone = ready && ready.blockers > 0 && baseTone === "auto" ? "manual" : baseTone;
   const blockers = dependencyBlockers(deps);
@@ -192,6 +192,7 @@ export function Overview() {
                       onCoverage={() => document.getElementById("unscanned")?.scrollIntoView({ block: "center" })}
                       onDeps={() => setView("dependencies")}
                       onCheck={() => showFindings()}
+                      onDocker={() => setView("runtime")}
                     />
                   )}
                   <p className="score__note">{t.overview.scoreNote}</p>
@@ -594,12 +595,14 @@ function ReadinessList({
   onCoverage,
   onDeps,
   onCheck,
+  onDocker,
 }: {
   ready: Readiness;
   onBlockers: () => void;
   onCoverage: () => void;
   onDeps: () => void;
   onCheck: () => void;
+  onDocker: () => void;
 }) {
   const { t } = useI18n();
   const r = t.overview.readiness;
@@ -624,6 +627,12 @@ function ReadinessList({
       value: ready.check.state === "passed" ? r.checkPassed(ready.check.kind) : ready.check.state === "failed" ? r.checkFailed(ready.check.kind) : r.checkNone,
       state: ready.check.state === "passed" ? "ok" : ready.check.state === "failed" ? "bad" : "warn",
       onClick: onCheck,
+    },
+    {
+      label: r.docker,
+      value: r.dockerState[ready.docker],
+      state: ready.docker === "passed" ? "ok" : ready.docker === "failed" ? "bad" : "warn",
+      onClick: onDocker,
     },
   ];
   const icon = { ok: <Check size={13} aria-hidden />, warn: <CircleDashed size={13} aria-hidden />, bad: <CircleAlert size={13} aria-hidden /> };

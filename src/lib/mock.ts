@@ -1,6 +1,6 @@
 import type { Api } from "./api";
 import type { Localized } from "../i18n";
-import type {
+import type { DockerSummary,
   CheckRun,
   DependencyReport,
   DiffLine,
@@ -173,6 +173,7 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
   let runtimeCheck: CheckRun | null = null;
   let runtimeRoots: string[] = [];
   let dockerImages = 0;
+  let dockerRuns: DockerSummary[] = [];
   const withRuntime = (findings: Finding[]): { findings: Finding[]; runtime: ScanResult["runtime"] } => {
     if (!runtimeLog) return { findings: findings.map((f) => ({ ...f, runtimeHits: 0 })), runtime: null };
     const hit = new Set(findings.filter((f) => f.ruleId.startsWith("removed.")).slice(0, 3).map((f) => f.id));
@@ -249,6 +250,7 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
       runtimeRoots = roots.split(",").map((r) => r.trim()).filter(Boolean);
       return withIgnores(lastScan);
     },
+    dockerHistory: async () => dockerRuns,
     dockerImageUsage: async () => ({ images: dockerImages, bytes: dockerImages * 650_000_000 }),
     removeDockerImages: async () => {
       const removed = dockerImages;
@@ -273,6 +275,7 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
       const event = { path: "/app/includes/cart.php", line: 44, level: "fatal" as const, message: "Error: Call to undefined function each()", count: 1 };
       await new Promise((r) => setTimeout(r, opts.delay ?? 0));
       dockerImages = extensions && !cleanImages ? 2 : dockerImages;
+      dockerRuns = [{ at: Date.now() / 1000, source, target, regressed: true, testsCompared: true, pages: pages.length ? 2 : 0, brokenPages: pages.length ? 1 : 0, differingPages: pages.length ? 1 : 0, unverifiedPages: 0, newFailures: 1, newMessages: 1, dataChanges: database ? 1 : 0 }, ...dockerRuns];
       runtimeLog = `Docker · PHP ${source} → ${target}`;
       runtimeCheck = null;
       return {

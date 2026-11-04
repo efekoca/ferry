@@ -40,6 +40,7 @@ pub struct AppState {
     writes: Arc<Mutex<()>>,
     rector_cancel: Mutex<HashMap<String, Arc<AtomicBool>>>,
     docker_cancel: Mutex<HashMap<String, Arc<AtomicBool>>>,
+    docker_results: Mutex<HashMap<String, docker::Comparison>>,
     rector_running: Arc<AtomicUsize>,
     shutdown: Arc<AtomicBool>,
     next_preview: AtomicU64,
@@ -59,6 +60,7 @@ impl AppState {
             writes: Arc::new(Mutex::new(())),
             rector_cancel: Mutex::new(HashMap::new()),
             docker_cancel: Mutex::new(HashMap::new()),
+            docker_results: Mutex::new(HashMap::new()),
             rector_running: Arc::new(AtomicUsize::new(0)),
             shutdown: Arc::new(AtomicBool::new(false)),
             next_preview: AtomicU64::new(1),
@@ -200,6 +202,10 @@ fn respond(root: &Path, mut scan: ScanResult, log: Option<&RuntimeLog>) -> ScanR
 }
 
 impl AppState {
+    fn docker_history_path(&self, path: &str) -> PathBuf {
+        self.data_dir.join("docker").join(format!("{:016x}.json", fnv1a(path.as_bytes())))
+    }
+
     fn runtime_log(&self, path: &str) -> Option<RuntimeLog> {
         self.runtime.lock().unwrap().get(path).cloned()
     }
@@ -387,6 +393,8 @@ async fn docker_compare<R: Runtime>(
         }
     }
     let (root, comparison) = result?;
+    let _ = docker::record(&state.docker_history_path(&path), comparison.summary(now_secs()));
+    state.docker_results.lock().unwrap().insert(path.clone(), comparison.clone());
     let entry = RuntimeLog {
         file: format!("Docker · PHP {source} → {target}"),
         events: comparison.new_on_target.clone(),
@@ -398,6 +406,11 @@ async fn docker_compare<R: Runtime>(
         state.runtime.lock().unwrap().insert(path, entry.clone());
     }
     Ok(DockerResponse { comparison, scan: scan.map(|scan| respond(&root, scan, Some(&entry))) })
+}
+
+#[tauri::command]
+fn docker_history(state: State<'_, AppState>, path: String) -> Vec<docker::Summary> {
+    docker::history(&state.docker_history_path(&normalize_path(path)))
 }
 
 #[tauri::command]
@@ -422,6 +435,7 @@ fn close_project(state: State<'_, AppState>, path: String) {
     let path = normalize_path(path);
     state.runtime.lock().unwrap().remove(&path);
     state.previews.lock().unwrap().remove(&path);
+    state.docker_results.lock().unwrap().remove(&path);
 }
 
 #[tauri::command]
@@ -1128,12 +1142,13 @@ async fn export_report(state: State<'_, AppState>, path: String, destination: St
     let path = normalize_path(path);
     let scan = state.scans.lock().unwrap().get(&path).cloned().ok_or_else(|| t!("Önce projeyi tarayın.", "Scan the project first."))?;
     let log = state.runtime_log(&path);
+    let comparison = state.docker_results.lock().unwrap().get(&path).filter(|c| c.target.version == scan.target).cloned();
     blocking(move || {
         let root = project_root(&path)?;
         let info = project::inspect(&root).map_err(|e| e.to_string())?;
         let scan = respond(&root, scan, log.as_ref()).scan;
         let deps = deps::check(&root, scan.target);
-        let md = report::to_markdown(&info, &scan, Some(&deps), i18n::lang());
+        let md = report::to_markdown(&info, &scan, Some(&deps), comparison.as_ref(), i18n::lang());
         std::fs::write(&destination, md).map_err(|e| {
             let e = ferry_core::i18n::io_error(&e);
             t!("Rapor kaydedilemedi: {e}", "Couldn't save the report: {e}")
@@ -1196,6 +1211,7 @@ pub fn with_commands<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R
         database_plan,
         cancel_docker_compare,
         docker_image_usage,
+        docker_history,
         remove_docker_images,
         clear_runtime_log,
         local_php_versions,

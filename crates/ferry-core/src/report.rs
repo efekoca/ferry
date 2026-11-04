@@ -79,7 +79,61 @@ fn md_escape(s: &str) -> String {
     s.replace('|', "\\|").replace('\n', " ")
 }
 
-pub fn to_markdown(project: &ProjectInfo, scan: &ScanResult, deps: Option<&DependencyReport>, lang: Lang) -> String {
+fn docker_section(result: &crate::docker::Comparison, lang: Lang) -> String {
+    let l = |t: Text| t.get(lang).to_string();
+    let summary = result.summary(0);
+    let mut md = format!("## {}\n\n", l(Text::new("Docker karşılaştırması", "Docker comparison")));
+    let line = match lang {
+        Lang::Tr => format!("PHP {} ile PHP {} karşılaştırıldı.", summary.source, summary.target),
+        Lang::En => format!("PHP {} was compared with PHP {}.", summary.source, summary.target),
+    };
+    let verdict = if summary.regressed {
+        l(Text::new("Hedef sürümde yeni sorunlar var.", "The target version has new problems."))
+    } else if summary.tests_compared {
+        l(Text::new(
+            "Testler iki sürümde de çalıştı ve hedef yeni bir hata eklemedi.",
+            "Tests ran on both versions and the target added no new errors.",
+        ))
+    } else {
+        l(Text::new(
+            "Testler karşılaştırılamadı; bu sonuç sözdizimi ve sayfa kontrolüne dayanıyor.",
+            "Tests couldn't be compared, so this result rests on the syntax and page checks.",
+        ))
+    };
+    md.push_str(&format!("{line} {verdict}\n\n"));
+    let (pages, failures, messages, tables) = match lang {
+        Lang::Tr => ("Farklı sayfa", "Yalnızca hedefte kalan test", "Hedefte yeni PHP mesajı", "Farklı tablo"),
+        Lang::En => ("Differing pages", "Tests failing only on the target", "New PHP messages on the target", "Differing tables"),
+    };
+    md.push_str(&format!("- {pages}: {} / {}\n", summary.differing_pages, summary.pages));
+    if summary.unverified_pages > 0 {
+        let label = l(Text::new("Karşılaştırılamayan sayfa", "Pages that couldn't be compared"));
+        md.push_str(&format!("- {label}: {}\n", summary.unverified_pages));
+    }
+    md.push_str(&format!("- {failures}: {}\n- {messages}: {}\n", summary.new_failures, summary.new_messages));
+    if result.database_used {
+        md.push_str(&format!("- {tables}: {}\n", summary.data_changes));
+    }
+    md.push('\n');
+    for name in result.new_failures.iter().take(20) {
+        md.push_str(&format!("- `{}`\n", md_escape(name)));
+    }
+    for page in result.pages.iter().filter(|p| p.broke()).take(20) {
+        md.push_str(&format!("- `{}` ({} → {})\n", md_escape(&page.path), page.source_status, page.target_status));
+    }
+    if !result.new_failures.is_empty() || result.pages.iter().any(|p| p.broke()) {
+        md.push('\n');
+    }
+    md
+}
+
+pub fn to_markdown(
+    project: &ProjectInfo,
+    scan: &ScanResult,
+    deps: Option<&DependencyReport>,
+    docker: Option<&crate::docker::Comparison>,
+    lang: Lang,
+) -> String {
     let l = |t: Text| t.get(lang);
     let s = summarize(&scan.findings);
     let current = project.current_version.map_or_else(|| l(Text::new("bilinmiyor", "unknown")).to_string(), |v| format!("PHP {v}"));
@@ -225,6 +279,9 @@ pub fn to_markdown(project: &ProjectInfo, scan: &ScanResult, deps: Option<&Depen
             md.push('\n');
         }
     }
+    if let Some(result) = docker {
+        md.push_str(&docker_section(result, lang));
+    }
     md.push_str(l(Text::new("---\nFerry ile hazırlandı.\n", "---\nGenerated with Ferry.\n")));
     md
 }
@@ -272,9 +329,43 @@ mod tests {
             errors: vec![],
             duration_ms: 1,
         };
-        let md = to_markdown(&project, &scan, Some(&deps), Lang::En);
+        let md = to_markdown(&project, &scan, Some(&deps), None, Lang::En);
         assert!(md.contains("1 package also couldn't be confirmed for PHP 8.4."), "{md}");
         assert!(md.contains("a/old"), "{md}");
+    }
+
+    #[test]
+    fn markdown_includes_the_docker_comparison() {
+        let run = |version: &str| crate::docker::VersionRun {
+            version: version.parse().unwrap(),
+            image: String::new(),
+            lint_errors: 0,
+            tests: None,
+            failed_tests: Vec::new(),
+            crawl: Default::default(),
+            data: Default::default(),
+            missing_extensions: Vec::new(),
+            installed_extensions: Vec::new(),
+            image_failed: false,
+            events: Vec::new(),
+            log: String::new(),
+        };
+        let comparison = crate::docker::Comparison {
+            source: run("7.4"),
+            target: run("8.4"),
+            dependencies_installed: true,
+            install_log: String::new(),
+            new_failures: vec!["CartTest::testTotal".into()],
+            pages: Vec::new(),
+            data_changes: Vec::new(),
+            database_used: false,
+            new_on_target: Vec::new(),
+            gone_on_target: Vec::new(),
+        };
+        assert!(comparison.regressed());
+        let text = docker_section(&comparison, Lang::En);
+        assert!(text.contains("PHP 7.4 was compared with PHP 8.4. The target version has new problems."), "{text}");
+        assert!(text.contains("`CartTest::testTotal`"), "{text}");
     }
 
     #[test]
@@ -318,10 +409,10 @@ mod tests {
             errors: vec![],
             duration_ms: 1,
         };
-        let md = to_markdown(&project, &scan, None, Lang::Tr);
+        let md = to_markdown(&project, &scan, None, None, Lang::Tr);
         assert!(md.starts_with("# Ferry raporu: demo"));
         assert!(md.contains("| `x.php` | 1 | each() (PHP 8.0) | Kritik | Gözden geçir |"));
-        let md = to_markdown(&project, &scan, None, Lang::En);
+        let md = to_markdown(&project, &scan, None, None, Lang::En);
         assert!(md.starts_with("# Ferry report: demo"));
         assert!(md.contains("| Breaking | Review | foreach or key()/current()/next() |"));
 
@@ -334,13 +425,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("composer.lock"), r#"{"packages":[{"name":"a/b","version":"1.0.0"}]}"#).unwrap();
         let deps = crate::deps::check_packages(dir.path(), "8.4".parse().unwrap());
-        let md = to_markdown(&project, &scan, Some(&deps), Lang::En);
+        let md = to_markdown(&project, &scan, Some(&deps), None, Lang::En);
         assert!(md.contains("No blockers found, but 1 package couldn't be confirmed") && !md.contains("look compatible"), "{md}");
         std::fs::write(dir.path().join("composer.lock"), "{broken").unwrap();
         let deps = crate::deps::check_packages(dir.path(), "8.4".parse().unwrap());
-        assert!(to_markdown(&project, &scan, Some(&deps), Lang::En).contains("composer.lock couldn't be read"));
+        assert!(to_markdown(&project, &scan, Some(&deps), None, Lang::En).contains("composer.lock couldn't be read"));
 
-        let md = to_markdown(&project, &partial, None, Lang::En);
+        let md = to_markdown(&project, &partial, None, None, Lang::En);
         assert!(md.contains("## Files not scanned") && md.contains("- `big.php`: too large"), "{md}");
         assert!(
             md.contains("in the files that could be scanned") && !md.contains("Nothing incompatible with the target version was found.\n")

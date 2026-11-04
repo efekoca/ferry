@@ -432,6 +432,10 @@ describe("Ferry app", () => {
     expect(screen.getAllByText("mysqli")).toHaveLength(2);
     await user.click(screen.getByRole("button", { name: "Bulgularda göster" }));
     expect(await screen.findByText(/Docker · PHP .* → 8.4: 31 farklı mesaj/)).toBeInTheDocument();
+    await user.click(nav(/Genel bakış/));
+    expect(await screen.findByRole("button", { name: "Yeni sorunlar var" })).toBeInTheDocument();
+    await user.click(nav(/Geçmiş/));
+    expect(await screen.findByText("Docker karşılaştırmaları")).toBeInTheDocument();
     expect(screen.queryByText("Sunucudaki proje kökü")).not.toBeInTheDocument();
   });
 
