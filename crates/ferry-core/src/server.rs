@@ -30,7 +30,7 @@ pub fn scan(root: &Path, target: PhpVersion) -> (Vec<Finding>, Vec<FileError>) {
     let mut out = Vec::new();
     let mut errors = Vec::new();
     let mut seen = 0;
-    for entry in WalkDir::new(root).max_depth(8).follow_links(false).into_iter().filter_entry(keep) {
+    for entry in WalkDir::new(root).follow_links(false).into_iter().filter_entry(keep) {
         seen += 1;
         if seen > MAX_ENTRIES || out.len() > MAX_FILES {
             errors.push(FileError {
@@ -525,6 +525,17 @@ mod tests {
         let docker = found.iter().find(|f| f.file == "Dockerfile").unwrap();
         assert_eq!((docker.title.en.as_str(), docker.since.to_string()), ("PHP 7.4 pinned", "8.4".to_string()));
         assert!(scan(root, PhpVersion::new(8, 2)).0.iter().all(|f| f.file != ".tool-versions"));
+    }
+
+    #[test]
+    fn config_files_are_found_at_any_depth() {
+        let dir = tempfile::tempdir().unwrap();
+        let deep = dir.path().join("a/b/c/d/e/f/g/h/i");
+        std::fs::create_dir_all(&deep).unwrap();
+        std::fs::write(deep.join("php.ini"), "mbstring.func_overload=1\n").unwrap();
+        let (findings, errors) = scan(dir.path(), PhpVersion::new(8, 5));
+        assert!(errors.is_empty());
+        assert!(findings.iter().any(|f| f.file.ends_with("php.ini")));
     }
 
     #[test]

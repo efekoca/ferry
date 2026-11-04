@@ -113,7 +113,7 @@ pub fn run_tests(php: &Path, root: &Path, timeout: Duration, cancel: &std::sync:
         command: format!("{} vendor/bin/phpunit {}", php.display(), extra.join(" ")).trim_end().to_string(),
         exit_code,
         timed_out,
-        passed: exit_code == Some(0) && done.stopped.is_none(),
+        passed: exit_code == Some(0) && done.stopped.is_none() && ran_tests(&output),
         duration_ms: done.duration.as_millis() as u64,
         log: tail(&output),
         output,
@@ -121,8 +121,18 @@ pub fn run_tests(php: &Path, root: &Path, timeout: Duration, cancel: &std::sync:
     })
 }
 
+fn ran_tests(output: &str) -> bool {
+    !output.contains("No tests executed")
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_empty_test_suite_is_not_a_pass() {
+        assert!(!super::ran_tests("PHPUnit 11.0\n\nNo tests executed!\n"));
+        assert!(super::ran_tests("OK (3 tests, 5 assertions)\n"));
+    }
+
     use super::*;
 
     #[test]
