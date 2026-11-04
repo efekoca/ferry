@@ -82,7 +82,7 @@ const app = spawn(exe, [], {
   env: {
     ...process.env,
     FERRY_E2E: bundled,
-    FERRY_E2E_ROOT: JSON.stringify({ demo, fixtures }),
+    FERRY_E2E_ROOT: JSON.stringify({ demo, fixtures, docker: !!process.env.FERRY_TEST_DOCKER }),
     FERRY_DATA_DIR: join(work, "data"),
     FERRY_TOOLS_DIR: tools,
   },

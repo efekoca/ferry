@@ -9,7 +9,7 @@ use ferry_core::rules::FixKind;
 use ferry_core::runtime;
 use ferry_core::snapshot::{content_hash, fnv1a, Snapshot, SnapshotStore};
 use ferry_core::toolchain::{self, ToolchainStatus};
-use ferry_core::{diff, report, t, PhpVersion};
+use ferry_core::{diff, docker, report, t, PhpVersion};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -39,6 +39,7 @@ pub struct AppState {
     previews: Mutex<HashMap<String, (u64, RectorPreview)>>,
     writes: Arc<Mutex<()>>,
     rector_cancel: Mutex<HashMap<String, Arc<AtomicBool>>>,
+    docker_cancel: Mutex<HashMap<String, Arc<AtomicBool>>>,
     rector_running: Arc<AtomicUsize>,
     shutdown: Arc<AtomicBool>,
     next_preview: AtomicU64,
@@ -57,6 +58,7 @@ impl AppState {
             previews: Mutex::new(HashMap::new()),
             writes: Arc::new(Mutex::new(())),
             rector_cancel: Mutex::new(HashMap::new()),
+            docker_cancel: Mutex::new(HashMap::new()),
             rector_running: Arc::new(AtomicUsize::new(0)),
             shutdown: Arc::new(AtomicBool::new(false)),
             next_preview: AtomicU64::new(1),
@@ -290,6 +292,73 @@ async fn run_local_check(state: State<'_, AppState>, path: String, target: Strin
     .await?;
     state.runtime.lock().unwrap().insert(root.to_string_lossy().to_string(), entry.clone());
     Ok(respond(&root, scan, Some(&entry)))
+}
+
+#[derive(Clone, Serialize)]
+struct DockerStep {
+    step: &'static str,
+    version: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DockerResponse {
+    comparison: docker::Comparison,
+    scan: Option<ScanResponse>,
+}
+
+#[tauri::command]
+async fn docker_compare<R: Runtime>(app: AppHandle<R>, path: String, source: String, target: String) -> CmdResult<DockerResponse> {
+    let path = normalize_path(path);
+    let source: PhpVersion = source.parse().map_err(|_| t!("Geçersiz sürüm.", "Invalid version."))?;
+    let target = parse_target(&target)?;
+    let state = app.state::<AppState>();
+    let cancel = Arc::new(AtomicBool::new(false));
+    if let Some(previous) = state.docker_cancel.lock().unwrap().insert(path.clone(), cancel.clone()) {
+        previous.store(true, Ordering::Relaxed);
+    }
+    let running = state.rector_running.clone();
+    running.fetch_add(1, Ordering::SeqCst);
+    let (handle, key, mine) = (app.clone(), path.clone(), cancel.clone());
+    let result = blocking(move || {
+        let _running = RunningGuard(running);
+        let root = project_root(&key)?;
+        let comparison = docker::compare(&root, source, target, &mine, |step| {
+            let (step, version) = match step {
+                docker::Step::Installing => ("install", None),
+                docker::Step::Lint(v) => ("lint", Some(v.to_string())),
+                docker::Step::Tests(v) => ("tests", Some(v.to_string())),
+            };
+            let _ = handle.emit("docker://step", DockerStep { step, version });
+        })?;
+        Ok((root, comparison))
+    })
+    .await;
+    {
+        let mut tokens = state.docker_cancel.lock().unwrap();
+        if tokens.get(&path).is_some_and(|t| Arc::ptr_eq(t, &cancel)) {
+            tokens.remove(&path);
+        }
+    }
+    let (root, comparison) = result?;
+    let entry = RuntimeLog {
+        file: format!("Docker · PHP {source} → {target}"),
+        events: comparison.new_on_target.clone(),
+        check: None,
+        roots: vec![docker::CONTAINER_ROOT.to_string()],
+    };
+    let scan = state.scans.lock().unwrap().get(&path).cloned();
+    if scan.is_some() {
+        state.runtime.lock().unwrap().insert(path, entry.clone());
+    }
+    Ok(DockerResponse { comparison, scan: scan.map(|scan| respond(&root, scan, Some(&entry))) })
+}
+
+#[tauri::command]
+fn cancel_docker_compare(state: State<'_, AppState>, path: String) {
+    if let Some(token) = state.docker_cancel.lock().unwrap().get(&normalize_path(path)) {
+        token.store(true, Ordering::Relaxed);
+    }
 }
 
 #[tauri::command]
@@ -1053,6 +1122,8 @@ pub fn with_commands<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R
         prune_ignores,
         import_runtime_log,
         set_runtime_roots,
+        docker_compare,
+        cancel_docker_compare,
         clear_runtime_log,
         local_php_versions,
         run_local_check,
@@ -1106,6 +1177,7 @@ pub fn run() {
             let state = app.state::<AppState>();
             state.shutdown.store(true, Ordering::Relaxed);
             state.rector_cancel.lock().unwrap().values().for_each(|t| t.store(true, Ordering::Relaxed));
+            state.docker_cancel.lock().unwrap().values().for_each(|t| t.store(true, Ordering::Relaxed));
             let started = Instant::now();
             while state.rector_running.load(Ordering::SeqCst) > 0 && started.elapsed() < Duration::from_secs(3) {
                 std::thread::sleep(Duration::from_millis(50));

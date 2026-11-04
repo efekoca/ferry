@@ -14,6 +14,8 @@ import type {
   Snapshot,
   Target,
   ToolchainStatus,
+  DockerComparison,
+  DockerStep,
 } from "./types";
 import { TARGETS } from "./types";
 import { isBlockedTarget } from "./security";
@@ -116,6 +118,10 @@ interface AppStore {
   previewing: boolean;
   loadPreview(mode: RectorMode): Promise<boolean>;
   cancelPreview(): void;
+  docker: DockerComparison | null;
+  dockerStep: DockerStep | null;
+  runDocker(source: string): Promise<boolean>;
+  cancelDocker(): void;
   applying: boolean;
   applyChanges(files: string[]): Promise<boolean>;
 
@@ -153,6 +159,8 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
   const [progress, setProgress] = useState<ScanProgress | null>(null);
   const [deps, setDeps] = useState<DependencyReport | null>(null);
   const [toolchain, setToolchain] = useState<ToolchainStatus | null>(null);
+  const [docker, setDocker] = useState<DockerComparison | null>(null);
+  const [dockerStep, setDockerStep] = useState<DockerStep | null>(null);
   const [installingRector, setInstallingRector] = useState(false);
   const [preview, setPreview] = useState<RectorPreview | null>(null);
   const [previewMode, setPreviewMode] = useState<RectorMode>("compat");
@@ -212,6 +220,7 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
     api?.cancelPreview().catch(() => {});
     generation.current++;
     previewSeq.current++;
+    setDocker(null);
     setScan(null);
     setDeps(null);
     setPreview(null);
@@ -377,6 +386,32 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
     api?.cancelPreview(project?.root).catch(() => {});
   }, [api, project]);
 
+  const runDocker = useCallback(
+    async (source: string) => {
+      if (!api || !project) return false;
+      const root = project.root;
+      setDockerStep({ step: "lint", version: source });
+      const stop = await api.onDockerStep(setDockerStep);
+      try {
+        const result = await api.dockerCompare(root, source, target);
+        if (rootRef.current !== root) return false;
+        setDocker(result.comparison);
+        if (result.scan) setScan(result.scan);
+        return true;
+      } catch (e) {
+        fail(t.docker.failed, e);
+        return false;
+      } finally {
+        stop();
+        setDockerStep(null);
+      }
+    },
+    [api, project, target, fail, t],
+  );
+  const cancelDocker = useCallback(() => {
+    if (project) api?.cancelDockerCompare(project.root).catch(() => {});
+  }, [api, project]);
+
   const applyChanges = useCallback(
     async (files: string[]) => {
       if (!api || !project || files.length === 0) return false;
@@ -532,13 +567,13 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
     () => ({
       api, view, setView, findingsFilter, setFindingsFilter, showFindings, theme, setTheme, recent, forgetRecent, project, opening, openProject, closeProject,
       target, setTarget, scan, scanning, progress, runScan, deps, toolchain, refreshToolchain, installingRector,
-      installRector, preview, previewMode, previewing, loadPreview, cancelPreview, applying, applyChanges, snapshots,
+      installRector, preview, previewMode, previewing, loadPreview, cancelPreview, docker, dockerStep, runDocker, cancelDocker, applying, applyChanges, snapshots,
       refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport, ignoreFinding, unignoreFinding, pruneIgnores, importRuntimeLog, setRuntimeRoots, clearRuntimeLog, runLocalCheck,
     }),
     [
       api, view, findingsFilter, showFindings, theme, setTheme, recent, forgetRecent, project, opening, openProject, closeProject, target,
       setTarget, scan, scanning, progress, runScan, deps, toolchain, refreshToolchain, installingRector,
-      installRector, preview, previewMode, previewing, loadPreview, cancelPreview, applying, applyChanges, snapshots,
+      installRector, preview, previewMode, previewing, loadPreview, cancelPreview, docker, dockerStep, runDocker, cancelDocker, applying, applyChanges, snapshots,
       refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport, ignoreFinding, unignoreFinding, pruneIgnores, importRuntimeLog, setRuntimeRoots, clearRuntimeLog, runLocalCheck,
     ],
   );

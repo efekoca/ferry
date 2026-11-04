@@ -60,9 +60,9 @@ export function Sidebar() {
     { view: "changes", shortcut: 3, label: t.nav.fixes, icon: <GitCompareArrows size={16} />, count: preview?.changes.length },
     { view: "dependencies", shortcut: 4, label: t.nav.dependencies, icon: <Package size={16} />, count: blockers || undefined, danger: blockers > 0 },
     { view: "history", shortcut: 5, label: t.nav.history, icon: <History size={16} /> },
+    { view: "runtime", label: t.nav.runtime, icon: <Container size={16} /> },
   ];
   const upcoming: NavItem[] = [
-    { view: "runtime", label: t.nav.runtime, icon: <Container size={16} /> },
     { view: "ai", label: t.nav.ai, icon: <Bot size={16} /> },
   ];
 

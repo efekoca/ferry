@@ -161,7 +161,7 @@ target/release/ferry-cli scan . --target 8.4 --format github
 - `--output <dosya>` raporu bir dosyaya yazar, `--lang tr` mesajları Türkçe yapar.
 - `--write-baseline <dosya>` bugünkü bulguları kaydeder, `--baseline <dosya>` ise onlarla karşılaştırır: `--fail-on` için yalnızca baseline'da olmayan bulgular sayılır, `--fail-on new` bunlardan herhangi biri varsa başarısız olur. Böylece yüzlerce eski bulgusu olan bir projede yenilerin eklenmesi engellenebilir.
 
-Docker çalışırken `ferry-cli compare <proje> --target 8.5`, projeyi `php:X.Y-cli` container'larında mevcut ve hedef sürümde lint eder, PHPUnit testlerini çalıştırır ve hedefte yeni çıkanları listeler. Container'lar kopyalar üzerinde ve ağ erişimi olmadan çalışır; ağa yalnızca `composer install` çıkar, o da projenin script ve eklentileri olmadan. Kalıplarda `mysqli` ya da `gd` gibi eklentiler yoktur; bunlara ihtiyaç duyan kod eksik olarak listelenir ve testleri iki sürümde de başarısız olabilir.
+Docker çalışırken **Docker karşılaştırması** ekranı ya da `ferry-cli compare <proje> --target 8.5`, projeyi `php:X.Y-cli` container'larında mevcut ve hedef sürümde lint eder, PHPUnit testlerini çalıştırır ve hedefte yeni çıkanları listeler. Container'lar kopyalar üzerinde ve ağ erişimi olmadan çalışır; ağa yalnızca `composer install` çıkar, o da projenin script ve eklentileri olmadan. Kalıplarda `mysqli` ya da `gd` gibi eklentiler yoktur; bunlara ihtiyaç duyan kod eksik olarak listelenir ve testleri iki sürümde de başarısız olabilir.
 
 Depo aynı zamanda `ferry-cli`'ı derleyip pull request'lere uyarı ekleyen bir GitHub Action'dır:
 

@@ -371,6 +371,21 @@
       await click("Log'u kaldır");
     },
 
+    async function dockerCompare() {
+      if (!P.docker) return emit("  skipped: FERRY_TEST_DOCKER isn't set");
+      const before = seen.length;
+      await openRecent(projects.unicode);
+      await scan();
+      await nav("Docker karşılaştırması");
+      await click("Karşılaştırmayı başlat");
+      await until(() => /PHP 8\.\d sürümünde yeni: [1-9]/.test(text()), "new messages on the target", 300000);
+      await emit(`  docker: ${$("main").innerText.replace(/\n+/g, " / ").slice(300, 900)}`);
+      noErrorToast(before);
+      await click("Bulgularda göster");
+      await until(() => text().includes("Docker · PHP"), "merged into the findings");
+      await click("Log'u kaldır");
+    },
+
     async function missingProject() {
       const before = seen.length;
       const item = await until(() => $$(".recent__item").find((b) => b.querySelector(".recent__path")?.textContent === projects.missing), "missing recent");

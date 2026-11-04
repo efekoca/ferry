@@ -1838,6 +1838,54 @@ select.input {
   margin-top: var(--space-2);
 }
 
+.docker-start {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
+.docker-start label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
+  color: var(--text-2);
+}
+
+.docker-run {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-1) var(--space-4);
+  font-size: var(--text-sm);
+}
+
+.docker-run dt {
+  color: var(--text-3);
+}
+
+.docker-events {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: 0;
+  list-style: none;
+  margin-bottom: var(--space-3);
+}
+
+.docker-events li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+}
+
+.docker-events code {
+  font-family: var(--font-mono);
+  color: var(--text-2);
+}
+
 .runtime-root {
   display: flex;
   gap: var(--space-2);

@@ -1,4 +1,6 @@
 import type {
+  DockerResponse,
+  DockerStep,
   SnapshotConflict,
   ApplyResult,
   BackupUsage,
@@ -45,6 +47,9 @@ export interface Api {
   installRector(): Promise<ToolchainStatus>;
   rectorPreview(path: string, target: string, mode: RectorMode): Promise<RectorPreview>;
   cancelPreview(path?: string): Promise<void>;
+  dockerCompare(path: string, source: string, target: string): Promise<DockerResponse>;
+  cancelDockerCompare(path: string): Promise<void>;
+  onDockerStep(handler: (step: DockerStep) => void): Promise<() => void>;
   applyChanges(path: string, previewId: number, files: string[], label: string): Promise<ApplyResult>;
   listSnapshots(path: string): Promise<Snapshot[]>;
   restoreSnapshot(path: string, id: string, acknowledged: SnapshotConflict[]): Promise<string[]>;
@@ -103,6 +108,9 @@ async function tauriApi(): Promise<Api> {
     installRector: () => invoke("install_rector"),
     rectorPreview: (path, target, mode) => invoke("rector_preview", { path, target, mode }),
     cancelPreview: (path) => invoke("cancel_rector_preview", { path }),
+    dockerCompare: (path, source, target) => invoke("docker_compare", { path, source, target }),
+    cancelDockerCompare: (path) => invoke("cancel_docker_compare", { path }),
+    onDockerStep: (handler) => listen<DockerStep>("docker://step", (e) => handler(e.payload)),
     applyChanges: (path, previewId, files, label) => invoke("apply_changes", { path, previewId, files, label }),
     listSnapshots: (path) => invoke("list_snapshots", { path }),
     restoreSnapshot: (path, id, acknowledged) => invoke("restore_snapshot", { path, id, acknowledged }),

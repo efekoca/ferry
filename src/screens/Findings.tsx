@@ -182,7 +182,7 @@ export function Findings() {
           {t.findings.clearLog}
         </Button>
       </div>
-      {!lastCheck && (
+      {!lastCheck && !runtime.file.startsWith("Docker") && (
         <details className="check-log">
           <summary>{runtime.roots.length > 0 ? t.findings.runtimeRootActive(runtime.roots.join(", ")) : t.findings.runtimeRoot}</summary>
           <form
