@@ -250,6 +250,7 @@ export const en: Dict = {
     importLog: "Import log",
     runtimeOnly: "Seen at runtime",
     runtimeSeen: (n) => `Runtime ×${n}`,
+    outsideFatals: (count) => `${count} fatal ${count === 1 ? "error" : "errors"} couldn't be tied to a project file. Check the log.`,
     runtimeSummary: (file, events, confirmed, added, outside) =>
       `${file}: ${events} distinct messages. ${confirmed} findings confirmed at runtime, ${added} messages added as findings the static scan missed, ${outside} from files outside the project.`,
     clearLog: "Remove log",

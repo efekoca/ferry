@@ -163,6 +163,7 @@ struct RuntimeSummary {
     confirmed: usize,
     added: usize,
     outside: usize,
+    outside_fatals: usize,
     check: Option<ferry_core::localcheck::CheckRun>,
 }
 
@@ -183,6 +184,7 @@ fn respond(root: &Path, mut scan: ScanResult, log: Option<&RuntimeLog>) -> ScanR
             confirmed: merged.confirmed,
             added: merged.added,
             outside: merged.outside,
+            outside_fatals: merged.outside_fatals,
             check: log.check.clone(),
         }
     });

@@ -250,6 +250,7 @@ export const tr = {
     importLog: "Log içe aktar",
     runtimeOnly: "Çalışırken görülenler",
     runtimeSeen: (n: number) => `Çalışırken ×${n}`,
+    outsideFatals: (count: number) => `${count} ölümcül hata bir proje dosyasına bağlanamadı; log'u kontrol edin.`,
     runtimeSummary: (file: string, events: number, confirmed: number, added: number, outside: number) =>
       `${file}: ${events} farklı mesaj. ${confirmed} bulgu çalışırken doğrulandı, ${added} mesaj statik taramanın bulmadığı yeni bulgu olarak eklendi, ${outside} mesaj proje dışındaki dosyalardan.`,
     clearLog: "Log'u kaldır",
