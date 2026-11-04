@@ -107,6 +107,7 @@ struct InterfaceInfo {
     parents: Vec<String>,
     declares_methods: bool,
     signatures: HashMap<String, MethodSig>,
+    constants: HashSet<String>,
 }
 
 impl ProjectIndex {
@@ -144,6 +145,14 @@ impl ProjectIndex {
         let mut index = Self { target, ..Self::default() };
         index.add(tokens);
         index
+    }
+
+    pub(crate) fn interface_declares_constant(&self, fqn: &str, name: &str) -> bool {
+        let key = short(fqn);
+        let found = self.interfaces.get(&key).and_then(|v| v.iter().find(|i| i.fqn == fqn));
+        found.is_some_and(|i| {
+            i.constants.contains(name) || i.parent_fqns.iter().any(|p| p != fqn && self.interface_declares_constant(p, name))
+        })
     }
 
     pub(crate) fn is_enum(&self, fqn: &str) -> bool {
@@ -228,6 +237,11 @@ impl ProjectIndex {
                 .filter_map(|k| method_sig(tokens, k, body_end, &names))
                 .collect();
             let declares_methods = !signatures.is_empty() || tokens[open..body_end].iter().any(|t| t.is_ident_ci("function"));
+            let constants = (open..body_end)
+                .filter(|&k| tokens[k].is_ident_ci("const"))
+                .filter_map(|k| (k + 1..body_end).find(|&j| tokens[j].is_punct("=")))
+                .map(|eq| tokens[eq - 1].text.clone())
+                .collect();
             self.interfaces.entry(short(&name.text)).or_default().push(InterfaceInfo {
                 name: name.text.clone(),
                 fqn: qualify(namespace_at(&spaces, i), &name.text),
@@ -235,6 +249,7 @@ impl ProjectIndex {
                 parents,
                 declares_methods,
                 signatures,
+                constants,
             });
         }
     }

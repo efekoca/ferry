@@ -7,6 +7,17 @@ use std::collections::HashSet;
 
 pub(crate) const BY_REF_ARGUMENT: &[&str] =
     &["array_pop", "array_push", "array_shift", "array_unshift", "end", "next", "prev", "reset", "rsort", "shuffle", "sort"];
+const XML_HANDLERS: &[&str] = &[
+    "xml_set_character_data_handler",
+    "xml_set_default_handler",
+    "xml_set_element_handler",
+    "xml_set_end_namespace_decl_handler",
+    "xml_set_external_entity_ref_handler",
+    "xml_set_notation_decl_handler",
+    "xml_set_processing_instruction_handler",
+    "xml_set_start_namespace_decl_handler",
+    "xml_set_unparsed_entity_decl_handler",
+];
 const SORTS: &[&str] = &["usort", "uasort", "uksort"];
 const VALUE_CALLBACKS: &[(&str, usize)] =
     &[("array_filter", 1), ("array_map", 0), ("array_reduce", 1), ("preg_replace_callback", 1), ("uasort", 1), ("uksort", 1), ("usort", 1)];
@@ -109,6 +120,7 @@ pub(crate) fn check(tokens: &[Token], index: &ProjectIndex) -> Vec<(usize, &'sta
             }
         }
     }
+    let xml_object = tokens.iter().any(|t| t.is_ident_ci("xml_set_object"));
     let list_seen = |base: &mut HashSet<String>, name: &str| !base.insert(name.to_string());
 
     for k in 0..tokens.len() {
@@ -127,6 +139,22 @@ pub(crate) fn check(tokens: &[Token], index: &ProjectIndex) -> Vec<(usize, &'sta
             let base = k.checked_sub(2).map(|b| &tokens[b]);
             if base.is_some_and(|b| b.kind == TokenKind::Variable || b.is_punct("]")) {
                 out.push((k, &FLOAT_TO_INT));
+            }
+        }
+
+        if t.kind == TokenKind::Variable && next.is_some_and(|n| n.is_punct("[")) {
+            let then_call = close_of(tokens, k + 1).is_some_and(|c| tokens.get(c + 1).is_some_and(|n| n.is_punct("(")));
+            let own = k >= 2 && ["self", "static", "parent"].iter().any(|w| tokens[k - 2].is_ident_ci(w));
+            let created = k >= 3 && tokens[k - 3].is_ident_ci("new");
+            if prev.is_some_and(|p| p.is_punct("->") || p.is_punct("?->") || p.is_punct("::") && then_call && !own && !created) {
+                out.push((k, &INDIRECT_ORDER));
+            }
+        }
+
+        if t.kind == TokenKind::Ident && !member && !declared && !open_call && !next.is_some_and(|n| n.is_punct("::")) {
+            let word = !prev.is_some_and(|p| p.is_ident_ci("const") || p.is_ident_ci("class") || p.is_ident_ci("function"));
+            if (t.text == "SID" || t.text == "NIL") && word && !index.defines_constant(&t.text) {
+                out.push((k, if t.text == "SID" { &SID_CONSTANT } else { &NIL_CONSTANT }));
             }
         }
 
@@ -241,6 +269,41 @@ pub(crate) fn check(tokens: &[Token], index: &ProjectIndex) -> Vec<(usize, &'sta
                 out.push((k, &MYSQLI_EXCEPTIONS));
             }
         }
+        if name == "is_callable" {
+            let first = args.first().copied().unwrap_or(close);
+            let quoted = |t: &Token| match t.kind {
+                TokenKind::Str { interpolates: false, .. } => Some(t.text.trim_matches(|q| q == '\'' || q == '"').to_string()),
+                _ => None,
+            };
+            let at = if tokens[first].is_ident_ci("array") { first + 1 } else { first };
+            let pair = (tokens[at].is_punct("[") || tokens[at].is_punct("("))
+                .then(|| starts(tokens, at))
+                .filter(|items| items.len() == 2)
+                .and_then(|items| {
+                    let class = quoted(&tokens[items[0]]).or_else(|| {
+                        (tokens[items[0]].kind == TokenKind::Ident && tokens.get(items[0] + 2).is_some_and(|c| c.is_ident_ci("class")))
+                            .then(|| names.resolve(items[0], &tokens[items[0]].text))
+                    });
+                    class.zip(quoted(&tokens[items[1]]))
+                })
+                .or_else(|| quoted(&tokens[first]).and_then(|s| s.split_once("::").map(|(c, m)| (c.to_string(), m.to_string()))));
+            if let Some((class, method)) = pair {
+                let fqn = class.trim_start_matches('\\').to_ascii_lowercase();
+                if index.instance_method(&fqn, &method.to_ascii_lowercase()) == Some(true) {
+                    out.push((k, &crate::rules::patterns::STATIC_CALL_TO_INSTANCE_METHOD));
+                }
+            }
+        }
+        if XML_HANDLERS.contains(&name.as_str()) {
+            let text = |a: &usize| match tokens[*a].kind {
+                TokenKind::Str { interpolates: false, .. } => Some(tokens[*a].text.trim_matches(|q| q == '\'' || q == '"')),
+                _ => None,
+            };
+            let stale = args.iter().skip(1).filter_map(text).any(|s| s.is_empty() || xml_object && !index.declares_function("", s, true));
+            if stale {
+                out.push((k, &XML_HANDLER_STRING));
+            }
+        }
         if name == "ob_start" {
             if let Some((open, end)) = args.first().and_then(|&a| closure_at(tokens, a)).and_then(|f| f.body) {
                 if tokens[open..end].iter().any(|b| b.is_ident_ci("echo") || b.is_ident_ci("print")) {
@@ -300,6 +363,54 @@ const SUBSTR_FALSE: PatternRule = rule(
     Text::new(
         "PHP 7.0'da substr() sınırda kesilen metin için false yerine boş metin döndürmeye başladı; PHP 8.0'dan beri hiç false dönmüyor.",
         "PHP 7.0 made substr() return an empty string instead of false when it cuts on the boundary, and since PHP 8.0 it never returns false.",
+    ),
+);
+
+const INDIRECT_ORDER: PatternRule = rule(
+    "behavior.indirect_access_order",
+    Text::new("Dolaylı erişim sırası", "Indirect access order"),
+    Severity::Behavior,
+    (7, 0),
+    Some(Text::new("$foo->{$bar['baz']}", "$foo->{$bar['baz']}")),
+    Text::new(
+        "PHP 7.0'dan beri dolaylı erişim soldan sağa okunur: $foo->$bar['baz'] artık ($foo->$bar)['baz'] demek. Eski anlam için süslü parantez kullanın.",
+        "Since PHP 7.0 indirect access reads left to right, so $foo->$bar['baz'] now means ($foo->$bar)['baz']. Use braces for the old meaning.",
+    ),
+);
+
+const SID_CONSTANT: PatternRule = rule(
+    "deprecated.sid_constant",
+    Text::new("SID sabiti", "SID constant"),
+    Severity::Deprecated,
+    (8, 4),
+    Some(Text::new("oturum kimliğini çerezle taşıyın", "keep the session ID in a cookie")),
+    Text::new(
+        "SID sabiti, GET ve POST üzerinden oturumlarla birlikte PHP 8.4'te kullanımdan kalktı.",
+        "The SID constant is deprecated since PHP 8.4, along with GET and POST sessions.",
+    ),
+);
+
+const NIL_CONSTANT: PatternRule = rule(
+    "deprecated.imap_nil_constant",
+    Text::new("NIL sabiti", "NIL constant"),
+    Severity::Deprecated,
+    (8, 1),
+    None,
+    Text::new(
+        "imap eklentisinin NIL sabiti PHP 8.1'de kullanımdan kalktı.",
+        "The imap extension's NIL constant is deprecated since PHP 8.1.",
+    ),
+);
+
+const XML_HANDLER_STRING: PatternRule = rule(
+    "deprecated.xml_handler_string",
+    Text::new("xml_set_*_handler() çağrılamayan metinle", "xml_set_*_handler() with a non-callable string"),
+    Severity::Deprecated,
+    (8, 4),
+    Some(Text::new("[$object, 'method'] ya da null verin", "pass [$object, 'method'] or null")),
+    Text::new(
+        "xml_set_*_handler() fonksiyonlarına çağrılamayan bir metin, boş metin ya da xml_set_object() ile çözülecek metot adı vermek PHP 8.4'te kullanımdan kalktı.",
+        "Passing a non-callable string, an empty string or a method name left for xml_set_object() to resolve to xml_set_*_handler() is deprecated since PHP 8.4.",
     ),
 );
 
