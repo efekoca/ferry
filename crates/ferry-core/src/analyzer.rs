@@ -61,6 +61,12 @@ pub fn analyze_files(root: &Path, files: &[PathBuf], target: PhpVersion, mut pro
     let index = crate::index::ProjectIndex::build_for(root, files, Some(target));
     let mut findings = Vec::new();
     let mut errors = Vec::new();
+    if files.is_empty() {
+        errors.push(FileError {
+            file: ".".into(),
+            message: crate::t!("Bu klasörde taranacak PHP dosyası yok.", "This folder has no PHP files to scan."),
+        });
+    }
     let mut lines = 0;
     for (i, path) in files.iter().enumerate() {
         let rel = relative_path(root, path);
@@ -90,7 +96,7 @@ pub fn analyze_files(root: &Path, files: &[PathBuf], target: PhpVersion, mut pro
         }
     }
     progress(files.len(), files.len(), "");
-    let files_scanned = files.len() - errors.len();
+    let files_scanned = files.len().saturating_sub(errors.len());
     if let Some(framework) = index.framework {
         findings.extend(crate::framework::check(root, framework, target));
     }

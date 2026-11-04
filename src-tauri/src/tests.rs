@@ -546,6 +546,15 @@ fn runtime_and_inline_ignores_behave() {
 }
 
 #[test]
+fn a_folder_without_php_is_an_incomplete_scan() {
+    let h = harness();
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("README.md"), "No PHP here.\n").unwrap();
+    let scan = h.ok("scan_project", json!({ "path": dir.path(), "target": "8.4", "run": 1 }));
+    assert_eq!(scan["errors"].as_array().unwrap().len(), 1, "{scan}");
+}
+
+#[test]
 fn runtime_roots_narrow_an_imported_log() {
     let h = harness();
     let root = h.root.clone();
