@@ -32,6 +32,17 @@ export function filterFindings(findings: Finding[], { fix, severity, rule, query
   );
 }
 
+/** List order: files with findings seen at runtime first, then scan order, keeping each file's findings together. */
+export function prioritizeFindings(findings: Finding[]): Finding[] {
+  const rank = new Map<string, number>();
+  findings.forEach((f, i) => {
+    const runtime = f.runtimeHits > 0 ? -findings.length : 0;
+    rank.set(f.file, Math.min(rank.get(f.file) ?? i, i + runtime));
+  });
+  const seen = (f: Finding) => (f.runtimeHits > 0 ? 0 : 1);
+  return [...findings].sort((a, b) => rank.get(a.file)! - rank.get(b.file)! || seen(a) - seen(b));
+}
+
 export function Findings() {
   const { t, loc } = useI18n();
   const { scan, setView, project, api, runScan, scanning, findingsFilter: filter, setFindingsFilter, ignoreFinding, unignoreFinding, pruneIgnores, importRuntimeLog, clearRuntimeLog, runLocalCheck, target } = useStore();
@@ -67,7 +78,7 @@ export function Findings() {
   const runtimeCount = useMemo(() => findings.filter((f) => f.runtimeHits > 0).length, [findings]);
   const runtimeFilter = onlyRuntime && runtimeCount > 0;
   const visible = useMemo(
-    () => filterFindings(findings, deferredFilter).filter((f) => !runtimeFilter || f.runtimeHits > 0),
+    () => prioritizeFindings(filterFindings(findings, deferredFilter).filter((f) => !runtimeFilter || f.runtimeHits > 0)),
     [findings, deferredFilter, runtimeFilter],
   );
   const [limit, setLimit] = useState({ for: visible, count: PAGE });
