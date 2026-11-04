@@ -32,7 +32,7 @@ import { errorMessage } from "../lib/api";
 import { formatBytes, formatRelative } from "../lib/labels";
 import { useStore, type Theme } from "../lib/store";
 import { compareProbe, parseProbe } from "../lib/probe";
-import type { BackupUsage, DependencyReport, DependencyStatus, ExtensionUse, FileChange, Settings, Snapshot, SnapshotConflict, VersionSuggestion, WpLatest } from "../lib/types";
+import type { BackupUsage, DockerImageUsage, DependencyReport, DependencyStatus, ExtensionUse, FileChange, Settings, Snapshot, SnapshotConflict, VersionSuggestion, WpLatest } from "../lib/types";
 
 const DEP_TONE: Record<DependencyStatus, "danger" | "auto" | "neutral"> = {
   incompatible: "danger",
@@ -760,11 +760,30 @@ export function SettingsScreen() {
   const [usage, setUsage] = useState<BackupUsage | null>(null);
   const [clearing, setClearing] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [images, setImages] = useState<DockerImageUsage | null>(null);
+  const [clearingImages, setClearingImages] = useState(false);
 
   useEffect(() => {
     api?.getSettings().then(setSettings).catch(() => {});
     api?.backupUsage().then(setUsage).catch(() => {});
+    api?.dockerImageUsage().then(setImages).catch(() => {});
   }, [api]);
+
+  const imagesSize = images ? formatBytes(images.bytes, t.locale) : "";
+  const removeImages = async () => {
+    if (!api) return;
+    setDeleting(true);
+    try {
+      await api.removeDockerImages();
+      toast.push({ tone: "success", title: t.settings.imagesDone });
+      setClearingImages(false);
+    } catch (e) {
+      toast.push({ tone: "error", title: t.toast.deleteFailed, description: errorMessage(e, t.common.genericError) });
+    } finally {
+      setDeleting(false);
+      api.dockerImageUsage().then(setImages).catch(() => {});
+    }
+  };
 
   const size = usage ? formatBytes(usage.bytes, t.locale) : "";
   const deleteAll = async () => {
@@ -967,6 +986,17 @@ export function SettingsScreen() {
                   {t.settings.deleteAll}
                 </Button>
               </div>
+              <div className="setting">
+                <div className="setting__text">
+                  <div className="setting__title">{t.settings.images}</div>
+                  <div className="setting__desc">
+                    {!images ? t.settings.imagesUnknown : images.images > 0 ? t.settings.imagesText(images.images, imagesSize) : t.settings.imagesEmpty}
+                  </div>
+                </div>
+                <Button size="sm" variant="danger" icon={<Trash2 size={13} />} onClick={() => setClearingImages(true)} disabled={!images?.images}>
+                  {t.settings.imagesDelete}
+                </Button>
+              </div>
             </div>
           </Card>
 
@@ -981,6 +1011,19 @@ export function SettingsScreen() {
             onConfirm={deleteAll}
           >
             {t.settings.deleteAllText(usage?.snapshots ?? 0, size)}
+          </ConfirmDialog>
+
+          <ConfirmDialog
+            open={clearingImages}
+            tone="danger"
+            icon={<Trash2 size={20} />}
+            title={t.settings.imagesTitle}
+            confirmLabel={t.history.deleteConfirm}
+            loading={deleting}
+            onCancel={() => setClearingImages(false)}
+            onConfirm={removeImages}
+          >
+            {t.settings.imagesConfirm(images?.images ?? 0, imagesSize)}
           </ConfirmDialog>
 
           {toolchain && (

@@ -432,6 +432,21 @@ describe("Ferry app", () => {
     expect(screen.queryByText("Sunucudaki proje kökü")).not.toBeInTheDocument();
   });
 
+  it("removes prepared Docker images from the settings", async () => {
+    const user = userEvent.setup();
+    render(<App api={mockApi({ delay: 0 })} />);
+    await openAndScan(user);
+    await user.click(nav(/Docker karşılaştırması/));
+    await user.click(await screen.findByRole("button", { name: "Karşılaştırmayı başlat" }));
+    await screen.findByText("PHP 8.4 sürümünde yeni sorunlar var.");
+    await user.click(screen.getByRole("button", { name: /Ayarlar/ }));
+    expect(await screen.findByText(/Ferry'nin hazırladığı 2 kalıp, yaklaşık/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Kalıpları sil" }));
+    const dialog = await screen.findByRole("dialog", { name: "Docker kalıpları silinsin mi?" });
+    await user.click(within(dialog).getByRole("button", { name: "Sil" }));
+    expect(await screen.findByText("Ferry'nin hazırladığı kalıp yok.")).toBeInTheDocument();
+  });
+
   it("narrows an imported log to the project root on the server", async () => {
     const user = userEvent.setup();
     render(<App api={mockApi({ delay: 0 })} />);

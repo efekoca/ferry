@@ -470,6 +470,14 @@ export const en: Dict = {
     usageText: (snapshots, projects, size) =>
       `${snapshots === 1 ? "1 backup" : `${snapshots} backups`} across ${projects === 1 ? "1 project" : `${projects} projects`}, ${size}.`,
     usageEmpty: "No backups yet.",
+    images: "Docker images",
+    imagesText: (n, size) => `${n} ${n === 1 ? "image" : "images"} prepared by Ferry, about ${size}.`,
+    imagesEmpty: "No images prepared by Ferry.",
+    imagesUnknown: "Can't be shown while Docker isn't running.",
+    imagesDelete: "Remove images",
+    imagesTitle: "Remove the Docker images?",
+    imagesConfirm: (n, size) => `This removes ${n} ${n === 1 ? "image" : "images"} prepared by Ferry and frees about ${size}. The official PHP images stay. The next comparison installs the extensions again.`,
+    imagesDone: "Docker images removed",
     deleteAll: "Delete all backups",
     deleteAllTitle: "Delete the backups of every project?",
     deleteAllText: (snapshots, size) =>
@@ -485,6 +493,7 @@ export const en: Dict = {
     intro: "Lints the project on two PHP versions, runs its PHPUnit tests if it has them, and shows only what breaks on the target.",
     safety: "Containers run on a temporary copy of your project with no network, so your project doesn't change. Only image setup and composer install go online, and your code and scripts don't run during them. The first run can take a few minutes.",
     installExtensions: "Install the extensions the project uses into the image",
+    cleanAfter: "Remove these images when the comparison ends (the next run prepares them again)",
     preparing: (v) => `Preparing extensions for PHP ${v}…`,
     imageFailed: "The image with extensions couldn't be built, so the comparison used the plain image.",
     added: "Installed extensions",
