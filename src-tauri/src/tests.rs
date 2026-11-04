@@ -554,8 +554,10 @@ fn docker_comparison_feeds_the_findings() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("a.php"), "<?php\nfunction f(int $a = null) {}\necho 1;\n").unwrap();
     h.ok("scan_project", json!({ "path": dir.path(), "target": "8.4", "run": 1 }));
-    let result =
-        h.ok("docker_compare", json!({ "path": dir.path(), "source": "7.4", "target": "8.4", "extensions": false, "cleanImages": false }));
+    let result = h.ok(
+        "docker_compare",
+        json!({ "path": dir.path(), "source": "7.4", "target": "8.4", "extensions": false, "cleanImages": false, "pages": [] }),
+    );
     assert!(!result["comparison"]["newOnTarget"].as_array().unwrap().is_empty(), "{result}");
     assert_eq!(result["scan"]["runtime"]["outside"], 0, "{result}");
     assert!(result["scan"]["findings"].as_array().unwrap().iter().any(|f| f["runtimeHits"].as_u64() > Some(0)), "{result}");

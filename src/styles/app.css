@@ -1861,6 +1861,12 @@ select.input {
   font-size: var(--text-sm);
 }
 
+.docker-paths {
+  margin-top: var(--space-2);
+  max-width: 420px;
+  font-family: var(--font-mono);
+}
+
 .docker-run {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);

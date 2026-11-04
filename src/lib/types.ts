@@ -142,12 +142,23 @@ export interface DockerRun {
   log: string;
 }
 
+export interface DockerPage {
+  path: string;
+  change: "same" | "status" | "redirect" | "errors" | "body" | "unstable" | "unverified" | "missing";
+  sourceStatus: number;
+  targetStatus: number;
+  newErrors: string[];
+  sourceText: string;
+  targetText: string;
+}
+
 export interface DockerComparison {
   source: DockerRun;
   target: DockerRun;
   dependenciesInstalled: boolean;
   installLog: string;
   newFailures: string[];
+  pages: DockerPage[];
   newOnTarget: DockerEvent[];
   goneOnTarget: DockerEvent[];
 }
@@ -158,7 +169,7 @@ export interface DockerImageUsage {
 }
 
 export interface DockerStep {
-  step: "install" | "extensions" | "lint" | "tests";
+  step: "install" | "extensions" | "lint" | "pages" | "tests";
   version: string | null;
 }
 

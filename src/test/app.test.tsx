@@ -427,6 +427,8 @@ describe("Ferry app", () => {
     expect(screen.getByText("Error: Call to undefined function each()")).toBeInTheDocument();
     expect(screen.getByText("1 test başarısız")).toBeInTheDocument();
     expect(screen.getByText("CartTest::testTotal")).toBeInTheDocument();
+    expect(screen.getByText("PHP 8.4 sürümünde farklı sayfalar: 1 / 2")).toBeInTheDocument();
+    expect(screen.getByText("/cart.php")).toBeInTheDocument();
     expect(screen.getAllByText("mysqli")).toHaveLength(2);
     await user.click(screen.getByRole("button", { name: "Bulgularda göster" }));
     expect(await screen.findByText(/Docker · PHP .* → 8.4: 31 farklı mesaj/)).toBeInTheDocument();

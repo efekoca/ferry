@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 const USAGE: &str = "Usage: ferry-cli scan <project> --target <8.2|8.3|8.4|8.5> [options]
-       ferry-cli compare <project> --target <version> [--source <version>] [--no-extensions] [--clean-images] [--format <text|json>]
+       ferry-cli compare <project> --target <version> [--source <version>] [--no-extensions] [--clean-images] [--page <path>] [--no-pages] [--format <text|json>]
        ferry-cli clean-images
 
 Options:
@@ -32,6 +32,8 @@ compare lints the project and runs its PHPUnit tests in php:X.Y-cli containers o
 versions, without network access. It needs Docker. --source defaults to the project's version.
 Extensions the project uses are built into a local image first, unless --no-extensions is given.
 --clean-images removes those images afterwards, and clean-images removes all that Ferry built.
+Pages are served inside the containers and compared, starting at / and following links with GET.
+--page adds a starting path (repeatable), and --no-pages skips this.
 
 Exit codes: 0 passed, 1 findings at the --fail-on level, 2 usage or run error,
 3 some files couldn't be scanned (unless --allow-incomplete).
@@ -639,6 +641,7 @@ fn run(o: &Options) -> Result<Outcome, String> {
 fn run_compare(args: &[String]) -> Result<bool, String> {
     let (mut root, mut source, mut target, mut json_output, mut extensions) = (None, None, None, false, true);
     let mut clean_images = false;
+    let mut pages = vec!["/".to_string()];
     let mut it = args.iter();
     while let Some(arg) = it.next() {
         let mut value = |name: &str| it.next().cloned().ok_or_else(|| format!("{name} needs a value"));
@@ -647,6 +650,8 @@ fn run_compare(args: &[String]) -> Result<bool, String> {
             "--source" => source = Some(value("--source")?.parse::<PhpVersion>().map_err(|e| e.to_string())?),
             "--no-extensions" => extensions = false,
             "--clean-images" => clean_images = true,
+            "--no-pages" => pages.clear(),
+            "--page" => pages.push(value("--page")?),
             "--format" => {
                 json_output = match value("--format")?.as_str() {
                     "json" => true,
@@ -663,11 +668,12 @@ fn run_compare(args: &[String]) -> Result<bool, String> {
     let current = project::inspect(&root).map_err(|e| e.to_string())?.current_version;
     let source = source.or(current).ok_or("--source is required: the project's version couldn't be detected")?;
     let cancel = std::sync::atomic::AtomicBool::new(false);
-    let options = ferry_core::docker::Options { install_extensions: extensions, clean_images };
+    let options = ferry_core::docker::Options { install_extensions: extensions, clean_images, pages };
     let result = ferry_core::docker::compare(&root, source, target, options, &cancel, |step| match step {
         ferry_core::docker::Step::Installing => eprintln!("ferry-cli: installing dependencies"),
         ferry_core::docker::Step::Extensions(v) => eprintln!("ferry-cli: preparing extensions for PHP {v}"),
         ferry_core::docker::Step::Lint(v) => eprintln!("ferry-cli: linting on PHP {v}"),
+        ferry_core::docker::Step::Pages(v) => eprintln!("ferry-cli: requesting pages on PHP {v}"),
         ferry_core::docker::Step::Tests(v) => eprintln!("ferry-cli: running tests on PHP {v}"),
     })?;
     let fatal = result.new_on_target.iter().any(|e| e.level == ferry_core::runtime::Level::Fatal);
@@ -697,6 +703,11 @@ fn run_compare(args: &[String]) -> Result<bool, String> {
         if !result.dependencies_installed {
             println!("Dependencies couldn't be installed, so tests may not have run:\n{}", result.install_log.trim());
         }
+        let changed: Vec<_> = result.pages.iter().filter(|p| p.change != ferry_core::web::PageChange::Same).collect();
+        println!("{} of {} pages differ", changed.len(), result.pages.len());
+        for p in changed {
+            println!("  {} {:?} ({} -> {})", p.path, p.change, p.source_status, p.target_status);
+        }
         println!("{} tests fail only on PHP {target}", result.new_failures.len());
         for name in &result.new_failures {
             println!("  {name}");
@@ -706,7 +717,7 @@ fn run_compare(args: &[String]) -> Result<bool, String> {
             println!("  {}:{} {}", e.path.trim_start_matches("/app/"), e.line, e.message);
         }
     }
-    let broke = !result.new_failures.is_empty();
+    let broke = !result.new_failures.is_empty() || result.pages.iter().any(|p| p.broke());
     let regressed = result.source.tests.as_ref().is_some_and(|t| t.passed) && result.target.tests.as_ref().is_some_and(|t| !t.passed);
     Ok(fatal || broke || regressed)
 }

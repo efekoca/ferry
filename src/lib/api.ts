@@ -48,7 +48,7 @@ export interface Api {
   installRector(): Promise<ToolchainStatus>;
   rectorPreview(path: string, target: string, mode: RectorMode): Promise<RectorPreview>;
   cancelPreview(path?: string): Promise<void>;
-  dockerCompare(path: string, source: string, target: string, extensions: boolean, cleanImages: boolean): Promise<DockerResponse>;
+  dockerCompare(path: string, source: string, target: string, extensions: boolean, cleanImages: boolean, pages: string[]): Promise<DockerResponse>;
   dockerImageUsage(): Promise<DockerImageUsage>;
   removeDockerImages(): Promise<number>;
   cancelDockerCompare(path: string): Promise<void>;
@@ -111,7 +111,7 @@ async function tauriApi(): Promise<Api> {
     installRector: () => invoke("install_rector"),
     rectorPreview: (path, target, mode) => invoke("rector_preview", { path, target, mode }),
     cancelPreview: (path) => invoke("cancel_rector_preview", { path }),
-    dockerCompare: (path, source, target, extensions, cleanImages) => invoke("docker_compare", { path, source, target, extensions, cleanImages }),
+    dockerCompare: (path, source, target, extensions, cleanImages, pages) => invoke("docker_compare", { path, source, target, extensions, cleanImages, pages }),
     dockerImageUsage: () => invoke("docker_image_usage"),
     removeDockerImages: () => invoke("remove_docker_images"),
     cancelDockerCompare: (path) => invoke("cancel_docker_compare", { path }),

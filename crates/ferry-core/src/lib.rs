@@ -39,6 +39,7 @@ mod syntax;
 pub mod symbols;
 pub mod toolchain;
 pub mod version;
+pub mod web;
 pub mod wordpress;
 
 pub use version::PhpVersion;
