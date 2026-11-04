@@ -14,7 +14,59 @@ pub const CONTAINER_ROOT: &str = "/app";
 const INSTALL_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const LINT_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const TEST_TIMEOUT: Duration = Duration::from_secs(20 * 60);
+const BUILD_TIMEOUT: Duration = Duration::from_secs(20 * 60);
 const LOG_LIMIT: usize = 64 * 1024;
+
+const INSTALLER_URL: &str = "https://github.com/mlocati/docker-php-extension-installer/releases/download/2.12.2/install-php-extensions";
+const INSTALLER_SHA256: &str = "ed854df3ed4366fa498c5a784e9d2b4c601fa29f5c04c7f21658a427dc151e9a";
+
+/// Extensions the installer builds without vendor downloads such as Oracle's client.
+const INSTALLABLE: &[&str] = &[
+    "amqp",
+    "apcu",
+    "bcmath",
+    "bz2",
+    "calendar",
+    "dba",
+    "enchant",
+    "exif",
+    "gd",
+    "gettext",
+    "gmp",
+    "gnupg",
+    "igbinary",
+    "imagick",
+    "imap",
+    "intl",
+    "ldap",
+    "mcrypt",
+    "memcached",
+    "mongodb",
+    "msgpack",
+    "mysql",
+    "mysqli",
+    "odbc",
+    "opcache",
+    "pcntl",
+    "pdo_mysql",
+    "pdo_odbc",
+    "pdo_pgsql",
+    "pgsql",
+    "pspell",
+    "recode",
+    "redis",
+    "shmop",
+    "soap",
+    "sockets",
+    "sysvmsg",
+    "sysvsem",
+    "sysvshm",
+    "tidy",
+    "wddx",
+    "xmlrpc",
+    "xsl",
+    "zip",
+];
 
 const LINT_SCRIPT: &str = "find /app -type f -name '*.php' -not -path '/app/vendor/*' -print0 \
     | xargs -0 -P 4 -n 1 php -n -d error_reporting=-1 -d display_errors=stderr -d log_errors=0 -l 2>&1 | grep -v '^No syntax errors'";
@@ -38,6 +90,8 @@ pub struct VersionRun {
     pub lint_errors: usize,
     pub tests: Option<TestRun>,
     pub missing_extensions: Vec<String>,
+    pub installed_extensions: Vec<String>,
+    pub image_failed: bool,
     pub events: Vec<Event>,
     pub log: String,
 }
@@ -55,6 +109,7 @@ pub struct Comparison {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Step {
     Installing,
+    Extensions(PhpVersion),
     Lint(PhpVersion),
     Tests(PhpVersion),
 }
@@ -153,28 +208,93 @@ fn tail(text: &str) -> String {
     text[start..].to_string()
 }
 
+fn dockerfile(base: &str, extensions: &[String]) -> String {
+    format!(
+        "FROM {base}\nADD --checksum=sha256:{INSTALLER_SHA256} {INSTALLER_URL} /usr/local/bin/install-php-extensions\n\
+         RUN chmod +x /usr/local/bin/install-php-extensions; for e in {}; do install-php-extensions \"$e\" || true; done\n",
+        extensions.join(" ")
+    )
+}
+
+fn installable(missing: &[String]) -> Vec<String> {
+    let mut list: Vec<String> = missing.iter().filter(|e| INSTALLABLE.contains(&e.as_str())).cloned().collect();
+    list.sort();
+    list.dedup();
+    list
+}
+
+fn loaded(container: &Container, version: PhpVersion, project: &Path, image: &str) -> Result<HashSet<String>, String> {
+    let done = container.run(&format!("modules-{}", version.compact()), project, image, false, "php -m", Duration::from_secs(300))?;
+    if done.status.and_then(|s| s.code()) == Some(125) {
+        let reason = tail(output(&done).trim());
+        return Err(crate::t!("{image} kalıbı çalıştırılamadı: {reason}", "Couldn't run the {image} image: {reason}"));
+    }
+    Ok(output(&done).lines().map(|l| l.trim().to_ascii_lowercase()).collect())
+}
+
+/// An image with the extensions added, reused between runs. Project code never runs while it's built.
+fn extended_image(
+    container: &Container,
+    base: &str,
+    version: PhpVersion,
+    extensions: &[String],
+    dir: &Path,
+) -> Result<Option<String>, String> {
+    let tag = format!("ferry-php:{version}-{:016x}", crate::snapshot::fnv1a(dockerfile(base, extensions).as_bytes()));
+    let cached = toolchain::command(container.docker).args(["image", "inspect", &tag]).output();
+    if cached.is_ok_and(|o| o.status.success()) {
+        return Ok(Some(tag));
+    }
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    std::fs::write(dir.join("Dockerfile"), dockerfile(base, extensions)).map_err(|e| e.to_string())?;
+    let mut cmd = toolchain::command(container.docker);
+    cmd.args(["build", "--quiet", "-t", &tag]).arg(dir);
+    let done = toolchain::run_process(cmd, container.docker, container.cancel, BUILD_TIMEOUT).map_err(|e| e.to_string())?;
+    if done.stopped == Some(Stop::Cancelled) {
+        return Err(crate::t!("Karşılaştırma durduruldu.", "The comparison was stopped."));
+    }
+    Ok(done.status.is_some_and(|s| s.success()).then_some(tag))
+}
+
 fn lint_lines(text: &str) -> impl Iterator<Item = &str> {
     text.lines().filter(|l| l.contains(" on line ")).filter(|l| !l.contains("Deprecated: ") && !l.contains("Warning: "))
+}
+
+struct Setup<'a> {
+    used: &'a [String],
+    install_extensions: bool,
+    images: &'a Path,
 }
 
 fn run_version(
     container: &Container,
     version: PhpVersion,
     project: &Path,
-    used: &[String],
+    setup: &Setup,
     step: &dyn Fn(Step),
 ) -> Result<VersionRun, String> {
-    let image = format!("php:{version}-cli");
+    let base = format!("php:{version}-cli");
+    let used = setup.used;
+    let mut image = base.clone();
+    let mut modules = loaded(container, version, project, &image)?;
+    let missing: Vec<String> = used.iter().filter(|e| !modules.contains(*e)).cloned().collect();
+    let wanted = if setup.install_extensions { installable(&missing) } else { Vec::new() };
+    let mut image_failed = false;
+    if !wanted.is_empty() {
+        step(Step::Extensions(version));
+        match extended_image(container, &base, version, &wanted, &setup.images.join(version.compact()))? {
+            Some(tag) => {
+                modules = loaded(container, version, project, &tag)?;
+                image = tag;
+            }
+            None => image_failed = true,
+        }
+    }
+    let installed_extensions = wanted.iter().filter(|e| modules.contains(*e)).cloned().collect();
     step(Step::Lint(version));
     let lint = container.run(&format!("lint-{}", version.compact()), project, &image, false, LINT_SCRIPT, LINT_TIMEOUT)?;
     let lint_output = output(&lint);
-    if lint.status.and_then(|s| s.code()) == Some(125) {
-        let reason = tail(lint_output.trim());
-        return Err(crate::t!("{image} kalıbı çalıştırılamadı: {reason}", "Couldn't run the {image} image: {reason}"));
-    }
     let lint_errors = lint_lines(&lint_output).count();
-    let modules = container.run(&format!("modules-{}", version.compact()), project, &image, false, "php -m", Duration::from_secs(60))?;
-    let modules: HashSet<String> = output(&modules).lines().map(|l| l.trim().to_ascii_lowercase()).collect();
     let missing_extensions = used.iter().filter(|e| !modules.contains(*e)).cloned().collect();
     let mut log = lint_output;
     let has_tests = project.join("vendor/bin/phpunit").exists();
@@ -188,7 +308,7 @@ fn run_version(
         None
     };
     let events = runtime::parse(&log);
-    Ok(VersionRun { version, image, lint_errors, tests, missing_extensions, events, log: tail(&log) })
+    Ok(VersionRun { version, image, lint_errors, tests, missing_extensions, installed_extensions, image_failed, events, log: tail(&log) })
 }
 
 fn differs(events: &[Event], other: &[Event]) -> Vec<Event> {
@@ -197,11 +317,12 @@ fn differs(events: &[Event], other: &[Event]) -> Vec<Event> {
 }
 
 /// Lints the project and runs its tests on both versions, each in a fresh copy with no network.
-/// Only Composer runs with network access, and without the project's scripts or plugins.
+/// Only Composer and image builds use the network, and neither runs the project's code, scripts or plugins.
 pub fn compare(
     root: &Path,
     source: PhpVersion,
     target: PhpVersion,
+    install_extensions: bool,
     cancel: &AtomicBool,
     step: impl Fn(Step),
 ) -> Result<Comparison, String> {
@@ -231,8 +352,10 @@ pub fn compare(
     let used: Vec<String> = crate::extensions::used(root, &files).into_iter().map(|e| e.name.to_ascii_lowercase()).collect();
     let target_dir = work.path().join("target");
     copy_project(&base, &target_dir).map_err(|e| crate::t!("Proje kopyalanamadı: {e}", "Couldn't copy the project: {e}"))?;
-    let source_run = run_version(&container, source, &base, &used, &step)?;
-    let target_run = run_version(&container, target, &target_dir, &used, &step)?;
+    let images = work.path().join("images");
+    let setup = Setup { used: &used, install_extensions, images: &images };
+    let source_run = run_version(&container, source, &base, &setup, &step)?;
+    let target_run = run_version(&container, target, &target_dir, &setup, &step)?;
     let new_on_target = differs(&target_run.events, &source_run.events);
     let gone_on_target = differs(&source_run.events, &target_run.events);
     Ok(Comparison { source: source_run, target: target_run, dependencies_installed, new_on_target, gone_on_target })
@@ -271,6 +394,29 @@ mod tests {
     }
 
     #[test]
+    fn images_add_only_extensions_the_installer_can_build() {
+        let missing = ["zip", "oci8", "gd", "zip", "interbase"].map(String::from);
+        assert_eq!(installable(&missing), ["gd", "zip"]);
+        let file = dockerfile("php:8.4-cli", &installable(&missing));
+        assert!(file.starts_with("FROM php:8.4-cli\nADD --checksum=sha256:ed854df3"), "{file}");
+        assert!(file.contains("for e in gd zip;"), "{file}");
+    }
+
+    #[test]
+    fn extensions_are_built_into_the_image() {
+        if std::env::var_os("FERRY_TEST_DOCKER").is_none() {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.php"), "<?php\n$b = new mysqli('h');\necho bcadd('1', '2');\n").unwrap();
+        let result = compare(dir.path(), PhpVersion::new(7, 4), PhpVersion::new(8, 4), true, &AtomicBool::new(false), |_| {}).unwrap();
+        for run in [&result.source, &result.target] {
+            assert_eq!(run.installed_extensions, ["bcmath", "mysqli"], "{run:?}");
+            assert!(run.missing_extensions.is_empty() && run.image.starts_with("ferry-php:"), "{run:?}");
+        }
+    }
+
+    #[test]
     fn lint_output_counts_only_errors() {
         let out = "PHP Parse error:  syntax error in /app/a.php on line 2\nPHP Deprecated:  old in /app/b.php on line 1\nErrors parsing /app/a.php\n";
         assert_eq!(lint_lines(out).count(), 1);
@@ -285,7 +431,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("a.php"), "<?php\nfunction f(int $a = null) {}\n$x = (real) 1;\n").unwrap();
         std::fs::write(dir.path().join("b.php"), "<?php\necho 1;\n").unwrap();
-        let result = compare(dir.path(), PhpVersion::new(7, 4), PhpVersion::new(8, 4), &AtomicBool::new(false), |_| {}).unwrap();
+        let result = compare(dir.path(), PhpVersion::new(7, 4), PhpVersion::new(8, 4), false, &AtomicBool::new(false), |_| {}).unwrap();
         assert_eq!((result.source.lint_errors, result.target.lint_errors), (0, 1), "{}", result.target.log);
         assert!(result.target.events.iter().all(|e| e.path == "/app/a.php"), "{:?}", result.target.events);
         assert!(result.new_on_target.iter().any(|e| e.level == Level::Fatal), "{:?}", result.new_on_target);

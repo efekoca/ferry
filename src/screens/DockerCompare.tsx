@@ -26,6 +26,12 @@ function RunCard({ run }: { run: DockerRun }) {
         <dd>{tests}</dd>
         <dt>{t.docker.messages}</dt>
         <dd>{run.events.length}</dd>
+        {run.installedExtensions.length > 0 && (
+          <>
+            <dt>{t.docker.added}</dt>
+            <dd>{run.installedExtensions.join(", ")}</dd>
+          </>
+        )}
       </dl>
       {run.log && (
         <details className="check-log">
@@ -52,6 +58,7 @@ function Result({ result }: { result: DockerComparison }) {
         {bad ? t.docker.worse(result.target.version) : tested ? t.docker.same(result.target.version) : t.docker.notTested}
       </Callout>
       {!result.dependenciesInstalled && <Callout tone="warn">{t.docker.notInstalled}</Callout>}
+      {(result.source.imageFailed || result.target.imageFailed) && <Callout tone="warn">{t.docker.imageFailed}</Callout>}
       {missing.length > 0 && <Callout tone="warn">{t.docker.missing(missing.join(", "))}</Callout>}
       <div className="grid-2">
         <RunCard run={result.source} />
@@ -88,11 +95,12 @@ export function DockerCompare() {
   const { t } = useI18n();
   const { project, target, toolchain, docker, dockerStep, runDocker, cancelDocker } = useStore();
   const [picked, setPicked] = useState<string | null>(null);
+  const [extensions, setExtensions] = useState(true);
   if (!project) return null;
   const sources = KNOWN_SOURCES.filter((v) => Number(v) < Number(target));
   const source = picked ?? project.currentVersion ?? "";
   const running = !!dockerStep;
-  const stepText = dockerStep && (dockerStep.step === "install" ? t.docker.installing : dockerStep.step === "lint" ? t.docker.linting(dockerStep.version ?? "") : t.docker.testing(dockerStep.version ?? ""));
+  const stepText = dockerStep && (dockerStep.step === "install" ? t.docker.installing : dockerStep.step === "extensions" ? t.docker.preparing(dockerStep.version ?? "") : dockerStep.step === "lint" ? t.docker.linting(dockerStep.version ?? "") : t.docker.testing(dockerStep.version ?? ""));
   return (
     <>
       <PageHeader title={t.docker.title} subtitle={t.docker.subtitle(source || "?", target as Target)} />
@@ -123,11 +131,15 @@ export function DockerCompare() {
                     {t.docker.stop}
                   </Button>
                 ) : (
-                  <Button variant="primary" icon={<Play size={14} />} disabled={!source} onClick={() => void runDocker(source)}>
+                  <Button variant="primary" icon={<Play size={14} />} disabled={!source} onClick={() => void runDocker(source, extensions)}>
                     {docker ? t.docker.again : t.docker.start}
                   </Button>
                 )}
               </div>
+              <label className="docker-option">
+                <input type="checkbox" className="checkbox" checked={extensions} disabled={running} onChange={(e) => setExtensions(e.target.checked)} />
+                <span>{t.docker.installExtensions}</span>
+              </label>
               {stepText && (
                 <p className="subtle" role="status">
                   {stepText}
