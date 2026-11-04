@@ -26,6 +26,7 @@ pub enum Check {
     New(usize),
     StrContains(usize, &'static str),
     ArrayLit(usize),
+    This(usize),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -105,6 +106,7 @@ impl Check {
             | Check::StrStarts(n, _)
             | Check::New(n)
             | Check::StrContains(n, _)
+            | Check::This(n)
             | Check::ArrayLit(n) => Some(n),
         }
     }
@@ -151,6 +153,7 @@ impl Check {
                     && arg.windows(2).any(|w| matches!(w[0].kind, TokenKind::Str { .. }) && w[1].is_punct("=>"))
             }
             Check::StrStarts(_, list) => text().is_some_and(|s| list.iter().any(|p| s.to_ascii_lowercase().starts_with(p))),
+            Check::This(_) => arg.len() == 1 && arg[0].kind == TokenKind::Variable && arg[0].text == "this",
             Check::New(_) => arg.first().is_some_and(|t| t.is_ident_ci("new")),
             Check::StrContains(_, part) => arg.len() == 1 && matches!(arg[0].kind, TokenKind::Str { .. }) && arg[0].text.contains(part),
             Check::ArrayLit(_) => {
@@ -163,6 +166,42 @@ impl Check {
         }
     }
 }
+
+pub(crate) const NEGATIVE_KEY: PatternRule = rule(
+    "behavior.negative_array_key",
+    Text::new("Negatif anahtardan sonraki anahtar", "Key after a negative key"),
+    B,
+    (8, 0),
+    None,
+    Text::new(
+        "PHP 8.0'dan beri negatif n anahtarından sonraki otomatik anahtar 0 değil, n+1.",
+        "Since PHP 8.0 the automatic key after a negative key n is n+1 instead of 0.",
+    ),
+);
+
+const OBJECT_KEY_EXISTS: PatternRule = rule(
+    "removed.array_key_exists_object",
+    Text::new("array_key_exists() nesneyle", "array_key_exists() on an object"),
+    R,
+    (8, 0),
+    code("property_exists($object, $key)"),
+    Text::new(
+        "array_key_exists() nesnelerde PHP 7.4'te kullanımdan kalktı ve PHP 8.0'dan beri TypeError fırlatıyor.",
+        "array_key_exists() on objects was deprecated in PHP 7.4 and throws a TypeError since PHP 8.0.",
+    ),
+);
+
+const OBJECT_POINTER: PatternRule = rule(
+    "deprecated.array_pointer_on_object",
+    Text::new("Dizi işaretçisi fonksiyonu nesneyle", "Array pointer function on an object"),
+    D,
+    (8, 1),
+    tx("önce get_mangled_object_vars() ile diziye çevirin", "convert it with get_mangled_object_vars() first"),
+    Text::new(
+        "key(), current(), next(), prev(), reset() ve end() fonksiyonlarını nesnede kullanmak PHP 8.1'de kullanımdan kalktı.",
+        "Calling key(), current(), next(), prev(), reset() or end() on an object is deprecated since PHP 8.1.",
+    ),
+);
 
 /// The first rule whose checks all hold for a call, and the token to report it at.
 pub fn find<'t>(function: &str, args: &[&'t [Token]]) -> Option<(&'static ArgRule, Option<&'t Token>)> {
@@ -507,6 +546,29 @@ pub const ARGUMENTS: &[ArgRule] = &[
         D, (8, 3), code("dba_fetch($key, $dba, $skip)"),
         Text::new("dba_fetch()'te handle'ı üçüncü argüman olarak vermek PHP 8.3'te kullanımdan kalktı.", "Passing the handle as the third argument of dba_fetch() is deprecated since PHP 8.3."),
     )),
+    arg(&["curl_getinfo"], &[Has(1, "CURLINFO_CERTINFO")], rule(
+        "behavior.curl_certinfo_format",
+        Text::new("CURLINFO_CERTINFO sonucunun biçimi", "CURLINFO_CERTINFO result format"),
+        B, (7, 0), None,
+        Text::new("PHP 7.0'dan beri sertifikanın Subject ve Issuer alanları dizi yerine metin olarak döner.", "Since PHP 7.0 the certificate's Subject and Issuer come back as strings instead of arrays."),
+    )),
+    arg(&["idn_to_ascii", "idn_to_utf8"], &[Count(1, 2)], rule(
+        "behavior.idn_default_variant",
+        Text::new("Değişen IDN varsayılanı", "Changed IDN default"),
+        B, (7, 4), code("INTL_IDNA_VARIANT_UTS46"),
+        Text::new("PHP 7.4'ten beri varsayılan varyant INTL_IDNA_VARIANT_2003 değil, INTL_IDNA_VARIANT_UTS46; bazı alan adları farklı dönüşebilir.", "Since PHP 7.4 the default variant is INTL_IDNA_VARIANT_UTS46 instead of INTL_IDNA_VARIANT_2003, so some domains can convert differently."),
+    )),
+    arg(&["call_user_func_array"], &[StringKeys(1)], rule(
+        "behavior.call_user_func_array_named",
+        Text::new("Dizi anahtarları parametre adı oluyor", "Array keys become parameter names"),
+        B, (8, 0), tx("array_values() ile sarın", "wrap the array in array_values()"),
+        Text::new("PHP 8.0'dan beri call_user_func_array() metin anahtarlarını parametre adı sayar; değerler sırayla değil adlarına göre geçer, eşleşmeyen ad Error fırlatır.", "Since PHP 8.0 call_user_func_array() treats string keys as parameter names, so values go by name instead of by position and an unknown name throws an Error."),
+    )),
+    arg(&["array_fill"], &[NumBelow(0, 0.0)], NEGATIVE_KEY),
+    arg(&["array_key_exists", "key_exists"], &[This(1)], OBJECT_KEY_EXISTS),
+    arg(&["array_key_exists", "key_exists"], &[New(1)], OBJECT_KEY_EXISTS),
+    arg(&["key", "current", "pos", "next", "prev", "reset", "end"], &[This(0)], OBJECT_POINTER),
+    arg(&["key", "current", "pos", "next", "prev", "reset", "end"], &[New(0)], OBJECT_POINTER),
     arg(&["ldap_connect"], &[Count(2, 2)], rule(
         "deprecated.ldap_connect_port",
         Text::new("Ayrı host ve port", "Separate host and port"),

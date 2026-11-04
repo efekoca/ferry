@@ -159,6 +159,30 @@ pub(crate) fn check(src: &str, tokens: &[Token], html: &[(usize, usize)]) -> Vec
                 out.push(at(t, &DEBUG_ZTS_BOOL));
             }
         }
+        if ["===", "!==", "==", "!="].iter().any(|o| t.is_punct(o)) && k > 0 {
+            let password = |a: &Token| a.text.trim_start_matches('\\').starts_with("PASSWORD_") && a.kind == TokenKind::Ident;
+            let hit = |a: &Token, b: Option<&Token>| password(a) && b.is_some_and(|b| b.kind == TokenKind::Number);
+            if hit(&tokens[k - 1], next) || next.is_some_and(|n| hit(n, Some(&tokens[k - 1]))) {
+                out.push(at(t, &PASSWORD_ALGO_INT));
+            }
+        }
+        if t.is_punct("\\") && k > 0 && tokens[k - 1].kind == TokenKind::Ident && next.is_some_and(|n| n.kind == TokenKind::Ident) {
+            out.push(at(t, &NAME_WHITESPACE));
+        }
+        if t.is_punct("\u{7f}") {
+            out.push(at(t, &DELETE_IDENTIFIER));
+        }
+        if t.is_punct("\0") {
+            out.push(at(t, &NUL_BYTE));
+        }
+        if matches!(t.kind, TokenKind::Str { .. }) && t.text.starts_with("<<<") {
+            let rest = src[t.end..].lines().next().unwrap_or_default().trim_start();
+            let word = rest.split(|c: char| !c.is_alphanumeric() && c != '_').next().unwrap_or_default();
+            let operator = ["and", "or", "xor", "as", "instanceof"].iter().any(|w| word.eq_ignore_ascii_case(w));
+            if rest.chars().next().is_some_and(|c| c.is_alphanumeric() || c == '$' || c == '_') && !operator {
+                out.push(at(t, &HEREDOC_LABEL));
+            }
+        }
         if t.is_ident_ci("list") && next.is_some_and(|n| n.is_punct("(")) {
             let empty = tokens[k + 2..].iter().take_while(|n| !n.is_punct(")")).all(|n| n.is_punct(","));
             let close = (k + 2..tokens.len()).find(|&j| !tokens[j].is_punct(","));
@@ -298,5 +322,65 @@ pub(crate) const DEBUG_ZTS_BOOL: PatternRule = rule(
     Text::new(
         "PHP 8.4'te PHP_DEBUG ve PHP_ZTS tamsayı yerine bool oldu; sayıyla === karşılaştırması artık hep false döner.",
         "In PHP 8.4 PHP_DEBUG and PHP_ZTS became bool instead of int, so a strict comparison with a number is now always false.",
+    ),
+);
+
+pub(crate) const PASSWORD_ALGO_INT: PatternRule = rule(
+    "behavior.password_algo_integer",
+    Text::new("Parola algoritması sayıyla karşılaştırılıyor", "Password algorithm compared with a number"),
+    Severity::Behavior,
+    (7, 4),
+    None,
+    Text::new(
+        "PHP 7.4'ten beri PASSWORD_* sabitleri tamsayı değil, null olabilen metin; sayıyla karşılaştırma artık tutmaz.",
+        "Since PHP 7.4 the PASSWORD_* constants are nullable strings instead of integers, so comparing them with a number no longer matches.",
+    ),
+);
+
+pub(crate) const NAME_WHITESPACE: PatternRule = rule(
+    "removed.namespaced_name_whitespace",
+    Text::new("Namespace adında boşluk", "Whitespace in a namespaced name"),
+    Severity::Breaking,
+    (8, 0),
+    Some(Text::new("adın içindeki boşlukları silin", "remove the whitespace inside the name")),
+    Text::new(
+        "PHP 8.0'dan beri namespace'li adlar tek bir belirteçtir, içinde boşluk bulunamaz; dosya derlenmez.",
+        "Since PHP 8.0 a namespaced name is a single token and can't contain whitespace; the file doesn't compile.",
+    ),
+);
+
+pub(crate) const DELETE_IDENTIFIER: PatternRule = rule(
+    "removed.delete_in_identifier",
+    Text::new("Tanımlayıcıda 0x7F karakteri", "0x7F character in an identifier"),
+    Severity::Breaking,
+    (7, 1),
+    Some(Text::new("karakteri silin", "remove the character")),
+    Text::new(
+        "PHP 7.1'den beri ASCII 0x7F (Delete) karakteri tırnaksız tanımlayıcılarda kullanılamaz; dosya derlenmez.",
+        "Since PHP 7.1 the ASCII 0x7F (Delete) character isn't allowed in unquoted identifiers; the file doesn't compile.",
+    ),
+);
+
+pub(crate) const NUL_BYTE: PatternRule = rule(
+    "removed.nul_byte_in_source",
+    Text::new("Kaynakta NUL baytı", "NUL byte in the source"),
+    Severity::Breaking,
+    (8, 0),
+    Some(Text::new("baytı silin", "remove the byte")),
+    Text::new(
+        "Metinlerin dışındaki NUL baytı PHP 8.0'dan beri uyarı değil, ParseError.",
+        "A NUL byte outside strings is a ParseError since PHP 8.0 instead of a warning.",
+    ),
+);
+
+pub(crate) const HEREDOC_LABEL: PatternRule = rule(
+    "removed.heredoc_label_in_body",
+    Text::new("Heredoc gövdesinde kapanış etiketi", "Closing label inside a heredoc body"),
+    Severity::Breaking,
+    (7, 3),
+    Some(Text::new("etiketi metinde geçmeyen bir adla değiştirin", "use a label that doesn't appear in the text")),
+    Text::new(
+        "PHP 7.3'ten beri girintili kapanış etiketine izin verildiği için satır başındaki bu kelime heredoc'u bitiriyor ve dosya derlenmiyor.",
+        "Since PHP 7.3 closing labels can be indented, so this word at the start of a line ends the heredoc and the file doesn't compile.",
     ),
 );

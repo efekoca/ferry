@@ -1,5 +1,6 @@
 pub mod analyzer;
 pub mod arguments;
+mod calls;
 #[rustfmt::skip]
 mod builtin;
 #[rustfmt::skip]

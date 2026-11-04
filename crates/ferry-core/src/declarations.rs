@@ -14,7 +14,7 @@ fn issue(at: usize, rule: &'static PatternRule) -> Issue {
     Issue { at, rule, since: rule.since, title: None }
 }
 
-fn close_of(tokens: &[Token], open: usize) -> Option<usize> {
+pub(crate) fn close_of(tokens: &[Token], open: usize) -> Option<usize> {
     let mut depth = 0usize;
     (open..tokens.len()).find(|&k| {
         let t = &tokens[k];
@@ -36,8 +36,8 @@ fn type_parts(tokens: &[Token]) -> Vec<String> {
         .collect()
 }
 
-struct Param {
-    var: usize,
+pub(crate) struct Param {
+    pub(crate) var: usize,
     types: Vec<String>,
     default: Option<usize>,
 }
@@ -66,17 +66,17 @@ fn params(tokens: &[Token], open: usize, close: usize) -> Vec<Param> {
     out
 }
 
-struct Function {
-    keyword: usize,
-    name: Option<usize>,
+pub(crate) struct Function {
+    pub(crate) keyword: usize,
+    pub(crate) name: Option<usize>,
     by_ref: bool,
-    params: Vec<Param>,
+    pub(crate) params: Vec<Param>,
     uses: Vec<usize>,
     returns: Option<Vec<String>>,
-    body: Option<(usize, usize)>,
+    pub(crate) body: Option<(usize, usize)>,
 }
 
-fn function_at(tokens: &[Token], k: usize) -> Option<Function> {
+pub(crate) fn function_at(tokens: &[Token], k: usize) -> Option<Function> {
     let t = &tokens[k];
     if !(t.is_ident_ci("function") || t.is_ident_ci("fn")) || k > 0 && (tokens[k - 1].is_punct("->") || tokens[k - 1].is_punct("::")) {
         return None;

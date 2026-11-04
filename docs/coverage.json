@@ -26,8 +26,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Changes to variable handling",
   "change": "Parentheses around variables or function calls no longer have any influence on behavior.",
-  "status": "gap",
-  "note": "array_pop((getArray())) passing a parenthesized call result by reference is not reported."
+  "status": "covered",
+  "note": "A function result wrapped in extra parentheses and passed to a by-reference built-in such as array_pop() is reported.",
+  "rules": [
+   "behavior.parenthesized_reference"
+  ]
  },
  {
   "version": "7.0",
@@ -58,8 +61,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Changes to list()",
   "change": "list() will no longer assign variables in reverse order.",
-  "status": "gap",
-  "note": "list($array[], $array[], $array[]) = [1, 2, 3] (assignment order change) is not reported."
+  "status": "covered",
+  "note": "list() appending to the same array more than once is reported.",
+  "rules": [
+   "behavior.list_assignment_order"
+  ]
  },
  {
   "version": "7.0",
@@ -414,8 +420,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Standard library changes",
   "change": "substr() now returns an empty string instead of FALSE when the truncation happens on boundaries.",
-  "status": "gap",
-  "note": "substr(...) === false checks are not reported."
+  "status": "covered",
+  "note": "Strict comparisons of a substr() call with false are reported.",
+  "rules": [
+   "behavior.substr_false"
+  ]
  },
  {
   "version": "7.0",
@@ -480,8 +489,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Curl",
   "change": "curl_getinfo($ch, CURLINFO_CERTINFO) returns certificate Subject and Issuer as a string (PHP >= 5.6.25)",
-  "status": "gap",
-  "note": "curl_getinfo($ch, CURLINFO_CERTINFO) whose result format changed is not reported."
+  "status": "covered",
+  "note": "curl_getinfo() with CURLINFO_CERTINFO is reported.",
+  "rules": [
+   "behavior.curl_certinfo_format"
+  ]
  },
  {
   "version": "7.0",
@@ -815,8 +827,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Core",
   "change": "The ASCII 0x7F Delete control character is no longer permitted in unquoted identifiers in source code.",
-  "status": "gap",
-  "note": "An identifier containing byte 0x7F is not reported."
+  "status": "covered",
+  "note": "A 0x7F byte in code outside strings and comments is reported.",
+  "rules": [
+   "removed.delete_in_identifier"
+  ]
  },
  {
   "version": "7.1",
@@ -1403,8 +1418,11 @@
   "version": "7.3",
   "section": "Backward Incompatible Changes",
   "change": "Due to the introduction of flexible heredoc/nowdoc syntax (see New Features section), doc strings that contain the ending label inside their body may cause syntax errors or change in interpretation.",
-  "status": "gap",
-  "note": "A heredoc whose body contains an indented closing label (   FOO) is not reported."
+  "status": "covered",
+  "note": "A heredoc that ends at a line where the label is followed by more words is reported.",
+  "rules": [
+   "removed.heredoc_label_in_body"
+  ]
  },
  {
   "version": "7.3",
@@ -1711,8 +1729,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Core",
   "change": "When using include/require on a stream, stream_set_option() will be invoked with the STREAM_OPTION_READ_BUFFER option.",
-  "status": "gap",
-  "note": "A stream wrapper class registered with stream_wrapper_register() that lacks stream_set_option() is not reported."
+  "status": "covered",
+  "note": "stream_wrapper_register() with a project class that has no parent, no traits and no stream_set_option() is reported.",
+  "rules": [
+   "behavior.stream_set_option_missing"
+  ]
  },
  {
   "version": "7.4",
@@ -1797,8 +1818,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Intl",
   "change": "The default parameter value of idn_to_ascii() and idn_to_utf8() is now INTL_IDNA_VARIANT_UTS46 instead of the deprecated INTL_IDNA_VARIANT_2003.",
-  "status": "gap",
-  "note": "idn_to_ascii('x') / idn_to_utf8('x') relying on the changed default variant are not reported."
+  "status": "covered",
+  "note": "idn_to_ascii() and idn_to_utf8() calls that leave the variant to its default are reported.",
+  "rules": [
+   "behavior.idn_default_variant"
+  ]
  },
  {
   "version": "7.4",
@@ -1926,8 +1950,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Standard",
   "change": "Password hashing algorithm identifiers are now nullable strings rather than integers.",
-  "status": "gap",
-  "note": "Comparing PASSWORD_BCRYPT === 1 (integer identifier) is not reported."
+  "status": "covered",
+  "note": "Comparing a PASSWORD_* constant with a number is reported.",
+  "rules": [
+   "behavior.password_algo_integer"
+  ]
  },
  {
   "version": "7.4",
@@ -2109,8 +2136,8 @@
   "section": "Deprecated Functionality",
   "ext": "Reflection",
   "change": "Calls to ReflectionType::__toString() now generate a deprecation notice.",
-  "status": "gap",
-  "note": "(string) $method->getReturnType() / ReflectionType::__toString() is not reported."
+  "status": "n/a",
+  "note": "Only PHP 7.4 raises this deprecation; it was withdrawn in 8.0, so no upgrade target past 7.4 sees it."
  },
  {
   "version": "7.4",
@@ -2150,8 +2177,11 @@
   "section": "Deprecated Functionality",
   "ext": "Standard",
   "change": "Using array_key_exists() on objects is deprecated.",
-  "status": "gap",
-  "note": "array_key_exists('k', $this) or on a new stdClass object is not reported."
+  "status": "covered",
+  "note": "array_key_exists() on $this or a new object is reported; other objects need the argument type.",
+  "rules": [
+   "removed.array_key_exists_object"
+  ]
  },
  {
   "version": "7.4",
@@ -2454,8 +2484,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Core",
   "change": "Any array that has a number n as its first numeric key will use n+1 for its next implicit key, even if n is negative.",
-  "status": "gap",
-  "note": "Not reported: an array literal with a negative first key followed by an implicit key, e.g. $a = [-5 => 'a', 'b']; or array_fill(-5, 3, 0)."
+  "status": "covered",
+  "note": "Array literals with a negative first key followed by an implicit key, and array_fill() with a negative start, are reported.",
+  "rules": [
+   "behavior.negative_array_key"
+  ]
  },
  {
   "version": "8.0",
@@ -2560,8 +2593,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Core",
   "change": "Unexpected characters in source files (such as null bytes outside of strings) will now result in a ParseError exception instead of a compile warning.",
-  "status": "gap",
-  "note": "Not reported: a source file containing a NUL byte outside strings, e.g. '<?php $x = 1;\\0'."
+  "status": "covered",
+  "note": "A NUL byte in code outside strings and comments is reported.",
+  "rules": [
+   "removed.nul_byte_in_source"
+  ]
  },
  {
   "version": "8.0",
@@ -2692,8 +2728,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Core",
   "change": "Namespaced names can no longer contain whitespace:",
-  "status": "gap",
-  "note": "Not reported: whitespace inside namespaced names, e.g. new Foo \\ Bar(); or use Foo \\ Baz;."
+  "status": "covered",
+  "note": "Names written as Foo \\ Bar, with whitespace around the separator, are reported.",
+  "rules": [
+   "removed.namespaced_name_whitespace"
+  ]
  },
  {
   "version": "8.0",
@@ -2738,8 +2777,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Core",
   "change": "call_user_func_array() array keys will now be interpreted as parameter names, instead of being silently ignored.",
-  "status": "gap",
-  "note": "Not reported: call_user_func_array('f', ['a' => 1, 'b' => 2]) with literal string keys."
+  "status": "covered",
+  "note": "call_user_func_array() with a literal array that has string keys is reported.",
+  "rules": [
+   "behavior.call_user_func_array_named"
+  ]
  },
  {
   "version": "8.0",
@@ -2807,11 +2849,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Enchant",
   "change": "enchant_broker_request_dict() and enchant_broker_request_pwl_dict() will now return an EnchantDictionary object rather than a resource.",
-  "status": "partial",
+  "status": "covered",
   "rules": [
    "removed.resource_check"
   ],
-  "note": "is_resource() on enchant_broker_request_dict() is reported, but on enchant_broker_request_pwl_dict() it is not."
+  "note": "is_resource() on enchant_broker_request_dict() and enchant_broker_request_pwl_dict() is reported."
  },
  {
   "version": "8.0",
@@ -3173,11 +3215,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "OpenSSL",
   "change": "openssl_x509_read() and openssl_csr_sign() will now return an OpenSSLCertificate object rather than a resource.",
-  "status": "partial",
+  "status": "covered",
   "rules": [
    "removed.resource_check"
   ],
-  "note": "is_resource() on openssl_x509_read() is reported, but on openssl_csr_sign() it is not."
+  "note": "is_resource() on openssl_x509_read() and openssl_csr_sign() is reported."
  },
  {
   "version": "8.0",
@@ -3388,11 +3430,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "Sockets",
   "change": "socket_create(), socket_create_listen(), socket_accept(), socket_import_stream(), socket_addrinfo_connect(), socket_addrinfo_bind(), and socket_wsaprotocol_info_import() will now return a Socket…",
-  "status": "partial",
+  "status": "covered",
   "rules": [
    "removed.resource_check"
   ],
-  "note": "is_resource() on socket_create() is reported, but on socket_import_stream() and socket_addrinfo_connect() it is not."
+  "note": "is_resource() on every listed socket function is reported."
  },
  {
   "version": "8.0",
@@ -3744,16 +3786,22 @@
   "section": "Backward Incompatible Changes",
   "ext": "Standard",
   "change": "Sort comparison functions that return true or false will now throw a deprecation warning, and should be replaced with an implementation that returns an integer less than, equal to, or greater than…",
-  "status": "gap",
-  "note": "Not reported: usort($array, fn($a, $b) => $a > $b) with a boolean-returning comparator."
+  "status": "covered",
+  "note": "usort(), uasort() and uksort() with a closure that only returns a comparison are reported.",
+  "rules": [
+   "deprecated.bool_sort_comparator"
+  ]
  },
  {
   "version": "8.0",
   "section": "Backward Incompatible Changes",
   "ext": "Standard",
   "change": "Any functions accepting callbacks that are not explicitly specified to accept parameters by reference will now warn if a callback with reference parameters is used.",
-  "status": "gap",
-  "note": "Not reported: array_filter($a, function (&$v) {...}) / array_reduce with a by-reference callback parameter."
+  "status": "covered",
+  "note": "Closures with a by-reference parameter passed to array_filter(), array_map(), array_reduce(), preg_replace_callback(), usort(), uasort() or uksort() are reported.",
+  "rules": [
+   "behavior.reference_callback"
+  ]
  },
  {
   "version": "8.0",
@@ -4208,16 +4256,22 @@
   "section": "Backward Incompatible Changes",
   "ext": "LDAP",
   "change": "The LDAP functions now accept and return, respectively, LDAP\\Result objects instead of \"ldap result\" resources.",
-  "status": "gap",
-  "note": "Not reported: $r = ldap_search($l, 'dc', 'x'); if (is_resource($r)) {} (only ldap_connect handles are tracked)."
+  "status": "covered",
+  "note": "is_resource() on ldap_search(), ldap_list() and ldap_read() results is reported.",
+  "rules": [
+   "removed.resource_check"
+  ]
  },
  {
   "version": "8.1",
   "section": "Backward Incompatible Changes",
   "ext": "LDAP",
   "change": "The LDAP functions now accept and return, respectively, LDAP\\ResultEntry objects instead of \"ldap result entry\" resources.",
-  "status": "gap",
-  "note": "Not reported: $e = ldap_first_entry($l, $r); if (is_resource($e)) {}."
+  "status": "covered",
+  "note": "is_resource() on ldap_first_entry() and ldap_next_entry() results is reported.",
+  "rules": [
+   "removed.resource_check"
+  ]
  },
  {
   "version": "8.1",
@@ -4371,8 +4425,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "PgSQL",
   "change": "The PgSQL functions now accept and return, respectively, \\PgSql\\Lob objects instead of \"pgsql large object\" resources.",
-  "status": "gap",
-  "note": "Not reported: $l = pg_lo_open($c, 1, 'r'); if (is_resource($l)) {}."
+  "status": "covered",
+  "note": "is_resource() on pg_lo_open() results is reported.",
+  "rules": [
+   "removed.resource_check"
+  ]
  },
  {
   "version": "8.1",
@@ -4464,8 +4521,11 @@
   "section": "Deprecated Functionality",
   "ext": "Core",
   "change": "Implicit conversion of floats to integers that result in loss of precision, e.g. a truncation from 1.9 to 1, is deprecated.",
-  "status": "gap",
-  "note": "Float-to-int loss usually comes from runtime values, but literal forms like $a[1.5] = 1, 7.5 % 2 and str_repeat('x', 2.5) are not reported."
+  "status": "covered",
+  "note": "Literal fractional array keys and % operands are reported; values that only exist at runtime are not.",
+  "rules": [
+   "deprecated.implicit_float_to_int"
+  ]
  },
  {
   "version": "8.1",
@@ -4716,8 +4776,11 @@
   "section": "Deprecated Functionality",
   "ext": "Standard",
   "change": "Calling key(), current(), next(), prev(), reset(), or end() on objects is deprecated.",
-  "status": "gap",
-  "note": "Generally needs the argument type, but obvious object forms like reset($this) / current($this) or key(new stdClass) are not reported."
+  "status": "covered",
+  "note": "key(), current(), next(), prev(), reset() and end() on $this or a new object are reported; other objects need the argument type.",
+  "rules": [
+   "deprecated.array_pointer_on_object"
+  ]
  },
  {
   "version": "8.1",
@@ -5684,8 +5747,11 @@
   "section": "Backward Incompatible Changes",
   "ext": "PCNTL",
   "change": "The functions pcntl_sigprocmask(), pcntl_sigwaitinfo() and pcntl_sigtimedwait() now always return false on failure.",
-  "status": "gap",
-  "note": "Checking `pcntl_sigwaitinfo(...) === -1` (now returns false) was tested and not reported."
+  "status": "covered",
+  "note": "pcntl_sigwaitinfo() and pcntl_sigtimedwait() results compared with -1 are reported.",
+  "rules": [
+   "behavior.pcntl_failure_value"
+  ]
  },
  {
   "version": "8.4",
@@ -6649,8 +6715,11 @@
   "section": "Deprecated Functionality",
   "ext": "Core",
   "change": "Trying to produce output (e.g. with `echo`) within a user output handler is deprecated.",
-  "status": "gap",
-  "note": "`ob_start(function ($b) { echo 'x'; return $b; })` was tested and not reported."
+  "status": "covered",
+  "note": "ob_start() with a closure that contains echo or print is reported.",
+  "rules": [
+   "deprecated.output_in_ob_handler"
+  ]
  },
  {
   "version": "8.5",
@@ -6742,8 +6811,11 @@
   "section": "Deprecated Functionality",
   "ext": "Core",
   "change": "The following closure binding issues, which already emit an E_WARNING, are now deprecated:",
-  "status": "gap",
-  "note": "Binding an object to a static closure via Closure::bind()/bindTo() and unbinding $this from a closure using $this were tested and not reported."
+  "status": "covered",
+  "note": "Binding an object to a static closure, and unbinding $this from a closure that uses it, are reported for literal closures.",
+  "rules": [
+   "deprecated.closure_bind"
+  ]
  },
  {
   "version": "8.5",
@@ -6769,8 +6841,8 @@
   "section": "Deprecated Functionality",
   "ext": "Core",
   "change": "The __sleep() and __wakeup() magic methods have been soft-deprecated.",
-  "status": "gap",
-  "note": "Soft deprecation only, but defining __sleep()/__wakeup() in a user class was tested and not reported."
+  "status": "n/a",
+  "note": "A soft deprecation only: PHP 8.5 raises nothing for __sleep() or __wakeup(), so there is nothing to change yet."
  },
  {
   "version": "8.5",

@@ -377,6 +377,9 @@ pub fn analyze_source_in(file: &str, src: &str, target: PhpVersion, index: &crat
             }
         }
     }
+    for (k, rule) in crate::calls::check(&tokens, index) {
+        ctx.pattern(rule, &tokens[k], None);
+    }
     for (k, rule) in crate::strings::check(&tokens) {
         ctx.pattern(rule, &tokens[k], None);
     }
@@ -2655,19 +2658,21 @@ fn serializable_without_magic(tokens: &[Token]) -> Vec<usize> {
         .collect()
 }
 
-const RESOURCE_OBJECTS: [(&str, u32, u32); 46] = [
+const RESOURCE_OBJECTS: [(&str, u32, u32); 58] = [
     ("curl_init", 8, 0),
     ("curl_multi_init", 8, 0),
     ("curl_share_init", 8, 0),
     ("deflate_init", 8, 0),
     ("enchant_broker_init", 8, 0),
     ("enchant_broker_request_dict", 8, 0),
+    ("enchant_broker_request_pwl_dict", 8, 0),
     ("imagecreate", 8, 0),
     ("imagecreatefrom*", 8, 0),
     ("imagecreatetruecolor", 8, 0),
     ("inflate_init", 8, 0),
     ("msg_get_queue", 8, 0),
     ("openssl_csr_new", 8, 0),
+    ("openssl_csr_sign", 8, 0),
     ("openssl_pkey_get_private", 8, 0),
     ("openssl_pkey_get_public", 8, 0),
     ("openssl_pkey_new", 8, 0),
@@ -2678,6 +2683,10 @@ const RESOURCE_OBJECTS: [(&str, u32, u32); 46] = [
     ("socket_accept", 8, 0),
     ("socket_create", 8, 0),
     ("socket_create_listen", 8, 0),
+    ("socket_addrinfo_bind", 8, 0),
+    ("socket_addrinfo_connect", 8, 0),
+    ("socket_import_stream", 8, 0),
+    ("socket_wsaprotocol_info_import", 8, 0),
     ("xml_parser_create", 8, 0),
     ("xml_parser_create_ns", 8, 0),
     ("xmlwriter_open_memory", 8, 0),
@@ -2688,8 +2697,14 @@ const RESOURCE_OBJECTS: [(&str, u32, u32); 46] = [
     ("imageloadfont", 8, 1),
     ("imap_open", 8, 1),
     ("ldap_connect", 8, 1),
+    ("ldap_first_entry", 8, 1),
+    ("ldap_list", 8, 1),
+    ("ldap_next_entry", 8, 1),
+    ("ldap_read", 8, 1),
+    ("ldap_search", 8, 1),
     ("pg_connect", 8, 1),
     ("pg_execute", 8, 1),
+    ("pg_lo_open", 8, 1),
     ("pg_pconnect", 8, 1),
     ("pg_prepare", 8, 1),
     ("pg_query", 8, 1),
@@ -3596,6 +3611,28 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
             ("<?php namespace App; class D extends DateTime { const ATOM = 'x'; }", "removed.typed_constant_override", 0),
             ("<?php #[Attribute] abstract class A {} #[Attribute] interface I {} #[Attribute, Other] enum E {} #[Attribute] final class B {} #[Other] trait T {}", "removed.attribute_on_non_class", 3),
             ("<?php trait T { static function f() {} public static $p; } class C { use T; } T::f(); T::$p = 1; C::f(); T::class;", "deprecated.trait_static_access", 2),
+            ("<?php substr($s, 1) === false; false !== substr($s, 1); substr($s, 1) === ''; strlen($s) === false;", "behavior.substr_false", 2),
+            ("<?php pcntl_sigwaitinfo([1]) === -1; pcntl_sigtimedwait([1]) == -1; pcntl_sigwaitinfo([1]) === false;", "behavior.pcntl_failure_value", 2),
+            ("<?php $a[1.5] = 1; echo 7.5 % 2, 2 % 1.5; $b[1.0] = 1; echo $c % 2; $d = [1.5];", "deprecated.implicit_float_to_int", 3),
+            ("<?php $a = [-5 => 'a', 'b']; $b = array(-1 => 'x', 'y'); $c = [-5 => 'a', -4 => 'b']; $d = [5 => 'a', 'b']; $e[-1] = 2; array_fill(-5, 3, 0); array_fill(5, 3, 0);", "behavior.negative_array_key", 3),
+            ("<?php list($a[], $a[]) = [1, 2]; list($b[], $c[]) = [1, 2]; list($d, $e) = [1, 2];", "behavior.list_assignment_order", 1),
+            ("<?php ob_start(function ($b) { echo 'x'; return $b; }); ob_start(function ($b) { return $b; }); ob_start('f');", "deprecated.output_in_ob_handler", 1),
+            ("<?php usort($a, fn($x, $y) => $x > $y); usort($a, function ($x, $y) { return $x['n'] < $y['n']; }); usort($a, fn($x, $y) => $x <=> $y); usort($a, function ($x, $y) { return $x > $y ? 1 : -1; }); usort($a, function ($x, $y) { if ($x > $y) { return 1; } return -1; });", "deprecated.bool_sort_comparator", 2),
+            ("<?php array_filter($a, function (&$v) {}); array_map(function (&$v) {}, $a); array_walk($a, function (&$v) {}); array_map(function ($v) {}, $a); usort($a, function (&$x, $y) {});", "behavior.reference_callback", 3),
+            ("<?php $f = static function () {}; $f->bindTo(new A); $f->bindTo(null); Closure::bind(static function () {}, new A); (static function () {})->bindTo($x); $g = function () { return $this; }; $g->bindTo(null); $h = function () {}; $h->bindTo(null); $h->bindTo(new A);", "deprecated.closure_bind", 4),
+            ("<?php echo array_pop((g())); echo array_pop(g()); array_pop(($a));", "behavior.parenthesized_reference", 1),
+            ("<?php class W { function stream_open() {} } class X { function stream_set_option() {} } stream_wrapper_register('a', 'W'); stream_wrapper_register('b', 'X'); stream_wrapper_register('c', W::class); stream_wrapper_register('d', $c);", "behavior.stream_set_option_missing", 2),
+            ("<?php class A { function t() { array_key_exists('k', $this); array_key_exists('k', $a); } } array_key_exists('k', new A);", "removed.array_key_exists_object", 2),
+            ("<?php class A { function t() { reset($this); reset($a); } } key(new A);", "deprecated.array_pointer_on_object", 2),
+            ("<?php curl_getinfo($c, CURLINFO_CERTINFO); curl_getinfo($c, CURLINFO_HTTP_CODE);", "behavior.curl_certinfo_format", 1),
+            ("<?php idn_to_ascii('x'); idn_to_utf8('x', 0); idn_to_ascii('x', 0, INTL_IDNA_VARIANT_UTS46);", "behavior.idn_default_variant", 2),
+            ("<?php call_user_func_array('f', ['a' => 1]); call_user_func_array('f', [1, 2]); call_user_func_array('f', $a);", "behavior.call_user_func_array_named", 1),
+            ("<?php PASSWORD_BCRYPT === 1; 2 == PASSWORD_ARGON2I; PASSWORD_BCRYPT === '2y'; $a === 1;", "behavior.password_algo_integer", 2),
+            ("<?php namespace Foo \\ Bar; echo A\\B::C; echo \\Foo\\bar();", "removed.namespaced_name_whitespace", 1),
+            ("<?php $a\x7fb = 1;", "removed.delete_in_identifier", 1),
+            ("<?php $x = 1;\0", "removed.nul_byte_in_source", 1),
+            ("<?php // a\0b\n$x = \"a\0b\";", "removed.nul_byte_in_source", 0),
+            ("<?php $x = <<<FOO\n  a\n  FOO b\nFOO;\n$y = <<<BAR\n c\n BAR . 'x';\n", "removed.heredoc_label_in_body", 1),
             ("<?php define('A', 1); define('A', 2); const B = 1, C = 2; const C = 3; if (!defined('D')) define('D', 1); if (!defined('D')) define('D', 2); if ($x) { define('E', 1); } else { define('E', 2); }", "deprecated.constant_redeclared", 2),
             ("<?php namespace N { const X = 1; } namespace M { const X = 1; }", "deprecated.constant_redeclared", 0),
             ("<?php class A { function f($a) { return function ($b) use ($this, $_GET, $b, $c) {}; } }", "removed.closure_use_variable", 3),
