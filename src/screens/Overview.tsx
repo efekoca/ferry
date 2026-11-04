@@ -63,7 +63,7 @@ export function Overview() {
   const pct = progress && progress.total > 0 ? (progress.done / progress.total) * 100 : null;
   const s = scan?.summary;
   const ready = scan ? readiness(scan, deps) : null;
-  const settled = !!ready && ready.blockers === 0 && ready.unscanned === 0 && ready.deps.state === "verified" && ready.check.state !== "failed";
+  const settled = !!ready && ready.blockers === 0 && ready.unscanned === 0 && ready.deps.state === "verified" && ready.check.state === "passed";
   const baseTone = s ? scoreTone(s.score) : "auto";
   const tone = ready && ready.blockers > 0 && baseTone === "auto" ? "manual" : baseTone;
   const blockers = dependencyBlockers(deps);

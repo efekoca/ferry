@@ -539,6 +539,12 @@ fn run(o: &Options) -> Result<Outcome, String> {
     let info = project::inspect(&root).map_err(|e| e.to_string())?;
     let files = project::collect_php_files(&root, &info.excluded_dirs);
     let mut scan = analyzer::analyze_files(&root, &files, o.target, |_, _, _| {});
+    if files.is_empty() {
+        scan.errors.push(analyzer::FileError {
+            file: ".".into(),
+            message: ferry_core::t!("Bu klasörde taranacak PHP dosyası yok.", "This folder has no PHP files to scan."),
+        });
+    }
     if let Some(path) = &o.runtime_log {
         let text = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
         let events = ferry_core::runtime::parse(&String::from_utf8_lossy(&text));
