@@ -1,4 +1,4 @@
-use crate::analyzer::{call_args, receiver_types};
+use crate::analyzer::{call_args, Receivers};
 use crate::i18n::Text;
 use crate::lexer::{Token, TokenKind};
 use crate::rules::{patterns, FixKind, PatternRule, Severity};
@@ -46,7 +46,7 @@ const PROPERTIES: &[(&str, &str, &PatternRule)] = &[
 /// `is_user_type` says whether the project declares a class with that short name.
 pub(crate) fn check(tokens: &[Token], is_user_type: impl Fn(&str) -> bool) -> Vec<Issue> {
     let mut out = Vec::new();
-    let types = receiver_types(tokens);
+    let receivers = Receivers::new(tokens);
     let field_call = |j: usize| {
         let name = tokens[j].text.to_ascii_lowercase();
         tokens[j].kind == TokenKind::Ident
@@ -66,7 +66,8 @@ pub(crate) fn check(tokens: &[Token], is_user_type: impl Fn(&str) -> bool) -> Ve
         let next = tokens.get(k + 1);
         let called = next.is_some_and(|n| n.is_punct("("));
         if t.kind == TokenKind::Ident && prev.is_some_and(|p| p.is_punct("->")) && k >= 2 && tokens[k - 2].kind == TokenKind::Variable {
-            let builtin: Vec<&String> = types.get(tokens[k - 2].text.as_str()).into_iter().flatten().filter(|c| !is_user_type(c)).collect();
+            let types = receivers.at(tokens, k - 2, &tokens[k - 2].text);
+            let builtin: Vec<&String> = types.iter().filter(|c| !is_user_type(c)).collect();
             let name = t.text.to_ascii_lowercase();
             if called {
                 let keys: Vec<String> = builtin.iter().map(|c| format!("{c}::{name}")).collect();
@@ -114,8 +115,8 @@ pub(crate) fn check(tokens: &[Token], is_user_type: impl Fn(&str) -> bool) -> Ve
             let var = next.filter(|n| n.kind == TokenKind::Variable);
             let member = tokens.get(k + 3).filter(|_| tokens.get(k + 2).is_some_and(|a| a.is_punct("->")));
             if let Some(v) = var {
-                let classes = types.get(v.text.as_str());
-                if member.is_none() && classes.is_some_and(|c| c.contains("domxpath")) && !is_user_type("domxpath") {
+                let classes = receivers.at(tokens, k + 1, &v.text);
+                if member.is_none() && classes.contains("domxpath") && !is_user_type("domxpath") {
                     out.push(issue(k, &CLONE_XPATH));
                 }
                 let list = member.is_some_and(|m| {
