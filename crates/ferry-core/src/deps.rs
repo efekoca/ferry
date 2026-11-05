@@ -152,7 +152,7 @@ pub fn check_packages(root: &Path, target: PhpVersion) -> DependencyReport {
         root_conflict,
         packages,
         has_lock_file: lock.is_some(),
-        lock_unreadable: lock.is_none() && root.join("composer.lock").is_file(),
+        lock_unreadable: root.join("composer.lock").is_file() && lock.as_ref().is_none_or(|l| !l["packages"].is_array()),
         extensions: Vec::new(),
         wordpress: Vec::new(),
     }
@@ -269,6 +269,13 @@ mod tests {
         assert!(note("paragonie/random_compat").unwrap().contains("PHP 7.0"));
         assert_eq!(note("symfony/polyfill-php85"), None, "the target doesn't have it yet");
         assert_eq!(note("symfony/polyfill-php81"), None, "it came with another package");
+    }
+
+    #[test]
+    fn a_lock_without_packages_is_unreadable() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("composer.lock"), "{}").unwrap();
+        assert!(check_packages(dir.path(), "8.3".parse().unwrap()).lock_unreadable);
     }
 
     #[test]
