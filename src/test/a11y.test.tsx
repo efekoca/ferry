@@ -7,7 +7,7 @@ import { mockApi } from "../lib/mock";
 
 async function violations(context: Element = document.body) {
   const result = await axe.run(context, {
-    rules: { "color-contrast": { enabled: false }, region: { enabled: false } },
+    rules: { "color-contrast": { enabled: false } },
   });
   return result.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`);
 }
@@ -152,5 +152,25 @@ describe("accessibility", { timeout: 30_000 }, () => {
     await user.click(await screen.findByRole("checkbox", { name: "Tümünü seç" }));
     await user.click(await screen.findByRole("button", { name: "Tümünü uygula" }));
     expect(await screen.findByRole("dialog")).toHaveAccessibleDescription(/satır değişecek/);
+  });
+
+  it("reaches a finding and its details with the keyboard alone", async () => {
+    const user = userEvent.setup();
+    render(<App api={mockApi({ delay: 0 })} />);
+    await screen.findByRole("heading", { name: "Kodunuz yeni sürüme hazır olsun" });
+    screen.getByRole("button", { name: "Proje klasörü seçin" }).focus();
+    await user.keyboard("{Enter}");
+    await screen.findByRole("heading", { name: "Genel bakış" });
+    screen.getByRole("button", { name: "Taramayı başlat" }).focus();
+    await user.keyboard("{Enter}");
+    const findings = nav(/Bulgular/);
+    await waitFor(() => expect(findings).toBeEnabled());
+    findings.focus();
+    await user.keyboard("{Enter}");
+    await screen.findByRole("heading", { name: "Bulgular" });
+    for (let k = 0; k < 40 && !document.activeElement?.closest("[role=listbox], [role=option]"); k++) await user.tab();
+    expect(document.activeElement?.closest("[role=listbox], [role=option]")).not.toBeNull();
+    await user.keyboard("{ArrowDown}");
+    expect(document.activeElement?.closest("[role=listbox], [role=option]")).not.toBeNull();
   });
 });
