@@ -349,7 +349,7 @@ To run the tests against real Rector, point `FERRY_TEST_TOOLS` to a folder where
 
 `crates/ferry-core/src/symbols.rs` is generated from PHP itself: `scripts/php-symbols/dump.sh <folder>` builds a Docker image per PHP version from 7.0 to 8.5 with the same extensions and dumps every built-in function, class, method, constant and ini setting with reflection, and `node scripts/php-symbols/generate.mjs <folder> > crates/ferry-core/src/symbols.rs` lists what each version removed or deprecated. `scripts/php-symbols/verify.php` checks the table against a PHP, and the `symbols` test fails if the scanner misses any of them. When a new PHP version comes out, add it to `dump.sh` and regenerate.
 
-`scripts/runtime-benchmark.sh <project> <test-dir> [target]` runs a project's PHPUnit tests in Docker on the target PHP and merges the deprecations they report with the static scan; the latest results are in [docs/ROADMAP.md](docs/ROADMAP.md).
+`scripts/runtime-benchmark.sh <project> <test-dir> [target]` runs a project's PHPUnit tests in Docker on the target PHP and merges the deprecations they report with the static scan. On Monolog, league/commonmark, Laravel, PHPMailer and Carbon, 104 of 116 runtime deprecations (90%) were already reported statically.
 
 `pnpm e2e:native` drives a debug build of the real app through the demo projects and edge cases such as a Unicode path, a symlink loop and an empty project, checks text contrast in both themes, and reports each scenario.
 
@@ -362,7 +362,7 @@ The screenshots in this README come from `node scripts/readme-shots.mjs` while `
 | `crates/ferry-core` | the engine: lexer, rules and analyzer, Rector integration, diffs, backups, and Composer checks |
 | `crates/ferry-cli` | command-line scanner for CI, with text, JSON, SARIF, GitHub annotation, JUnit, Checkstyle and CSV output |
 | `src-tauri` | desktop shell: commands, window, and platform settings |
-| `src` | React and TypeScript interface (design system in [docs/DESIGN.md](docs/DESIGN.md)) |
+| `src` | React and TypeScript interface |
 | `demo` | sample projects for trying the app and for the tests |
 
 CI checks formatting and runs the interface and engine tests (including real Rector) on Linux and Windows for every pull request and push to `main`, drives the real app with the native e2e on both, and builds the macOS, Windows and Linux packages for `v*` tags.

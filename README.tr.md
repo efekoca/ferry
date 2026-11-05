@@ -349,7 +349,7 @@ Testleri gerçek Rector'la çalıştırmak için `FERRY_TEST_TOOLS` değişkenin
 
 `crates/ferry-core/src/symbols.rs` PHP'nin kendisinden üretilir: `scripts/php-symbols/dump.sh <klasör>` 7.0'dan 8.5'e her PHP sürümü için aynı extension'larla bir Docker imajı kurar ve reflection ile bütün yerleşik fonksiyonları, sınıfları, metotları, sabitleri ve ini ayarlarını döker; `node scripts/php-symbols/generate.mjs <klasör> > crates/ferry-core/src/symbols.rs` her sürümün neyi kaldırdığını ya da kullanımdan kaldırdığını çıkarır. `scripts/php-symbols/verify.php` tabloyu bir PHP'ye karşı doğrular; `symbols` testi de tarayıcı bunlardan birini kaçırırsa başarısız olur. Yeni bir PHP sürümü çıktığında onu `dump.sh`'e ekleyip tabloyu yeniden üretin.
 
-`scripts/runtime-benchmark.sh <proje> <test-klasörü> [hedef]` bir projenin PHPUnit testlerini Docker'da hedef PHP sürümüyle çalıştırır ve bildirdikleri kullanımdan kalkmaları statik taramayla birleştirir; son sonuçlar [docs/ROADMAP.md](docs/ROADMAP.md) içinde.
+`scripts/runtime-benchmark.sh <proje> <test-klasörü> [hedef]` bir projenin PHPUnit testlerini Docker'da hedef PHP sürümüyle çalıştırır ve bildirdikleri kullanımdan kalkmaları statik taramayla birleştirir. Monolog, league/commonmark, Laravel, PHPMailer ve Carbon üzerinde, çalışma anındaki 116 kullanımdan kalkma mesajının 104'ünü (%90) statik tarama zaten bildirmişti.
 
 `pnpm e2e:native`, uygulamanın debug sürümünü demo projeler ve Unicode yol, symlink döngüsü ya da boş proje gibi uç durumlar üzerinde baştan sona çalıştırır, iki temada metin kontrastını ölçer ve her senaryonun sonucunu bildirir.
 
@@ -362,7 +362,7 @@ Bu README'deki ekran görüntüleri, `pnpm dev` çalışırken `node scripts/rea
 | `crates/ferry-core` | Motor: sözcük çözümleyici, kurallar ve analiz, Rector entegrasyonu, farklar, yedekler ve Composer kontrolleri |
 | `crates/ferry-cli` | CI için komut satırı tarayıcısı; metin, JSON, SARIF, GitHub uyarısı, JUnit, Checkstyle ve CSV çıktısı verir |
 | `src-tauri` | Masaüstü kabuğu: komutlar, pencere ve platform ayarları |
-| `src` | React ve TypeScript arayüzü (tasarım sistemi: [docs/DESIGN.md](docs/DESIGN.md)) |
+| `src` | React ve TypeScript arayüzü |
 | `demo` | Uygulamayı denemek ve testler için örnek projeler |
 
 CI, her pull request'te ve `main`'e yapılan her push'ta biçimi kontrol eder, arayüz ve motor testlerini (gerçek Rector dahil) Linux ve Windows'ta çalıştırır, ikisinde de gerçek uygulamayı native e2e ile test eder; `v*` etiketlerinde macOS, Windows ve Linux paketlerini oluşturur.
