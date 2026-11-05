@@ -422,7 +422,7 @@ describe("Ferry app", () => {
     render(<App api={mockApi({ delay: 0 })} />);
     await openAndScan(user);
     await user.click(nav(/Gerçek test/));
-    await user.click(await screen.findByRole("button", { name: "Karşılaştırmayı başlat" }));
+    await user.click(await screen.findByRole("button", { name: "Testi başlat" }));
     expect(await screen.findByText("PHP 8.4 sürümünde yeni sorunlar var.")).toBeInTheDocument();
     expect(screen.getByText("Error: Call to undefined function each()")).toBeInTheDocument();
     expect(screen.getByText("1 test başarısız")).toBeInTheDocument();
@@ -465,7 +465,7 @@ describe("Ferry app", () => {
     await user.click(nav(/Gerçek test/));
     await user.selectOptions(await screen.findByRole("combobox", { name: "Veritabanı" }), await screen.findByRole("option", { name: "Canlı kopya: magaza (127.0.0.1)" }));
     expect(screen.getByText(/Canlı veritabanınıza yazılmaz/)).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Karşılaştırmayı başlat" }));
+    await user.click(screen.getByRole("button", { name: "Testi başlat" }));
     expect(await screen.findByText("İstekler sonrası farklı tablolar: 1")).toBeInTheDocument();
     expect(screen.getByText("orders")).toBeInTheDocument();
   });
@@ -481,11 +481,11 @@ describe("Ferry app", () => {
     await user.type(screen.getByRole("combobox", { name: "SSH sunucusu" }), "prod");
     await user.type(screen.getByRole("textbox", { name: "Veritabanı adı" }), "magaza");
     await user.type(screen.getByRole("textbox", { name: "Veritabanı kullanıcısı" }), "app");
-    await user.click(screen.getByRole("button", { name: "Karşılaştırmayı başlat" }));
+    await user.click(screen.getByRole("button", { name: "Testi başlat" }));
     const dialog = await screen.findByRole("dialog", { name: "Sunucudaki veri kopyalansın mı?" });
     expect(within(dialog).getByText(/prod sunucusundaki magaza/)).toBeInTheDocument();
     expect(compare).not.toHaveBeenCalled();
-    await user.click(within(dialog).getByRole("button", { name: "Kopyala ve karşılaştır" }));
+    await user.click(within(dialog).getByRole("button", { name: "Kopyala ve test et" }));
     await waitFor(() => expect(compare).toHaveBeenCalled());
     expect(compare.mock.calls[0][6]).toEqual({ kind: "ssh", host: "prod", engine: "mysql", name: "magaza", user: "app" });
   });
@@ -499,7 +499,7 @@ describe("Ferry app", () => {
     render(<App api={api} />);
     await openAndScan(user);
     await user.click(nav(/Gerçek test/));
-    await user.click(await screen.findByRole("button", { name: "Karşılaştırmayı başlat" }));
+    await user.click(await screen.findByRole("button", { name: "Testi başlat" }));
     await user.click(await screen.findByRole("button", { name: "Düzeltmeleri hazırla" }));
     expect(await screen.findByText(/Yeni 1 mesajdan 1 tanesi/)).toBeInTheDocument();
     expect(screen.getByText("1 sorunla ilgili")).toBeInTheDocument();
@@ -527,7 +527,7 @@ describe("Ferry app", () => {
     await user.click(nav(/Gerçek test/));
     expect(await screen.findByDisplayValue("vendor/bin/pest")).toBeInTheDocument();
     expect(screen.getByDisplayValue("make assets")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Karşılaştırmayı başlat" }));
+    await user.click(screen.getByRole("button", { name: "Testi başlat" }));
     await waitFor(() => expect(compare).toHaveBeenCalled());
     const call = compare.mock.calls[0];
     expect([call[1], call[2], call[3], call[5], call[7], call[8]]).toEqual(["8.0", "8.3", false, ["/shop"], "make assets", "vendor/bin/pest"]);
@@ -543,7 +543,7 @@ describe("Ferry app", () => {
     render(<App api={api} />);
     await openAndScan(user);
     await user.click(nav(/Gerçek test/));
-    await user.click(await screen.findByRole("button", { name: "Karşılaştırmayı başlat" }));
+    await user.click(await screen.findByRole("button", { name: "Testi başlat" }));
     expect(await screen.findByText("Yeni mesajlar nereden geliyor")).toBeInTheDocument();
     expect(screen.getByText("Önce WordPress'i güncelleyin.")).toBeInTheDocument();
     expect(screen.getByText("acme/mailer 1.4.0")).toBeInTheDocument();
@@ -564,14 +564,14 @@ describe("Ferry app", () => {
     await user.type(screen.getByRole("combobox", { name: "SSH sunucusu" }), "prod");
     await user.type(screen.getByRole("textbox", { name: "Veritabanı adı" }), "magaza");
     await user.type(screen.getByRole("textbox", { name: "Veritabanı kullanıcısı" }), "app");
-    await user.click(screen.getByRole("button", { name: "Karşılaştırmayı başlat" }));
-    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Kopyala ve karşılaştır" }));
+    await user.click(screen.getByRole("button", { name: "Testi başlat" }));
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Kopyala ve test et" }));
     await user.click(await screen.findByRole("button", { name: "Düzeltmeleri hazırla" }));
     await user.click(await screen.findByRole("button", { name: /geçici kopyada dene/ }));
     const dialog = await screen.findByRole("dialog", { name: "Sunucudaki veri kopyalansın mı?" });
     expect(within(dialog).getByText(/prod sunucusundaki magaza/)).toBeInTheDocument();
     expect(compare).toHaveBeenCalledTimes(1);
-    await user.click(within(dialog).getByRole("button", { name: "Kopyala ve karşılaştır" }));
+    await user.click(within(dialog).getByRole("button", { name: "Kopyala ve test et" }));
     await waitFor(() => expect(compare).toHaveBeenCalledTimes(2));
   });
 
@@ -580,7 +580,7 @@ describe("Ferry app", () => {
     render(<App api={mockApi({ delay: 0 })} />);
     await openAndScan(user);
     await user.click(nav(/Gerçek test/));
-    await user.click(await screen.findByRole("button", { name: "Karşılaştırmayı başlat" }));
+    await user.click(await screen.findByRole("button", { name: "Testi başlat" }));
     await screen.findByText("PHP 8.4 sürümünde yeni sorunlar var.");
     await user.click(screen.getByRole("button", { name: /Ayarlar/ }));
     expect(await screen.findByText(/Ferry'nin hazırladığı 2 kalıp, yaklaşık/)).toBeInTheDocument();
