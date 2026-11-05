@@ -2831,6 +2831,15 @@ select.input {
   font-weight: 600;
 }
 
+.setting--stacked {
+  display: block;
+}
+
+.field-error {
+  color: var(--danger);
+  font-size: var(--text-sm);
+}
+
 .step-picker {
   display: flex;
   align-items: center;

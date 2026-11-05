@@ -28,6 +28,7 @@ pub struct Settings {
     pub php_path: Option<String>,
     pub snapshot_limit: Option<u32>,
     pub editor: Option<String>,
+    pub editor_command: Option<String>,
 }
 
 pub struct AppState {
@@ -689,6 +690,62 @@ fn editor_url(editor: &str, file: &Path, line: usize, column: usize) -> Option<S
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum EditorCall {
+    Url(String),
+    Command(PathBuf, Vec<String>),
+}
+
+fn split_args(template: &str) -> Vec<String> {
+    let (mut args, mut current, mut quote, mut started) = (Vec::new(), String::new(), None, false);
+    for c in template.chars() {
+        match (quote, c) {
+            (Some(q), c) if c == q => quote = None,
+            (Some(_), c) => current.push(c),
+            (None, '"' | '\'') => {
+                quote = Some(c);
+                started = true;
+            }
+            (None, c) if c.is_whitespace() => {
+                if started {
+                    args.push(std::mem::take(&mut current));
+                }
+                started = false;
+            }
+            (None, c) => {
+                current.push(c);
+                started = true;
+            }
+        }
+    }
+    if started {
+        args.push(current);
+    }
+    args
+}
+
+/// Paths are filled in after the command is split, and nothing goes through a shell, so a file
+/// name can't turn into an argument or a command of its own.
+fn custom_editor(template: &str, file: &Path, line: usize, column: usize) -> Option<EditorCall> {
+    let template = template.trim();
+    if !template.contains("{file}") {
+        return None;
+    }
+    let fill =
+        |text: &str, path: &str| text.replace("{file}", path).replace("{line}", &line.to_string()).replace("{column}", &column.to_string());
+    if template
+        .split_once("://")
+        .is_some_and(|(scheme, _)| !scheme.is_empty() && scheme.chars().all(|c| c.is_ascii_alphanumeric() || "+-.".contains(c)))
+    {
+        let path = file.to_string_lossy().replace('\\', "/");
+        return Some(EditorCall::Url(fill(template, &encode_path(&path))));
+    }
+    let mut args = split_args(template).into_iter().map(|arg| fill(&arg, &file.to_string_lossy()));
+    let program = args.next()?;
+    let found = toolchain::find_executable(&program).unwrap_or_else(|| PathBuf::from(&program));
+    Some(EditorCall::Command(found, args.collect()))
+}
+
 #[tauri::command]
 async fn open_in_editor<R: Runtime>(app: AppHandle<R>, path: String, file: String, line: usize, column: usize) -> CmdResult<()> {
     use tauri_plugin_opener::OpenerExt;
@@ -698,8 +755,23 @@ async fn open_in_editor<R: Runtime>(app: AppHandle<R>, path: String, file: Strin
     if !full.starts_with(&root) {
         return Err(t!("Dosya proje klasörünün dışında: {file}", "The file is outside the project folder: {file}"));
     }
-    let editor = app.state::<AppState>().settings.lock().unwrap().editor.clone().unwrap_or_default();
+    let (editor, command) = {
+        let state = app.state::<AppState>();
+        let settings = state.settings.lock().unwrap();
+        (settings.editor.clone().unwrap_or_default(), settings.editor_command.clone().unwrap_or_default())
+    };
     let failed = |e: &dyn std::fmt::Display| t!("Dosya editörde açılamadı: {e}", "Couldn't open the file in the editor: {e}");
+    if editor == "custom" {
+        let reason = t!("Özel komutta {{file}} olmalı.", "The custom command needs {{file}}.");
+        return match custom_editor(&command, &full, line, column).ok_or_else(|| failed(&reason))? {
+            EditorCall::Url(url) => app.opener().open_url(url, None::<&str>).map_err(|e| failed(&e)),
+            EditorCall::Command(program, args) => {
+                let mut child = toolchain::command(&program).args(args).spawn().map_err(|e| failed(&e))?;
+                std::thread::spawn(move || child.wait());
+                Ok(())
+            }
+        };
+    }
     match editor_url(&editor, &full, line, column) {
         Some(url) => app.opener().open_url(url, None::<&str>).map_err(|e| failed(&e)),
         None => app.opener().open_path(full.to_string_lossy(), None::<&str>).map_err(|e| failed(&e)),

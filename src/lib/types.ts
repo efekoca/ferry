@@ -461,4 +461,5 @@ export interface Settings {
   phpPath: string | null;
   snapshotLimit: number | null;
   editor: string | null;
+  editorCommand: string | null;
 }
