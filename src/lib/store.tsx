@@ -4,6 +4,7 @@ import type {
   SnapshotConflict,
   DependencyReport,
   Framework,
+  ProjectConfig,
   ProjectInfo,
   RectorMode,
   RectorPreview,
@@ -125,8 +126,9 @@ interface AppStore {
   docker: DockerComparison | null;
   dockerHistory: DockerSummary[];
   dockerStep: DockerStep | null;
-  runDocker(source: string, extensions: boolean, cleanImages: boolean, pages: string[], database: DatabaseChoice | null, prepare: string | null): Promise<boolean>;
+  runDocker(source: string, extensions: boolean, cleanImages: boolean, pages: string[], database: DatabaseChoice | null, prepare: string | null, test: string | null): Promise<boolean>;
   cancelDocker(): void;
+  saveConfig(config: ProjectConfig): Promise<boolean>;
   dockerArgs: DockerRunArgs | null;
   dockerTrial: DockerTrial | null;
   tryFixes(files: string[]): Promise<boolean>;
@@ -280,6 +282,9 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
         resetResults();
         setFindingsFilter(NO_FILTER);
         setProject(info);
+        const pinned = info.config.target as Target | null;
+        if (pinned && TARGETS.includes(pinned) && !isBlockedTarget(pinned)) setTargetState(pinned);
+        if (info.configError) toast.push({ tone: "error", title: t.toast.configFailed, description: info.configError });
         setDockerHistory([]);
         void api.dockerHistory(info.root).then(setDockerHistory).catch(() => {});
         setView("overview");
@@ -297,7 +302,7 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
         if (seq === openSeq.current) setOpening(false);
       }
     },
-    [api, resetResults, fail, t],
+    [api, resetResults, fail, t, toast],
   );
 
   const forgetRecent = useCallback((path: string) => {
@@ -348,6 +353,28 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
       }
     }
   }, [api, project, target, fail, t]);
+
+  const saveConfig = useCallback(
+    async (config: ProjectConfig) => {
+      if (!api || !project) return false;
+      try {
+        const info = await api.saveProjectConfig(project.root, config);
+        const moved = info.excludedDirs.join() !== project.excludedDirs.join();
+        setProject(info);
+        toast.push({ tone: "success", title: t.toast.configSaved, description: t.toast.configSavedText });
+        if (moved) {
+          const rescan = !!scan;
+          resetResults();
+          if (rescan) void runScan();
+        }
+        return true;
+      } catch (e) {
+        fail(t.toast.saveFailed, e);
+        return false;
+      }
+    },
+    [api, project, scan, resetResults, runScan, toast, fail, t],
+  );
 
   const setTarget = useCallback(
     (next: Target) => {
@@ -422,14 +449,14 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
   );
 
   const runDocker = useCallback(
-    async (source: string, extensions: boolean, cleanImages: boolean, pages: string[], database: DatabaseChoice | null, prepare: string | null) => {
+    async (source: string, extensions: boolean, cleanImages: boolean, pages: string[], database: DatabaseChoice | null, prepare: string | null, test: string | null) => {
       if (!api || !project) return false;
       const root = project.root;
       return withDockerSteps(source, async () => {
-        const result = await api.dockerCompare(root, source, target, extensions, cleanImages, pages, database, prepare);
+        const result = await api.dockerCompare(root, source, target, extensions, cleanImages, pages, database, prepare, test);
         if (rootRef.current !== root) return false;
         setDocker(result.comparison);
-        setDockerArgs({ source, extensions, cleanImages, pages, database, prepare });
+        setDockerArgs({ source, extensions, cleanImages, pages, database, prepare, test });
         setDockerTrial(null);
         void api.dockerHistory(root).then(setDockerHistory).catch(() => {});
         if (result.scan) setScan(result.scan);
@@ -444,9 +471,9 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
       if (!api || !project || !preview || !dockerArgs) return false;
       const root = project.root;
       const previewId = preview.id;
-      const { source, extensions, cleanImages, pages, database, prepare } = dockerArgs;
+      const { source, extensions, cleanImages, pages, database, prepare, test } = dockerArgs;
       return withDockerSteps(source, async () => {
-        const result = await api.dockerCompare(root, source, target, extensions, cleanImages, pages, database, prepare, { previewId, files });
+        const result = await api.dockerCompare(root, source, target, extensions, cleanImages, pages, database, prepare, test, { previewId, files });
         if (rootRef.current !== root || !result.outcome) return false;
         setDockerTrial({ previewId, files, outcome: result.outcome });
         return true;
@@ -621,13 +648,13 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
     () => ({
       api, view, setView, findingsFilter, setFindingsFilter, showFindings, theme, setTheme, recent, forgetRecent, project, opening, openProject, closeProject,
       target, setTarget, scan, scanning, progress, runScan, deps, toolchain, refreshToolchain, installingRector,
-      installRector, preview, previewMode, previewing, loadPreview, cancelPreview, docker, dockerHistory, dockerStep, runDocker, cancelDocker, dockerArgs, dockerTrial, tryFixes, applying, applyChanges, snapshots,
+      installRector, preview, previewMode, previewing, loadPreview, cancelPreview, docker, dockerHistory, dockerStep, runDocker, cancelDocker, saveConfig, dockerArgs, dockerTrial, tryFixes, applying, applyChanges, snapshots,
       refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport, ignoreFinding, unignoreFinding, pruneIgnores, importRuntimeLog, setRuntimeRoots, clearRuntimeLog, runLocalCheck,
     }),
     [
       api, view, findingsFilter, showFindings, theme, setTheme, recent, forgetRecent, project, opening, openProject, closeProject, target,
       setTarget, scan, scanning, progress, runScan, deps, toolchain, refreshToolchain, installingRector,
-      installRector, preview, previewMode, previewing, loadPreview, cancelPreview, docker, dockerHistory, dockerStep, runDocker, cancelDocker, dockerArgs, dockerTrial, tryFixes, applying, applyChanges, snapshots,
+      installRector, preview, previewMode, previewing, loadPreview, cancelPreview, docker, dockerHistory, dockerStep, runDocker, cancelDocker, saveConfig, dockerArgs, dockerTrial, tryFixes, applying, applyChanges, snapshots,
       refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport, ignoreFinding, unignoreFinding, pruneIgnores, importRuntimeLog, setRuntimeRoots, clearRuntimeLog, runLocalCheck,
     ],
   );

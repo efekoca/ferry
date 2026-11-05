@@ -506,7 +506,7 @@ describe("Ferry app", () => {
     expect(screen.getByRole("checkbox", { name: /includes\/class-cart.php/ })).toBeChecked();
     await user.click(screen.getByRole("button", { name: /geçici kopyada dene/ }));
     await screen.findByText(/sürümüne özgü sorun kalmadı/);
-    const fix = compare.mock.calls.at(-1)?.[8];
+    const fix = compare.mock.calls.at(-1)?.[9];
     expect(fix?.files).toContain("includes/class-cart.php");
     expect(apply).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: /dosyayı projeye yaz/ }));
@@ -515,6 +515,25 @@ describe("Ferry app", () => {
     await waitFor(() => expect(keep).toHaveBeenCalled());
     expect(apply.mock.calls[0][2]).toEqual(fix?.files);
     expect(apply.mock.calls[0][4]).toBeUndefined();
+  });
+
+  it("opens with the project's saved settings and saves them back", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0, config: { target: "8.3", exclude: ["legacy"], baseline: null, docker: { source: "8.0", extensions: false, pages: ["/shop"], dump: null, prepare: "make assets", test: "vendor/bin/pest" } } });
+    const compare = vi.spyOn(api, "dockerCompare");
+    const save = vi.spyOn(api, "saveProjectConfig");
+    render(<App api={api} />);
+    await openAndScan(user);
+    await user.click(nav(/Docker karşılaştırması/));
+    expect(await screen.findByDisplayValue("vendor/bin/pest")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("make assets")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Karşılaştırmayı başlat" }));
+    await waitFor(() => expect(compare).toHaveBeenCalled());
+    const call = compare.mock.calls[0];
+    expect([call[1], call[2], call[3], call[5], call[7], call[8]]).toEqual(["8.0", "8.3", false, ["/shop"], "make assets", "vendor/bin/pest"]);
+    await user.click(await screen.findByRole("button", { name: "Seçenekleri projeye kaydet" }));
+    await waitFor(() => expect(save).toHaveBeenCalled());
+    expect(save.mock.calls[0][1]).toMatchObject({ target: "8.3", exclude: ["legacy"], docker: { test: "vendor/bin/pest", pages: ["/shop"] } });
   });
 
   it("says where new messages come from and finds a package's next version", async () => {

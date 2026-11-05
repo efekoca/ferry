@@ -146,6 +146,8 @@ pub struct Options {
     pub database: Option<crate::database::Source>,
     /// Runs once on the source version with network access, before anything is compared.
     pub prepare: Option<String>,
+    /// Replaces the PHPUnit run. Only its exit code decides whether the tests passed.
+    pub test: Option<String>,
     /// Files replaced only in the target's copy, as (relative path, content), so the old code
     /// on the old version is compared with the fixed code on the new one.
     pub fixes: Vec<(String, String)>,
@@ -524,6 +526,7 @@ struct Setup<'a> {
     used: &'a [String],
     install_extensions: bool,
     pages: &'a [String],
+    test: Option<&'a str>,
     drivers: &'a [String],
     images: &'a Path,
     database: Option<&'a crate::database::Prepared>,
@@ -614,7 +617,19 @@ fn run_version(
     }
     let has_tests = project.join("vendor/bin/phpunit").exists() && project.join("vendor/autoload.php").is_file();
     let mut failed = Vec::new();
-    let tests = if has_tests {
+    let tests = if let Some(command) = setup.test {
+        step(Step::Tests(version));
+        let run = container.run(&format!("tests-{}", version.compact()), project, &image, false, command, TEST_TIMEOUT)?;
+        log.push_str(&output(&run));
+        failed = failed_tests(&output(&run));
+        let exit_code = run.status.and_then(|s| s.code());
+        Some(TestRun {
+            exit_code,
+            timed_out: run.stopped == Some(Stop::TimedOut),
+            passed: run.stopped.is_none() && exit_code == Some(0),
+            by_file: false,
+        })
+    } else if has_tests {
         step(Step::Tests(version));
         let run = container.run(&format!("tests-{}", version.compact()), project, &image, false, TEST_SCRIPT, TEST_TIMEOUT)?;
         let mut run = run;
@@ -761,6 +776,7 @@ pub fn compare(
         used: &used,
         install_extensions: options.install_extensions,
         pages: &options.pages,
+        test: options.test.as_deref(),
         drivers: &drivers,
         images: &images,
         database: None,
@@ -920,6 +936,20 @@ mod tests {
         assert_eq!(result.pages.fixed, ["/a"]);
         assert_eq!(result.pages.remaining, ["/b", "/c"]);
         assert!(result.regressed_after);
+    }
+
+    #[test]
+    fn a_test_command_replaces_phpunit_on_each_version() {
+        if std::env::var_os("FERRY_TEST_DOCKER").is_none() {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("check.php"), "<?php exit(PHP_MAJOR_VERSION === 8 ? 3 : 0);\n").unwrap();
+        let options = Options { test: Some("php check.php".to_string()), ..Options::default() };
+        let result = compare(dir.path(), PhpVersion::new(7, 4), PhpVersion::new(8, 4), options, &AtomicBool::new(false), |_| {}).unwrap();
+        assert!(result.source.tests.as_ref().is_some_and(|t| t.passed), "{:?}", result.source);
+        assert!(result.target.tests.as_ref().is_some_and(|t| !t.passed && t.exit_code == Some(3)), "{:?}", result.target);
+        assert!(result.regressed());
     }
 
     #[test]

@@ -767,6 +767,30 @@ const EDITORS = [
   ["zed", "Zed"],
 ] as const;
 
+function ProjectSettings() {
+  const { t } = useI18n();
+  const { project, saveConfig } = useStore();
+  const [exclude, setExclude] = useState(project?.config.exclude.join("\n") ?? "");
+  if (!project) return null;
+  const list = exclude.split("\n").map((d) => d.trim()).filter(Boolean);
+  const pinned = project.config.target;
+  return (
+    <Card title={t.settings.projectTitle(project.name)}>
+      <p className="subtle">{t.settings.projectNote}</p>
+      {pinned && <p>{t.settings.projectTarget(pinned)}</p>}
+      <label className="docker-field">
+        <span>{t.settings.projectExclude}</span>
+        <textarea className="input" rows={3} placeholder="legacy&#10;tools/old" value={exclude} onChange={(e) => setExclude(e.target.value)} />
+      </label>
+      <div className="docker-save">
+        <Button variant="secondary" size="sm" onClick={() => void saveConfig({ ...project.config, exclude: list })}>
+          {t.settings.projectSave}
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
 export function SettingsScreen() {
   const { t, lang, setLang } = useI18n();
   const { theme, setTheme, toolchain, refreshToolchain, installRector, installingRector, api, refreshSnapshots } = useStore();
@@ -891,6 +915,7 @@ export function SettingsScreen() {
       <PageHeader title={t.settings.title} />
       <div className="page-scroll">
         <div className="page-body page-body--narrow stack">
+          <ProjectSettings />
           <Card title={t.settings.appearance} bodyClassName="">
             <div className="card__list">
               <div className="setting">

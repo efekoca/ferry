@@ -411,10 +411,11 @@ function Result({ result, onTry }: { result: DockerComparison; onTry: (files: st
 
 export function DockerCompare() {
   const { t } = useI18n();
-  const { api, project, target, toolchain, docker, dockerStep, runDocker, cancelDocker, dockerArgs, tryFixes } = useStore();
+  const { api, project, target, toolchain, docker, dockerStep, runDocker, cancelDocker, dockerArgs, tryFixes, saveConfig } = useStore();
+  const saved = project?.config.docker;
   const [trying, setTrying] = useState<string[] | null>(null);
   const [plan, setPlan] = useState<DatabasePlan | null>(null);
-  const [dataSource, setDataSource] = useState("none");
+  const [dataSource, setDataSource] = useState(saved?.dump ? `dump:${saved.dump}` : "none");
   const [dumpFile, setDumpFile] = useState<string | null>(null);
   const [hosts, setHosts] = useState<string[]>([]);
   const [remote, setRemote] = useState({ host: "", engine: "mysql" as "mysql" | "postgres", name: "", user: "" });
@@ -424,12 +425,13 @@ export function DockerCompare() {
     if (root) api?.databasePlan(root).then(setPlan).catch(() => setPlan(null));
     api?.sshHosts().then(setHosts).catch(() => {});
   }, [api, root]);
-  const [picked, setPicked] = useState<string | null>(null);
-  const [extensions, setExtensions] = useState(true);
+  const [picked, setPicked] = useState<string | null>(saved?.source ?? null);
+  const [extensions, setExtensions] = useState(saved?.extensions ?? true);
   const [cleanImages, setCleanImages] = useState(false);
-  const [comparePages, setComparePages] = useState(true);
-  const [paths, setPaths] = useState("/");
-  const [prepare, setPrepare] = useState("");
+  const [comparePages, setComparePages] = useState(saved?.pages ? saved.pages.length > 0 : true);
+  const [paths, setPaths] = useState(saved?.pages?.join(", ") || "/");
+  const [prepare, setPrepare] = useState(saved?.prepare ?? "");
+  const [test, setTest] = useState(saved?.test ?? "");
   if (!project) return null;
   const sources = KNOWN_SOURCES.filter((v) => Number(v) < Number(target));
   const source = picked ?? project.currentVersion ?? "";
@@ -446,8 +448,15 @@ export function DockerCompare() {
       return;
     }
     const database = dataSource === "ssh" ? ({ kind: "ssh", ...remote } as const) : choice(dataSource, dumpFile, project.root);
-    void runDocker(source, extensions, extensions && cleanImages, comparePages ? parsePaths(paths) : [], database, prepare.trim() || null);
+    void runDocker(source, extensions, extensions && cleanImages, comparePages ? parsePaths(paths) : [], database, prepare.trim() || null, test.trim() || null);
   };
+  const dump = dataSource.startsWith("dump:") ? dataSource.slice(5) : null;
+  const saveOptions = () =>
+    void saveConfig({
+      ...project.config,
+      target,
+      docker: { source: source || null, extensions, pages: comparePages ? parsePaths(paths) : [], dump, prepare: prepare.trim() || null, test: test.trim() || null },
+    });
   const stepText = dockerStep && (dockerStep.step === "install" ? t.docker.installing : dockerStep.step === "extensions" ? t.docker.preparing(dockerStep.version ?? "") : dockerStep.step === "database" ? t.docker.preparingData : dockerStep.step === "prepare" ? t.docker.runningPrepare : dockerStep.step === "pages" ? t.docker.requesting(dockerStep.version ?? "") : dockerStep.step === "lint" ? t.docker.linting(dockerStep.version ?? "") : t.docker.testing(dockerStep.version ?? ""));
   return (
     <>
@@ -504,6 +513,7 @@ export function DockerCompare() {
                 <select className="input" value={dataSource} disabled={running} onChange={(e) => setDataSource(e.target.value)}>
                   <option value="none">{t.docker.dataNone}</option>
                   <option value="file">{t.docker.dataFile}</option>
+                  {saved?.dump && !plan?.dumps.includes(saved.dump) && <option value={`dump:${saved.dump}`}>{t.docker.dataDump(saved.dump)}</option>}
                   {plan?.dumps.map((d) => (
                     <option key={d} value={`dump:${d}`}>
                       {t.docker.dataDump(d)}
@@ -547,6 +557,17 @@ export function DockerCompare() {
                 <input className="input docker-paths" placeholder="php bin/console sass:build" value={prepare} disabled={running} onChange={(e) => setPrepare(e.target.value)} />
                 {prepare.trim() && <span className="subtle">{t.docker.prepareNote}</span>}
               </label>
+              <label className="docker-field">
+                <span>{t.docker.testCommand}</span>
+                <input className="input docker-paths" placeholder="vendor/bin/pest" value={test} disabled={running} onChange={(e) => setTest(e.target.value)} />
+                {test.trim() && <span className="subtle">{t.docker.testCommandNote}</span>}
+              </label>
+              <div className="docker-save">
+                <Button variant="secondary" size="sm" disabled={running} onClick={saveOptions}>
+                  {t.docker.saveOptions}
+                </Button>
+                <span className="subtle">{t.docker.saveOptionsNote}</span>
+              </div>
               {stepText && (
                 <p className="subtle" role="status">
                   {stepText}

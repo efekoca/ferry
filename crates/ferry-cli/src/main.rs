@@ -8,8 +8,8 @@ use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-const USAGE: &str = "Usage: ferry-cli scan <project> --target <8.2|8.3|8.4|8.5> [options]
-       ferry-cli compare <project> --target <version> [--source <version>] [--no-extensions] [--clean-images] [--page <path>] [--no-pages] [--db-dump <file>] [--db-live] [--db-seed] [--db-ssh <host:database:user>] [--prepare <command>] [--try-fixes <rector>] [--format <text|json>]
+const USAGE: &str = "Usage: ferry-cli scan <project> [--target <8.2|8.3|8.4|8.5>] [options]
+       ferry-cli compare <project> --target <version> [--source <version>] [--no-extensions] [--clean-images] [--page <path>] [--no-pages] [--db-dump <file>] [--db-live] [--db-seed] [--db-ssh <host:database:user>] [--prepare <command>] [--test <command>] [--try-fixes <rector>] [--format <text|json>]
        ferry-cli clean-images
 
 Options:
@@ -144,7 +144,9 @@ fn parse(args: &[String]) -> Result<Options, String> {
         }
     }
     let root = root.ok_or("missing project folder")?;
-    let target: PhpVersion = target.ok_or("missing --target")?.parse()?;
+    let config = ferry_core::config::load(&root)?;
+    let baseline = baseline.or_else(|| config.baseline.as_ref().map(|b| root.join(b)).filter(|b| b.is_file()));
+    let target: PhpVersion = target.or(config.target).ok_or("missing --target")?.parse()?;
     if target == PhpVersion::new(8, 1) {
         return Err("PHP 8.1 is end of life and won't be patched for CVE-2026-109618 and CVE-2026-109619; pick 8.2 or newer".into());
     }
@@ -693,11 +695,15 @@ fn print_outcome(outcome: &ferry_core::docker::Outcome) {
 }
 
 fn run_compare(args: &[String]) -> Result<bool, String> {
-    let (mut root, mut source, mut target, mut json_output, mut extensions) = (None, None, None, false, true);
+    let (mut root, mut source, mut target, mut json_output) = (None, None, None, false);
+    let extensions = true;
     let mut clean_images = false;
-    let mut pages = vec!["/".to_string()];
+    let mut pages = Vec::new();
+    let mut no_pages = false;
+    let mut no_extensions = false;
     let mut database = None;
     let mut prepare = None;
+    let mut test = None;
     let (mut remote, mut postgres) = (None::<String>, false);
     let mut rector = None;
     let mut it = args.iter();
@@ -706,10 +712,11 @@ fn run_compare(args: &[String]) -> Result<bool, String> {
         match arg.as_str() {
             "--target" => target = Some(value("--target")?.parse::<PhpVersion>().map_err(|e| e.to_string())?),
             "--source" => source = Some(value("--source")?.parse::<PhpVersion>().map_err(|e| e.to_string())?),
-            "--no-extensions" => extensions = false,
+            "--no-extensions" => no_extensions = true,
             "--clean-images" => clean_images = true,
-            "--no-pages" => pages.clear(),
+            "--no-pages" => no_pages = true,
             "--prepare" => prepare = Some(value("--prepare")?),
+            "--test" => test = Some(value("--test")?),
             "--try-fixes" => rector = Some(PathBuf::from(value("--try-fixes")?)),
             "--db-dump" => database = Some(ferry_core::database::Source::Dump(PathBuf::from(value("--db-dump")?))),
             "--db-live" => database = Some(ferry_core::database::Source::Live),
@@ -736,11 +743,28 @@ fn run_compare(args: &[String]) -> Result<bool, String> {
         database = Some(ferry_core::database::Source::Ssh(remote));
     }
     let root = std::fs::canonicalize(root.ok_or("compare needs a project folder")?).map_err(|e| e.to_string())?;
-    let target = target.ok_or("--target is required")?;
+    let config = ferry_core::config::load(&root)?;
+    let parsed = |v: Option<String>| v.map(|v| v.parse::<PhpVersion>().map_err(|e| e.to_string())).transpose();
+    let target = target.or(parsed(config.target)?).ok_or("--target is required")?;
     let current = project::inspect(&root).map_err(|e| e.to_string())?.current_version;
-    let source = source.or(current).ok_or("--source is required: the project's version couldn't be detected")?;
+    let source =
+        source.or(parsed(config.docker.source)?).or(current).ok_or("--source is required: the project's version couldn't be detected")?;
+    let extensions = !no_extensions && config.docker.extensions.unwrap_or(extensions);
+    if pages.is_empty() {
+        pages = config.docker.pages.unwrap_or_else(|| vec!["/".to_string()]);
+    }
+    if no_pages {
+        pages.clear();
+    }
+    let database = database.or(config.docker.dump.map(|d| ferry_core::database::Source::Dump(root.join(d))));
+    if let (None, Some(command)) = (&prepare, &config.docker.prepare) {
+        eprintln!("ferry-cli: prepare command from .ferry/config.json: {command}");
+    }
+    let prepare = prepare.or(config.docker.prepare);
+    let test = test.or(config.docker.test);
     let cancel = std::sync::atomic::AtomicBool::new(false);
-    let options = ferry_core::docker::Options { install_extensions: extensions, clean_images, pages, database, prepare, fixes: Vec::new() };
+    let options =
+        ferry_core::docker::Options { install_extensions: extensions, clean_images, pages, database, prepare, test, fixes: Vec::new() };
     let step = |step: ferry_core::docker::Step| match step {
         ferry_core::docker::Step::Installing => eprintln!("ferry-cli: installing dependencies"),
         ferry_core::docker::Step::Extensions(v) => eprintln!("ferry-cli: preparing extensions for PHP {v}"),

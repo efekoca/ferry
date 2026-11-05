@@ -1,6 +1,6 @@
 import type { Api } from "./api";
 import type { Localized } from "../i18n";
-import type { DockerComparison, DockerSummary,
+import type { DockerComparison, DockerSummary, ProjectConfig,
   CheckRun,
   DependencyReport,
   DiffLine,
@@ -162,7 +162,7 @@ const DEPS: Omit<DependencyReport, "target" | "rootStatus"> = {
   ],
 };
 
-export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: IgnoreEntry[] } = {}): Api {
+export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: IgnoreEntry[]; config?: ProjectConfig } = {}): Api {
   const delay = opts.delay ?? 450;
   const listeners = new Set<(p: ScanProgress) => void>();
   let settings: Settings = { phpPath: null, snapshotLimit: null, editor: null };
@@ -174,6 +174,24 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
   let runtimeRoots: string[] = [];
   let dockerImages = 0;
   let dockerRuns: DockerSummary[] = [];
+  let config: ProjectConfig = opts.config ?? { target: null, exclude: [], baseline: null, docker: { source: null, extensions: null, pages: null, dump: null, prepare: null, test: null } };
+  const info = async (path: string): Promise<ProjectInfo> => {
+    await sleep(delay / 3);
+    return {
+      root: path,
+      name: path.split(/[\\/]/).filter(Boolean).pop() ?? path,
+      framework: "wordpress",
+      phpFiles: 148,
+      phpConstraint: ">=5.6",
+      currentVersion: "7.4",
+      hasComposerLock: true,
+      hasVendor: true,
+      isGitRepo: true,
+      excludedDirs: ["wp-admin", "wp-includes", ...config.exclude],
+      config,
+      configError: null,
+    };
+  };
   let dockerTrial: DockerComparison | null = null;
   const withRuntime = (findings: Finding[]): { findings: Finding[]; runtime: ScanResult["runtime"] } => {
     if (!runtimeLog) return { findings: findings.map((f) => ({ ...f, runtimeHits: 0 })), runtime: null };
@@ -260,7 +278,7 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
     },
     sshHosts: async () => ["prod", "staging"],
     databasePlan: async () => ({ engine: "mysql" as const, host: "127.0.0.1", name: "magaza", user: "app", live: true, seed: null, dumps: ["database/dump.sql"] }),
-    dockerCompare: async (_path, source, target, extensions, cleanImages, pages, database, _prepare, fix) => {
+    dockerCompare: async (_path, source, target, extensions, cleanImages, pages, database, _prepare, _test, fix) => {
       if (!lastScan) throw new Error("Scan the project first.");
       const run = (version: string, lintErrors: number, passed: boolean, log: string) => ({
         version,
@@ -330,20 +348,10 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
       runtimeCheck = null;
       return withIgnores(lastScan);
     },
-    inspectProject: async (path): Promise<ProjectInfo> => {
-      await sleep(delay / 3);
-      return {
-        root: path,
-        name: path.split(/[\\/]/).filter(Boolean).pop() ?? path,
-        framework: "wordpress",
-        phpFiles: 148,
-        phpConstraint: ">=5.6",
-        currentVersion: "7.4",
-        hasComposerLock: true,
-        hasVendor: true,
-        isGitRepo: true,
-        excludedDirs: ["wp-admin", "wp-includes"],
-      };
+    inspectProject: info,
+    saveProjectConfig: async (path, next) => {
+      config = next;
+      return info(path);
     },
     scanProject: async (_path, target, run): Promise<ScanResult> => {
       const total = 148;
