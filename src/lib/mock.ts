@@ -181,7 +181,7 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
   let runtimeRoots: string[] = [];
   let dockerImages = 0;
   let dockerRuns: DockerSummary[] = [];
-  let config: ProjectConfig = opts.config ?? { target: null, exclude: [], baseline: null, docker: { source: null, extensions: null, pages: null, dump: null, prepare: null, test: null } };
+  let config: ProjectConfig = opts.config ?? { target: null, exclude: [], baseline: null, docker: { source: null, extensions: null, pages: null, dump: null, prepare: null, test: null }, git: { requireClean: false, branchPerBatch: false } };
   const info = async (path: string): Promise<ProjectInfo> => {
     await sleep(delay / 3);
     return {
@@ -427,14 +427,14 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
     cancelPreview: async () => {
       cancelled = true;
     },
-    applyChanges: async (path, id, files, label) => {
+    applyChanges: async (path, id, files, label, _skipped, commitMessage) => {
       await sleep(delay);
       if (id !== previewId) throw new Error("The preview is out of date. Calculate the changes again.");
       const snapshot: Snapshot = { id: String(Date.now()), createdAt: Date.now(), projectRoot: path, label, files: files.map((p) => ({ path: p, existed: true })) };
       snapshots = [snapshot, ...snapshots];
       pending = pending.filter((c) => !files.includes(c.file));
       files.forEach((f) => fixed.add(f));
-      return { snapshot, written: files, lintErrors: [], lintChecked: true };
+      return { snapshot, written: files, lintErrors: [], lintChecked: true, branch: commitMessage ? `ferry/php-${files.length}` : null, commit: commitMessage ? "abc1234" : null };
     },
     listSnapshots: async () => snapshots,
     restoreSnapshot: async (_path, id) => {

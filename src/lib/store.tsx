@@ -133,7 +133,7 @@ interface AppStore {
   dockerTrial: DockerTrial | null;
   tryFixes(files: string[]): Promise<boolean>;
   applying: boolean;
-  applyChanges(files: string[], skipped?: Record<string, number[]>, keepTrial?: boolean): Promise<boolean>;
+  applyChanges(files: string[], skipped?: Record<string, number[]>, keepTrial?: boolean, commitMessage?: string): Promise<boolean>;
 
   snapshots: Snapshot[];
   refreshSnapshots(): Promise<void>;
@@ -488,14 +488,14 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
   }, [api, project]);
 
   const applyChanges = useCallback(
-    async (files: string[], skipped?: Record<string, number[]>, keepTrial = false) => {
+    async (files: string[], skipped?: Record<string, number[]>, keepTrial = false, commitMessage?: string) => {
       if (!api || !project || files.length === 0) return false;
       setApplying(true);
       const root = project.root;
       try {
         const label = t.changes.snapshotLabel(previewMode, target);
         if (!preview) return false;
-        const result = await api.applyChanges(root, preview.id, files, label, skipped);
+        const result = await api.applyChanges(root, preview.id, files, label, skipped, commitMessage);
         if (rootRef.current !== root) return true;
         setPreview((p) => (p ? { ...p, changes: p.changes.filter((c) => !result.written.includes(c.file)) } : p));
         if (result.lintErrors.length > 0) {
@@ -511,6 +511,8 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
             description: result.lintChecked ? t.toast.appliedText : `${t.toast.lintSkippedText}\n${t.toast.appliedText}`,
           });
         }
+        if (result.commit && result.branch) toast.push({ tone: "success", title: t.git.committed(result.branch, result.commit) });
+        if (result.gitError) toast.push({ tone: "error", title: t.git.commitFailed(result.branch ?? ""), description: result.gitError });
         void refreshSnapshots();
         if (keepTrial) {
           const kept = await api.keepDockerTrial(root).catch(() => null);

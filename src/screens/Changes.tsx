@@ -14,6 +14,8 @@ export function Changes() {
   const { toolchain, installRector, installingRector, preview, previewMode, previewing, loadPreview, cancelPreview, applyChanges, applying, target, setView, api, project } =
     useStore();
   const [dirty, setDirty] = useState<string[]>([]);
+  const [unclean, setUnclean] = useState<string[]>([]);
+  const [ownBranch, setOwnBranch] = useState(false);
   const [mode, setMode] = useState<RectorMode>(previewMode);
   const [excluded, setExcluded] = useState<{ previewId: number | null; files: Set<string> }>({ previewId: null, files: new Set() });
   const [active, setActive] = useState<string | null>(null);
@@ -110,16 +112,24 @@ export function Changes() {
     const counts = new Map<string, number>();
     for (const c of chosen) for (const r of c.rules) counts.set(loc(r.title), (counts.get(loc(r.title)) ?? 0) + 1);
     const lines = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([title, n]) => `- ${title} (${n})`);
-    return [t.git.subject(preview?.target ?? target, chosen.length), "", ...lines].join("\n");
+    return [t.git.subject(preview?.target ?? target, chosen.length, preview?.mode === "pins"), "", ...lines].join("\n");
   }, [chosen, loc, preview, target, t]);
   const openConfirm = () => {
     setDirty([]);
+    setUnclean([]);
+    setOwnBranch(Boolean(project?.isGitRepo && project.config.git.branchPerBatch));
     setConfirming(true);
-    if (api && project)
+    if (api && project) {
       api
         .gitStatus(project.root, chosen.map((c) => c.file))
         .then((s) => setDirty(s.dirty))
         .catch(() => {});
+      if (project.config.git.requireClean)
+        api
+          .gitStatus(project.root, [])
+          .then((s) => setUnclean(s.dirty))
+          .catch(() => {});
+    }
   };
 
   const toggle = (file: string) => {
@@ -403,10 +413,11 @@ export function Changes() {
         title={t.changes.confirmTitle(chosen.length)}
         confirmLabel={t.common.apply}
         loading={applying}
+        confirmDisabled={unclean.length > 0 || (ownBranch && dirty.length > 0)}
         onCancel={() => setConfirming(false)}
         onConfirm={async () => {
           const all = chosen.length === changes.length;
-          const ok = await applyChanges(chosen.map((c) => c.file), skipped);
+          const ok = await applyChanges(chosen.map((c) => c.file), skipped, false, ownBranch ? commitMessage : undefined);
           if (ok) {
             setConfirming(false);
             setAppliedAll(all);
@@ -425,6 +436,18 @@ export function Changes() {
             <strong>{t.git.dirtyTitle(dirty.length)}</strong> {t.git.dirtyText}
             <div className="mono selectable dirty-list">{dirty.slice(0, 5).join(", ")}</div>
           </Callout>
+        )}
+        {unclean.length > 0 && (
+          <Callout tone="danger" icon={<GitBranch size={15} />}>
+            <strong>{t.git.uncleanTitle(unclean.length)}</strong> {t.git.uncleanText}
+            <div className="mono selectable dirty-list">{unclean.slice(0, 5).join(", ")}</div>
+          </Callout>
+        )}
+        {project?.isGitRepo && (
+          <label className="git-batch">
+            <input type="checkbox" className="checkbox" checked={ownBranch} onChange={(e) => setOwnBranch(e.target.checked)} />
+            <span>{t.git.ownBranch}</span>
+          </label>
         )}
         {project?.isGitRepo && (
           <details className="commit-message">

@@ -2831,6 +2831,13 @@ select.input {
   font-weight: 600;
 }
 
+.git-batch {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
 .mode-cards {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

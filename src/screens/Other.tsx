@@ -771,6 +771,8 @@ function ProjectSettings() {
   const { t } = useI18n();
   const { project, saveConfig } = useStore();
   const [exclude, setExclude] = useState(project?.config.exclude.join("\n") ?? "");
+  const [requireClean, setRequireClean] = useState(project?.config.git.requireClean ?? false);
+  const [branchPerBatch, setBranchPerBatch] = useState(project?.config.git.branchPerBatch ?? false);
   if (!project) return null;
   const list = exclude.split("\n").map((d) => d.trim()).filter(Boolean);
   const pinned = project.config.target;
@@ -782,8 +784,20 @@ function ProjectSettings() {
         <span>{t.settings.projectExclude}</span>
         <textarea className="input" rows={3} placeholder="legacy&#10;tools/old" value={exclude} onChange={(e) => setExclude(e.target.value)} />
       </label>
+      {project.isGitRepo && (
+        <>
+          <label className="git-batch">
+            <input type="checkbox" className="checkbox" checked={requireClean} onChange={(e) => setRequireClean(e.target.checked)} />
+            <span>{t.settings.projectRequireClean}</span>
+          </label>
+          <label className="git-batch">
+            <input type="checkbox" className="checkbox" checked={branchPerBatch} onChange={(e) => setBranchPerBatch(e.target.checked)} />
+            <span>{t.settings.projectBranchPerBatch}</span>
+          </label>
+        </>
+      )}
       <div className="docker-save">
-        <Button variant="secondary" size="sm" onClick={() => void saveConfig({ ...project.config, exclude: list })}>
+        <Button variant="secondary" size="sm" onClick={() => void saveConfig({ ...project.config, exclude: list, git: { requireClean, branchPerBatch } })}>
           {t.settings.projectSave}
         </Button>
       </div>
