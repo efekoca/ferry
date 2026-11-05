@@ -24,7 +24,6 @@ Competing tools each cover part of an upgrade: PHPCompatibility (detection only;
 
 | # | Feature | Why | Size |
 |---|---|---|---|
-| 7 | **More runtime formats**: Symfony PHPUnit bridge summaries and Monolog JSON (PHP error logs, uncaught errors and `phpunit --display-deprecations` output are imported already) | Covers the remaining log shapes teams use | S |
 | 13 | **Docker comparison**: `ferry-cli compare` runs `php -l` and the test suite in official `php:X.Y-cli` images on the current and target versions. The app has a screen for it, and new messages are added to the findings. Extensions the project uses are built into a local image, and pages and database tables are compared, using a dump, a copy of a local database, or test data from migrations and seeders. Ready-made fixes can be tried in a temporary copy and compared again before they're written | Covers behavior changes; turns "Coming soon" into a real feature | M |
 | 14 | **AI help for manual findings**, opt-in per project, own API key or a local model, through the same preview, backup and lint flow | Manual findings are where time goes; the privacy promise needs an explicit opt-in | M–L |
 | 15 | Issue creation (GitHub/GitLab), incremental cached scans for very large projects, scanning `vendor/` for library parents, multiple composer roots, more interface languages | Teams, enterprise, reach | M each |
