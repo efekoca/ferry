@@ -767,6 +767,30 @@ const EDITORS = [
   ["zed", "Zed"],
 ] as const;
 
+function EditorCommand({ value, onSave }: { value: string; onSave: (command: string) => void }) {
+  const { t } = useI18n();
+  const [command, setCommand] = useState(value);
+  useEffect(() => setCommand(value), [value]);
+  const missing = command.trim() !== "" && !command.includes("{file}");
+  return (
+    <div className="setting setting--stacked">
+      <label className="docker-field">
+        <span>{t.settings.editorCommand}</span>
+        <input
+          className="input mono"
+          placeholder="emacsclient -n +{line}:{column} {file}"
+          spellCheck={false}
+          aria-invalid={missing}
+          value={command}
+          onChange={(e) => setCommand(e.target.value)}
+          onBlur={() => onSave(command.trim())}
+        />
+      </label>
+      <p className={missing ? "field-error" : "hint"}>{missing ? t.settings.editorCommandMissing : t.settings.editorCommandHint}</p>
+    </div>
+  );
+}
+
 function ProjectSettings() {
   const { t } = useI18n();
   const { project, saveConfig } = useStore();
@@ -810,7 +834,7 @@ export function SettingsScreen() {
   const { theme, setTheme, toolchain, refreshToolchain, installRector, installingRector, api, refreshSnapshots } = useStore();
   const toast = useToast();
   const [checking, setChecking] = useState(false);
-  const [settings, setSettings] = useState<Settings>({ phpPath: null, snapshotLimit: null, editor: null });
+  const [settings, setSettings] = useState<Settings>({ phpPath: null, snapshotLimit: null, editor: null, editorCommand: null });
   const [usage, setUsage] = useState<BackupUsage | null>(null);
   const [clearing, setClearing] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -963,8 +987,10 @@ export function SettingsScreen() {
                       {label}
                     </option>
                   ))}
+                  <option value="custom">{t.settings.editorCustom}</option>
                 </select>
               </div>
+              {settings.editor === "custom" && <EditorCommand value={settings.editorCommand ?? ""} onSave={(editorCommand) => void save({ editorCommand: editorCommand || null })} />}
             </div>
           </Card>
 

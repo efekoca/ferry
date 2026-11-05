@@ -63,12 +63,33 @@ pub fn check(root: &Path, target: PhpVersion) -> DependencyReport {
     report
 }
 
+/// Polyfills do nothing once PHP itself has the feature. Only ones the project asks for itself
+/// can be removed: the rest come with other packages.
+fn needless_polyfill(name: &str, target: PhpVersion) -> Option<Localized> {
+    let digits = name.strip_prefix("symfony/polyfill-php");
+    let built_in = match digits.and_then(|d| d.parse::<u32>().ok()) {
+        Some(n) => PhpVersion::new(n / 10, n % 10),
+        None if name == "paragonie/random_compat" => PhpVersion::new(7, 0),
+        None => return None,
+    };
+    (built_in <= target).then(|| Localized {
+        tr: format!(
+            "PHP {built_in} bunu zaten içeriyor. Projenin PHP kısıtını yükselttikten sonra composer remove {name} ile kaldırabilirsiniz."
+        ),
+        en: format!(
+            "PHP {built_in} already includes this. Once the project's PHP constraint is raised, composer remove {name} takes it out."
+        ),
+    })
+}
+
 pub fn check_packages(root: &Path, target: PhpVersion) -> DependencyReport {
     let manifest = read_json(&root.join("composer.json"));
     let field = |v: Option<&serde_json::Value>, path: &str| v.and_then(|j| j.pointer(path)).and_then(|v| v.as_str()).map(str::to_string);
     let root_constraint = field(manifest.as_ref(), "/require/php");
     let root_conflict = field(manifest.as_ref(), "/conflict/php");
     let lock = read_json(&root.join("composer.lock"));
+    let direct =
+        |name: &str| ["/require", "/require-dev"].iter().any(|key| manifest.as_ref().and_then(|m| m.pointer(key)?.get(name)).is_some());
     let mut packages = Vec::new();
     if let Some(lock) = &lock {
         for (key, dev) in [("packages", false), ("packages-dev", true)] {
@@ -90,6 +111,9 @@ pub fn check_packages(root: &Path, target: PhpVersion) -> DependencyReport {
                         tr: format!("Paketin conflict alanı ({c}) PHP {t} ile kurulmasını engelliyor."),
                         en: format!("The package's conflict field ({c}) keeps it from installing on PHP {t}."),
                     });
+                }
+                if note.is_none() && direct(&name) {
+                    note = needless_polyfill(&name, target);
                 }
                 if let Some(limit) = crate::framework::package_limit(&name, &version).filter(|l| target > l.max) {
                     let (max, t) = (limit.max.to_string(), target.to_string());
@@ -219,6 +243,32 @@ mod tests {
         assert!(row("symfony/console").note.is_none(), "only core packages carry the Symfony limit");
         let ok = check(dir.path(), "8.2".parse().unwrap());
         assert!(ok.packages.iter().find(|p| p.name == "laravel/framework").unwrap().note.is_none());
+    }
+
+    #[test]
+    fn polyfills_the_project_asks_for_can_go() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("composer.json"),
+            r#"{"require":{"symfony/polyfill-php80":"^1.0","symfony/polyfill-php85":"^1.0","paragonie/random_compat":"^9.0"}}"#,
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("composer.lock"),
+            r#"{"packages": [
+                {"name": "symfony/polyfill-php80", "version": "v1.31.0"},
+                {"name": "symfony/polyfill-php85", "version": "v1.33.0"},
+                {"name": "symfony/polyfill-php81", "version": "v1.31.0"},
+                {"name": "paragonie/random_compat", "version": "v9.99.100"}
+            ]}"#,
+        )
+        .unwrap();
+        let r = check_packages(dir.path(), "8.4".parse().unwrap());
+        let note = |n: &str| r.packages.iter().find(|p| p.name == n).unwrap().note.as_ref().map(|l| l.en.clone());
+        assert!(note("symfony/polyfill-php80").unwrap().contains("PHP 8.0 already includes this"));
+        assert!(note("paragonie/random_compat").unwrap().contains("PHP 7.0"));
+        assert_eq!(note("symfony/polyfill-php85"), None, "the target doesn't have it yet");
+        assert_eq!(note("symfony/polyfill-php81"), None, "it came with another package");
     }
 
     #[test]

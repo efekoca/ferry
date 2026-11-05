@@ -16,9 +16,7 @@ String-to-number comparisons with `==` (8.0), `null` passed to built-ins from va
 
 | Addition | Why | Size |
 |---|---|---|
-| **Composer platform pitfalls, the rest.** `config.platform.ext-*` pinned below the target and plugins that need `composer-plugin-api ^1` (`platform-check: false`, Composer 1 lock files and `config.platform.php` are done). | Each one makes Composer install packages for the wrong platform | S |
 | **Platform checks.** Re-check the MediaWiki matrix and Joomla 6 once they publish firm ranges. | Legacy CMS users are Ferry's core audience | S |
-| **Polyfill cleanup.** `symfony/polyfill-php*` and `random_compat` become no-ops once the target passes their version. | Smaller dependency tree | S |
 
 ## 3. Workflow features
 
@@ -26,7 +24,6 @@ Competing tools each cover part of an upgrade: PHPCompatibility (detection only;
 
 | # | Feature | Why | Size |
 |---|---|---|---|
-| 3 | **Custom editor command or URL** for editors outside the built-in list (VS Code, Cursor, PhpStorm, Sublime Text and Zed are done) | Covers Neovim, Emacs and in-house setups | S |
 | 13 | **Docker comparison**: `ferry-cli compare` runs `php -l` and the test suite in official `php:X.Y-cli` images on the current and target versions. The app has a screen for it, and new messages are added to the findings. Extensions the project uses are built into a local image, and pages and database tables are compared, using a dump, a copy of a local database, or test data from migrations and seeders. Ready-made fixes can be tried in a temporary copy and compared again before they're written | Covers behavior changes; turns "Coming soon" into a real feature | M |
 | 14 | **AI help for manual findings**, opt-in per project, own API key or a local model, through the same preview, backup and lint flow | Manual findings are where time goes; the privacy promise needs an explicit opt-in | M–L |
 | 15 | Issue creation (GitHub/GitLab), incremental cached scans for very large projects, scanning `vendor/` for library parents, multiple composer roots, more interface languages | Teams, enterprise, reach | M each |

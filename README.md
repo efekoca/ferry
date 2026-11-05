@@ -62,7 +62,7 @@ Select a finding to see:
 - what to use instead
 - whether it can be fixed automatically
 
-**Show in folder** opens the file's location, and **Open in editor** opens the file at that line in the editor picked in **Settings** (Visual Studio Code, Cursor, PhpStorm, Sublime Text, Zed, or the system default). Use the arrow keys to move through the list.
+**Show in folder** opens the file's location, and **Open in editor** opens the file at that line in the editor picked in **Settings** (Visual Studio Code, Cursor, PhpStorm, Sublime Text, Zed, the system default, or a custom command or address with `{file}`, `{line}` and `{column}`, such as `emacsclient -n +{line}:{column} {file}`). Use the arrow keys to move through the list.
 
 **Ignore** takes a finding out of the list and the score once you've decided it doesn't apply, for example code that only runs on the old server. Ferry asks for a reason and saves it to `.ferry/ignore.json` in the project, so the decision travels with the code when you commit that file. The match uses the rule, the file and the code, so an ignored finding stays ignored when lines above it move. **Ignored** on the Findings page lists them with their reasons, and **Show again** brings one back.
 
@@ -90,7 +90,7 @@ Ferry also reads the files around the code that decide which PHP actually runs:
 
 - `.htaccess`: `php_value` and `php_flag` lines outside `<IfModule mod_php.c>`, which give a 500 error on PHP-FPM, and `<IfModule mod_php5.c>` or `mod_php7.c` blocks that PHP 8 no longer matches
 - `.user.ini`, `php.ini` and `.htaccess` settings that PHP removed or deprecated, such as `register_globals` (PHP won't start with it on), `track_errors`, `allow_url_include` and `session.trans_sid_hosts`
-- `composer.json` with `platform-check` turned off, and a `composer.lock` written by Composer 1
+- `composer.json` with `platform-check` turned off or `config.platform.ext-*` pinned to an old version, a `composer.lock` written by Composer 1, and Composer plugins that only work with Composer 1
 - PHP versions pinned below your target in `Dockerfile`, Docker Compose, GitHub Actions, GitLab CI, Travis, Bitbucket Pipelines, DDEV, Lando, Platform.sh, PHP-FPM socket paths in `.conf` files and Caddyfiles, `.tool-versions`, `.php-version`, and `config.platform.php` in `composer.json`. The **Version files** mode on the Changes screen, or `ferry-cli pins <project> --write`, updates them
 
 ### Review every change before it is applied
@@ -114,6 +114,8 @@ Ferry handles cases Rector cannot on its own. For example, a file that uses `$st
 The **Dependencies** page checks every locked package against the target version, using the PHP requirement each package declares in `composer.lock`. The project's own PHP constraint in `composer.json` is checked too. A `conflict` entry for `php`, in `composer.json` or in a locked package, is taken into account as well.
 
 A declared requirement like `^8.0` doesn't always mean the package works on the newest PHP. For Laravel (`laravel/framework`, `illuminate/*`), Drupal core, and Symfony's core packages, Ferry also uses the framework's published support range and explains the difference under the requirement.
+
+Polyfills the project requires itself, such as `symfony/polyfill-php80` or `paragonie/random_compat`, get a note once the target PHP includes what they add.
 
 ![Dependencies page with three incompatible packages for PHP 8.4, the project's PHP constraint, and each package's version, PHP requirement and status](assets/readme/dependencies-en.webp)
 
