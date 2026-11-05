@@ -228,6 +228,22 @@ fn snapshot_changes_fall_back_to_a_fresh_diff() {
 }
 
 #[test]
+fn version_files_move_to_the_target_and_can_be_undone_over_ipc() {
+    let h = harness();
+    let root = h.root.clone();
+    let dockerfile = Path::new(&root).join("Dockerfile");
+    std::fs::write(&dockerfile, "FROM php:7.4-cli\n").unwrap();
+    let preview = h.ok("rector_preview", json!({ "path": root, "target": "8.4", "mode": "pins" }));
+    assert_eq!(preview["mode"], "pins");
+    assert_eq!(preview["changes"][0]["file"], "Dockerfile");
+    let id = preview["id"].as_u64().unwrap();
+    let result = h.ok("apply_changes", json!({ "path": root, "previewId": id, "files": ["Dockerfile"], "label": "pins" }));
+    assert_eq!(std::fs::read_to_string(&dockerfile).unwrap(), "FROM php:8.4-cli\n");
+    h.ok("restore_snapshot", json!({ "path": root, "id": result["snapshot"]["id"] }));
+    assert_eq!(std::fs::read_to_string(&dockerfile).unwrap(), "FROM php:7.4-cli\n");
+}
+
+#[test]
 fn rector_preview_apply_restore_over_ipc() {
     if std::env::var_os("FERRY_TEST_TOOLS").is_none() {
         eprintln!("FERRY_TEST_TOOLS ayarlı değil; Rector IPC testi atlandı");

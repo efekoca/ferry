@@ -493,7 +493,7 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
       setApplying(true);
       const root = project.root;
       try {
-        const label = t.changes.snapshotLabel(previewMode === "compat", target);
+        const label = t.changes.snapshotLabel(previewMode, target);
         if (!preview) return false;
         const result = await api.applyChanges(root, preview.id, files, label, skipped);
         if (rootRef.current !== root) return true;
