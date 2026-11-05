@@ -7,7 +7,7 @@ import { Splitter } from "../components/Splitter";
 import { Button, Callout, Card, CommandLine, EmptyState, Progress, RiskBadge, RuleChips, Segmented } from "../components/ui";
 import { useI18n } from "../i18n";
 import { useStore } from "../lib/store";
-import type { FileChange, RectorMode } from "../lib/types";
+import { stepsBetween, type FileChange, type RectorMode } from "../lib/types";
 
 export function Changes() {
   const { t, loc } = useI18n();
@@ -21,6 +21,33 @@ export function Changes() {
   const [active, setActive] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [appliedAll, setAppliedAll] = useState(false);
+
+  const steps = useMemo(() => stepsBetween(project?.currentVersion ?? null, target), [project, target]);
+  const [pickedStep, setPickedStep] = useState("");
+  const step = mode !== "pins" && steps.includes(pickedStep) ? pickedStep : undefined;
+  const nextStep = step ? (steps[steps.indexOf(step) + 1] ?? target) : null;
+  const goToStep = (value: string) => {
+    setPickedStep(value);
+    void loadPreview(mode, steps.includes(value) ? value : undefined);
+  };
+  const stepPicker = steps.length > 0 && mode !== "pins" && (
+    <label className="step-picker">
+      <span>{t.changes.step}</span>
+      <select className="input" value={step ?? ""} disabled={previewing} onChange={(e) => (preview ? goToStep(e.target.value) : setPickedStep(e.target.value))}>
+        <option value="">{t.changes.stepAll(target)}</option>
+        {steps.map((v) => (
+          <option key={v} value={v}>
+            {t.changes.stepTo(v)}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+  const nextStepButton = nextStep && (
+    <Button variant="primary" onClick={() => goToStep(nextStep)}>
+      {t.changes.nextStep(nextStep)}
+    </Button>
+  );
 
   const modes = [
     { value: "compat" as const, label: t.changes.compat },
@@ -153,18 +180,19 @@ export function Changes() {
               onChange={(m) => {
                 const previous = mode;
                 setMode(m);
-                loadPreview(m).then((ok) => {
+                loadPreview(m, m === "pins" ? undefined : step).then((ok) => {
                   if (!ok) setMode(previous);
                 });
               }}
               disabled={previewing}
             />
+            {stepPicker}
             {previewing && (
               <Button variant="ghost" size="sm" icon={<CircleStop size={14} />} onClick={cancelPreview}>
                 {t.changes.stop}
               </Button>
             )}
-            <Button variant="secondary" size="sm" icon={<RotateCw size={14} />} onClick={() => loadPreview(mode)} loading={previewing}>
+            <Button variant="secondary" size="sm" icon={<RotateCw size={14} />} onClick={() => loadPreview(mode, step)} loading={previewing}>
               {t.changes.recalculate}
             </Button>
           </>
@@ -237,7 +265,7 @@ export function Changes() {
             <Card bodyClassName="card__body stack">
               <div className="intro__title">
                 <Wand2 size={18} aria-hidden />
-                <h2>{t.changes.introTitle(target)}</h2>
+                <h2>{t.changes.introTitle(step ?? target)}</h2>
               </div>
               <p className="muted">{mode === "pins" ? t.changes.introPins : t.changes.introText}</p>
               {mode !== "pins" && <p className="hint">{t.changes.introTrust}</p>}
@@ -265,6 +293,8 @@ export function Changes() {
                   );
                 })}
               </div>
+              {stepPicker}
+              {stepPicker && <p className="hint">{t.changes.stepHint}</p>}
               {previewing ? (
                 <div className="stack stack--tight">
                   <Progress value={null} label={t.changes.calculating} />
@@ -277,7 +307,7 @@ export function Changes() {
                 </div>
               ) : (
                 <div>
-                  <Button variant="primary" icon={<Sparkles size={15} />} onClick={() => loadPreview(mode)}>
+                  <Button variant="primary" icon={<Sparkles size={15} />} onClick={() => loadPreview(mode, step)}>
                     {t.changes.calculate}
                   </Button>
                 </div>
@@ -298,15 +328,18 @@ export function Changes() {
             icon={<CircleCheck size={24} />}
             title={t.changes.allApplied}
             action={
-              <Button variant="secondary" onClick={() => setView("findings")}>
-                {t.changes.seeRemaining}
-              </Button>
+              <div className="row">
+                {nextStepButton}
+                <Button variant="secondary" onClick={() => setView("findings")}>
+                  {t.changes.seeRemaining}
+                </Button>
+              </div>
             }
           >
             {t.changes.allAppliedText}
           </EmptyState>
         ) : (
-          <EmptyState icon={<CircleCheck size={24} />} title={t.changes.nothing}>
+          <EmptyState icon={<CircleCheck size={24} />} title={t.changes.nothing} action={nextStepButton || undefined}>
             {nothingText[preview.mode](preview.target)}
           </EmptyState>
         )}

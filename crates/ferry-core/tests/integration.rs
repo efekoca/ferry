@@ -45,6 +45,32 @@ fn scan_fixture_project() {
 }
 
 #[test]
+fn a_step_leaves_newer_rules_for_later() {
+    let Some(tools) = std::env::var_os("FERRY_TEST_TOOLS").map(PathBuf::from) else {
+        eprintln!("FERRY_TEST_TOOLS ayarlı değil; Rector testi atlandı");
+        return;
+    };
+    let php = toolchain::find_php(None).expect("php gerekli");
+    let (_dir, root) = copy_fixture();
+    let work = tempfile::tempdir().unwrap();
+    let preview = rector::preview(
+        &php,
+        &toolchain::rector_entry(&tools),
+        &root,
+        PhpVersion::new(8, 0),
+        rector::RectorMode::Compat,
+        &[],
+        work.path(),
+        &std::sync::atomic::AtomicBool::new(false),
+    )
+    .unwrap();
+    assert!(preview.errors.is_empty(), "{:?}", preview.errors);
+    let names: Vec<_> = preview.changes.iter().flat_map(|c| &c.rules).map(|r| r.name.as_str()).collect();
+    assert!(names.contains(&"WhileEachToForeachRector"), "{names:?}");
+    assert!(!names.contains(&"ExplicitNullableParamTypeRector"), "{names:?}");
+}
+
+#[test]
 fn rector_preview_apply_and_restore() {
     let Some(tools) = std::env::var_os("FERRY_TEST_TOOLS").map(PathBuf::from) else {
         eprintln!("FERRY_TEST_TOOLS ayarlı değil; Rector testi atlandı");

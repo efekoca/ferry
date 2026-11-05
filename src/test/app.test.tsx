@@ -1048,4 +1048,23 @@ describe("Ferry app", () => {
     expect(apply.mock.calls[0][5]).toMatch(/^PHP .* uyumluluğu/);
     expect(await screen.findByText(/dalına commit edildi \(abc1234\)/)).toBeInTheDocument();
   });
+
+  it("moves up one PHP version at a time", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    const preview = vi.spyOn(api, "rectorPreview");
+    render(<App api={api} />);
+    await openAndScan(user);
+    await user.click(nav(/Düzeltmeler/));
+    await user.selectOptions(await screen.findByRole("combobox", { name: "Adım" }), "8.0");
+    await user.click(screen.getByRole("button", { name: "Değişiklikleri hesapla" }));
+    await waitFor(() => expect(preview).toHaveBeenCalled());
+    expect(preview.mock.calls[0][1]).toBe("8.0");
+    await user.click(await screen.findByRole("checkbox", { name: "Tümünü seç" }));
+    await user.click(await screen.findByRole("button", { name: "Tümünü uygula" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Uygula" }));
+    await user.click(await screen.findByRole("button", { name: "PHP 8.1 adımına geç" }));
+    await waitFor(() => expect(preview.mock.calls.at(-1)?.[1]).toBe("8.1"));
+  });
 });

@@ -8,6 +8,14 @@ export type RectorMode = "compat" | "modernize" | "pins";
 
 export const TARGETS = ["8.1", "8.2", "8.3", "8.4", "8.5"] as const;
 export type Target = (typeof TARGETS)[number];
+const PHP_VERSIONS = ["7.0", "7.1", "7.2", "7.3", "7.4", "8.0", ...TARGETS];
+
+/** The versions between the two, for moving up one version at a time. */
+export const stepsBetween = (current: string | null, target: string) => {
+  const from = current ? PHP_VERSIONS.indexOf(current) : -1;
+  const to = PHP_VERSIONS.indexOf(target);
+  return from < 0 ? [] : PHP_VERSIONS.slice(from + 1, Math.max(to, from + 1));
+};
 
 export interface ProjectInfo {
   root: string;

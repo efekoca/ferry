@@ -101,6 +101,7 @@ The **Fixes** page runs Rector on your project in dry-run mode. No files change.
 
 - **Compatibility** makes only the changes needed to run on the new version. It is the best place to start.
 - **Modernize** also adopts newer syntax for the target version.
+- **Step** stops at a version on the way, for example 8.0 on the way from 7.4 to 8.4. You apply one version's fixes, then go to the next, which keeps each batch small. The scan still reports against the target.
 - Pick the files you want, untick any single change in a file's diff, and press **Apply**. Automatic files start selected; files marked **Review** start unselected and carry a note to check them first. Until you open one, it is labeled **Not viewed**, and the confirmation says how many automatic and review files you are applying and whether you skipped any diffs.
 - **Narrow the selection** picks only the automatic fixes, or only the files a given Rector rule changed, so you can apply and commit one kind of change at a time. Selection works per file: other changes in those files are applied too.
 - In a Git project, the confirmation lists selected files that already have uncommitted changes and offers a ready-to-copy commit message that names the rules being applied.
