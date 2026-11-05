@@ -228,6 +228,14 @@ fn snapshot_changes_fall_back_to_a_fresh_diff() {
 }
 
 #[test]
+fn fixes_can_stop_at_a_version_on_the_way() {
+    assert_eq!(parse_step("7.4").unwrap(), PhpVersion::new(7, 4));
+    assert_eq!(parse_step("8.5").unwrap(), PhpVersion::new(8, 5));
+    assert!(parse_step("5.6").is_err());
+    assert!(parse_step("9.0").is_err());
+}
+
+#[test]
 fn version_files_move_to_the_target_and_can_be_undone_over_ipc() {
     let h = harness();
     let root = h.root.clone();

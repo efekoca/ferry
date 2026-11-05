@@ -101,6 +101,7 @@ Ferry, hangi PHP'nin gerçekten çalışacağını belirleyen ve kodun çevresin
 
 - **Uyumluluk** yalnızca yeni sürümde çalışmak için gerekenleri değiştirir. Başlamak için en doğru yer burasıdır.
 - **Modernleştirme** hedef sürümün yeni yazımlarını da benimser.
+- **Adım**, yolda bir sürümde durur; örneğin 7.4'ten 8.4'e geçerken 8.0'da. Bir sürümün düzeltmelerini uygular, sonra bir sonrakine geçersiniz; böylece her grup küçük kalır. Tarama yine hedefe göre raporlar.
 - İstediğiniz dosyaları seçin, gerekirse dosyanın farkındaki tek tek değişikliklerin işaretini kaldırın ve **Uygula**'ya basın. Otomatik dosyalar seçili gelir; **Gözden geçir** olarak işaretlenen dosyalar seçilmemiş gelir ve önce kontrol etmeniz için bir not taşır. Açmadığınız dosyalarda **Bakılmadı** yazar; onay penceresi kaç otomatik ve kaç gözden geçirilecek dosya uyguladığınızı ve farkına bakmadığınız dosya olup olmadığını söyler.
 - **Seçimi daralt** yalnızca otomatik düzeltmeleri ya da belirli bir Rector kuralının değiştirdiği dosyaları seçer; böylece her seferinde tek tür değişikliği uygulayıp commit edebilirsiniz. Seçim dosya bazlıdır: seçilen dosyalardaki diğer değişiklikler de uygulanır.
 - Git projelerinde onay penceresi, seçilen dosyalardan commit edilmemiş değişikliği olanları listeler ve uygulanan kuralları sayan, kopyalamaya hazır bir commit mesajı önerir.

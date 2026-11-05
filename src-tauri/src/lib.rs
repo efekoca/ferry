@@ -97,6 +97,16 @@ fn parse_target(target: &str) -> CmdResult<PhpVersion> {
     Ok(v)
 }
 
+/// Fixes can stop at an older version on the way to the target, one step at a time.
+fn parse_step(target: &str) -> CmdResult<PhpVersion> {
+    let v: PhpVersion = target.parse()?;
+    let newest = PhpVersion::TARGETS.iter().max().copied().unwrap_or(v);
+    if v < PhpVersion::new(7, 0) || v > newest {
+        return Err(t!("Desteklenmeyen hedef sürüm: {v}", "Unsupported target version: {v}"));
+    }
+    Ok(v)
+}
+
 fn normalize_path(path: String) -> String {
     let path = if cfg!(windows) { path.replace('/', "\\") } else { path };
     let Ok(canonical) = std::fs::canonicalize(&path) else { return path };
@@ -852,7 +862,7 @@ async fn install_rector(state: State<'_, AppState>) -> CmdResult<ToolchainStatus
 #[tauri::command]
 async fn rector_preview(state: State<'_, AppState>, path: String, target: String, mode: RectorMode) -> CmdResult<PreviewResponse> {
     let path = normalize_path(path);
-    let target = parse_target(&target)?;
+    let target = parse_step(&target)?;
     let tools = state.tools_dir();
     let work = state.data_dir.join("rector");
     let php_override = state.php_override();

@@ -741,6 +741,8 @@ mod tests {
         let root = Path::new("/p/it's");
         let cfg = build_config(root, PhpVersion::new(8, 1), RectorMode::Compat, &["storage".into()], &Staging::default(), Path::new("/c"));
         assert!(cfg.contains("->withPhpSets(php81: true)"));
+        let step = build_config(root, PhpVersion::new(8, 0), RectorMode::Compat, &[], &Staging::default(), Path::new("/c"));
+        assert!(step.contains("->withPhpSets(php80: true)") && step.contains("->withPhpVersion(80000)"), "{step}");
         assert!(cfg.contains("'/p/it\\'s'"));
         assert!(cfg.contains("StrContainsRector"));
         assert!(cfg.contains("FunctionFirstClassCallableRector"), "modernizations outside PhpXY namespaces are skipped too");

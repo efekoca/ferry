@@ -2831,6 +2831,16 @@ select.input {
   font-weight: 600;
 }
 
+.step-picker {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.step-picker .input {
+  width: auto;
+}
+
 .git-batch {
   display: flex;
   align-items: center;

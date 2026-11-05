@@ -121,7 +121,7 @@ interface AppStore {
   preview: RectorPreview | null;
   previewMode: RectorMode;
   previewing: boolean;
-  loadPreview(mode: RectorMode): Promise<boolean>;
+  loadPreview(mode: RectorMode, step?: string): Promise<boolean>;
   cancelPreview(): void;
   docker: DockerComparison | null;
   dockerHistory: DockerSummary[];
@@ -401,7 +401,7 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
   }, [api, toast, fail, t]);
 
   const loadPreview = useCallback(
-    async (mode: RectorMode) => {
+    async (mode: RectorMode, step?: string) => {
       if (!api || !project) return false;
       const root = project.root;
       const seq = ++previewSeq.current;
@@ -409,7 +409,7 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
       setPreviewMode(mode);
       setPreviewing(true);
       try {
-        const result = await api.rectorPreview(root, target, mode);
+        const result = await api.rectorPreview(root, step ?? target, mode);
         if (seq === previewSeq.current) setPreview(result);
         return true;
       } catch (e) {
@@ -493,7 +493,7 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
       setApplying(true);
       const root = project.root;
       try {
-        const label = t.changes.snapshotLabel(previewMode, target);
+        const label = t.changes.snapshotLabel(previewMode, preview?.target ?? target);
         if (!preview) return false;
         const result = await api.applyChanges(root, preview.id, files, label, skipped, commitMessage);
         if (rootRef.current !== root) return true;
