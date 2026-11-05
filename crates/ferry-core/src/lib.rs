@@ -27,6 +27,8 @@ pub mod lexer;
 pub mod localcheck;
 mod objects;
 pub mod origin;
+#[rustfmt::skip]
+mod param_names;
 pub mod packagist;
 pub mod probe;
 pub mod project;

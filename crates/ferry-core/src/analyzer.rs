@@ -170,6 +170,27 @@ fn curly_offsets(tokens: &[Token]) -> Vec<(usize, Vec<(usize, usize)>)> {
     out
 }
 
+/// Puts named arguments where the function expects them, with an empty slot for each skipped one.
+/// An unknown function or parameter name leaves the call unread.
+fn positional<'t>(function: &str, args: &[&'t [Token]]) -> Option<Vec<&'t [Token]>> {
+    let k = crate::param_names::PARAM_NAMES.binary_search_by(|(name, _)| (*name).cmp(function)).ok()?;
+    let names = crate::param_names::PARAM_NAMES[k].1;
+    let mut out: Vec<&'t [Token]> = Vec::new();
+    for arg in args {
+        let label = arg.len() > 1 && arg[1].is_punct(":") && arg[0].kind == TokenKind::Ident;
+        if !label {
+            out.push(arg);
+            continue;
+        }
+        let slot = names.iter().position(|n| arg[0].is_ident_ci(n))?;
+        if out.len() <= slot {
+            out.resize(slot + 1, &[]);
+        }
+        out[slot] = &arg[2..];
+    }
+    Some(out)
+}
+
 /// Imports count per namespace block: `use function` in one block says nothing about the next.
 fn function_imports(tokens: &[Token]) -> std::collections::HashMap<(usize, String), String> {
     let spaces = crate::index::namespaces(tokens);
@@ -1056,9 +1077,12 @@ impl<'a> Ctx<'a> {
                 }
                 return self.symbol(&crate::rules::LARAVEL_HELPER, tok, true);
             }
-            let single = |n: usize| args.get(n).filter(|a| a.len() == 1).map(|a| &a[0]);
             let named = args.iter().any(|a| a.len() > 1 && a[1].is_punct(":") && a[0].kind == TokenKind::Ident);
             let spread = args.iter().any(|a| a.first().is_some_and(|t| t.is_punct("...")));
+            let ordered = if named && !spread { positional(&lower, &args) } else { None };
+            let in_order = ordered.as_deref().unwrap_or(&args);
+            let readable = !spread && (!named || ordered.is_some());
+            let single = |n: usize| in_order.get(n).filter(|a| a.len() == 1).map(|a| &a[0]);
             if !named && !spread && self.applies(PhpVersion::new(8, 0)) {
                 if let Ok(k) = crate::arity::ARITY.binary_search_by(|(n, _, _)| (*n).cmp(lower.as_str())) {
                     let (_, required, max) = crate::arity::ARITY[k];
@@ -1079,7 +1103,7 @@ impl<'a> Ctx<'a> {
                     }
                 }
             }
-            if !named && !spread {
+            if readable {
                 if let Some((_, slots)) = crate::rules::NULL_STRING_ARGS.iter().find(|(f, _)| *f == lower) {
                     for &slot in *slots {
                         if let Some(arg) = single(slot).filter(|t| t.is_ident_ci("null")) {
@@ -1087,7 +1111,7 @@ impl<'a> Ctx<'a> {
                         }
                     }
                 }
-                if let Some((rule, at)) = crate::arguments::find(&lower, &args) {
+                if let Some((rule, at)) = crate::arguments::find(&lower, in_order) {
                     let repeated =
                         rule.rule.id == crate::arguments::HTML_FLAGS_ID && std::mem::replace(&mut self.html_flags_reported, true);
                     if !repeated {
@@ -3625,6 +3649,19 @@ mod tests {
     }
 
     #[test]
+    fn named_arguments_are_read_like_positional_ones() {
+        let null = "deprecated.null_to_internal";
+        assert_eq!(lines_of("<?php\nstrlen(string: null);", "8.1", null), vec![2]);
+        assert_eq!(lines_of("<?php\nstr_replace(subject: null, search: 'a', replace: 'b');", "8.1", null), vec![2]);
+        assert!(lines_of("<?php\nstr_replace(search: 'a', replace: 'b', subject: $s);", "8.1", null).is_empty());
+        assert!(lines_of("<?php\nstrlen(unknown: null);", "8.1", null).is_empty());
+        assert_eq!(
+            rule_ids("<?php define(constant_name: 'A', value: 1, case_insensitive: true);"),
+            rule_ids("<?php define('A', 1, true);")
+        );
+    }
+
+    #[test]
     fn imports_stay_in_their_namespace_block() {
         assert!(rule_ids("<?php namespace A { use function Foo\\each; each($x); } namespace B { each($x); }")
             .contains(&"removed.each".to_string()));
@@ -4140,7 +4177,7 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
         for (src, id, n) in cases {
             assert_eq!(count85(src, id), *n, "{id}: {src}");
         }
-        assert_eq!(count85("<?php strpos(haystack: $h, needle: 65);", "behavior.int_as_char_code"), 0);
+        assert_eq!(count85("<?php strpos(haystack: $h, needle: 65);", "behavior.int_as_char_code"), 1);
         assert_eq!(count85("<?php function chr($c) {} chr(300);", "deprecated.chr_out_of_range"), 0);
     }
 
@@ -4749,7 +4786,7 @@ htmlspecialchars(string: null);
 \\strpos('abc', NULL);
 $obj->strlen(null);";
         let rule = "deprecated.null_to_internal";
-        assert_eq!(lines_of(src, "8.1", rule), vec![2, 3, 7]);
+        assert_eq!(lines_of(src, "8.1", rule), vec![2, 3, 6, 7]);
         assert!(lines_of(src, "8.0", rule).is_empty());
         assert!(lines_of("<?php namespace App; function strlen($s) {} strlen(null);", "8.1", rule).is_empty());
     }

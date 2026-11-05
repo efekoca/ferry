@@ -1088,9 +1088,11 @@ describe("Ferry app", () => {
     const api = mockApi({ delay: 0 });
     render(<App api={api} />);
     await openAndScan(user);
-    await api.runLocalCheck("/x", "8.4", "lint");
+    await user.click(nav(/Bulgular/));
+    await user.click(await screen.findByRole("button", { name: /lint et/ }));
     await user.click(nav(/Geçmiş/));
-    await user.click(nav(/Genel bakış/));
-    expect(await api.checkHistory("/x")).toHaveLength(1);
+    const card = (await screen.findByText("Lint ve test kontrolleri")).closest(".card") as HTMLElement;
+    expect(within(card).getByText("Geçti")).toBeInTheDocument();
+    expect(within(card).getByText(/php -l · PHP/)).toBeInTheDocument();
   });
 });
