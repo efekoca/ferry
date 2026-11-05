@@ -53,15 +53,70 @@ fn split_location(rest: &str) -> Option<(String, String, usize)> {
     Some((head[..at_in].trim().to_string(), head[at_in + 4..].trim().to_string(), line))
 }
 
+/// A record from Monolog's JsonFormatter. Records about the application itself, such as a failed
+/// login, have no PHP error in them and are left out.
+fn monolog_record(text: &str) -> Option<(String, usize, Level, String)> {
+    let record: serde_json::Value = serde_json::from_str(text).ok()?;
+    record.get("level_name").or(record.get("level"))?;
+    let exception = record.pointer("/context/exception");
+    let message = exception.and_then(|e| e["message"].as_str()).or(record["message"].as_str())?.to_string();
+    let class = exception.and_then(|e| e["class"].as_str());
+    let code = exception.and_then(|e| e["code"].as_i64());
+    let level = match code {
+        Some(8192 | 16384) if class == Some("ErrorException") => Some(Level::Deprecated),
+        Some(2 | 512) if class == Some("ErrorException") => Some(Level::Warning),
+        _ => record["message"].as_str().and_then(level_of).or_else(|| level_of(&format!("{}: {message}", class.unwrap_or_default()))),
+    }?;
+    if let Some((path, line)) = exception.and_then(|e| e["file"].as_str()?.rsplit_once(':')) {
+        return Some((path.to_string(), line.parse().ok()?, level, message));
+    }
+    ["/context", "/extra"].iter().find_map(|key| {
+        let place = record.pointer(key)?;
+        Some((place["file"].as_str()?.to_string(), place["line"].as_u64()? as usize, level, message.clone()))
+    })
+}
+
+/// True on a heading of the Symfony PHPUnit bridge's summary that lists deprecations in the
+/// project's own reach. Indirect and legacy ones come from packages or are silenced on purpose.
+fn bridge_heading(text: &str) -> Option<bool> {
+    let start = text.find(|c: char| c.is_ascii_uppercase())?;
+    let rest = &text[start..];
+    let (head, _) = rest.split_once(" deprecation notices (")?;
+    Some(matches!(head, "Remaining self" | "Remaining direct" | "Other" | "Unsilenced"))
+}
+
+fn bridge_notice(text: &str) -> Option<(usize, &str)> {
+    let (count, message) = text.split_once("x: ")?;
+    Some((count.parse().ok()?, message.trim()))
+}
+
 pub fn parse(log: &str) -> Vec<Event> {
     let mut found: BTreeMap<(String, usize, String), (Level, usize)> = BTreeMap::new();
-    let mut add = |path: String, line: usize, level: Level, message: String| {
-        found.entry((path, line, message)).and_modify(|e| e.1 += 1).or_insert((level, 1));
+    let mut add_many = |path: String, line: usize, level: Level, message: String, count: usize| {
+        found.entry((path, line, message)).and_modify(|e| e.1 += count).or_insert((level, count));
     };
     let lines: Vec<&str> = log.lines().collect();
     let mut section = Level::Deprecated;
+    let mut bridge = None;
     for (k, raw) in lines.iter().enumerate() {
         let text = raw.trim();
+        if text.starts_with('{') {
+            if let Some((path, line, level, message)) = monolog_record(text) {
+                add_many(path, line, level, message, 1);
+                continue;
+            }
+        }
+        if let Some(reachable) = bridge_heading(text) {
+            bridge = Some(reachable);
+            continue;
+        }
+        if let (Some(reachable), Some((count, message))) = (bridge, bridge_notice(text)) {
+            if reachable {
+                add_many(String::new(), 0, Level::Deprecated, message.to_string(), count);
+            }
+            continue;
+        }
+        let mut add = |path: String, line: usize, level: Level, message: String| add_many(path, line, level, message, 1);
         if text.ends_with(':') && (text.contains(" triggered ") || text.starts_with("There w")) {
             section = level_of(text).unwrap_or(Level::Warning);
             continue;
@@ -203,6 +258,17 @@ pub fn merge(root: &Path, findings: &mut Vec<Finding>, events: &[Event], target:
     let mut merged = Merged { confirmed: 0, added: 0, outside: 0, outside_fatals: 0 };
     let files = project_files(root, events, remote_roots);
     for (e, file) in events.iter().zip(files) {
+        if e.path.is_empty() {
+            let message = e.message.to_ascii_lowercase();
+            let mut same = findings.iter_mut().filter(|f| symbol(f).is_some_and(|s| names_symbol(&message, &s))).peekable();
+            if same.peek().is_none() {
+                merged.outside += 1;
+            } else {
+                merged.confirmed += 1;
+            }
+            same.for_each(|f| f.runtime_hits += e.count);
+            continue;
+        }
         let skipped = |rel: &str| rel.split('/').any(|part| crate::project::ALWAYS_SKIP.contains(&part));
         let Some(file) = file.filter(|rel| !skipped(rel)) else {
             merged.outside += 1;
@@ -355,6 +421,43 @@ PHP Deprecated:  Function utf8_encode() is deprecated in /srv/app/a.php on line 
         let fatal = findings.iter().find(|f| f.rule_id == "runtime.fatal").expect("a fatal is never folded into a deprecation");
         assert_eq!((fatal.line, fatal.severity), (1, Severity::Breaking));
         assert!(findings.iter().any(|f| f.rule_id == "runtime.deprecated" && f.line == 1));
+    }
+
+    #[test]
+    fn monolog_json_records() {
+        let log = [
+            r#"{"message":"Deprecated: strftime() is deprecated","context":{"exception":{"class":"ErrorException","message":"Deprecated: strftime() is deprecated","code":8192,"file":"/srv/app/src/A.php:12"}},"level":200,"level_name":"INFO","channel":"php","datetime":"2026-11-05T10:00:00+00:00","extra":{}}"#,
+            r#"{"message":"Uncaught PHP Exception TypeError: bad","context":{"exception":{"class":"TypeError","message":"bad","code":0,"file":"/srv/app/src/B.php:3"}},"level":500,"level_name":"CRITICAL","channel":"request","extra":{}}"#,
+            r#"{"message":"Warning: Undefined variable $x","context":{},"level":300,"level_name":"WARNING","channel":"php","extra":{"file":"/srv/app/src/C.php","line":8}}"#,
+            r#"{"message":"Payment declined","context":{"exception":{"class":"App\PaymentFailed","message":"Payment declined","code":0,"file":"/srv/app/src/D.php:1"}},"level":400,"level_name":"ERROR","channel":"app","extra":{}}"#,
+            r#"{"hello":"world"}"#,
+        ]
+        .join("\n");
+        let events = parse(&log);
+        let summary: Vec<_> = events.iter().map(|e| (e.path.as_str(), e.line, e.level)).collect();
+        assert_eq!(
+            summary,
+            [
+                ("/srv/app/src/A.php", 12, Level::Deprecated),
+                ("/srv/app/src/B.php", 3, Level::Fatal),
+                ("/srv/app/src/C.php", 8, Level::Warning)
+            ]
+        );
+    }
+
+    #[test]
+    fn bridge_summaries_confirm_findings_by_name() {
+        let log = "OK (3 tests)\n\n\u{1b}[37;41mRemaining self deprecation notices (3)\u{1b}[0m\n\n  2x: Function strftime() is deprecated\n    2x in ATest::testOne from App\\Tests\n\n  1x: Something this project never heard of\n    1x in ATest::testTwo from App\\Tests\n\nRemaining indirect deprecation notices (1)\n\n  4x: Function utf8_encode() is deprecated\n    4x in BTest::test from App\\Tests\n\nLegacy deprecation notices (1)\n\n  1x: Old thing\n";
+        let events = parse(log);
+        let notices: Vec<_> = events.iter().map(|e| (e.path.as_str(), e.message.as_str(), e.count)).collect();
+        assert_eq!(notices, [("", "Function strftime() is deprecated", 2), ("", "Something this project never heard of", 1)]);
+
+        let target = PhpVersion::new(8, 4);
+        let mut findings = analyze_source("a.php", "<?php\nstrftime('%Y');\n", target);
+        let dir = tempfile::tempdir().unwrap();
+        let merged = merge(dir.path(), &mut findings, &events, target, &[]);
+        assert_eq!((merged.confirmed, merged.added, merged.outside), (1, 0, 1));
+        assert_eq!(findings.iter().find(|f| f.title.en.contains("strftime")).unwrap().runtime_hits, 2);
     }
 
     #[test]

@@ -666,7 +666,8 @@ fn run_version(
     };
     container.detach();
     drop(database);
-    let events = runtime::parse(&log);
+    let mut events = runtime::parse(&log);
+    events.retain(|e| !e.path.is_empty());
     Ok(VersionRun {
         version,
         image,
