@@ -3,11 +3,13 @@ import { CircleAlert, CircleCheck, Container, Play, ShieldAlert, Square, Wand2 }
 import { DiffViewer } from "../components/DiffViewer";
 import { ConfirmDialog } from "../components/Modal";
 import { PageHeader } from "../components/Shell";
+import { useToast } from "../components/Toast";
 import { Badge, Button, Callout, Card, EmptyState, RiskBadge } from "../components/ui";
 import { useI18n } from "../i18n";
 import { containerPath as shortPath, touches } from "../lib/fixes";
+import { errorMessage } from "../lib/api";
 import { useStore } from "../lib/store";
-import { KNOWN_SOURCES, type DatabaseChoice, type DatabasePlan, type DockerComparison, type DockerDelta, type DockerEvent, type DockerOutcome, type DockerPage, type DockerRun, type Target } from "../lib/types";
+import { KNOWN_SOURCES, type DatabaseChoice, type DatabasePlan, type DockerComparison, type DockerDelta, type DockerEvent, type DockerOrigin, type DockerOutcome, type DockerPage, type DockerRun, type Target, type VersionSuggestion } from "../lib/types";
 
 const choice = (source: string, file: string | null, root: string): DatabaseChoice | null => {
   if (source === "live" || source === "seed") return { kind: source };
@@ -77,6 +79,66 @@ function PagesCard({ pages, version }: { pages: DockerPage[]; version: string })
         </ul>
       )}
     </Card>
+  );
+}
+
+function Origins({ origins, target }: { origins: DockerOrigin[]; target: string }) {
+  const { t, loc } = useI18n();
+  const { api } = useStore();
+  const toast = useToast();
+  const [found, setFound] = useState<VersionSuggestion[] | null>(null);
+  const [looking, setLooking] = useState(false);
+  if (origins.every((o) => o.kind === "project")) return null;
+  const packages = origins.filter((o) => o.kind === "package" && o.version);
+  const look = async () => {
+    if (!api) return;
+    setLooking(true);
+    try {
+      setFound(await api.findCompatibleVersions(target, packages.map((o) => ({ name: o.name, version: o.version ?? "" }))));
+    } catch (e) {
+      toast.push({ tone: "error", title: t.deps.findFailed, description: errorMessage(e, t.common.genericError) });
+    } finally {
+      setLooking(false);
+    }
+  };
+  const step = (o: DockerOrigin) => {
+    if (o.advice) return loc(o.advice);
+    if (o.kind === "project") return t.docker.originProject;
+    if (o.kind === "core") return t.docker.originCore(o.name);
+    return o.kind === "package" ? t.docker.originPackage : t.docker.originExtension;
+  };
+  return (
+    <div className="docker-origins">
+      <h3>{t.docker.originTitle}</h3>
+      <ul className="docker-events">
+        {origins.map((o) => {
+          const suggestion = found?.find((s) => s.name === o.name);
+          return (
+            <li key={`${o.kind}:${o.name}`}>
+              <Badge tone={o.fatal > 0 ? "danger" : "neutral"}>{t.docker.originKind[o.kind]}</Badge>
+              {o.name && (
+                <code>
+                  {o.name}
+                  {o.version && ` ${o.version}`}
+                </code>
+              )}
+              <span>{t.docker.originCount(o.messages, o.fatal)}</span>
+              <span className="subtle docker-origins__step">{step(o)}</span>
+              {o.kind === "package" && suggestion && <code className="docker-origins__step">{t.docker.originSuggested(o.name, suggestion.version)}</code>}
+              {o.kind === "package" && found && !suggestion && <span className="subtle docker-origins__step">{t.docker.originNoSuggestion}</span>}
+            </li>
+          );
+        })}
+      </ul>
+      {packages.length > 0 && !found && (
+        <>
+          <Button variant="secondary" size="sm" loading={looking} onClick={() => void look()}>
+            {t.deps.findVersions}
+          </Button>
+          <p className="subtle">{t.deps.findVersionsNote}</p>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -163,6 +225,7 @@ function TrialResult({ outcome, version, files, onEdit }: { outcome: DockerOutco
         </ul>
       )}
       {left && <p className="subtle">{t.docker.fixManual}</p>}
+      <Origins origins={outcome.origins} target={version} />
       <div className="docker-actions">
         <Button variant={introduced ? "secondary" : "primary"} onClick={() => setConfirming(true)}>
           {t.docker.fixWrite(files.length)}
@@ -265,6 +328,11 @@ function Result({ result, onTry }: { result: DockerComparison; onTry: (files: st
       <Callout tone={bad ? "danger" : tested ? "success" : "warn"} icon={bad ? <CircleAlert size={15} /> : <CircleCheck size={15} />}>
         {bad ? t.docker.worse(result.target.version) : tested ? t.docker.same(result.target.version) : t.docker.notTested}
       </Callout>
+      {result.origins.some((o) => o.kind !== "project") && (
+        <Card>
+          <Origins origins={result.origins} target={result.target.version} />
+        </Card>
+      )}
       {fixable && <FixLoop result={result} onTry={onTry} />}
       {!result.dependenciesInstalled && (
         <Callout tone="warn">
