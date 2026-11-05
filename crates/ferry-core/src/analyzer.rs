@@ -379,6 +379,29 @@ pub fn fix_curly_offsets(src: &str) -> Option<String> {
     String::from_utf8(bytes).ok()
 }
 
+/// The first bracket that closes nothing or never closes. Valid PHP always balances, whatever
+/// the version, so this only fires on files no PHP can compile.
+fn unbalanced(tokens: &[Token]) -> Option<&Token> {
+    let mut open: Vec<&Token> = Vec::new();
+    for token in tokens.iter().filter(|t| t.kind == TokenKind::Punct) {
+        match token.text.as_str() {
+            "(" | "[" | "#[" | "{" => open.push(token),
+            ")" | "]" | "}" => {
+                let closes = |o: &&Token| match token.text.as_str() {
+                    ")" => o.text == "(",
+                    "]" => o.text == "[" || o.text == "#[",
+                    _ => o.text == "{",
+                };
+                if !open.pop().as_ref().is_some_and(closes) {
+                    return Some(token);
+                }
+            }
+            _ => {}
+        }
+    }
+    open.first().copied()
+}
+
 pub fn analyze_source(file: &str, src: &str, target: PhpVersion) -> Vec<Finding> {
     let index = crate::index::ProjectIndex::from_tokens_for(&lex(src).tokens, Some(target));
     analyze_source_in(file, src, target, &index)
@@ -408,6 +431,9 @@ pub fn analyze_source_in(file: &str, src: &str, target: PhpVersion, index: &crat
     };
     for &(line, column) in &lexed.stray_hash_brackets {
         ctx.pattern_at(&patterns::HASH_BRACKET_COMMENT, line, column);
+    }
+    if let Some(token) = unbalanced(&tokens) {
+        ctx.pattern(&patterns::UNBALANCED, token, None);
     }
     for (base, _) in curly_offsets(&tokens) {
         ctx.pattern(&patterns::CURLY_OFFSET, &tokens[base], None);
@@ -3421,6 +3447,14 @@ mod tests {
         assert_eq!(count("<?php class C { function __construct(private $p, public $q) {} } class D extends C { function f() { $this->p = 1; $this->q = 2; } }"), 1);
         assert_eq!(count("<?php class C { private $v; } class D extends C { function f() { \\Closure::bind(function () { $this->v = 1; }, $this, C::class)(); } }"), 0);
         assert_eq!(count("<?php class C { private $v; } class D extends C { function f() { (function () { $this->v = 1; })->bindTo($this, C::class)(); } }"), 0);
+    }
+
+    #[test]
+    fn files_no_php_can_compile_are_reported() {
+        assert_eq!(rule_ids("<?php $x = [1;\neach($a);"), ["syntax.unbalanced", "removed.each"].map(String::from).to_vec());
+        assert!(rule_ids("<?php function f() {").contains(&"syntax.unbalanced".to_string()));
+        assert!(rule_ids("<?php if ($a): ?><div>{</div><?php endif; $s = \"{$a['b']}\"; $t = <<<X\n{\nX;\n").is_empty());
+        assert!(!rule_ids("<?php f(1);\n__halt_compiler(); ((((").contains(&"syntax.unbalanced".to_string()));
     }
 
     #[test]
