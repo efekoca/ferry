@@ -185,7 +185,7 @@ fn reports_uncommitted_files_in_git_projects() {
 #[test]
 fn porcelain_output_keeps_renames_and_spaces() {
     let out = b"R  sub/new name.php\0sub/old.php\0?? sub/x -> y.php\0 M other.php\0";
-    assert_eq!(porcelain_paths(out, "sub/"), ["new name.php", "x -> y.php", "other.php"]);
+    assert_eq!(git::porcelain_paths(out, "sub/"), ["new name.php", "x -> y.php", "other.php"]);
 }
 
 #[test]
@@ -241,6 +241,44 @@ fn version_files_move_to_the_target_and_can_be_undone_over_ipc() {
     assert_eq!(std::fs::read_to_string(&dockerfile).unwrap(), "FROM php:8.4-cli\n");
     h.ok("restore_snapshot", json!({ "path": root, "id": result["snapshot"]["id"] }));
     assert_eq!(std::fs::read_to_string(&dockerfile).unwrap(), "FROM php:7.4-cli\n");
+}
+
+#[test]
+fn a_batch_goes_on_its_own_branch_and_a_dirty_tree_can_be_refused() {
+    let _lang = turkish();
+    let h = harness();
+    let root = h.root.clone();
+    let dir = Path::new(&root);
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git").arg("-C").arg(dir).args(args).output().unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+    std::fs::write(dir.join("Dockerfile"), "FROM php:7.4-cli\n").unwrap();
+    git(&["init", "-q", "-b", "main"]);
+    git(&["config", "user.email", "t@example.com"]);
+    git(&["config", "user.name", "T"]);
+    let config = ferry_core::config::Config {
+        git: ferry_core::config::GitConfig { require_clean: true, branch_per_batch: false },
+        ..Default::default()
+    };
+    ferry_core::config::save(dir, &config).unwrap();
+    git(&["add", "."]);
+    git(&["commit", "-qm", "first"]);
+
+    let id = h.ok("rector_preview", json!({ "path": root, "target": "8.4", "mode": "pins" }))["id"].as_u64().unwrap();
+    std::fs::write(dir.join("notes.txt"), "open work\n").unwrap();
+    let args = json!({ "path": root, "previewId": id, "files": ["Dockerfile"], "label": "pins", "commitMessage": "Update PHP" });
+    let err = h.invoke("apply_changes", args.clone()).unwrap_err();
+    assert!(err.as_str().unwrap().contains("temiz çalışma ağacı"), "{err}");
+    assert_eq!(git(&["symbolic-ref", "--short", "HEAD"]), "main");
+
+    std::fs::remove_file(dir.join("notes.txt")).unwrap();
+    let result = h.ok("apply_changes", args);
+    assert_eq!(result["branch"], "ferry/php-8.4-versions");
+    assert_eq!(result["commit"].as_str().unwrap(), git(&["rev-parse", "--short", "HEAD"]));
+    assert_eq!(git(&["log", "-1", "--format=%s"]), "Update PHP");
+    assert_eq!(git(&["status", "--porcelain"]), "");
 }
 
 #[test]

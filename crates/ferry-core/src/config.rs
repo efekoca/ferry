@@ -10,6 +10,16 @@ pub struct Config {
     pub exclude: Vec<String>,
     pub baseline: Option<String>,
     pub docker: DockerConfig,
+    pub git: GitConfig,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct GitConfig {
+    /// Refuse to write while the project has uncommitted changes.
+    pub require_clean: bool,
+    /// Offer each batch of changes on its own branch, with its own commit.
+    pub branch_per_batch: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -76,6 +86,7 @@ mod tests {
         let config = Config {
             target: Some("8.4".into()),
             exclude: vec!["legacy".into()],
+            git: GitConfig { require_clean: true, branch_per_batch: false },
             baseline: Some(".ferry/baseline.json".into()),
             docker: DockerConfig { pages: Some(vec!["/login".into()]), test: Some("vendor/bin/pest".into()), ..DockerConfig::default() },
         };

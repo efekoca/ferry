@@ -175,9 +175,15 @@ Projenin ayarları `.ferry/ignore.json` dosyasının yanındaki `.ferry/config.j
     "dump": "database/dump.sql",
     "prepare": "php bin/console sass:build",
     "test": "vendor/bin/pest"
+  },
+  "git": {
+    "requireClean": true,
+    "branchPerBatch": true
   }
 }
 ```
+
+`requireClean`, projede commit edilmemiş dosya varken uygulamanın değişiklik yazmasını engeller. `branchPerBatch`, bir düzeltme grubunu ayrı bir `ferry/php-X.Y-…` dalına alıp yalnızca o dosyaları commit eden seçeneği işaretli getirir. Ferry bu commit için projenin Git kancalarını çalıştırmaz; Geçmiş'teki geri alma commit'i silmez, dosyaları onun üstüne geri yükler.
 
 Komut satırı seçenekleri dosyanın önüne geçer ve `--target` zorunlu olmaktan çıkar. Yollar proje içinde olmalıdır. Sunucu bağlantıları kaydedilemez, çünkü her kopyalama onay ister. Kayıtlı `prepare` ve `test` komutları yalnızca container içinde çalışır ve uygulama başlatmadan önce bunları gösterir.
 

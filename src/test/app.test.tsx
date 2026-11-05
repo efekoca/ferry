@@ -519,7 +519,7 @@ describe("Ferry app", () => {
 
   it("opens with the project's saved settings and saves them back", async () => {
     const user = userEvent.setup();
-    const api = mockApi({ delay: 0, config: { target: "8.3", exclude: ["legacy"], baseline: null, docker: { source: "8.0", extensions: false, pages: ["/shop"], dump: null, prepare: "make assets", test: "vendor/bin/pest" } } });
+    const api = mockApi({ delay: 0, config: { target: "8.3", exclude: ["legacy"], baseline: null, docker: { source: "8.0", extensions: false, pages: ["/shop"], dump: null, prepare: "make assets", test: "vendor/bin/pest" }, git: { requireClean: false, branchPerBatch: false } } });
     const compare = vi.spyOn(api, "dockerCompare");
     const save = vi.spyOn(api, "saveProjectConfig");
     render(<App api={api} />);
@@ -1015,5 +1015,37 @@ describe("Ferry app", () => {
     expect(apply.mock.calls[0][2]).toEqual(["Dockerfile"]);
     expect(apply.mock.calls[0][3]).toMatch(/^Sürüm dosyaları · PHP/);
     expect(await screen.findByText("Hepsi uygulandı")).toBeInTheDocument();
+  });
+
+  it("blocks applying on an uncommitted tree when the project asks for it", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0, config: { target: null, exclude: [], baseline: null, docker: { source: null, extensions: null, pages: null, dump: null, prepare: null, test: null }, git: { requireClean: true, branchPerBatch: false } } });
+    api.gitStatus = async () => ({ repo: true, dirty: ["src/open.php"] });
+    render(<App api={api} />);
+    await openAndScan(user);
+    await user.click(nav(/Düzeltmeler/));
+    await user.click(await screen.findByRole("button", { name: "Değişiklikleri hesapla" }));
+    await user.click(await screen.findByRole("button", { name: /uygula/ }));
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByText("Projede commit edilmemiş 1 dosya var")).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Uygula" })).toBeDisabled();
+  });
+
+  it("commits a batch on its own branch when asked", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0, config: { target: null, exclude: [], baseline: null, docker: { source: null, extensions: null, pages: null, dump: null, prepare: null, test: null }, git: { requireClean: false, branchPerBatch: true } } });
+    const apply = vi.spyOn(api, "applyChanges");
+    api.gitStatus = async () => ({ repo: true, dirty: [] });
+    render(<App api={api} />);
+    await openAndScan(user);
+    await user.click(nav(/Düzeltmeler/));
+    await user.click(await screen.findByRole("button", { name: "Değişiklikleri hesapla" }));
+    await user.click(await screen.findByRole("button", { name: /uygula/ }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByRole("checkbox", { name: /Ayrı dal aç/ })).toBeChecked();
+    await user.click(within(dialog).getByRole("button", { name: "Uygula" }));
+    await waitFor(() => expect(apply).toHaveBeenCalled());
+    expect(apply.mock.calls[0][5]).toMatch(/^PHP .* uyumluluğu/);
+    expect(await screen.findByText(/dalına commit edildi \(abc1234\)/)).toBeInTheDocument();
   });
 });

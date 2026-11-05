@@ -36,6 +36,10 @@ export interface ProjectConfig {
     prepare: string | null;
     test: string | null;
   };
+  git: {
+    requireClean: boolean;
+    branchPerBatch: boolean;
+  };
 }
 
 export interface Finding {
@@ -434,6 +438,9 @@ export interface ApplyResult {
   written: string[];
   lintErrors: string[];
   lintChecked: boolean;
+  branch?: string | null;
+  commit?: string | null;
+  gitError?: string | null;
 }
 
 export interface BackupUsage {

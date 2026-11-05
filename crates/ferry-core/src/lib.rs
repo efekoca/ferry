@@ -17,6 +17,7 @@ pub mod extensions;
 #[rustfmt::skip]
 mod ext_map;
 pub mod framework;
+pub mod git;
 mod guards;
 pub mod history;
 pub mod i18n;

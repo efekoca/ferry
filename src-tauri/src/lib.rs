@@ -1,5 +1,6 @@
 use ferry_core::analyzer::{self, ScanResult};
 use ferry_core::deps::{self, DependencyReport};
+use ferry_core::git;
 use ferry_core::history;
 use ferry_core::i18n::{self, Lang};
 use ferry_core::ignore::{self, Ignore, IgnoredFinding};
@@ -789,45 +790,13 @@ struct GitState {
     dirty: Vec<String>,
 }
 
-fn porcelain_paths(out: &[u8], prefix: &str) -> Vec<String> {
-    let mut entries = out.split(|b| *b == 0).filter(|e| !e.is_empty());
-    let mut paths = Vec::new();
-    while let Some(entry) = entries.next() {
-        let Some(path) = entry.get(3..) else { continue };
-        if matches!(entry[0], b'R' | b'C') {
-            entries.next();
-        }
-        let path = String::from_utf8_lossy(path);
-        paths.push(path.strip_prefix(prefix).unwrap_or(&path).to_string());
-    }
-    paths
-}
-
 #[tauri::command]
 async fn git_status(path: String, files: Vec<String>) -> CmdResult<GitState> {
     let path = normalize_path(path);
     blocking(move || {
         let root = project_root(&path)?;
-        let Some(git) = toolchain::find_executable("git") else { return Ok(GitState { repo: false, dirty: Vec::new() }) };
-        let inside = toolchain::command(&git).arg("-C").arg(&root).args(["rev-parse", "--is-inside-work-tree"]).output();
-        if !inside.is_ok_and(|o| o.status.success()) {
-            return Ok(GitState { repo: false, dirty: Vec::new() });
-        }
-        let prefix = toolchain::command(&git)
-            .arg("-C")
-            .arg(&root)
-            .args(["rev-parse", "--show-prefix"])
-            .output()
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-            .unwrap_or_default();
-        let out = toolchain::command(&git)
-            .arg("-C")
-            .arg(&root)
-            .args(["status", "--porcelain=v1", "-z", "--untracked-files=all", "--"])
-            .args(&files)
-            .output()
-            .map_err(|e| e.to_string())?;
-        Ok(GitState { repo: true, dirty: porcelain_paths(&out.stdout, &prefix) })
+        let status = ferry_core::git::status(&root, &files)?;
+        Ok(GitState { repo: status.repo, dirty: status.dirty })
     })
     .await
 }
@@ -960,6 +929,41 @@ struct ApplyResult {
     written: Vec<String>,
     lint_errors: Vec<String>,
     lint_checked: bool,
+    branch: Option<String>,
+    commit: Option<String>,
+    git_error: Option<String>,
+}
+
+fn check_git(root: &Path, files: &[String], own_commit: bool) -> Result<(), String> {
+    if ferry_core::config::load(root)?.git.require_clean {
+        let status = git::status(root, &[])?;
+        if !status.dirty.is_empty() {
+            let count = status.dirty.len();
+            return Err(t!(
+                "Projede commit edilmemiş {count} dosya var. Proje ayarları temiz çalışma ağacı istiyor; önce bunları commit edin.",
+                "The project has {count} uncommitted files, and its settings require a clean working tree. Commit them first."
+            ));
+        }
+    }
+    if own_commit {
+        let status = git::status(root, files)?;
+        if let Some(file) = status.dirty.first() {
+            return Err(t!(
+                "{file} dosyasında commit edilmemiş değişiklik var, ayrı commit'e karışırdı. Önce commit edin ya da ayrı dal seçeneğini kapatın.",
+                "{file} has uncommitted changes that would end up in the separate commit. Commit them first or turn the separate branch off."
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn batch_branch(target: PhpVersion, mode: RectorMode) -> String {
+    let mode = match mode {
+        RectorMode::Compat => "compat",
+        RectorMode::Modernize => "modernize",
+        RectorMode::Pins => "versions",
+    };
+    format!("ferry/php-{target}-{mode}")
 }
 
 #[tauri::command]
@@ -970,10 +974,11 @@ async fn apply_changes(
     files: Vec<String>,
     skipped: Option<HashMap<String, Vec<usize>>>,
     label: String,
+    commit_message: Option<String>,
 ) -> CmdResult<ApplyResult> {
     let path = normalize_path(path);
     let root = project_root(&path)?;
-    let (selected, target): (Vec<FileChange>, PhpVersion) = {
+    let (selected, target, mode): (Vec<FileChange>, PhpVersion, RectorMode) = {
         let previews = state.previews.lock().unwrap();
         let (id, preview) = previews.get(&path).ok_or_else(|| t!("Önce değişiklikleri hesaplayın.", "Calculate the changes first."))?;
         if *id != preview_id {
@@ -983,7 +988,7 @@ async fn apply_changes(
             ));
         }
         let selected = preview.changes.iter().filter(|c| files.contains(&c.file)).cloned().collect();
-        (selected, preview.target)
+        (selected, preview.target, preview.mode)
     };
     if selected.is_empty() {
         return Err(t!("Uygulanacak dosya seçilmedi.", "No files selected to apply."));
@@ -997,6 +1002,7 @@ async fn apply_changes(
         let _guard = writes.lock().unwrap_or_else(|e| e.into_inner());
         let refs: Vec<&FileChange> = selected.iter().collect();
         rector::check_fresh(&root, &refs).map_err(|e| e.to_string())?;
+        check_git(&root, &applied_files, commit_message.is_some())?;
         let selected: Vec<FileChange> = selected
             .iter()
             .map(|change| {
@@ -1024,6 +1030,16 @@ async fn apply_changes(
         }
         let originals: HashMap<String, String> =
             refs.iter().filter_map(|c| Some((c.file.clone(), std::fs::read_to_string(root.join(&c.file)).ok()?))).collect();
+        let batch = match commit_message {
+            Some(_) => match git::start_batch(&root, &batch_branch(target, mode)) {
+                Ok(batch) => Some(batch),
+                Err(e) => {
+                    let _ = store.delete(&root, &snapshot.id);
+                    return Err(e);
+                }
+            },
+            None => None,
+        };
         let mut written = Vec::new();
         match rector::write_changes(&root, &refs, &mut written) {
             Ok(()) => {
@@ -1038,11 +1054,28 @@ async fn apply_changes(
                         toolchain::new_syntax_errors(&php, files)
                     });
                 let lint_checked = lint.as_ref().is_some_and(|l| l.not_run.is_empty());
-                Ok(ApplyResult { snapshot, written, lint_errors: lint.map(|l| l.errors).unwrap_or_default(), lint_checked })
+                let committed = commit_message.as_deref().map(|message| git::commit(&root, &written, message));
+                let (commit, git_error) = match committed {
+                    Some(Ok(hash)) => (Some(hash), None),
+                    Some(Err(e)) => (None, Some(e)),
+                    None => (None, None),
+                };
+                Ok(ApplyResult {
+                    snapshot,
+                    written,
+                    lint_errors: lint.map(|l| l.errors).unwrap_or_default(),
+                    lint_checked,
+                    branch: batch.map(|b| b.branch),
+                    commit,
+                    git_error,
+                })
             }
             Err(e) => match store.restore_files(&root, &snapshot.id, Some(&written)) {
                 Ok(_) => {
                     let _ = store.delete(&root, &snapshot.id);
+                    if let Some(batch) = &batch {
+                        git::abort_batch(&root, batch);
+                    }
                     Err(e.to_string())
                 }
                 Err(restore) => Err(t!(

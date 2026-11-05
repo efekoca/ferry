@@ -175,9 +175,15 @@ Settings for a project can live in `.ferry/config.json`, next to `.ferry/ignore.
     "dump": "database/dump.sql",
     "prepare": "php bin/console sass:build",
     "test": "vendor/bin/pest"
+  },
+  "git": {
+    "requireClean": true,
+    "branchPerBatch": true
   }
 }
 ```
+
+`requireClean` stops the app from applying changes while the project has uncommitted files. `branchPerBatch` ticks the option that puts a batch on its own `ferry/php-X.Y-…` branch and commits only those files. Ferry doesn't run the project's Git hooks for that commit, and Undo in History leaves the commit in place and restores the files on top of it.
 
 Command-line options override the file, and `--target` becomes optional. Paths must be inside the project. Server connections can't be saved, because each copy needs a confirmation. A saved `prepare` or `test` command is only run inside containers, and the app shows it before you start.
 
