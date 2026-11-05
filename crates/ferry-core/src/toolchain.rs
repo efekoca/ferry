@@ -291,6 +291,16 @@ pub fn lint_source(php: &Path, src: &str) -> Lint {
     }
 }
 
+fn error_text<'a>(source: &'a str, message: &str) -> Option<&'a str> {
+    let line: usize = message.rsplit_once(" on line ")?.1.trim_end_matches(|c: char| !c.is_ascii_digit()).parse().ok()?;
+    source.lines().nth(line.checked_sub(1)?).map(str::trim)
+}
+
+/// Edits move lines, so an old error is recognised by its message and the code it points at.
+fn same_error(before: (&str, &str), after: (&str, &str)) -> bool {
+    without_line(before.1) == without_line(after.1) && error_text(before.0, before.1) == error_text(after.0, after.1)
+}
+
 fn without_line(message: &str) -> &str {
     message.rsplit_once(" on line ").map_or(message, |(head, _)| head)
 }
@@ -315,8 +325,8 @@ pub fn new_syntax_errors<'a>(php: &Path, files: impl IntoIterator<Item = (&'a st
                             Lint::Clean => None,
                             Lint::NotRun => Some((rel.to_string(), None)),
                             Lint::Error(error) => {
-                                let existing = before.map(|b| lint_source(php, b));
-                                if matches!(&existing, Some(Lint::Error(old)) if without_line(old) == without_line(&error)) {
+                                let existing = before.map(|b| (b, lint_source(php, b)));
+                                if matches!(&existing, Some((b, Lint::Error(old))) if same_error((b, old), (after, &error))) {
                                     return None;
                                 }
                                 Some((rel.to_string(), Some(format!("{rel} — {}", error.replace("Standard input code", rel)))))

@@ -239,6 +239,21 @@ fn fixes_can_stop_at_a_version_on_the_way() {
 }
 
 #[test]
+fn a_check_only_counts_for_its_target_and_the_files_it_ran_on() {
+    let log = RuntimeLog {
+        file: "php -l · PHP 8.4".into(),
+        events: Vec::new(),
+        check: None,
+        roots: Vec::new(),
+        target: Some(PhpVersion::new(8, 4)),
+        php: None,
+    };
+    assert!(log.applies_to(PhpVersion::new(8, 4)));
+    assert!(!log.applies_to(PhpVersion::new(8, 5)));
+    assert!(RuntimeLog { target: None, ..log }.applies_to(PhpVersion::new(8, 5)));
+}
+
+#[test]
 fn version_files_move_to_the_target_and_can_be_undone_over_ipc() {
     let h = harness();
     let root = h.root.clone();

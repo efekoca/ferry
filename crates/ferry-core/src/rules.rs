@@ -1201,6 +1201,19 @@ pub mod patterns {
             "__autoload() was removed in PHP 8.0 and is never called anymore.",
         ),
     };
+    pub const UNBALANCED: PatternRule = PatternRule {
+        id: "syntax.unbalanced",
+        title: Text::new("Kapanmayan parantez", "Unbalanced bracket"),
+        severity: Severity::Breaking,
+        since: (7, 0),
+        replacement: None,
+        fix: FixKind::Manual,
+        note: Text::new(
+            "Bu dosya hiçbir PHP sürümünde derlenmez. Ferry dosyanın geri kalanını doğru okuyamayabilir, bu yüzden buradaki bulgular eksik olabilir.",
+            "This file doesn't compile on any PHP version. Ferry may misread the rest of it, so the findings here can be incomplete.",
+        ),
+    };
+
     pub const CURLY_OFFSET: PatternRule = PatternRule {
         id: "removed.curly_offset",
         title: Text::new("Süslü parantezle dizi erişimi", "Curly brace offset access"),

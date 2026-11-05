@@ -79,9 +79,17 @@ pub struct Applied {
     pub stale: Vec<Ignore>,
 }
 
+/// A directive starts a comment, or a line of a block comment. Prose that mentions it, or a word
+/// that only begins the same way, isn't one.
+fn directive_text(comment: &str) -> Option<&str> {
+    comment.lines().find_map(|line| {
+        let rest = line.trim_start_matches(|c: char| c.is_whitespace() || "/#*!<-".contains(c)).strip_prefix("ferry-ignore")?;
+        (rest.is_empty() || rest.starts_with(|c: char| c.is_whitespace() || matches!(c, ':' | '*' | '-'))).then_some(rest)
+    })
+}
+
 fn directive(comment: &str, rule_id: &str) -> Option<String> {
-    let at = comment.find("ferry-ignore")?;
-    let rest = comment[at + "ferry-ignore".len()..].trim_start_matches(':').trim();
+    let rest = directive_text(comment)?.trim_start_matches(':').trim();
     let rest = rest.split("*/").next().unwrap_or_default().split("-->").next().unwrap_or_default().trim();
     let (first, tail) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
     let names_rule = first.contains('.') || first.ends_with('*');
@@ -96,7 +104,7 @@ fn directive(comment: &str, rule_id: &str) -> Option<String> {
 struct Source {
     lines: Vec<String>,
     trimmed: std::collections::HashSet<String>,
-    comments: std::collections::HashMap<usize, Vec<String>>,
+    comments: std::collections::HashMap<usize, Vec<(String, bool)>>,
 }
 
 impl Source {
@@ -106,12 +114,13 @@ impl Source {
         let mut starts = vec![0];
         starts.extend(text.match_indices('\n').map(|(i, _)| i + 1));
         let line_of = |pos: usize| starts.partition_point(|&s| s <= pos);
-        let mut comments: std::collections::HashMap<usize, Vec<String>> = std::collections::HashMap::new();
+        let mut comments: std::collections::HashMap<usize, Vec<(String, bool)>> = std::collections::HashMap::new();
         let mut add = |start: usize, end: usize| {
             let body = &text[start..end];
             if body.contains("ferry-ignore") {
+                let own_line = text[..start].rsplit('\n').next().is_some_and(|before| before.trim().is_empty());
                 for line in line_of(start)..=line_of(end.saturating_sub(1).max(start)) {
-                    comments.entry(line).or_default().push(body.to_string());
+                    comments.entry(line).or_default().push((body.to_string(), own_line));
                 }
             }
         };
@@ -128,13 +137,15 @@ impl Source {
             }
         }
         let lines: Vec<String> = text.lines().map(str::to_string).collect();
-        let trimmed = lines.iter().map(|l| l.trim().to_string()).collect();
+        let trimmed = lines.iter().map(|l| l.trim_start_matches('\u{feff}').trim().to_string()).collect();
         Some(Self { lines, trimmed, comments })
     }
 
     fn inline_reason(&self, line: usize, rule_id: &str) -> Option<String> {
-        let on = |l: usize| self.comments.get(&l).and_then(|cs| cs.iter().find_map(|c| directive(c, rule_id)));
-        on(line).or_else(|| line.checked_sub(1).filter(|&l| l > 0).and_then(on))
+        let on = |l: usize, own_line: bool| {
+            self.comments.get(&l).and_then(|cs| cs.iter().filter(|c| c.1 || !own_line).find_map(|c| directive(&c.0, rule_id)))
+        };
+        on(line, false).or_else(|| line.checked_sub(1).filter(|&l| l > 0).and_then(|l| on(l, true)))
     }
 
     fn has_snippet(&self, snippet: &str) -> bool {
@@ -161,6 +172,7 @@ pub fn apply(root: &Path, findings: Vec<Finding>, ignores: &[Ignore]) -> Applied
     }
     let stale = ignores
         .iter()
+        .filter(|i| !ignored.iter().any(|g: &IgnoredFinding| !g.inline && i.matches(&g.finding)))
         .filter(|i| {
             let source = sources.entry(i.file.clone()).or_insert_with(|| Source::read(&root.join(&i.file)));
             !source.as_ref().is_some_and(|s| s.has_snippet(&i.snippet))
@@ -188,6 +200,29 @@ mod tests {
         assert_eq!(kept[0].line, 5);
         assert_eq!((ignored[0].finding.line, ignored[0].reason.as_str()), (4, "vendored copy"));
         assert!(load(&dir.path().join("missing")).is_empty());
+    }
+
+    #[test]
+    fn only_a_real_directive_hides_a_finding() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = "<?php\n// ferry-ignored by nobody\neach($a);\n// see ferry-ignore docs\neach($b);\n$x = 1; // ferry-ignore\neach($c);\n/**\n * ferry-ignore removed.each old\n */\neach($d);\n";
+        std::fs::write(dir.path().join("a.php"), src).unwrap();
+        let findings = analyze_source("a.php", src, "8.2".parse().unwrap());
+        let applied = apply(dir.path(), findings, &[]);
+        let lines: Vec<usize> = applied.kept.iter().map(|f| f.line).collect();
+        assert_eq!(lines, [3, 5, 7]);
+        assert_eq!(applied.ignored.iter().map(|i| i.finding.line).collect::<Vec<_>>(), [11]);
+    }
+
+    #[test]
+    fn an_ignore_on_a_bom_line_is_not_stale() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = "\u{feff}<?php each($a);\n";
+        std::fs::write(dir.path().join("a.php"), src).unwrap();
+        let findings = analyze_source("a.php", src, "8.2".parse().unwrap());
+        let ignores = [Ignore::for_finding(&findings[0], "old", 1)];
+        let applied = apply(dir.path(), findings, &ignores);
+        assert_eq!((applied.ignored.len(), applied.stale.len()), (1, 0));
     }
 
     #[test]

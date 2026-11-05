@@ -30,9 +30,11 @@ fn throwable(lower: &str) -> bool {
 
 fn level_of(text: &str) -> Option<Level> {
     let t = text.to_ascii_lowercase();
-    if t.contains("deprecat") {
+    if t.contains("fatal error") || t.contains("uncaught") || t.contains("parse error") {
+        Some(Level::Fatal)
+    } else if t.contains("deprecat") {
         Some(Level::Deprecated)
-    } else if t.contains("fatal error") || t.contains("uncaught") || t.contains("parse error") || throwable(&t) {
+    } else if throwable(&t) {
         Some(Level::Fatal)
     } else if t.contains("warning") {
         Some(Level::Warning)
@@ -255,6 +257,28 @@ pub struct Merged {
 
 /// With `remote_roots`, only paths under one of those roots count as part of the project.
 pub fn merge(root: &Path, findings: &mut Vec<Finding>, events: &[Event], target: PhpVersion, remote_roots: &[String]) -> Merged {
+    merge_from(root, findings, events, target, remote_roots, None)
+}
+
+/// The PHP version PHPUnit printed in its header, when the log has one.
+pub fn php_version(log: &str) -> Option<PhpVersion> {
+    log.lines().find_map(|line| line.trim().strip_prefix("Runtime:")?.trim().strip_prefix("PHP ")?.parse().ok())
+}
+
+/// With `log_php`, messages that come from a newer PHP than the target say nothing about the
+/// target: they count as outside, and the rest carry the version that printed them.
+pub fn merge_from(
+    root: &Path,
+    findings: &mut Vec<Finding>,
+    events: &[Event],
+    target: PhpVersion,
+    remote_roots: &[String],
+    log_php: Option<PhpVersion>,
+) -> Merged {
+    if log_php.is_some_and(|php| php > target) {
+        let outside_fatals = events.iter().filter(|e| e.level == Level::Fatal).count();
+        return Merged { confirmed: 0, added: 0, outside: events.len(), outside_fatals };
+    }
     let mut merged = Merged { confirmed: 0, added: 0, outside: 0, outside_fatals: 0 };
     let files = project_files(root, events, remote_roots);
     for (e, file) in events.iter().zip(files) {
@@ -285,7 +309,7 @@ pub fn merge(root: &Path, findings: &mut Vec<Finding>, events: &[Event], target:
             let named = symbol(f).map(|s| names_symbol(&message, &s));
             compatible
                 && match f.line.abs_diff(e.line) {
-                    0 => named != Some(false),
+                    0 => named == Some(true) || (named.is_none() && e.level != Level::Fatal),
                     1 => named == Some(true),
                     _ => false,
                 }
@@ -322,7 +346,7 @@ pub fn merge(root: &Path, findings: &mut Vec<Finding>, events: &[Event], target:
                 tr: format!("Bu mesaj çalışma anı log'unda {} kez görüldü; statik tarama burada bir şey bulmadı.", e.count),
                 en: format!("This message appeared {} times in the runtime log; the static scan found nothing here.", e.count),
             },
-            since: target,
+            since: log_php.unwrap_or(target),
             severity,
             fix: FixKind::Manual,
             replacement: None,
@@ -421,6 +445,44 @@ PHP Deprecated:  Function utf8_encode() is deprecated in /srv/app/a.php on line 
         let fatal = findings.iter().find(|f| f.rule_id == "runtime.fatal").expect("a fatal is never folded into a deprecation");
         assert_eq!((fatal.line, fatal.severity), (1, Severity::Breaking));
         assert!(findings.iter().any(|f| f.rule_id == "runtime.deprecated" && f.line == 1));
+    }
+
+    #[test]
+    fn a_fatal_needs_a_finding_that_names_it() {
+        let target = PhpVersion::new(8, 4);
+        let mut findings = analyze_source("a.php", "<?php\necho $s{0}; run();\n", target);
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("src")).unwrap();
+        std::fs::write(dir.path().join("src/a.php"), "<?php\necho $s{0}; run();\n").unwrap();
+        findings[0].file = "src/a.php".into();
+        let events = parse("PHP Fatal error:  Uncaught RuntimeException: boom in /srv/app/src/a.php:2\n");
+        let merged = merge(dir.path(), &mut findings, &events, target, &["/srv/app".to_string()]);
+        assert_eq!((merged.confirmed, merged.added), (0, 1), "{findings:?}");
+        assert!(findings.iter().any(|f| f.rule_id == "runtime.fatal"));
+    }
+
+    #[test]
+    fn a_critical_record_about_deprecation_is_still_fatal() {
+        let log = r#"{"message":"Uncaught PHP Exception RuntimeException: \"call to deprecated endpoint\"","context":{"exception":{"class":"RuntimeException","message":"call to deprecated endpoint","code":0,"file":"/a/b.php:3"}},"level":500,"level_name":"CRITICAL"}"#;
+        assert_eq!(parse(log)[0].level, Level::Fatal);
+    }
+
+    #[test]
+    fn a_log_from_a_newer_php_says_nothing_about_the_target() {
+        let log = "PHPUnit 12.0.0 by Sebastian Bergmann and contributors.\n\nRuntime:       PHP 8.5.12\n\nPHP Deprecated:  old in /srv/app/src/a.php on line 2\n";
+        assert_eq!(php_version(log), Some(PhpVersion::new(8, 5)));
+        let events = parse(log);
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("src")).unwrap();
+        std::fs::write(dir.path().join("src/a.php"), "<?php\nf();\n").unwrap();
+        let roots = ["/srv/app".to_string()];
+        let mut findings = Vec::new();
+        let merged = merge_from(dir.path(), &mut findings, &events, PhpVersion::new(8, 2), &roots, php_version(log));
+        assert_eq!((merged.added, merged.outside, findings.len()), (0, 1, 0));
+        let merged = merge_from(dir.path(), &mut findings, &events, PhpVersion::new(8, 5), &roots, php_version(log));
+        assert_eq!((merged.added, findings[0].since), (1, PhpVersion::new(8, 5)));
+        let later = merge_from(dir.path(), &mut Vec::new(), &events, PhpVersion::new(8, 5), &roots, Some(PhpVersion::new(8, 4)));
+        assert_eq!(later.added, 1);
     }
 
     #[test]
