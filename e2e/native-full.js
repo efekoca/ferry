@@ -390,7 +390,7 @@
       await openRecent(projects.unicode);
       await scan();
       await nav("Gerçek test");
-      await click("Karşılaştırmayı başlat");
+      await click("Testi başlat");
       await until(() => /PHP 8\.\d sürümünde yeni: [1-9]/.test(text()), "new messages on the target", 300000);
       await emit(`  docker: ${$("main").innerText.replace(/\n+/g, " / ").slice(300, 900)}`);
       noErrorToast(before);
@@ -423,14 +423,14 @@
       await openRecent(projects.unicode);
       await scan();
       await nav("Gerçek test");
-      await click("Karşılaştırmayı başlat");
+      await click("Testi başlat");
       await click("Durdur", undefined, 30000);
-      await until(() => button("Karşılaştırmayı başlat"), "start button back after stop", 60000);
+      await until(() => button("Testi başlat"), "start button back after stop", 60000);
       noErrorToast(before);
       check(!text().includes("sürümünde yeni"), "no result after a stop");
       const clean = $$(".docker-option").find((l) => l.textContent.includes("bitince"));
       clean.querySelector("input").click();
-      await click("Karşılaştırmayı başlat");
+      await click("Testi başlat");
       await until(() => text().includes("Kurulan eklentiler"), "extension installed", 600000);
       noErrorToast(before);
       const after = (await invoke("docker_image_usage")).images;
@@ -448,7 +448,7 @@
       const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set;
       setter.call(select, "dump:database/dump.sql");
       select.dispatchEvent(new Event("change", { bubbles: true }));
-      await click("Karşılaştırmayı başlat");
+      await click("Testi başlat");
       await until(() => text().includes("İstekler sonrası"), "data comparison", 900000);
       noErrorToast(before);
     },
