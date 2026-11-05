@@ -75,7 +75,10 @@ const INSTALLABLE: &[&str] = &[
     "zip",
 ];
 
-const LINT_COMMAND: &str = "-print0 | xargs -0 -P 4 -n 1 php -n -d error_reporting=-1 -d display_errors=stderr -d log_errors=0 -l 2>&1 \
+/// Each file's output is written in one go: with several workers, `php -l`'s own writes can land
+/// in the middle of another file's message and the line can no longer be read.
+const LINT_COMMAND: &str = "-print0 | xargs -0 -P 4 -I{} sh -c \
+    'out=$(php -n -d error_reporting=-1 -d display_errors=stderr -d log_errors=0 -l \"$1\" 2>&1); printf \"%s\\n\" \"$out\"' _ {} \
     | grep -v '^No syntax errors'";
 const TEST_SCRIPT: &str = "flags='--display-deprecations --display-warnings --no-progress'; \
     php vendor/bin/phpunit --version | grep -qE 'PHPUnit [0-9]\\.' && flags=''; \
@@ -1227,7 +1230,7 @@ mod tests {
             compare(dir.path(), PhpVersion::new(7, 4), PhpVersion::new(8, 4), Options::default(), &AtomicBool::new(false), |_| {}).unwrap();
         assert_eq!((result.source.lint_errors, result.target.lint_errors), (0, 1), "{}", result.target.log);
         assert!(result.target.events.iter().all(|e| e.path == "/app/a.php"), "{:?}", result.target.events);
-        assert!(result.new_on_target.iter().any(|e| e.level == Level::Fatal), "{:?}", result.new_on_target);
+        assert!(result.new_on_target.iter().any(|e| e.level == Level::Fatal), "{:?}\n{}", result.new_on_target, result.target.log);
     }
 
     #[test]
