@@ -90,7 +90,7 @@ Ferry, hangi PHP'nin gerçekten çalışacağını belirleyen ve kodun çevresin
 
 - `.htaccess`: PHP-FPM'de 500 hatası veren ve `<IfModule mod_php.c>` dışında kalan `php_value` ve `php_flag` satırları ile PHP 8'in artık eşleşmediği `<IfModule mod_php5.c>` ya da `mod_php7.c` blokları
 - `.user.ini`, `php.ini` ve `.htaccess` içinde PHP'nin kaldırdığı ya da kullanımdan kaldırdığı ayarlar: `register_globals` (açıkken PHP hiç başlamaz), `track_errors`, `allow_url_include` ve `session.trans_sid_hosts` gibi
-- `platform-check` seçeneği kapatılmış bir `composer.json` ve Composer 1 ile oluşturulmuş bir `composer.lock`
+- `platform-check` seçeneği kapatılmış ya da `config.platform.ext-*` değerleri eski sürümde sabitlenmiş bir `composer.json`, Composer 1 ile oluşturulmuş bir `composer.lock` ve yalnızca Composer 1 ile çalışan Composer eklentileri
 - `Dockerfile`, Docker Compose, GitHub Actions, GitLab CI, Travis, Bitbucket Pipelines, DDEV, Lando, Platform.sh, `.conf` dosyaları ve Caddyfile'lardaki PHP-FPM soket yolları, `.tool-versions`, `.php-version` ve `composer.json`'daki `config.platform.php` içinde hedefinizin altında sabitlenmiş PHP sürümleri. Düzeltmeler ekranındaki **Sürüm dosyaları** modu ya da `ferry-cli pins <proje> --write` bunları günceller
 
 ### Her değişikliği uygulamadan önce inceleyin
@@ -114,6 +114,8 @@ Ferry, Rector'ın tek başına çözemediği durumları da ele alır. Örneğin 
 **Bağımlılıklar** sayfası, kilitli her paketi `composer.lock`'ta bildirdiği PHP gereksinimine göre hedef sürümle karşılaştırır. Projenin `composer.json`'daki kendi PHP kısıtı da kontrol edilir. `composer.json`'da ya da kilitli bir pakette `php` için yazılmış bir `conflict` kaydı da hesaba katılır.
 
 `^8.0` gibi bir gereksinim, paketin en yeni PHP'de çalıştığı anlamına gelmeyebilir. Laravel (`laravel/framework`, `illuminate/*`), Drupal çekirdeği ve Symfony'nin çekirdek paketleri için Ferry, framework'ün yayımladığı destek aralığını da kullanır ve farkı gereksinimin altında açıklar.
+
+Projenin kendisinin istediği `symfony/polyfill-php80` ya da `paragonie/random_compat` gibi polyfill'lere, hedef PHP eklediklerini zaten içerdiğinde bir not düşülür.
 
 ![PHP 8.4 ile uyumsuz üç paket, projenin PHP kısıtı ve her paketin sürümü, PHP gereksinimi ve durumunu gösteren Bağımlılıklar sayfası](assets/readme/dependencies-tr.webp)
 

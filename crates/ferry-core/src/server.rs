@@ -586,6 +586,16 @@ const PLATFORM_CHECK: Text = Text::new(
     "config.platform-check is turned off, so Composer no longer checks at runtime that the installed packages fit the server's PHP version and extensions. An incompatible package only shows up when something fails. Keep it on during the upgrade.",
 );
 
+const PLATFORM_EXT: Text = Text::new(
+    "config.platform bu eklentiyi eski bir sürümde sabitliyor. Composer sunucuya bakmadan paketleri bu varsayıma göre seçer; eklenti hedef PHP'de yoksa ya da sürümü farklıysa hata ancak çalışırken çıkar. Satırı silin ya da hedef sunucudaki sürümü yazın.",
+    "config.platform pins this extension to an old version. Composer picks packages from that assumption without looking at the server, so if the extension is missing or different on the target PHP, the error only shows up at runtime. Delete the line or write the version on the target server.",
+);
+
+const OLD_PLUGIN: Text = Text::new(
+    "Bu Composer eklentisi yalnızca Composer 1 ile çalışır. Composer 2 onu devre dışı bırakır ya da kurulumu durdurur; PHP 8 uyumlu paketler için Composer 2 gerekir. Eklentiyi Composer 2 destekleyen bir sürüme yükseltin ya da kaldırın.",
+    "This Composer plugin only works with Composer 1. Composer 2 disables it or stops the install, and PHP 8 compatible packages need Composer 2. Upgrade the plugin to a release that supports Composer 2, or remove it.",
+);
+
 const COMPOSER1_LOCK: Text = Text::new(
     "Bu composer.lock Composer 1 ile oluşturulmuş (plugin-api-version yok). Composer 1 artık güncellenmiyor ve Packagist'in yeni meta verisini okuyamıyor. PHP 8 uyumlu paket sürümlerine geçmeden önce Composer 2 ile composer update çalıştırın.",
     "This composer.lock was written by Composer 1 (there is no plugin-api-version). Composer 1 is no longer maintained and can't read Packagist's current metadata. Run composer update with Composer 2 before moving to PHP 8 compatible package versions.",
@@ -612,6 +622,21 @@ fn composer(text: &str, target: PhpVersion) -> Vec<Hit> {
     if let Some((line, found)) = composer_platform(text).filter(|(_, found)| *found < target) {
         out.push(pin_hit(line, found, target, PLATFORM));
     }
+    let platform = json.pointer("/config/platform").and_then(|p| p.as_object());
+    for (name, value) in platform.into_iter().flatten().filter(|(name, _)| name.starts_with("ext-")) {
+        let pinned = value.as_str().unwrap_or_default();
+        if version_at(pinned).is_some_and(|found| found < target) {
+            out.push(Hit {
+                line: line_of(text, &format!("\"{name}\"")),
+                rule: "server.composer_platform_ext",
+                title: Localized::same(format!("config.platform.{name}: {pinned}")),
+                since: target,
+                severity: Severity::Behavior,
+                message: PLATFORM_EXT,
+                replacement: Some(Text::new("satırı silin", "delete the line").into()),
+            });
+        }
+    }
     out
 }
 
@@ -625,20 +650,48 @@ fn composer_platform(text: &str) -> Option<(usize, PhpVersion)> {
     Some((line, found))
 }
 
+/// True when no alternative in the constraint can match Composer 2's plugin API.
+fn composer1_only(constraint: &str) -> bool {
+    constraint.split('|').map(str::trim).filter(|alt| !alt.is_empty()).all(|alt| {
+        let bare = alt.trim_start_matches(['^', '~', '=', 'v', ' ']);
+        let major = bare.split('.').next().and_then(|m| m.parse::<u32>().ok());
+        major.is_some_and(|m| m < 2) || (alt.starts_with('>') && alt.contains("<2"))
+    })
+}
+
 fn composer_lock(text: &str, target: PhpVersion) -> Vec<Hit> {
     let Ok(json) = serde_json::from_str::<serde_json::Value>(text) else { return Vec::new() };
-    if json.get("plugin-api-version").is_some() || json.get("packages").is_none() || json.get("content-hash").is_none() {
-        return Vec::new();
+    let mut out = Vec::new();
+    let packages = ["packages", "packages-dev"].iter().filter_map(|key| json.get(key)?.as_array()).flatten();
+    for package in packages.filter(|p| p["type"] == "composer-plugin") {
+        let (Some(name), Some(api)) = (package["name"].as_str(), package.pointer("/require/composer-plugin-api").and_then(|v| v.as_str()))
+        else {
+            continue;
+        };
+        if composer1_only(api) {
+            out.push(Hit {
+                line: line_of(text, &format!("\"name\": \"{name}\"")),
+                rule: "server.composer_plugin_api",
+                title: Localized::same(format!("{name} (composer-plugin-api {api})")),
+                since: target,
+                severity: Severity::Behavior,
+                message: OLD_PLUGIN,
+                replacement: Some(Localized::same(format!("composer update {name}"))),
+            });
+        }
     }
-    vec![Hit {
-        line: 1,
-        rule: "server.composer1_lock",
-        title: Localized { tr: "Composer 1 kilit dosyası".into(), en: "Composer 1 lock file".into() },
-        since: target,
-        severity: Severity::Behavior,
-        message: COMPOSER1_LOCK,
-        replacement: Some(Localized::same("composer update (Composer 2)")),
-    }]
+    if json.get("plugin-api-version").is_none() && json.get("packages").is_some() && json.get("content-hash").is_some() {
+        out.push(Hit {
+            line: 1,
+            rule: "server.composer1_lock",
+            title: Localized { tr: "Composer 1 kilit dosyası".into(), en: "Composer 1 lock file".into() },
+            since: target,
+            severity: Severity::Behavior,
+            message: COMPOSER1_LOCK,
+            replacement: Some(Localized::same("composer update (Composer 2)")),
+        });
+    }
+    out
 }
 
 #[cfg(test)]
@@ -705,6 +758,31 @@ mod tests {
             std::fs::create_dir_all(p.parent().unwrap()).unwrap();
             std::fs::write(p, text).unwrap();
         }
+    }
+
+    #[test]
+    fn composer_platform_extensions_and_old_plugins() {
+        let dir = tempfile::tempdir().unwrap();
+        write_all(
+            dir.path(),
+            &[
+                (
+                    "composer.json",
+                    "{\n  \"config\": {\n    \"platform\": {\n      \"ext-intl\": \"7.4.33\",\n      \"ext-gd\": \"8.4.0\",\n      \"ext-custom\": \"12.0\"\n    }\n  }\n}\n",
+                ),
+                (
+                    "composer.lock",
+                    "{\n  \"plugin-api-version\": \"2.6.0\",\n  \"content-hash\": \"a\",\n  \"packages\": [\n    {\n      \"name\": \"old/plugin\",\n      \"type\": \"composer-plugin\",\n      \"require\": {\"composer-plugin-api\": \"^1.0\"}\n    },\n    {\n      \"name\": \"new/plugin\",\n      \"type\": \"composer-plugin\",\n      \"require\": {\"composer-plugin-api\": \"^1.1 || ^2.0\"}\n    }\n  ],\n  \"packages-dev\": [\n    {\n      \"name\": \"dev/plugin\",\n      \"type\": \"composer-plugin\",\n      \"require\": {\"composer-plugin-api\": \">=1.0 <2.0\"}\n    },\n    {\n      \"name\": \"any/plugin\",\n      \"type\": \"composer-plugin\",\n      \"require\": {\"composer-plugin-api\": \"*\"}\n    }\n  ]\n}\n",
+                ),
+            ],
+        );
+        let found = ids(&scan(dir.path(), PhpVersion::new(8, 4)).0);
+        let expected = [
+            ("composer.json", 4, "server.composer_platform_ext"),
+            ("composer.lock", 6, "server.composer_plugin_api"),
+            ("composer.lock", 18, "server.composer_plugin_api"),
+        ];
+        assert_eq!(found, expected.map(|(f, l, r)| (f.to_string(), l, r.to_string())));
     }
 
     #[test]
