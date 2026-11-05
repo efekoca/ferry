@@ -142,6 +142,17 @@ async fn inspect_project(path: String) -> CmdResult<ProjectInfo> {
     blocking(move || project::inspect(&project_root(&path)?).map_err(|e| e.to_string())).await
 }
 
+#[tauri::command]
+async fn save_project_config(path: String, config: ferry_core::config::Config) -> CmdResult<ProjectInfo> {
+    let path = normalize_path(path);
+    blocking(move || {
+        let root = project_root(&path)?;
+        ferry_core::config::save(&root, &config)?;
+        project::inspect(&root).map_err(|e| e.to_string())
+    })
+    .await
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ScanResponse {
@@ -400,6 +411,7 @@ async fn docker_compare<R: Runtime>(
     pages: Vec<String>,
     database: Option<DatabaseChoice>,
     prepare: Option<String>,
+    test: Option<String>,
     fix: Option<FixChoice>,
 ) -> CmdResult<DockerResponse> {
     let path = normalize_path(path);
@@ -437,6 +449,7 @@ async fn docker_compare<R: Runtime>(
             pages,
             database: database.map(DatabaseChoice::into_source),
             prepare,
+            test,
             fixes: fixes.into_iter().map(|c| (c.file, c.new_content)).collect(),
         };
         let comparison = docker::compare(&root, source, target, options, &mine, |step| {
@@ -1255,6 +1268,7 @@ fn save_settings(state: State<'_, AppState>, settings: Settings) -> CmdResult<()
 pub fn with_commands<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     builder.invoke_handler(tauri::generate_handler![
         inspect_project,
+        save_project_config,
         scan_project,
         check_dependencies,
         write_probe,

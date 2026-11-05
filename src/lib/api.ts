@@ -12,6 +12,7 @@ import type {
   DependencyReport,
   FileChange,
   LocalPhp,
+  ProjectConfig,
   ProjectInfo,
   RectorMode,
   RectorPreview,
@@ -41,6 +42,7 @@ export interface Api {
   localPhpVersions(): Promise<LocalPhp[]>;
   runLocalCheck(path: string, target: string, kind: "lint" | "tests"): Promise<ScanResult>;
   inspectProject(path: string): Promise<ProjectInfo>;
+  saveProjectConfig(path: string, config: ProjectConfig): Promise<ProjectInfo>;
   scanProject(path: string, target: string, run: number): Promise<ScanResult>;
   onScanProgress(handler: (p: ScanProgress) => void): Promise<() => void>;
   checkDependencies(path: string, target: string): Promise<DependencyReport>;
@@ -52,7 +54,7 @@ export interface Api {
   installRector(): Promise<ToolchainStatus>;
   rectorPreview(path: string, target: string, mode: RectorMode): Promise<RectorPreview>;
   cancelPreview(path?: string): Promise<void>;
-  dockerCompare(path: string, source: string, target: string, extensions: boolean, cleanImages: boolean, pages: string[], database: DatabaseChoice | null, prepare: string | null, fix?: DockerFixChoice): Promise<DockerResponse>;
+  dockerCompare(path: string, source: string, target: string, extensions: boolean, cleanImages: boolean, pages: string[], database: DatabaseChoice | null, prepare: string | null, test: string | null, fix?: DockerFixChoice): Promise<DockerResponse>;
   keepDockerTrial(path: string): Promise<DockerResponse>;
   databasePlan(path: string): Promise<DatabasePlan>;
   sshHosts(): Promise<string[]>;
@@ -108,6 +110,7 @@ async function tauriApi(): Promise<Api> {
     localPhpVersions: () => invoke("local_php_versions"),
     runLocalCheck: (path, target, kind) => invoke("run_local_check", { path, target, kind }),
     inspectProject: (path) => invoke("inspect_project", { path }),
+    saveProjectConfig: (path, config) => invoke("save_project_config", { path, config }),
     scanProject: (path, target, run) => invoke("scan_project", { path, target, run }),
     onScanProgress: (handler) => listen<ScanProgress>("scan://progress", (e) => handler(e.payload)),
     checkDependencies: (path, target) => invoke("check_dependencies", { path, target }),
@@ -119,7 +122,7 @@ async function tauriApi(): Promise<Api> {
     installRector: () => invoke("install_rector"),
     rectorPreview: (path, target, mode) => invoke("rector_preview", { path, target, mode }),
     cancelPreview: (path) => invoke("cancel_rector_preview", { path }),
-    dockerCompare: (path, source, target, extensions, cleanImages, pages, database, prepare, fix) => invoke("docker_compare", { path, source, target, extensions, cleanImages, pages, database, prepare, fix: fix ?? null }),
+    dockerCompare: (path, source, target, extensions, cleanImages, pages, database, prepare, test, fix) => invoke("docker_compare", { path, source, target, extensions, cleanImages, pages, database, prepare, test, fix: fix ?? null }),
     keepDockerTrial: (path) => invoke("keep_docker_trial", { path }),
     databasePlan: (path) => invoke("database_plan", { path }),
     sshHosts: () => invoke("ssh_hosts"),

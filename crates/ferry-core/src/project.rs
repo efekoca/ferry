@@ -32,6 +32,8 @@ pub struct ProjectInfo {
     pub has_vendor: bool,
     pub is_git_repo: bool,
     pub excluded_dirs: Vec<String>,
+    pub config: crate::config::Config,
+    pub config_error: Option<String>,
 }
 
 pub(crate) const PHP_EXTENSIONS: [&str; 13] =
@@ -221,7 +223,12 @@ pub fn inspect(root: &Path) -> std::io::Result<ProjectInfo> {
         ));
     }
     let framework = detect_framework(root);
-    let excluded_dirs = project_excludes(root, framework);
+    let (config, config_error) = match crate::config::load(root) {
+        Ok(config) => (config, None),
+        Err(e) => (Default::default(), Some(e)),
+    };
+    let mut excluded_dirs = project_excludes(root, framework);
+    excluded_dirs.extend(config.exclude.iter().map(|d| d.trim_end_matches('/').to_string()));
     let php_files = collect_php_files(root, &excluded_dirs).iter().filter(|p| !p.is_dir()).count();
     let php_constraint = composer_php_constraint(root);
     let current_version =
@@ -238,7 +245,36 @@ pub fn inspect(root: &Path) -> std::io::Result<ProjectInfo> {
         has_vendor: root.join("vendor").is_dir(),
         is_git_repo: root.join(".git").exists(),
         excluded_dirs,
+        config,
+        config_error,
     })
+}
+
+#[cfg(test)]
+mod config_tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn excludes_from_the_config_keep_files_out_of_the_scan() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("legacy")).unwrap();
+        fs::write(dir.path().join("legacy/a.php"), "<?php").unwrap();
+        fs::write(dir.path().join("b.php"), "<?php").unwrap();
+        assert_eq!(inspect(dir.path()).unwrap().php_files, 2);
+        let config = crate::config::Config { exclude: vec!["legacy/".into()], ..Default::default() };
+        crate::config::save(dir.path(), &config).unwrap();
+        let info = inspect(dir.path()).unwrap();
+        assert_eq!((info.php_files, info.config_error), (1, None));
+    }
+
+    #[test]
+    fn a_broken_config_is_reported_without_blocking_the_project() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir(dir.path().join(".ferry")).unwrap();
+        fs::write(crate::config::path(dir.path()), "{").unwrap();
+        assert!(inspect(dir.path()).unwrap().config_error.is_some());
+    }
 }
 
 #[cfg(test)]

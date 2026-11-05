@@ -20,6 +20,22 @@ export interface ProjectInfo {
   hasVendor: boolean;
   isGitRepo: boolean;
   excludedDirs: string[];
+  config: ProjectConfig;
+  configError: string | null;
+}
+
+export interface ProjectConfig {
+  target: string | null;
+  exclude: string[];
+  baseline: string | null;
+  docker: {
+    source: string | null;
+    extensions: boolean | null;
+    pages: string[] | null;
+    dump: string | null;
+    prepare: string | null;
+    test: string | null;
+  };
 }
 
 export interface Finding {
@@ -247,6 +263,7 @@ export interface DockerRunArgs {
   pages: string[];
   database: DatabaseChoice | null;
   prepare: string | null;
+  test: string | null;
 }
 
 export interface DockerTrial {

@@ -319,6 +319,8 @@ mod tests {
             has_vendor: false,
             is_git_repo: false,
             excluded_dirs: vec![],
+            config: Default::default(),
+            config_error: None,
         };
         let scan = ScanResult {
             target: deps.target,
@@ -399,6 +401,8 @@ mod tests {
             has_vendor: false,
             is_git_repo: false,
             excluded_dirs: vec![],
+            config: Default::default(),
+            config_error: None,
         };
         let scan = ScanResult {
             target: "8.4".parse().unwrap(),
