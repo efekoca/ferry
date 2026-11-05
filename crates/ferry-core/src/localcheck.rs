@@ -1,10 +1,10 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 const LOG_LIMIT: usize = 64 * 1024;
 
-#[derive(Debug, Clone, Copy, Default, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum CheckKind {
     #[default]
@@ -133,6 +133,53 @@ fn ran_tests(output: &str) -> bool {
     !output.contains("No tests executed")
 }
 
+const HISTORY_LIMIT: usize = 20;
+
+/// What a check found, kept after its log and the app are gone.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Summary {
+    pub at: u64,
+    pub target: String,
+    pub label: String,
+    pub kind: CheckKind,
+    pub passed: bool,
+    pub timed_out: bool,
+    pub exit_code: Option<i32>,
+    pub failed: usize,
+    pub duration_ms: u64,
+}
+
+impl CheckRun {
+    pub fn summary(&self, at: u64, target: String, label: String) -> Summary {
+        Summary {
+            at,
+            target,
+            label,
+            kind: self.kind,
+            passed: self.passed,
+            timed_out: self.timed_out,
+            exit_code: self.exit_code,
+            failed: self.failed,
+            duration_ms: self.duration_ms,
+        }
+    }
+}
+
+pub fn history(file: &Path) -> Vec<Summary> {
+    std::fs::read(file).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_default()
+}
+
+pub fn record(file: &Path, summary: Summary) -> std::io::Result<()> {
+    let mut entries = history(file);
+    entries.insert(0, summary);
+    entries.truncate(HISTORY_LIMIT);
+    if let Some(parent) = file.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(file, serde_json::to_vec(&entries)?)
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -197,5 +244,28 @@ mod tests {
         assert!(run.timed_out && !run.passed);
         assert_eq!(run.exit_code, None);
         assert!(started.elapsed() < Duration::from_secs(10));
+    }
+
+    #[test]
+    fn check_history_keeps_the_newest_runs() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("checks/a.json");
+        let summary = |at| Summary {
+            at,
+            target: "8.4".into(),
+            label: "php -l · PHP 8.4".into(),
+            kind: CheckKind::Lint,
+            passed: true,
+            timed_out: false,
+            exit_code: Some(0),
+            failed: 0,
+            duration_ms: 5,
+        };
+        assert!(history(&file).is_empty());
+        for at in 0..25 {
+            record(&file, summary(at)).unwrap();
+        }
+        let kept = history(&file);
+        assert_eq!((kept.len(), kept[0].at), (HISTORY_LIMIT, 24));
     }
 }

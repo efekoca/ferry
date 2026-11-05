@@ -309,7 +309,7 @@ fn a_batch_goes_on_its_own_branch_and_a_dirty_tree_can_be_refused() {
 
 #[test]
 fn rector_preview_apply_restore_over_ipc() {
-    if std::env::var_os("FERRY_TEST_TOOLS").is_none() {
+    if toolchain::test_tools().is_none() {
         eprintln!("FERRY_TEST_TOOLS ayarlı değil; Rector IPC testi atlandı");
         return;
     }

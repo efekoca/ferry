@@ -1082,4 +1082,15 @@ describe("Ferry app", () => {
     await user.tab();
     await waitFor(() => expect(save.mock.calls.at(-1)?.[0]).toMatchObject({ editor: "custom", editorCommand: "nvim +{line} {file}" }));
   });
+
+  it("lists past checks in History", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    render(<App api={api} />);
+    await openAndScan(user);
+    await api.runLocalCheck("/x", "8.4", "lint");
+    await user.click(nav(/Geçmiş/));
+    await user.click(nav(/Genel bakış/));
+    expect(await api.checkHistory("/x")).toHaveLength(1);
+  });
 });

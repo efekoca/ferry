@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { errorMessage, getApi, type Api } from "./api";
 import type {
+  CheckSummary,
   SnapshotConflict,
   DependencyReport,
   Framework,
@@ -125,6 +126,7 @@ interface AppStore {
   cancelPreview(): void;
   docker: DockerComparison | null;
   dockerHistory: DockerSummary[];
+  checkHistory: CheckSummary[];
   dockerStep: DockerStep | null;
   runDocker(source: string, extensions: boolean, cleanImages: boolean, pages: string[], database: DatabaseChoice | null, prepare: string | null, test: string | null): Promise<boolean>;
   cancelDocker(): void;
@@ -174,6 +176,7 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
   const [dockerArgs, setDockerArgs] = useState<DockerRunArgs | null>(null);
   const [dockerTrial, setDockerTrial] = useState<DockerTrial | null>(null);
   const [dockerHistory, setDockerHistory] = useState<DockerSummary[]>([]);
+  const [checkHistory, setCheckHistory] = useState<CheckSummary[]>([]);
   const [installingRector, setInstallingRector] = useState(false);
   const [preview, setPreview] = useState<RectorPreview | null>(null);
   const [previewMode, setPreviewMode] = useState<RectorMode>("compat");
@@ -289,7 +292,9 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
           for (const s of list) toast.push({ tone: "error", title: t.toast.interruptedWrite, description: t.toast.interruptedWriteText(s.label) });
         }).catch(() => {});
         setDockerHistory([]);
+        setCheckHistory([]);
         void api.dockerHistory(info.root).then(setDockerHistory).catch(() => {});
+        void api.checkHistory(info.root).then(setCheckHistory).catch(() => {});
         setView("overview");
         setRecent((list) => {
           const next = [
@@ -645,7 +650,11 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
 
   const runLocalCheck = useCallback(
     (kind: "lint" | "tests") =>
-      api ? updateIgnores((root) => api.runLocalCheck(root, target, kind), t.toast.localCheckFailed) : Promise.resolve(false),
+      api
+        ? updateIgnores((root) => api.runLocalCheck(root, target, kind), t.toast.localCheckFailed).finally(() => {
+            if (rootRef.current) void api.checkHistory(rootRef.current).then(setCheckHistory).catch(() => {});
+          })
+        : Promise.resolve(false),
     [api, updateIgnores, target, t],
   );
 
@@ -653,13 +662,13 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
     () => ({
       api, view, setView, findingsFilter, setFindingsFilter, showFindings, theme, setTheme, recent, forgetRecent, project, opening, openProject, closeProject,
       target, setTarget, scan, scanning, progress, runScan, deps, toolchain, refreshToolchain, installingRector,
-      installRector, preview, previewMode, previewing, loadPreview, cancelPreview, docker, dockerHistory, dockerStep, runDocker, cancelDocker, saveConfig, dockerArgs, dockerTrial, tryFixes, applying, applyChanges, snapshots,
+      installRector, preview, previewMode, previewing, loadPreview, cancelPreview, docker, dockerHistory, checkHistory, dockerStep, runDocker, cancelDocker, saveConfig, dockerArgs, dockerTrial, tryFixes, applying, applyChanges, snapshots,
       refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport, ignoreFinding, unignoreFinding, pruneIgnores, importRuntimeLog, setRuntimeRoots, clearRuntimeLog, runLocalCheck,
     }),
     [
       api, view, findingsFilter, showFindings, theme, setTheme, recent, forgetRecent, project, opening, openProject, closeProject, target,
       setTarget, scan, scanning, progress, runScan, deps, toolchain, refreshToolchain, installingRector,
-      installRector, preview, previewMode, previewing, loadPreview, cancelPreview, docker, dockerHistory, dockerStep, runDocker, cancelDocker, saveConfig, dockerArgs, dockerTrial, tryFixes, applying, applyChanges, snapshots,
+      installRector, preview, previewMode, previewing, loadPreview, cancelPreview, docker, dockerHistory, checkHistory, dockerStep, runDocker, cancelDocker, saveConfig, dockerArgs, dockerTrial, tryFixes, applying, applyChanges, snapshots,
       refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport, ignoreFinding, unignoreFinding, pruneIgnores, importRuntimeLog, setRuntimeRoots, clearRuntimeLog, runLocalCheck,
     ],
   );

@@ -241,6 +241,10 @@ fn respond(root: &Path, mut scan: ScanResult, log: Option<&RuntimeLog>) -> ScanR
 }
 
 impl AppState {
+    fn check_history_path(&self, path: &str) -> PathBuf {
+        self.data_dir.join("checks").join(format!("{:016x}.json", fnv1a(path.as_bytes())))
+    }
+
     fn docker_history_path(&self, path: &str) -> PathBuf {
         self.data_dir.join("docker").join(format!("{:016x}.json", fnv1a(path.as_bytes())))
     }
@@ -345,6 +349,13 @@ async fn run_local_check(state: State<'_, AppState>, path: String, target: Strin
         Ok((root, RuntimeLog { file: label, events, check: Some(run), roots: Vec::new(), target: Some(target), php: None }))
     })
     .await?;
+    if let Some(run) = &entry.check {
+        let key = root.to_string_lossy();
+        let _ = ferry_core::localcheck::record(
+            &state.check_history_path(&key),
+            run.summary(now_secs(), target.to_string(), entry.file.clone()),
+        );
+    }
     state.runtime.lock().unwrap().insert(root.to_string_lossy().to_string(), entry.clone());
     Ok(respond(&root, scan, Some(&entry)))
 }
@@ -529,6 +540,11 @@ fn keep_docker_trial(state: State<'_, AppState>, path: String) -> CmdResult<Dock
         state.docker_trials.lock().unwrap().remove(&path).ok_or_else(|| t!("Önce düzeltmeleri deneyin.", "Try the fixes first."))?;
     let scan = state.keep_docker_result(path, &root, &comparison);
     Ok(DockerResponse { comparison, scan, outcome: None })
+}
+
+#[tauri::command]
+fn check_history(state: State<'_, AppState>, path: String) -> Vec<ferry_core::localcheck::Summary> {
+    ferry_core::localcheck::history(&state.check_history_path(&normalize_path(path)))
 }
 
 #[tauri::command]
@@ -1455,6 +1471,7 @@ pub fn with_commands<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R
         cancel_docker_compare,
         docker_image_usage,
         docker_history,
+        check_history,
         remove_docker_images,
         clear_runtime_log,
         local_php_versions,

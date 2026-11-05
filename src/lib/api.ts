@@ -1,4 +1,5 @@
 import type {
+  CheckSummary,
   DatabaseChoice,
   DatabasePlan,
   DockerFixChoice,
@@ -61,6 +62,7 @@ export interface Api {
   sshHosts(): Promise<string[]>;
   dockerImageUsage(): Promise<DockerImageUsage>;
   dockerHistory(path: string): Promise<DockerSummary[]>;
+  checkHistory(path: string): Promise<CheckSummary[]>;
   removeDockerImages(): Promise<number>;
   cancelDockerCompare(path: string): Promise<void>;
   onDockerStep(handler: (step: DockerStep) => void): Promise<() => void>;
@@ -129,6 +131,7 @@ async function tauriApi(): Promise<Api> {
     sshHosts: () => invoke("ssh_hosts"),
     dockerImageUsage: () => invoke("docker_image_usage"),
     dockerHistory: (path) => invoke("docker_history", { path }),
+    checkHistory: (path) => invoke("check_history", { path }),
     removeDockerImages: () => invoke("remove_docker_images"),
     cancelDockerCompare: (path) => invoke("cancel_docker_compare", { path }),
     onDockerStep: (handler) => listen<DockerStep>("docker://step", (e) => handler(e.payload)),

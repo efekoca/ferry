@@ -2952,14 +2952,24 @@ select.input {
   }
 }
 
-@media (max-width: 1000px) {
-  .split,
-  .split--changes {
+@media (max-width: 900px) {
+  .split:not(.split--changes) {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr) 1px var(--split-row, minmax(0, 45%));
   }
 
+  .split:not(.split--changes) > .splitter {
+    cursor: row-resize;
+  }
+
+  .split:not(.split--changes) > .splitter::before {
+    inset: -4px 0;
+  }
+}
+
+@media (max-width: 1000px) {
   .split--changes {
+    grid-template-columns: minmax(0, 1fr);
     grid-template-rows: var(--split-row, minmax(0, 42%)) 1px minmax(0, 1fr);
   }
 
@@ -2985,11 +2995,11 @@ select.input {
     overflow-y: auto;
   }
 
-  .splitter {
+  .split--changes > .splitter {
     cursor: row-resize;
   }
 
-  .splitter::before {
+  .split--changes > .splitter::before {
     inset: -4px 0;
   }
 }

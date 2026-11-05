@@ -378,7 +378,7 @@ export function Findings() {
             )}
           </div>
 
-          <Splitter id="findings" side="end" label={t.common.resizePanes} />
+          <Splitter id="findings" side="end" label={t.common.resizePanes} narrowAt="(max-width: 900px)" />
           <aside className="pane pane--side" aria-label={t.findings.details}>
             {selected && (
               <div className="detail" key={selected.id}>

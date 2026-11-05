@@ -46,7 +46,7 @@ fn scan_fixture_project() {
 
 #[test]
 fn a_step_leaves_newer_rules_for_later() {
-    let Some(tools) = std::env::var_os("FERRY_TEST_TOOLS").map(PathBuf::from) else {
+    let Some(tools) = ferry_core::toolchain::test_tools() else {
         eprintln!("FERRY_TEST_TOOLS ayarlı değil; Rector testi atlandı");
         return;
     };
@@ -72,7 +72,7 @@ fn a_step_leaves_newer_rules_for_later() {
 
 #[test]
 fn rector_preview_apply_and_restore() {
-    let Some(tools) = std::env::var_os("FERRY_TEST_TOOLS").map(PathBuf::from) else {
+    let Some(tools) = ferry_core::toolchain::test_tools() else {
         eprintln!("FERRY_TEST_TOOLS ayarlı değil; Rector testi atlandı");
         return;
     };
@@ -120,7 +120,7 @@ fn rector_preview_apply_and_restore() {
 
 #[test]
 fn rector_sees_the_same_files_as_the_scanner() {
-    let Some(tools) = std::env::var_os("FERRY_TEST_TOOLS").map(PathBuf::from) else {
+    let Some(tools) = ferry_core::toolchain::test_tools() else {
         return;
     };
     let php = toolchain::find_php(None).expect("php gerekli");
