@@ -522,20 +522,55 @@ fn line_spans(line: &str, kind: Kind) -> Vec<Span> {
     match kind {
         Kind::Pin => span_at(line, indent + if lower.starts_with("php ") { 4 } else { 0 }).into_iter().collect(),
         Kind::Docker => {
+            if let Some(at) =
+                lower.find("php_version=").filter(|_| lower.starts_with("arg ") || lower.starts_with("env ") || lower.starts_with("- "))
+            {
+                return span_at(line, indent + at + "php_version=".len()).into_iter().collect();
+            }
+            if key == "php_version" {
+                return listed_versions(line, value);
+            }
             let image = lower.starts_with("from ") || key == "image";
             image.then(|| image_version(line)).flatten().into_iter().collect()
         }
         Kind::Socket => socket_version(line).into_iter().collect(),
         Kind::Hosting if matches!(key.as_str(), "type" | "via") => image_version(line).into_iter().collect(),
         _ if matches!(key.as_str(), "php" | "php-version" | "php-versions" | "php_version") => listed_versions(line, value),
-        _ if key == "image" => image_version(line).into_iter().collect(),
+        _ if matches!(key.as_str(), "image" | "container") => image_version(line).into_iter().collect(),
+        _ if key == "name" && lower.contains("php:") => image_version(line).into_iter().collect(),
+        _ if lower.contains("docker run") => image_version(line).into_iter().collect(),
         _ => Vec::new(),
     }
 }
 
 fn pin_lines(text: &str, kind: Kind) -> Vec<(usize, Vec<Span>)> {
-    let lines = text.lines().enumerate().filter(|(_, raw)| !raw.trim_start().starts_with('#'));
-    lines.map(|(i, raw)| (i + 1, line_spans(raw, kind))).filter(|(_, spans)| !spans.is_empty()).collect()
+    let mut out = Vec::new();
+    let mut list = None;
+    for (i, raw) in text.lines().enumerate().filter(|(_, raw)| !raw.trim_start().starts_with('#')) {
+        let indent = raw.len() - raw.trim_start().len();
+        let item = raw.trim_start().starts_with("- ");
+        if list.is_some_and(|open: usize| item && indent >= open) {
+            let spans = listed_versions(raw, 0);
+            if !spans.is_empty() {
+                out.push((i + 1, spans));
+            }
+            continue;
+        }
+        list = None;
+        let (key, value) = yaml_key(raw);
+        let starts_list = matches!(kind, Kind::Ci | Kind::Hosting)
+            && matches!(key.to_ascii_lowercase().as_str(), "php" | "php-version" | "php-versions" | "php_version")
+            && raw[value..].trim().is_empty();
+        if starts_list {
+            list = Some(indent);
+            continue;
+        }
+        let spans = line_spans(raw, kind);
+        if !spans.is_empty() {
+            out.push((i + 1, spans));
+        }
+    }
+    out
 }
 
 fn newest(spans: &[Span]) -> PhpVersion {
@@ -812,6 +847,40 @@ mod tests {
             ("docker/nginx/site.conf", 2),
         ];
         assert_eq!(pins, expected.map(|(f, l)| (f.to_string(), l)));
+    }
+
+    #[test]
+    fn pins_in_lists_containers_and_build_arguments() {
+        let dir = tempfile::tempdir().unwrap();
+        write_all(
+            dir.path(),
+            &[
+                (".travis.yml", "language: php\nphp:\n  - 7.1\n  - 7.2\nscript: phpunit\n"),
+                (".github/workflows/a.yml", "jobs:\n  c:\n    container: php:7.1-cli\n"),
+                (".github/workflows/b.yml", "jobs:\n  c:\n    steps:\n      - run: |\n          docker run php:7.0-cli php -v\n"),
+                (".gitlab-ci.yml", "job:\n  image:\n    name: php:7.3-cli\n"),
+                ("Dockerfile", "ARG PHP_VERSION=7.3\nFROM php:${PHP_VERSION}-cli\n"),
+                ("docker-compose.yml", "services:\n  app:\n    build:\n      args:\n        PHP_VERSION: \"7.4\"\n  b:\n    build:\n      args:\n        - PHP_VERSION=7.2\n"),
+            ],
+        );
+        let target = PhpVersion::new(8, 4);
+        let pins: Vec<_> = ids(&scan(dir.path(), target).0).into_iter().map(|(f, l, _)| (f, l)).collect();
+        let expected = [
+            (".github/workflows/a.yml", 3),
+            (".github/workflows/b.yml", 5),
+            (".gitlab-ci.yml", 3),
+            (".travis.yml", 4),
+            ("Dockerfile", 1),
+            ("docker-compose.yml", 5),
+            ("docker-compose.yml", 9),
+        ];
+        assert_eq!(pins, expected.map(|(f, l)| (f.to_string(), l)));
+        let after = bump(dir.path(), target);
+        let text = |name: &str| after.changes.iter().find(|c| c.file.replace('\\', "/") == name).unwrap().new_content.clone();
+        assert_eq!(text("Dockerfile"), "ARG PHP_VERSION=8.4\nFROM php:${PHP_VERSION}-cli\n");
+        assert!(text(".travis.yml").contains("  - 7.1\n  - 8.4\n"));
+        assert!(text("docker-compose.yml").contains("PHP_VERSION: \"8.4\"") && text("docker-compose.yml").contains("- PHP_VERSION=8.4"));
+        assert!(text(".github/workflows/b.yml").contains("docker run php:8.4-cli"));
     }
 
     #[test]

@@ -91,7 +91,7 @@ Ferry also reads the files around the code that decide which PHP actually runs:
 - `.htaccess`: `php_value` and `php_flag` lines outside `<IfModule mod_php.c>`, which give a 500 error on PHP-FPM, and `<IfModule mod_php5.c>` or `mod_php7.c` blocks that PHP 8 no longer matches
 - `.user.ini`, `php.ini` and `.htaccess` settings that PHP removed or deprecated, such as `register_globals` (PHP won't start with it on), `track_errors`, `allow_url_include` and `session.trans_sid_hosts`
 - `composer.json` with `platform-check` turned off or `config.platform.ext-*` pinned to an old version, a `composer.lock` written by Composer 1, and Composer plugins that only work with Composer 1
-- PHP versions pinned below your target in `Dockerfile`, Docker Compose, GitHub Actions, GitLab CI, Travis, Bitbucket Pipelines, DDEV, Lando, Platform.sh, PHP-FPM socket paths in `.conf` files and Caddyfiles, `.tool-versions`, `.php-version`, and `config.platform.php` in `composer.json`. The **Version files** mode on the Changes screen, or `ferry-cli pins <project> --write`, updates them
+- PHP versions pinned below your target in `Dockerfile` (also `ARG PHP_VERSION`), Docker Compose (also build arguments), GitHub Actions (also `container:`, `docker run` and YAML lists), GitLab CI, Travis, Bitbucket Pipelines, DDEV, Lando, Platform.sh, PHP-FPM socket paths in `.conf` files and Caddyfiles, `.tool-versions`, `.php-version`, and `config.platform.php` in `composer.json`. The **Version files** mode on the Changes screen, or `ferry-cli pins <project> --write`, updates them
 
 ### Review every change before it is applied
 
