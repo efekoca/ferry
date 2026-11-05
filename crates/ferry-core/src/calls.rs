@@ -162,9 +162,70 @@ fn is_null(tokens: &[Token], k: usize) -> bool {
 }
 
 /// Literal calls and operators whose result or meaning changed: what a call is compared with, what callbacks
+fn unchecked_pdo(tokens: &[Token]) -> Vec<usize> {
+    let creates = tokens.windows(2).any(|w| w[0].is_ident_ci("new") && w[1].text.trim_start_matches('\\').eq_ignore_ascii_case("pdo"));
+    if !creates || tokens.iter().any(|t| t.text.ends_with("ATTR_ERRMODE")) {
+        return Vec::new();
+    }
+    (2..tokens.len().saturating_sub(1))
+        .filter(|&k| {
+            let method = ["query", "exec", "prepare"].iter().any(|m| tokens[k].is_ident_ci(m));
+            let Some(close) =
+                (method && tokens[k - 1].is_punct("->") && tokens[k + 1].is_punct("(")).then(|| close_of(tokens, k + 1)).flatten()
+            else {
+                return false;
+            };
+            let after = tokens.get(close + 1);
+            let then = tokens.get(close + 2);
+            let compared = after.is_some_and(|o| o.is_punct("===")) && then.is_some_and(|v| v.is_ident_ci("false"));
+            let dies = after.is_some_and(|o| o.is_ident_ci("or")) && then.is_some_and(|v| v.is_ident_ci("die") || v.is_ident_ci("exit"));
+            let kept = k >= 4 && tokens[k - 3].is_punct("=") && tokens[k - 4].kind == TokenKind::Variable;
+            let checked_later = kept
+                && (close + 2..tokens.len().min(close + 10)).any(|i| {
+                    let same = tokens[i].text == tokens[k - 4].text;
+                    same && (tokens[i - 1].is_punct("!")
+                        || tokens.get(i + 1).is_some_and(|o| o.is_punct("==="))
+                            && tokens.get(i + 2).is_some_and(|v| v.is_ident_ci("false")))
+                });
+            compared || dies || checked_later || k >= 3 && tokens[k - 3].is_punct("!")
+        })
+        .collect()
+}
+
+fn inherited_statics(tokens: &[Token], index: &ProjectIndex) -> Vec<usize> {
+    let mut out = Vec::new();
+    for (class, open, close) in crate::analyzer::class_bodies(tokens) {
+        let Some(name) = tokens.get(class + 1) else { continue };
+        let mut k = open + 1;
+        while k < close {
+            if !tokens[k].is_ident_ci("function") {
+                k += 1;
+                continue;
+            }
+            let Some(start) = (k..close).find(|&i| tokens[i].is_punct("{") || tokens[i].is_punct(";")) else { break };
+            if tokens[start].is_punct(";") {
+                k = start + 1;
+                continue;
+            }
+            let end = close_of(tokens, start).unwrap_or(close);
+            let private = tokens[..k]
+                .iter()
+                .rev()
+                .take_while(|t| !t.is_punct(";") && !t.is_punct("{") && !t.is_punct("}"))
+                .any(|t| t.is_ident_ci("private"));
+            if !private && tokens.get(k + 1).is_some_and(|m| m.kind == TokenKind::Ident && index.inherits_unchanged(&name.text, &m.text)) {
+                out.extend((start..end).filter(|&i| tokens[i].is_ident_ci("static") && tokens[i + 1].kind == TokenKind::Variable));
+            }
+            k = end + 1;
+        }
+    }
+    out
+}
+
 /// do, and how literal keys and operands behave.
 pub(crate) fn check(tokens: &[Token], index: &ProjectIndex) -> Vec<(usize, &'static PatternRule)> {
-    let mut out = Vec::new();
+    let mut out: Vec<(usize, &'static PatternRule)> = unchecked_pdo(tokens).into_iter().map(|k| (k, &PDO_EXCEPTIONS)).collect();
+    out.extend(inherited_statics(tokens, index).into_iter().map(|k| (k, &INHERITED_STATIC)));
     let names = crate::index::Names::new(tokens);
     let mut closures: Vec<(&str, bool, bool)> = Vec::new();
     for k in 0..tokens.len().saturating_sub(2) {
@@ -483,6 +544,30 @@ const MYSQLI_EXCEPTIONS: PatternRule = rule(
     Text::new(
         "PHP 8.1'den beri mysqli varsayılan olarak hata durumunda false döndürmek yerine mysqli_sql_exception fırlatır, bu yüzden bu kontrole hiç ulaşılmaz.",
         "Since PHP 8.1 mysqli throws mysqli_sql_exception by default instead of returning false on failure, so this check is never reached.",
+    ),
+);
+
+const PDO_EXCEPTIONS: PatternRule = rule(
+    "behavior.pdo_default_exceptions",
+    Text::new("PDO hatası artık istisna", "PDO errors are exceptions now"),
+    Severity::Behavior,
+    (8, 0),
+    Some(Text::new("try/catch kullanın ya da PDO::ATTR_ERRMODE ayarlayın", "use try/catch or set PDO::ATTR_ERRMODE")),
+    Text::new(
+        "PHP 8.0'dan beri PDO varsayılan olarak hata durumunda false döndürmek yerine PDOException fırlatır, bu yüzden bu kontrole hiç ulaşılmaz.",
+        "Since PHP 8.0 PDO throws PDOException by default instead of returning false on failure, so this check is never reached.",
+    ),
+);
+
+const INHERITED_STATIC: PatternRule = rule(
+    "behavior.inherited_static_variable",
+    Text::new("Alt sınıfla paylaşılan static değişken", "Static variable shared with a subclass"),
+    Severity::Behavior,
+    (8, 1),
+    Some(Text::new("sınıfa göre anahtarlı bir static dizi kullanın", "key a static array by static::class")),
+    Text::new(
+        "PHP 8.1'den beri miras alınan metottaki static değişken üst sınıfla ortaktır; alt sınıf başına ayrı kopya olmaz. Sınıf başına singleton ve önbellekler aynı değeri paylaşır.",
+        "Since PHP 8.1 a static variable in an inherited method is shared with the parent, with no separate copy per subclass. Per-class singletons and caches end up sharing one value.",
     ),
 );
 

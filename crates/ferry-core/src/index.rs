@@ -171,6 +171,13 @@ impl ProjectIndex {
         self.enums.contains(fqn)
     }
 
+    /// Whether a known subclass inherits this method instead of overriding it.
+    pub(crate) fn inherits_unchanged(&self, class: &str, method: &str) -> bool {
+        let short = |name: &str| name.rsplit('\\').next().unwrap_or(name).to_ascii_lowercase();
+        let (class, method) = (short(class), method.to_ascii_lowercase());
+        self.types.values().flatten().any(|t| t.parent.as_deref().is_some_and(|p| short(p) == class) && !t.methods.contains(&method))
+    }
+
     pub(crate) fn sets_mysqli_report(&self) -> bool {
         self.mysqli_report
     }
