@@ -172,7 +172,7 @@ const DEPS: Omit<DependencyReport, "target" | "rootStatus"> = {
 export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: IgnoreEntry[]; config?: ProjectConfig } = {}): Api {
   const delay = opts.delay ?? 450;
   const listeners = new Set<(p: ScanProgress) => void>();
-  let settings: Settings = { phpPath: null, snapshotLimit: null, editor: null };
+  let settings: Settings = { phpPath: null, snapshotLimit: null, editor: null, editorCommand: null };
   const ignores = new Map<string, string>();
   let stale = opts.staleIgnores ?? [];
   let lastScan: ScanResult | null = null;

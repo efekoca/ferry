@@ -201,9 +201,12 @@ fn compares_every_selectable_target() {
 #[test]
 fn settings_round_trip() {
     let h = harness();
-    assert_eq!(h.ok("get_settings", json!({})), json!({ "phpPath": null, "snapshotLimit": null, "editor": null }));
+    assert_eq!(h.ok("get_settings", json!({})), json!({ "phpPath": null, "snapshotLimit": null, "editor": null, "editorCommand": null }));
     h.ok("save_settings", json!({ "settings": { "phpPath": "/opt/php/bin/php", "editor": "vscode" } }));
-    assert_eq!(h.ok("get_settings", json!({})), json!({ "phpPath": "/opt/php/bin/php", "snapshotLimit": null, "editor": "vscode" }));
+    assert_eq!(
+        h.ok("get_settings", json!({})),
+        json!({ "phpPath": "/opt/php/bin/php", "snapshotLimit": null, "editor": "vscode", "editorCommand": null })
+    );
     h.ok("save_settings", json!({ "settings": { "phpPath": null, "snapshotLimit": 10 } }));
     assert_eq!(h.ok("get_settings", json!({}))["snapshotLimit"], 10);
 }
@@ -558,6 +561,24 @@ fn ignored_findings_move_out_of_the_summary() {
     let pruned = h.ok("prune_ignores", json!({ "path": root }));
     assert_eq!(pruned["staleIgnores"], json!([]));
     assert!(!std::fs::read_to_string(Path::new(&root).join(".ferry/ignore.json")).unwrap().contains("gone.php"));
+}
+
+#[test]
+fn custom_editor_commands() {
+    let file = Path::new("/home/efe/My Site/a; rm.php");
+    let call = custom_editor("my-editor --wait '+{line}:{column}' \"{file}\" --flag=\"a b\"", file, 12, 3).unwrap();
+    let EditorCall::Command(program, args) = call else { panic!("expected a command") };
+    assert_eq!(program, PathBuf::from("my-editor"));
+    assert_eq!(args, ["--wait", "+12:3", "/home/efe/My Site/a; rm.php", "--flag=a b"]);
+    let EditorCall::Command(_, args) = custom_editor("e {file}", file, 1, 1).unwrap() else { panic!("expected a command") };
+    assert_eq!(args.len(), 1, "a file name with spaces stays one argument");
+    assert_eq!(
+        custom_editor("mvim://open?url=file://{file}&line={line}", Path::new("/a b.php"), 7, 1),
+        Some(EditorCall::Url("mvim://open?url=file:///a%20b.php&line=7".into()))
+    );
+    assert_eq!(custom_editor("nvim +{line}", file, 1, 1), None);
+    assert_eq!(custom_editor("  ", file, 1, 1), None);
+    assert_eq!(split_args("a '' \"b c\""), ["a", "", "b c"]);
 }
 
 #[test]

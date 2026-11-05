@@ -62,7 +62,7 @@ Select a finding to see:
 - what to use instead
 - whether it can be fixed automatically
 
-**Show in folder** opens the file's location, and **Open in editor** opens the file at that line in the editor picked in **Settings** (Visual Studio Code, Cursor, PhpStorm, Sublime Text, Zed, or the system default). Use the arrow keys to move through the list.
+**Show in folder** opens the file's location, and **Open in editor** opens the file at that line in the editor picked in **Settings** (Visual Studio Code, Cursor, PhpStorm, Sublime Text, Zed, the system default, or a custom command or address with `{file}`, `{line}` and `{column}`, such as `emacsclient -n +{line}:{column} {file}`). Use the arrow keys to move through the list.
 
 **Ignore** takes a finding out of the list and the score once you've decided it doesn't apply, for example code that only runs on the old server. Ferry asks for a reason and saves it to `.ferry/ignore.json` in the project, so the decision travels with the code when you commit that file. The match uses the rule, the file and the code, so an ignored finding stays ignored when lines above it move. **Ignored** on the Findings page lists them with their reasons, and **Show again** brings one back.
 

@@ -62,7 +62,7 @@ Bir bulguyu seçtiğinizde şunları görürsünüz:
 - yerine ne kullanmanız gerektiği
 - otomatik olarak düzeltilip düzeltilemeyeceği
 
-**Dosyayı göster** dosyanın bulunduğu klasörü açar. **Editörde aç** ise dosyayı **Ayarlar**'da seçtiğiniz editörde (Visual Studio Code, Cursor, PhpStorm, Sublime Text, Zed ya da sistem varsayılanı) ilgili satırda açar. Listede ok tuşlarıyla gezinebilirsiniz.
+**Dosyayı göster** dosyanın bulunduğu klasörü açar. **Editörde aç** ise dosyayı **Ayarlar**'da seçtiğiniz editörde (Visual Studio Code, Cursor, PhpStorm, Sublime Text, Zed, sistem varsayılanı ya da `emacsclient -n +{line}:{column} {file}` gibi `{file}`, `{line}` ve `{column}` içeren özel bir komut veya adres) ilgili satırda açar. Listede ok tuşlarıyla gezinebilirsiniz.
 
 Bir bulgunun sizin için geçerli olmadığına karar verdiyseniz (örneğin yalnızca eski sunucuda çalışan bir kod) **Yok say** onu listeden ve puandan çıkarır. Ferry bir gerekçe ister ve bunu projedeki `.ferry/ignore.json` dosyasına yazar; bu dosyayı depoya eklerseniz karar kodla birlikte taşınır. Eşleştirme kural, dosya ve kod üzerinden yapılır, bu yüzden üstteki satırlar kaysa da bulgu yok sayılmaya devam eder. Bulgular sayfasındaki **Yok sayılanlar** bunları gerekçeleriyle listeler, **Yeniden göster** bir bulguyu geri getirir.
 

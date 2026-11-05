@@ -726,12 +726,12 @@ describe("Ferry app", () => {
   it("keeps the PHP path when the backup limit changes", async () => {
     const user = userEvent.setup();
     const api = mockApi({ delay: 0 });
-    await api.saveSettings({ phpPath: "/opt/php", snapshotLimit: null, editor: null });
+    await api.saveSettings({ phpPath: "/opt/php", snapshotLimit: null, editor: null, editorCommand: null });
     render(<App api={api} />);
     await user.click(await screen.findByRole("button", { name: /Ayarlar/ }));
     const group = await screen.findByRole("radiogroup", { name: "Saklanacak yedek" });
     await user.click(within(group).getByRole("radio", { name: "30" }));
-    await waitFor(async () => expect(await api.getSettings()).toEqual({ phpPath: "/opt/php", snapshotLimit: 30, editor: null }));
+    await waitFor(async () => expect(await api.getSettings()).toEqual({ phpPath: "/opt/php", snapshotLimit: 30, editor: null, editorCommand: null }));
     expect(within(group).getByRole("radio", { name: "30" })).toHaveAttribute("aria-checked", "true");
   });
 
@@ -748,7 +748,7 @@ describe("Ferry app", () => {
     const group = await screen.findByRole("radiogroup", { name: "Saklanacak yedek" });
     await user.click(within(group).getByRole("radio", { name: "30" }));
     await user.selectOptions(screen.getByRole("combobox", { name: "Editör" }), "vscode");
-    await waitFor(async () => expect(await api.getSettings()).toEqual({ phpPath: null, snapshotLimit: 30, editor: "vscode" }));
+    await waitFor(async () => expect(await api.getSettings()).toEqual({ phpPath: null, snapshotLimit: 30, editor: "vscode", editorCommand: null }));
   });
 
   it("shows backup disk usage and deletes every backup after confirming", async () => {
@@ -1066,5 +1066,20 @@ describe("Ferry app", () => {
     await user.click(within(dialog).getByRole("button", { name: "Uygula" }));
     await user.click(await screen.findByRole("button", { name: "PHP 8.1 adımına geç" }));
     await waitFor(() => expect(preview.mock.calls.at(-1)?.[1]).toBe("8.1"));
+  });
+
+  it("saves a custom editor command and asks for the file placeholder", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    const save = vi.spyOn(api, "saveSettings");
+    render(<App api={api} />);
+    await user.click(await screen.findByRole("button", { name: /Ayarlar/ }));
+    await user.selectOptions(await screen.findByRole("combobox", { name: "Editör" }), "custom");
+    const field = await screen.findByRole("textbox", { name: "Komut ya da adres" });
+    await user.type(field, "nvim +{{line}");
+    expect(screen.getByText("Komutta {file} olmalı.")).toBeInTheDocument();
+    await user.type(field, " {{file}");
+    await user.tab();
+    await waitFor(() => expect(save.mock.calls.at(-1)?.[0]).toMatchObject({ editor: "custom", editorCommand: "nvim +{line} {file}" }));
   });
 });
