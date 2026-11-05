@@ -253,6 +253,8 @@ pub fn php_version(php: &Path) -> Option<String> {
     String::from_utf8_lossy(&out.stdout).lines().map(str::trim).rfind(|l| !l.is_empty()).map(str::to_string)
 }
 
+const LINT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Lint {
     Clean,
@@ -261,25 +263,21 @@ pub enum Lint {
 }
 
 pub fn lint_source(php: &Path, src: &str) -> Lint {
-    use std::io::Write;
-    let Ok(mut child) = command(php)
-        .args(["-n", "-d", "display_errors=1", "-l"])
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-    else {
+    let Ok(mut file) = tempfile::Builder::new().prefix("ferry-lint-").suffix(".php").tempfile() else { return Lint::NotRun };
+    if std::io::Write::write_all(&mut file, src.as_bytes()).is_err() {
         return Lint::NotRun;
-    };
-    let Some(mut stdin) = child.stdin.take() else { return Lint::NotRun };
-    let input = src.to_string();
-    let writer = std::thread::spawn(move || stdin.write_all(input.as_bytes()));
-    let Ok(out) = child.wait_with_output() else { return Lint::NotRun };
-    let _ = writer.join();
-    if out.status.success() {
+    }
+    let mut cmd = command(php);
+    cmd.args(["-n", "-d", "display_errors=1", "-l"]).arg(file.path());
+    let cancel = std::sync::atomic::AtomicBool::new(false);
+    let Ok(out) = run_process(cmd, php, &cancel, LINT_TIMEOUT) else { return Lint::NotRun };
+    let Some(status) = out.status.filter(|_| out.stopped.is_none()) else { return Lint::NotRun };
+    let path = file.path().to_string_lossy();
+    if status.success() {
         return Lint::Clean;
     }
-    let text = format!("{}\n{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    let text = format!("{}\n{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr))
+        .replace(path.as_ref(), "Standard input code");
     let line = text
         .lines()
         .map(str::trim)

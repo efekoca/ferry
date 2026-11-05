@@ -121,6 +121,8 @@ fn read_optional(path: &Path) -> Result<Option<Vec<u8>>, SnapshotError> {
     }
 }
 
+const WRITING_MARKER: &str = "writing";
+
 pub fn fnv1a(bytes: &[u8]) -> u64 {
     let mut hash: u64 = 0xcbf29ce484222325;
     for b in bytes {
@@ -285,6 +287,30 @@ impl SnapshotStore {
         let dir = self.project_dir(project_root).join(id);
         let bytes = std::fs::read(dir.join("manifest.json")).map_err(|_| SnapshotError::NotFound(id.to_string()))?;
         Ok((serde_json::from_slice(&bytes)?, dir))
+    }
+
+    /// Left in the backup while files are written. It only survives if the app stops mid-way.
+    pub fn mark_writing(&self, project_root: &Path, id: &str) -> Result<(), SnapshotError> {
+        let (_, dir) = self.load(project_root, id)?;
+        std::fs::write(dir.join(WRITING_MARKER), b"").map_err(io_err(&dir))
+    }
+
+    pub fn clear_writing(&self, project_root: &Path, id: &str) {
+        if let Ok((_, dir)) = self.load(project_root, id) {
+            let _ = std::fs::remove_file(dir.join(WRITING_MARKER));
+        }
+    }
+
+    /// The backups of writes that never finished. Each is reported once.
+    pub fn take_interrupted(&self, project_root: &Path) -> Vec<Snapshot> {
+        let found: Vec<Snapshot> = self
+            .list(project_root)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|s| self.load(project_root, &s.id).is_ok_and(|(_, dir)| dir.join(WRITING_MARKER).is_file()))
+            .collect();
+        found.iter().for_each(|s| self.clear_writing(project_root, &s.id));
+        found
     }
 
     pub fn restore(&self, project_root: &Path, id: &str) -> Result<Vec<String>, SnapshotError> {
@@ -577,5 +603,21 @@ mod tests {
         let store_dir = tempfile::tempdir().unwrap();
         let store = SnapshotStore::new(store_dir.path());
         assert!(store.list(Path::new("/nope")).unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_unfinished_write_is_reported_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("p");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("a.php"), "a").unwrap();
+        let store = SnapshotStore::new(dir.path().join("s"));
+        let finished = store.create(&root, &["a.php".to_string()], "one").unwrap();
+        store.mark_writing(&root, &finished.id).unwrap();
+        store.clear_writing(&root, &finished.id);
+        assert!(store.take_interrupted(&root).is_empty());
+        store.mark_writing(&root, &finished.id).unwrap();
+        assert_eq!(store.take_interrupted(&root).iter().map(|s| s.label.as_str()).collect::<Vec<_>>(), ["one"]);
+        assert!(store.take_interrupted(&root).is_empty());
     }
 }
