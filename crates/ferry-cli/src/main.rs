@@ -5,11 +5,11 @@ use ferry_core::ignore::{self, IgnoredFinding};
 use ferry_core::rules::{FixKind, Severity};
 use ferry_core::{project, report, PhpVersion};
 use serde_json::{json, Value};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 const USAGE: &str = "Usage: ferry-cli scan <project> --target <8.2|8.3|8.4|8.5> [options]
-       ferry-cli compare <project> --target <version> [--source <version>] [--no-extensions] [--clean-images] [--page <path>] [--no-pages] [--db-dump <file>] [--db-live] [--db-seed] [--db-ssh <host:database:user>] [--prepare <command>] [--format <text|json>]
+       ferry-cli compare <project> --target <version> [--source <version>] [--no-extensions] [--clean-images] [--page <path>] [--no-pages] [--db-dump <file>] [--db-live] [--db-seed] [--db-ssh <host:database:user>] [--prepare <command>] [--try-fixes <rector>] [--format <text|json>]
        ferry-cli clean-images
 
 Options:
@@ -642,6 +642,34 @@ fn run(o: &Options) -> Result<Outcome, String> {
     })
 }
 
+fn safe_fixes(root: &Path, rector: &Path, target: PhpVersion) -> Result<Vec<(String, String)>, String> {
+    use ferry_core::{rector, rules::FixKind, toolchain};
+    let php = toolchain::find_php(None).ok_or_else(|| toolchain::ToolError::PhpMissing.to_string())?;
+    let excluded = project::inspect(root).map_err(|e| e.to_string())?.excluded_dirs;
+    let work = std::env::temp_dir().join("ferry-cli-rector");
+    let cancel = std::sync::atomic::AtomicBool::new(false);
+    let preview =
+        rector::preview(&php, rector, root, target, rector::RectorMode::Compat, &excluded, &work, &cancel).map_err(|e| e.to_string())?;
+    Ok(preview.changes.into_iter().filter(|c| c.fix == FixKind::Auto).map(|c| (c.file, c.new_content)).collect())
+}
+
+fn print_outcome(outcome: &ferry_core::docker::Outcome) {
+    use ferry_core::docker::Delta;
+    fn line<T>(name: &str, delta: &Delta<T>) {
+        println!("{name}: {} fixed, {} remaining, {} new", delta.fixed.len(), delta.remaining.len(), delta.introduced.len());
+    }
+    line("Messages", &outcome.messages);
+    line("Tests", &outcome.tests);
+    line("Pages", &outcome.pages);
+    line("Tables", &outcome.tables);
+    println!("Syntax errors: {} -> {}", outcome.lint_before, outcome.lint_after);
+    for e in outcome.messages.remaining.iter().chain(&outcome.messages.introduced) {
+        println!("  {}:{} {}", e.path.trim_start_matches("/app/"), e.line, e.message);
+    }
+    let verdict = if outcome.regressed_after { "still worse than the source" } else { "no longer worse than the source" };
+    println!("The fixed copy is {verdict}.");
+}
+
 fn run_compare(args: &[String]) -> Result<bool, String> {
     let (mut root, mut source, mut target, mut json_output, mut extensions) = (None, None, None, false, true);
     let mut clean_images = false;
@@ -649,6 +677,7 @@ fn run_compare(args: &[String]) -> Result<bool, String> {
     let mut database = None;
     let mut prepare = None;
     let (mut remote, mut postgres) = (None::<String>, false);
+    let mut rector = None;
     let mut it = args.iter();
     while let Some(arg) = it.next() {
         let mut value = |name: &str| it.next().cloned().ok_or_else(|| format!("{name} needs a value"));
@@ -659,6 +688,7 @@ fn run_compare(args: &[String]) -> Result<bool, String> {
             "--clean-images" => clean_images = true,
             "--no-pages" => pages.clear(),
             "--prepare" => prepare = Some(value("--prepare")?),
+            "--try-fixes" => rector = Some(PathBuf::from(value("--try-fixes")?)),
             "--db-dump" => database = Some(ferry_core::database::Source::Dump(PathBuf::from(value("--db-dump")?))),
             "--db-live" => database = Some(ferry_core::database::Source::Live),
             "--db-seed" => database = Some(ferry_core::database::Source::Seed),
@@ -688,8 +718,8 @@ fn run_compare(args: &[String]) -> Result<bool, String> {
     let current = project::inspect(&root).map_err(|e| e.to_string())?.current_version;
     let source = source.or(current).ok_or("--source is required: the project's version couldn't be detected")?;
     let cancel = std::sync::atomic::AtomicBool::new(false);
-    let options = ferry_core::docker::Options { install_extensions: extensions, clean_images, pages, database, prepare };
-    let result = ferry_core::docker::compare(&root, source, target, options, &cancel, |step| match step {
+    let options = ferry_core::docker::Options { install_extensions: extensions, clean_images, pages, database, prepare, fixes: Vec::new() };
+    let step = |step: ferry_core::docker::Step| match step {
         ferry_core::docker::Step::Installing => eprintln!("ferry-cli: installing dependencies"),
         ferry_core::docker::Step::Extensions(v) => eprintln!("ferry-cli: preparing extensions for PHP {v}"),
         ferry_core::docker::Step::Lint(v) => eprintln!("ferry-cli: linting on PHP {v}"),
@@ -697,7 +727,20 @@ fn run_compare(args: &[String]) -> Result<bool, String> {
         ferry_core::docker::Step::Prepare => eprintln!("ferry-cli: running the prepare command"),
         ferry_core::docker::Step::Pages(v) => eprintln!("ferry-cli: requesting pages on PHP {v}"),
         ferry_core::docker::Step::Tests(v) => eprintln!("ferry-cli: running tests on PHP {v}"),
-    })?;
+    };
+    let result = ferry_core::docker::compare(&root, source, target, options.clone(), &cancel, step)?;
+    if let Some(rector) = rector {
+        let fixes = safe_fixes(&root, &rector, target)?;
+        eprintln!("ferry-cli: comparing again with {} fixed files in a copy", fixes.len());
+        let after = ferry_core::docker::compare(&root, source, target, ferry_core::docker::Options { fixes, ..options }, &cancel, step)?;
+        let outcome = ferry_core::docker::outcome(&result, &after);
+        if json_output {
+            println!("{}", serde_json::to_string_pretty(&outcome).map_err(|e| e.to_string())?);
+        } else {
+            print_outcome(&outcome);
+        }
+        return Ok(outcome.regressed_after || outcome.worsened());
+    }
     let fatal = result.new_on_target.iter().any(|e| e.level == ferry_core::runtime::Level::Fatal);
     if json_output {
         println!("{}", serde_json::to_string_pretty(&result).map_err(|e| e.to_string())?);

@@ -41,6 +41,7 @@ pub struct AppState {
     rector_cancel: Mutex<HashMap<String, Arc<AtomicBool>>>,
     docker_cancel: Mutex<HashMap<String, Arc<AtomicBool>>>,
     docker_results: Mutex<HashMap<String, docker::Comparison>>,
+    docker_trials: Mutex<HashMap<String, docker::Comparison>>,
     rector_running: Arc<AtomicUsize>,
     shutdown: Arc<AtomicBool>,
     next_preview: AtomicU64,
@@ -61,6 +62,7 @@ impl AppState {
             rector_cancel: Mutex::new(HashMap::new()),
             docker_cancel: Mutex::new(HashMap::new()),
             docker_results: Mutex::new(HashMap::new()),
+            docker_trials: Mutex::new(HashMap::new()),
             rector_running: Arc::new(AtomicUsize::new(0)),
             shutdown: Arc::new(AtomicBool::new(false)),
             next_preview: AtomicU64::new(1),
@@ -342,6 +344,48 @@ struct DockerStep {
 struct DockerResponse {
     comparison: docker::Comparison,
     scan: Option<ScanResponse>,
+    outcome: Option<docker::Outcome>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FixChoice {
+    preview_id: u64,
+    files: Vec<String>,
+}
+
+impl AppState {
+    fn chosen_fixes(&self, path: &str, target: PhpVersion, choice: &FixChoice) -> CmdResult<Vec<FileChange>> {
+        let previews = self.previews.lock().unwrap();
+        let (id, preview) = previews.get(path).ok_or_else(|| t!("Önce değişiklikleri hesaplayın.", "Calculate the changes first."))?;
+        if *id != choice.preview_id || preview.target != target {
+            return Err(t!(
+                "Önizleme güncel değil. Değişiklikleri yeniden hesaplayın.",
+                "The preview is out of date. Calculate the changes again."
+            ));
+        }
+        let chosen: Vec<FileChange> = preview.changes.iter().filter(|c| choice.files.contains(&c.file)).cloned().collect();
+        if chosen.is_empty() {
+            return Err(t!("Denenecek dosya seçilmedi.", "No files selected to try."));
+        }
+        Ok(chosen)
+    }
+
+    fn keep_docker_result(&self, path: String, root: &Path, comparison: &docker::Comparison) -> Option<ScanResponse> {
+        let _ = docker::record(&self.docker_history_path(&path), comparison.summary(now_secs()));
+        self.docker_results.lock().unwrap().insert(path.clone(), comparison.clone());
+        let entry = RuntimeLog {
+            file: format!("Docker · PHP {} → {}", comparison.source.version, comparison.target.version),
+            events: comparison.new_on_target.clone(),
+            check: None,
+            roots: vec![docker::CONTAINER_ROOT.to_string()],
+        };
+        let scan = self.scans.lock().unwrap().get(&path).cloned();
+        if scan.is_some() {
+            self.runtime.lock().unwrap().insert(path, entry.clone());
+        }
+        scan.map(|scan| respond(root, scan, Some(&entry)))
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -356,11 +400,26 @@ async fn docker_compare<R: Runtime>(
     pages: Vec<String>,
     database: Option<DatabaseChoice>,
     prepare: Option<String>,
+    fix: Option<FixChoice>,
 ) -> CmdResult<DockerResponse> {
     let path = normalize_path(path);
     let source: PhpVersion = source.parse().map_err(|_| t!("Geçersiz sürüm.", "Invalid version."))?;
     let target = parse_target(&target)?;
     let state = app.state::<AppState>();
+    let before = match &fix {
+        Some(_) => Some(
+            state
+                .docker_results
+                .lock()
+                .unwrap()
+                .get(&path)
+                .filter(|c| c.source.version == source && c.target.version == target)
+                .cloned()
+                .ok_or_else(|| t!("Önce projeyi karşılaştırın.", "Compare the project first."))?,
+        ),
+        None => None,
+    };
+    let fixes = fix.as_ref().map(|choice| state.chosen_fixes(&path, target, choice)).transpose()?.unwrap_or_default();
     let cancel = Arc::new(AtomicBool::new(false));
     if let Some(previous) = state.docker_cancel.lock().unwrap().insert(path.clone(), cancel.clone()) {
         previous.store(true, Ordering::Relaxed);
@@ -371,12 +430,14 @@ async fn docker_compare<R: Runtime>(
     let result = blocking(move || {
         let _running = RunningGuard(running);
         let root = project_root(&key)?;
+        rector::check_fresh(&root, &fixes.iter().collect::<Vec<_>>()).map_err(|e| e.to_string())?;
         let options = docker::Options {
             install_extensions: extensions,
             clean_images,
             pages,
             database: database.map(DatabaseChoice::into_source),
             prepare,
+            fixes: fixes.into_iter().map(|c| (c.file, c.new_content)).collect(),
         };
         let comparison = docker::compare(&root, source, target, options, &mine, |step| {
             let (step, version) = match step {
@@ -400,19 +461,23 @@ async fn docker_compare<R: Runtime>(
         }
     }
     let (root, comparison) = result?;
-    let _ = docker::record(&state.docker_history_path(&path), comparison.summary(now_secs()));
-    state.docker_results.lock().unwrap().insert(path.clone(), comparison.clone());
-    let entry = RuntimeLog {
-        file: format!("Docker · PHP {source} → {target}"),
-        events: comparison.new_on_target.clone(),
-        check: None,
-        roots: vec![docker::CONTAINER_ROOT.to_string()],
-    };
-    let scan = state.scans.lock().unwrap().get(&path).cloned();
-    if scan.is_some() {
-        state.runtime.lock().unwrap().insert(path, entry.clone());
+    if let Some(before) = before {
+        let outcome = Some(docker::outcome(&before, &comparison));
+        state.docker_trials.lock().unwrap().insert(path, comparison.clone());
+        return Ok(DockerResponse { comparison, scan: None, outcome });
     }
-    Ok(DockerResponse { comparison, scan: scan.map(|scan| respond(&root, scan, Some(&entry))) })
+    let scan = state.keep_docker_result(path, &root, &comparison);
+    Ok(DockerResponse { comparison, scan, outcome: None })
+}
+
+#[tauri::command]
+fn keep_docker_trial(state: State<'_, AppState>, path: String) -> CmdResult<DockerResponse> {
+    let path = normalize_path(path);
+    let root = project_root(&path)?;
+    let comparison =
+        state.docker_trials.lock().unwrap().remove(&path).ok_or_else(|| t!("Önce düzeltmeleri deneyin.", "Try the fixes first."))?;
+    let scan = state.keep_docker_result(path, &root, &comparison);
+    Ok(DockerResponse { comparison, scan, outcome: None })
 }
 
 #[tauri::command]
@@ -443,6 +508,7 @@ fn close_project(state: State<'_, AppState>, path: String) {
     state.runtime.lock().unwrap().remove(&path);
     state.previews.lock().unwrap().remove(&path);
     state.docker_results.lock().unwrap().remove(&path);
+    state.docker_trials.lock().unwrap().remove(&path);
 }
 
 #[tauri::command]
@@ -1215,6 +1281,7 @@ pub fn with_commands<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R
         import_runtime_log,
         set_runtime_roots,
         docker_compare,
+        keep_docker_trial,
         database_plan,
         ssh_hosts,
         cancel_docker_compare,

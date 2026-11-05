@@ -1,6 +1,7 @@
 import type {
   DatabaseChoice,
   DatabasePlan,
+  DockerFixChoice,
   DockerImageUsage,
   DockerResponse,
   DockerSummary,
@@ -51,7 +52,8 @@ export interface Api {
   installRector(): Promise<ToolchainStatus>;
   rectorPreview(path: string, target: string, mode: RectorMode): Promise<RectorPreview>;
   cancelPreview(path?: string): Promise<void>;
-  dockerCompare(path: string, source: string, target: string, extensions: boolean, cleanImages: boolean, pages: string[], database: DatabaseChoice | null, prepare: string | null): Promise<DockerResponse>;
+  dockerCompare(path: string, source: string, target: string, extensions: boolean, cleanImages: boolean, pages: string[], database: DatabaseChoice | null, prepare: string | null, fix?: DockerFixChoice): Promise<DockerResponse>;
+  keepDockerTrial(path: string): Promise<DockerResponse>;
   databasePlan(path: string): Promise<DatabasePlan>;
   sshHosts(): Promise<string[]>;
   dockerImageUsage(): Promise<DockerImageUsage>;
@@ -117,7 +119,8 @@ async function tauriApi(): Promise<Api> {
     installRector: () => invoke("install_rector"),
     rectorPreview: (path, target, mode) => invoke("rector_preview", { path, target, mode }),
     cancelPreview: (path) => invoke("cancel_rector_preview", { path }),
-    dockerCompare: (path, source, target, extensions, cleanImages, pages, database, prepare) => invoke("docker_compare", { path, source, target, extensions, cleanImages, pages, database, prepare }),
+    dockerCompare: (path, source, target, extensions, cleanImages, pages, database, prepare, fix) => invoke("docker_compare", { path, source, target, extensions, cleanImages, pages, database, prepare, fix: fix ?? null }),
+    keepDockerTrial: (path) => invoke("keep_docker_trial", { path }),
     databasePlan: (path) => invoke("database_plan", { path }),
     sshHosts: () => invoke("ssh_hosts"),
     dockerImageUsage: () => invoke("docker_image_usage"),
