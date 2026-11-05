@@ -216,9 +216,13 @@ Set `sarif: "true"` to also write `ferry.sarif` for `github/codeql-action/upload
 | **Moodle** | `version.php` (or `public/version.php` from 5.1) with `lib/moodlelib.php` | `vendor` folders |
 | **MediaWiki** | `MW_VERSION` in `includes/Defines.php`, or `$wgVersion` in `includes/DefaultSettings.php` | core folders such as `includes`, `languages`, `maintenance`, `resources`; `extensions` and `skins` are scanned |
 | **phpBB** | `PHPBB_VERSION` in `includes/constants.php` (also under `phpBB/`) | core folders such as `phpbb`, `includes`, `cache`, `install`; `ext` and `styles` are scanned |
+| **CodeIgniter** | `system/CodeIgniter.php`, `system/core/CodeIgniter.php`, or `codeigniter4/framework` in `composer.json` | `system`, `writable` |
+| **Yii** | `yiisoft/yii2` or `yiisoft/yii` in `composer.json`, or Yii 1's `framework/YiiBase.php` | `framework`, `runtime`, `web/assets`, `protected/runtime`, `assets` |
+| **CakePHP** | `cakephp/cakephp` in `composer.json`, or CakePHP 2's `lib/Cake/VERSION.txt` | `lib/Cake`, `tmp`, `logs`, `app/tmp` |
+| **OpenCart** | `system/startup.php` with `catalog/controller` (also under `upload/`) | `system`, `image`, `install`; `admin`, `catalog` and `extension` are scanned |
 | **Plain PHP** | any folder with PHP files | — |
 
-For WordPress, Laravel, Drupal, Magento, PrestaShop, Joomla, Moodle, MediaWiki, phpBB, and Symfony, Ferry also checks the platform itself:
+For WordPress, Laravel, Drupal, Magento, PrestaShop, Joomla, Moodle, MediaWiki, phpBB, CodeIgniter, Yii, CakePHP, OpenCart, and Symfony, Ferry also checks the platform itself:
 
 - **WordPress:** the core version in `wp-includes/version.php` against the oldest WordPress release that supports your target PHP version (for example, PHP 8.4 needs WordPress 6.7).
 - **Laravel:** the `laravel/framework` version in `composer.lock` against Laravel's supported PHP range, plus the `str_*` and `array_*` helpers and the `Input` facade that Laravel 6 removed. PHP 8 needs Laravel 6.20 or newer, so these break too unless `laravel/helpers` is installed.
@@ -229,6 +233,10 @@ For WordPress, Laravel, Drupal, Magento, PrestaShop, Joomla, Moodle, MediaWiki, 
 - **Moodle:** `$release` in `version.php` against Moodle's PHP policy, down to the patch release (for example, PHP 8.2 needs 4.2.3 and PHP 8.4 needs 5.0).
 - **MediaWiki:** the version against mediawiki.org's compatibility matrix (for example, PHP 8.4 needs 1.46). The matrix has gaps, so findings are marked **Risky**.
 - **phpBB:** `PHPBB_VERSION` against the PHP range in each release's `INSTALL.html`: 3.3.6 adds PHP 8.0 and 8.1, 3.3.12 adds 8.2 and 8.3, and no stable release supports 8.4 yet.
+- **CodeIgniter:** CodeIgniter 4 against the user guide's table (for example, PHP 8.4 needs 4.6.0 and PHP 8.5 needs 4.7.0). CodeIgniter 3 has no table; its changelog stops at PHP 8.1 in 3.1.12, so newer targets are marked **Risky**.
+- **Yii:** Yii 1.1 and 2 against their changelogs (for example, PHP 8.4 needs 2.0.52 and PHP 8.5 needs 2.0.54). No published Yii 1.1 release supports PHP 8.5 yet. Findings are marked **Risky**.
+- **CakePHP:** the version against the PHP versions each release is tested on in its CI (for example, PHP 8.4 needs 4.6.3 or 5.1). Findings are marked **Risky**.
+- **OpenCart:** the version in `index.php`, all four parts, against the PHP versions each release's CI lints (for example, PHP 8.5 needs 3.0.5.1 or 4.1.0.4). OpenCart publishes no maximum, so findings are marked **Risky**.
 - **Symfony:** Symfony doesn't publish a maximum PHP version, so a release whose maintenance ended before your target PHP version came out is marked **Risky**.
 
 `vendor` and `node_modules` are always skipped. Files larger than 2 MB are skipped and listed in the scan results, so nothing is left out silently.

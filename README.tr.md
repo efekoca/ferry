@@ -216,9 +216,13 @@ Depo aynı zamanda `ferry-cli`'ı derleyip pull request'lere uyarı ekleyen bir 
 | **Moodle** | `lib/moodlelib.php` ile birlikte `version.php` (5.1'den itibaren `public/version.php`) | `vendor` klasörleri |
 | **MediaWiki** | `includes/Defines.php` içindeki `MW_VERSION` ya da `includes/DefaultSettings.php` içindeki `$wgVersion` | `includes`, `languages`, `maintenance`, `resources` gibi çekirdek klasörler; `extensions` ve `skins` taranır |
 | **phpBB** | `includes/constants.php` içindeki `PHPBB_VERSION` (`phpBB/` altında da aranır) | `phpbb`, `includes`, `cache`, `install` gibi çekirdek klasörler; `ext` ve `styles` taranır |
+| **CodeIgniter** | `system/CodeIgniter.php`, `system/core/CodeIgniter.php` ya da `composer.json`'da `codeigniter4/framework` | `system`, `writable` |
+| **Yii** | `composer.json`'da `yiisoft/yii2` ya da `yiisoft/yii`, veya Yii 1'in `framework/YiiBase.php` dosyası | `framework`, `runtime`, `web/assets`, `protected/runtime`, `assets` |
+| **CakePHP** | `composer.json`'da `cakephp/cakephp`, ya da CakePHP 2'nin `lib/Cake/VERSION.txt` dosyası | `lib/Cake`, `tmp`, `logs`, `app/tmp` |
+| **OpenCart** | `catalog/controller` ile birlikte `system/startup.php` (`upload/` altında da) | `system`, `image`, `install`; `admin`, `catalog` ve `extension` taranır |
 | **Düz PHP** | PHP dosyası içeren her klasör | — |
 
-WordPress, Laravel, Drupal, Magento, PrestaShop, Joomla, Moodle, MediaWiki, phpBB ve Symfony projelerinde Ferry platformun kendisini de kontrol eder:
+WordPress, Laravel, Drupal, Magento, PrestaShop, Joomla, Moodle, MediaWiki, phpBB, CodeIgniter, Yii, CakePHP, OpenCart ve Symfony projelerinde Ferry platformun kendisini de kontrol eder:
 
 - **WordPress:** `wp-includes/version.php`'deki çekirdek sürümü, hedef PHP sürümünü destekleyen en eski WordPress sürümüyle karşılaştırılır (örneğin PHP 8.4 için en az WordPress 6.7 gerekir).
 - **Laravel:** `composer.lock`'taki `laravel/framework` sürümü Laravel'in desteklediği PHP aralığıyla karşılaştırılır. Ayrıca Laravel 6'nın kaldırdığı `str_*` ve `array_*` yardımcıları ile `Input` facade'ı işaretlenir; PHP 8 en az Laravel 6.20 gerektirdiği için `laravel/helpers` kurulu değilse bunlar da bozulur.
@@ -229,6 +233,10 @@ WordPress, Laravel, Drupal, Magento, PrestaShop, Joomla, Moodle, MediaWiki, phpB
 - **Moodle:** `version.php`'deki `$release` değeri, Moodle'ın PHP politikasıyla yama sürümüne kadar karşılaştırılır (örneğin PHP 8.2 için en az 4.2.3, PHP 8.4 için en az 5.0 gerekir).
 - **MediaWiki:** Sürüm, mediawiki.org'daki uyumluluk tablosuyla karşılaştırılır (örneğin PHP 8.4 için en az 1.46 gerekir). Tabloda boşluklar olduğu için bulgular **Riskli** olarak işaretlenir.
 - **phpBB:** `PHPBB_VERSION`, her sürümün `INSTALL.html` dosyasındaki PHP aralığıyla karşılaştırılır: 3.3.6 PHP 8.0 ve 8.1'i, 3.3.12 8.2 ve 8.3'ü ekler; 8.4'ü destekleyen kararlı bir sürüm henüz yok.
+- **CodeIgniter:** CodeIgniter 4, kullanım kılavuzundaki tabloyla karşılaştırılır (örneğin PHP 8.4 için 4.6.0, PHP 8.5 için 4.7.0 gerekir). CodeIgniter 3'ün tablosu yok; değişiklik günlüğü 3.1.12'de PHP 8.1'de bitiyor, bu yüzden daha yeni hedefler **Riskli** işaretlenir.
+- **Yii:** Yii 1.1 ve 2, değişiklik günlükleriyle karşılaştırılır (örneğin PHP 8.4 için 2.0.52, PHP 8.5 için 2.0.54 gerekir). Yayımlanmış hiçbir Yii 1.1 sürümü henüz PHP 8.5'i desteklemiyor. Bulgular **Riskli** işaretlenir.
+- **CakePHP:** Sürüm, her yayının CI'da test edildiği PHP sürümleriyle karşılaştırılır (örneğin PHP 8.4 için 4.6.3 ya da 5.1 gerekir). Bulgular **Riskli** işaretlenir.
+- **OpenCart:** `index.php`'deki sürümün dört parçası da, her yayının CI'da lint edildiği PHP sürümleriyle karşılaştırılır (örneğin PHP 8.5 için 3.0.5.1 ya da 4.1.0.4 gerekir). OpenCart en yüksek sürüm yayımlamadığı için bulgular **Riskli** işaretlenir.
 - **Symfony:** Symfony en yüksek PHP sürümünü yayımlamadığı için, bakımı hedef PHP sürümü çıkmadan biten bir sürüm **Riskli** olarak işaretlenir.
 
 `vendor` ve `node_modules` her zaman atlanır. 2 MB'tan büyük dosyalar atlanır ve tarama sonuçlarında listelenir; hiçbir dosya sessizce dışarıda kalmaz.

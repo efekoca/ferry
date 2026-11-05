@@ -82,6 +82,10 @@ pub fn check(root: &Path, framework: Framework, target: PhpVersion) -> Vec<Findi
         Framework::Moodle => moodle(root, target).into_iter().collect(),
         Framework::MediaWiki => mediawiki(root, target).into_iter().collect(),
         Framework::Phpbb => phpbb(root, target).into_iter().collect(),
+        Framework::CodeIgniter => codeigniter(root, target).into_iter().collect(),
+        Framework::Yii => yii(root, target).into_iter().collect(),
+        Framework::CakePhp => cakephp(root, target).into_iter().collect(),
+        Framework::OpenCart => opencart(root, target).into_iter().collect(),
         Framework::Generic => Vec::new(),
     }
 }
@@ -230,6 +234,64 @@ const MEDIAWIKI_MAX_PHP: [(Release, (u32, u32)); 5] =
 
 const PHPBB_MAX_PHP: [(Release, (u32, u32)); 4] = [((3, 2, 0), (7, 2)), ((3, 3, 0), (7, 4)), ((3, 3, 6), (8, 1)), ((3, 3, 12), (8, 3))];
 
+/// Moving between major versions of CodeIgniter or Yii is a rewrite, so each major is checked
+/// against its own releases only.
+const CODEIGNITER_MAX_PHP: [(Release, (u32, u32)); 8] = [
+    ((3, 0, 0), (7, 4)),
+    ((3, 1, 12), (8, 1)),
+    ((4, 0, 0), (8, 0)),
+    ((4, 1, 6), (8, 1)),
+    ((4, 2, 11), (8, 2)),
+    ((4, 4, 4), (8, 3)),
+    ((4, 6, 0), (8, 4)),
+    ((4, 7, 0), (8, 5)),
+];
+
+const YII_MAX_PHP: [(Release, (u32, u32)); 14] = [
+    ((1, 1, 0), (7, 4)),
+    ((1, 1, 23), (8, 0)),
+    ((1, 1, 26), (8, 1)),
+    ((1, 1, 28), (8, 2)),
+    ((1, 1, 30), (8, 3)),
+    ((1, 1, 32), (8, 4)),
+    ((2, 0, 0), (7, 4)),
+    ((2, 0, 38), (8, 0)),
+    ((2, 0, 45), (8, 1)),
+    ((2, 0, 48), (8, 2)),
+    ((2, 0, 50), (8, 3)),
+    ((2, 0, 52), (8, 4)),
+    ((2, 0, 54), (8, 5)),
+    ((3, 0, 0), (8, 5)),
+];
+
+const CAKEPHP_MAX_PHP: [(Release, (u32, u32)); 12] = [
+    ((2, 0, 0), (5, 6)),
+    ((2, 8, 0), (7, 0)),
+    ((3, 0, 0), (7, 4)),
+    ((4, 2, 0), (8, 0)),
+    ((4, 3, 0), (8, 1)),
+    ((4, 4, 0), (8, 2)),
+    ((4, 5, 3), (8, 3)),
+    ((4, 6, 3), (8, 5)),
+    ((5, 0, 0), (8, 3)),
+    ((5, 1, 0), (8, 4)),
+    ((5, 2, 7), (8, 5)),
+    ((6, 0, 0), (8, 5)),
+];
+
+/// OpenCart has four version parts, and the last one matters. The third part here is c * 100 + d.
+const OPENCART_MAX_PHP: [(Release, (u32, u32)); 9] = [
+    ((3, 0, 0), (7, 4)),
+    ((3, 0, 400), (8, 3)),
+    ((3, 0, 500), (8, 4)),
+    ((3, 0, 501), (8, 5)),
+    ((4, 0, 0), (8, 1)),
+    ((4, 0, 200), (8, 2)),
+    ((4, 1, 0), (8, 3)),
+    ((4, 1, 3), (8, 4)),
+    ((4, 1, 4), (8, 5)),
+];
+
 struct Located {
     file: String,
     line: usize,
@@ -256,13 +318,24 @@ fn release_check(
     target: PhpVersion,
 ) -> Option<Finding> {
     let current = release_parts(&found.version)?;
+    check_release(found, current, release_label, table, (product, rule), severity, target)
+}
+
+fn check_release(
+    found: Located,
+    current: Release,
+    label: fn(Release) -> String,
+    table: &[(Release, (u32, u32))],
+    (product, rule): (&str, &str),
+    severity: Severity,
+    target: PhpVersion,
+) -> Option<Finding> {
     let max = table.iter().rev().find(|(v, _)| *v <= current)?.1;
     let since = next_minor(max);
     if target < since {
         return None;
     }
-    let needed =
-        table.iter().find(|(v, m)| *v > current && PhpVersion::new(m.0, m.1) >= target).map(|(v, _)| format!("{}.{}.{}", v.0, v.1, v.2));
+    let needed = table.iter().find(|(v, m)| *v > current && PhpVersion::new(m.0, m.1) >= target).map(|(v, _)| label(*v));
     let (cur, t, t_acc) = (found.version.clone(), target.to_string(), crate::i18n::tr_accusative(&target.to_string()));
     let (tr, en, replacement) = match &needed {
         Some(n) => (
@@ -328,6 +401,60 @@ fn mediawiki(root: &Path, target: PhpVersion) -> Option<Finding> {
 fn phpbb(root: &Path, target: PhpVersion) -> Option<Finding> {
     let found = locate(root, &[("includes/constants.php", "'PHPBB_VERSION'"), ("phpBB/includes/constants.php", "'PHPBB_VERSION'")])?;
     release_check(found, &PHPBB_MAX_PHP, "phpBB", "framework.phpbb_version", Severity::Breaking, target)
+}
+
+fn locked(root: &Path, package: &str) -> Option<Located> {
+    let (_, version) = locked_version(root, &[package])?;
+    let version = version.trim_start_matches(['v', 'V']).to_string();
+    let (file, line, snippet) = package_line(root, package, &format!("{package} {version}"));
+    Some(Located { file, line, snippet, version })
+}
+
+fn codeigniter(root: &Path, target: PhpVersion) -> Option<Finding> {
+    let found = locate(root, &[("system/CodeIgniter.php", "CI_VERSION ="), ("system/core/CodeIgniter.php", "'CI_VERSION'")])
+        .or_else(|| locked(root, "codeigniter4/framework"))?;
+    let (table, severity) = if release_parts(&found.version)?.0 >= 4 {
+        (&CODEIGNITER_MAX_PHP[2..], Severity::Breaking)
+    } else {
+        (&CODEIGNITER_MAX_PHP[..2], Severity::Behavior)
+    };
+    release_check(found, table, "CodeIgniter", "framework.codeigniter_version", severity, target)
+}
+
+fn yii(root: &Path, target: PhpVersion) -> Option<Finding> {
+    let found = locked(root, "yiisoft/yii2")
+        .or_else(|| locked(root, "yiisoft/yii"))
+        .or_else(|| locate(root, &[("framework/YiiBase.php", "return '1."), ("framework/BaseYii.php", "return '2.")]))?;
+    let table = if release_parts(&found.version)?.0 == 1 { &YII_MAX_PHP[..6] } else { &YII_MAX_PHP[6..] };
+    release_check(found, table, "Yii", "framework.yii_version", Severity::Behavior, target)
+}
+
+fn cakephp(root: &Path, target: PhpVersion) -> Option<Finding> {
+    let found = locked(root, "cakephp/cakephp").or_else(|| {
+        let rel = "lib/Cake/VERSION.txt";
+        let text = std::fs::read_to_string(root.join(rel)).ok()?;
+        let lines: Vec<&str> = text.lines().collect();
+        let line = lines.iter().rposition(|l| l.starts_with(|c: char| c.is_ascii_digit()))?;
+        let version = lines[line];
+        Some(Located { file: rel.into(), line: line + 1, snippet: version.to_string(), version: version.trim().to_string() })
+    })?;
+    release_check(found, &CAKEPHP_MAX_PHP, "CakePHP", "framework.cakephp_version", Severity::Behavior, target)
+}
+
+fn opencart(root: &Path, target: PhpVersion) -> Option<Finding> {
+    let found = locate(root, &[("index.php", "define('VERSION'"), ("upload/index.php", "define('VERSION'")])?;
+    let mut parts = found.version.split('.').map(|p| p.parse::<u32>().unwrap_or(0));
+    let (a, b, c, d) = (parts.next()?, parts.next()?, parts.next().unwrap_or(0), parts.next().unwrap_or(0));
+    let label = |(a, b, c): Release| format!("{a}.{b}.{}.{}", c / 100, c % 100);
+    check_release(
+        found,
+        (a, b, c * 100 + d),
+        label,
+        &OPENCART_MAX_PHP,
+        ("OpenCart", "framework.opencart_version"),
+        Severity::Behavior,
+        target,
+    )
 }
 
 fn release_parts(v: &str) -> Option<Release> {
@@ -690,6 +817,93 @@ mod tests {
         assert_eq!(check(documented.path(), Framework::WordPress, PhpVersion::new(8, 4))[0].line, 5);
         let old = project(&[("web/wp/wp-includes/version.php", "<?php\n$wp_version = \"4.9.8\";\n")]);
         assert_eq!(check(old.path(), Framework::WordPress, PhpVersion::new(8, 1))[0].since, PhpVersion::new(7, 4));
+    }
+
+    #[test]
+    fn codeigniter_versions() {
+        let four = project(&[("system/CodeIgniter.php", "<?php\nclass CodeIgniter {\n    public const CI_VERSION = '4.5.1';\n}\n")]);
+        assert_eq!(project::detect_framework(four.path()), Framework::CodeIgniter);
+        assert!(check(four.path(), Framework::CodeIgniter, PhpVersion::new(8, 3)).is_empty());
+        let f = &check(four.path(), Framework::CodeIgniter, PhpVersion::new(8, 5))[0];
+        assert_eq!((f.title.en.as_str(), f.line, f.since), ("CodeIgniter 4.5.1", 3, PhpVersion::new(8, 4)));
+        assert_eq!(f.severity, Severity::Breaking);
+        assert!(f.message.en.contains("at least CodeIgniter 4.7.0"), "{}", f.message.en);
+
+        let three = project(&[("system/core/CodeIgniter.php", "<?php\n\tdefine('CI_VERSION', '3.1.13');\n")]);
+        assert_eq!(project::detect_framework(three.path()), Framework::CodeIgniter);
+        let f = &check(three.path(), Framework::CodeIgniter, PhpVersion::new(8, 2))[0];
+        assert_eq!(f.severity, Severity::Behavior);
+        assert!(f.message.en.contains("no release that does"), "{}", f.message.en);
+
+        let composer = project(&[
+            ("composer.json", "{\n  \"require\": {\n    \"codeigniter4/framework\": \"^4.2\"\n  }\n}\n"),
+            ("composer.lock", r#"{"packages":[{"name":"codeigniter4/framework","version":"v4.2.0"}]}"#),
+        ]);
+        assert_eq!(project::detect_framework(composer.path()), Framework::CodeIgniter);
+        let f = &check(composer.path(), Framework::CodeIgniter, PhpVersion::new(8, 2))[0];
+        assert_eq!((f.file.as_str(), f.line, f.title.en.as_str()), ("composer.json", 3, "CodeIgniter 4.2.0"));
+    }
+
+    #[test]
+    fn yii_versions() {
+        let two = project(&[
+            ("composer.json", "{\n  \"require\": {\n    \"yiisoft/yii2\": \"~2.0.45\"\n  }\n}\n"),
+            ("composer.lock", r#"{"packages":[{"name":"yiisoft/yii2","version":"2.0.45"}]}"#),
+        ]);
+        assert_eq!(project::detect_framework(two.path()), Framework::Yii);
+        let f = &check(two.path(), Framework::Yii, PhpVersion::new(8, 4))[0];
+        assert_eq!((f.title.en.as_str(), f.since), ("Yii 2.0.45", PhpVersion::new(8, 2)));
+        assert!(f.message.en.contains("at least Yii 2.0.52"), "{}", f.message.en);
+        let extension = project(&[("composer.json", r#"{"require":{"yiisoft/yii2-queue":"^2"}}"#)]);
+        assert_eq!(project::detect_framework(extension.path()), Framework::Generic);
+
+        let one = project(&[("framework/YiiBase.php", "<?php\nfunction getVersion() {\n    return '1.1.31';\n}\n")]);
+        assert_eq!(project::detect_framework(one.path()), Framework::Yii);
+        assert!(check(one.path(), Framework::Yii, PhpVersion::new(8, 3)).is_empty());
+        let f = &check(one.path(), Framework::Yii, PhpVersion::new(8, 4))[0];
+        assert!(f.message.en.contains("at least Yii 1.1.32"), "{}", f.message.en);
+        let f = &check(one.path(), Framework::Yii, PhpVersion::new(8, 5))[0];
+        assert!(f.message.en.contains("no release that does"), "{}", f.message.en);
+    }
+
+    #[test]
+    fn cakephp_versions() {
+        let four = project(&[
+            ("composer.json", "{\n  \"require\": {\n    \"cakephp/cakephp\": \"^4.4\"\n  }\n}\n"),
+            ("composer.lock", r#"{"packages":[{"name":"cakephp/cakephp","version":"4.4.18"}]}"#),
+        ]);
+        assert_eq!(project::detect_framework(four.path()), Framework::CakePhp);
+        assert!(check(four.path(), Framework::CakePhp, PhpVersion::new(8, 2)).is_empty());
+        let f = &check(four.path(), Framework::CakePhp, PhpVersion::new(8, 4))[0];
+        assert!(f.message.en.contains("at least CakePHP 4.6.3"), "{}", f.message.en);
+
+        let two = project(&[("lib/Cake/VERSION.txt", "// header\n//\n2.10.24\n")]);
+        assert_eq!(project::detect_framework(two.path()), Framework::CakePhp);
+        let f = &check(two.path(), Framework::CakePhp, PhpVersion::new(8, 2))[0];
+        assert_eq!((f.file.as_str(), f.line, f.title.en.as_str()), ("lib/Cake/VERSION.txt", 3, "CakePHP 2.10.24"));
+    }
+
+    #[test]
+    fn opencart_versions_use_all_four_parts() {
+        let dir = project(&[
+            ("index.php", "<?php\ndefine('VERSION', '4.1.0.3');\n"),
+            ("system/startup.php", "<?php\n"),
+            ("catalog/controller/x.php", "<?php\n"),
+        ]);
+        assert_eq!(project::detect_framework(dir.path()), Framework::OpenCart);
+        assert!(check(dir.path(), Framework::OpenCart, PhpVersion::new(8, 4)).is_empty());
+        let f = &check(dir.path(), Framework::OpenCart, PhpVersion::new(8, 5))[0];
+        assert_eq!((f.title.en.as_str(), f.severity), ("OpenCart 4.1.0.3", Severity::Behavior));
+        assert!(f.message.en.contains("at least OpenCart 4.1.0.4"), "{}", f.message.en);
+
+        let old = project(&[
+            ("upload/index.php", "<?php\ndefine('VERSION', '3.0.3.8');\n"),
+            ("upload/system/startup.php", "<?php\n"),
+            ("upload/catalog/controller/x.php", "<?php\n"),
+        ]);
+        assert_eq!(project::detect_framework(old.path()), Framework::OpenCart);
+        let f = &check(old.path(), Framework::OpenCart, PhpVersion::new(8, 2))[0];
+        assert!(f.message.en.contains("at least OpenCart 3.0.4.0"), "{}", f.message.en);
     }
 
     #[test]
