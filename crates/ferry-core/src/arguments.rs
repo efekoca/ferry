@@ -28,6 +28,9 @@ pub enum Check {
     ArrayLit(usize),
     This(usize),
     InvalidForBase(usize, usize),
+    /// The argument sets a locale, as opposed to reading it or resetting it to C.
+    ChangesLocale(usize),
+    ArrayLitEmpty(usize),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -109,6 +112,8 @@ impl Check {
             | Check::StrContains(n, _)
             | Check::This(n)
             | Check::InvalidForBase(n, _)
+            | Check::ChangesLocale(n)
+            | Check::ArrayLitEmpty(n)
             | Check::ArrayLit(n) => Some(n),
         }
     }
@@ -170,6 +175,15 @@ impl Check {
                 }
             }
             Check::This(_) => arg.len() == 1 && arg[0].kind == TokenKind::Variable && arg[0].text == "this",
+            Check::ArrayLitEmpty(_) => {
+                arg.len() == 2 && arg[0].is_punct("[") && arg[1].is_punct("]")
+                    || arg.len() == 3 && arg[0].is_ident_ci("array") && arg[1].is_punct("(") && arg[2].is_punct(")")
+            }
+            Check::ChangesLocale(_) => match literal(arg) {
+                Lit::Num(..) => false,
+                Lit::Str(Some(s)) => !["C", "POSIX"].contains(&s.as_str()),
+                _ => true,
+            },
             Check::New(_) => arg.first().is_some_and(|t| t.is_ident_ci("new")),
             Check::StrContains(_, part) => arg.len() == 1 && matches!(arg[0].kind, TokenKind::Str { .. }) && arg[0].text.contains(part),
             Check::ArrayLit(_) => {
@@ -182,6 +196,8 @@ impl Check {
         }
     }
 }
+
+pub(crate) const HTML_FLAGS_ID: &str = "behavior.html_default_flags";
 
 pub(crate) const NEGATIVE_KEY: PatternRule = rule(
     "behavior.negative_array_key",
@@ -279,7 +295,106 @@ pub(crate) const POW_ZERO_NEGATIVE: PatternRule = rule(
     ),
 );
 
+const DRIVER_METHODS: &[&str] = &[
+    "pdo::sqlitecreateaggregate",
+    "pdo::sqlitecreatecollation",
+    "pdo::sqlitecreatefunction",
+    "pdo::pgsqlcopyfromarray",
+    "pdo::pgsqlcopyfromfile",
+    "pdo::pgsqlcopytoarray",
+    "pdo::pgsqlcopytofile",
+    "pdo::pgsqlgetnotify",
+    "pdo::pgsqlgetpid",
+    "pdo::pgsqllobcreate",
+    "pdo::pgsqllobopen",
+    "pdo::pgsqllobunlink",
+];
+
+const fn value_error(tr: &'static str, en: &'static str, fix_tr: &'static str, fix_en: &'static str) -> PatternRule {
+    rule(
+        "removed.literal_value_error",
+        Text::new(tr, en),
+        R,
+        (8, 0),
+        tx(fix_tr, fix_en),
+        Text::new(
+            "Bu değer eskiden uyarı verip false ya da null döndürürdü; PHP 8.0'dan beri ValueError fırlatır.",
+            "This value used to warn and return false or null; since PHP 8.0 it throws a ValueError.",
+        ),
+    )
+}
+
 pub const ARGUMENTS: &[ArgRule] = &[
+    arg(&["htmlspecialchars", "htmlentities", "htmlspecialchars_decode", "html_entity_decode"], &[Count(1, 1)], rule(
+        HTML_FLAGS_ID,
+        Text::new("HTML kodlamanın varsayılan bayrakları", "Default flags of HTML encoding"),
+        B, (8, 1), code("ENT_COMPAT | ENT_HTML401"),
+        Text::new(
+            "PHP 8.1'den beri varsayılan bayraklar ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML401: tek tırnak da kodlanır, geçersiz UTF-8 boş sonuç yerine � olur. Bu dosyadaki bayraksız çağrıların hepsi için geçerlidir; yalnızca ilki gösterilir.",
+            "Since PHP 8.1 the default flags are ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML401: single quotes are encoded too, and invalid UTF-8 becomes � instead of an empty result. This applies to every call without flags in this file; only the first is shown.",
+        ),
+    )),
+    arg(&["setlocale"], &[Has(0, "LC_ALL"), ChangesLocale(1)], rule(
+        "behavior.locale_conversions",
+        Text::new("Locale artık dönüşümleri etkilemiyor", "The locale no longer affects conversions"),
+        B, (8, 0), tx("biçimlendirme için NumberFormatter, Türkçe harfler için mb_strtolower() kullanın", "use NumberFormatter for formatting and mb_strtolower() for non-ASCII letters"),
+        Text::new(
+            "PHP 8.0'dan beri ondalık sayılar metne locale'den bağımsız noktayla çevrilir, 8.2'den beri strtolower(), strtoupper(), ucfirst() ve benzerleri yalnızca ASCII harfleri değiştirir. tr_TR ile I/ı ve İ/i dönüşümü artık yapılmaz.",
+            "Since PHP 8.0 floats convert to strings with a dot whatever the locale, and since 8.2 strtolower(), strtoupper(), ucfirst() and similar functions change ASCII letters only. With tr_TR, I/ı and İ/i are no longer converted.",
+        ),
+    )),
+    arg(&["setlocale"], &[Has(0, "LC_NUMERIC"), ChangesLocale(1)], rule(
+        "behavior.locale_float",
+        Text::new("Locale artık sayı biçimini etkilemiyor", "The locale no longer formats floats"),
+        B, (8, 0), tx("biçimlendirme için number_format() ya da NumberFormatter kullanın", "use number_format() or NumberFormatter to format numbers"),
+        Text::new("PHP 8.0'dan beri ondalık sayılar metne locale'den bağımsız noktayla çevrilir; 1,5 değil 1.5 yazılır.", "Since PHP 8.0 floats convert to strings with a dot whatever the locale, so 1.5 is no longer written as 1,5."),
+    )),
+    arg(&["setlocale"], &[Has(0, "LC_CTYPE"), ChangesLocale(1)], rule(
+        "behavior.locale_case",
+        Text::new("Locale artık harf dönüşümünü etkilemiyor", "The locale no longer changes letter case"),
+        B, (8, 2), code("mb_strtolower()"),
+        Text::new(
+            "PHP 8.2'den beri strtolower(), strtoupper(), ucfirst() ve benzerleri yalnızca ASCII harfleri değiştirir. tr_TR ile I/ı ve İ/i dönüşümü artık yapılmaz.",
+            "Since PHP 8.2 strtolower(), strtoupper(), ucfirst() and similar functions change ASCII letters only. With tr_TR, I/ı and İ/i are no longer converted.",
+        ),
+    )),
+    arg(&["explode"], &[StrIs(0, &[""])], value_error("explode() boş ayraçla", "explode() with an empty separator", "tek karakterlere ayırmak için str_split() kullanın", "use str_split() to split into characters")),
+    arg(&["str_repeat"], &[NumBelow(1, 0.0)], value_error("str_repeat() negatif sayıyla", "str_repeat() with a negative count", "sayıyı 0'dan küçük olmayacak şekilde sınırlayın", "keep the count at 0 or above")),
+    arg(&["array_fill"], &[NumBelow(1, 0.0)], value_error("array_fill() negatif sayıyla", "array_fill() with a negative count", "sayıyı 0'dan küçük olmayacak şekilde sınırlayın", "keep the count at 0 or above")),
+    arg(&["array_chunk", "str_split"], &[NumBelow(1, 1.0)], value_error("Sıfır ya da negatif parça boyu", "Zero or negative chunk length", "boyu en az 1 yapın", "use a length of at least 1")),
+    arg(&["str_pad"], &[StrIs(2, &[""])], value_error("str_pad() boş dolgu metniyle", "str_pad() with an empty padding", "boş olmayan bir metin verin", "pass a non-empty string")),
+    arg(&["mb_substr_count"], &[StrIs(1, &[""])], value_error("mb_substr_count() boş metinle", "mb_substr_count() with an empty needle", "boş olmayan bir metin verin", "pass a non-empty string")),
+    arg(&["array_rand"], &[ArrayLitEmpty(0)], value_error("array_rand() boş diziyle", "array_rand() with an empty array", "önce dizinin boş olmadığını denetleyin", "check that the array isn't empty first")),
+    arg(&["vsprintf", "vprintf"], &[Str(1)], rule(
+        "removed.vsprintf_string",
+        Text::new("Metin verilen vsprintf()", "vsprintf() given a string"),
+        R, (8, 0), code("[$value]"),
+        Text::new("vsprintf() ve vprintf() PHP 8.0'dan beri dizi dışında bir değer verilirse TypeError fırlatır.", "vsprintf() and vprintf() throw a TypeError since PHP 8.0 when given anything but an array."),
+    )),
+    arg(&["filesystemiterator::__construct"], &[Count(2, 2), Lacks(1, "SKIP_DOTS"), Has(1, "FilesystemIterator")], rule(
+        "behavior.filesystem_iterator_dots",
+        Text::new("FilesystemIterator bayrakları", "FilesystemIterator flags"),
+        B, (8, 2), code("FilesystemIterator::SKIP_DOTS"),
+        Text::new(
+            "PHP 8.2'den beri bayrak verildiğinde SKIP_DOTS kendiliğinden eklenmez; döngüye . ve .. da girer.",
+            "Since PHP 8.2 SKIP_DOTS is no longer added when flags are passed, so the loop also sees . and ..",
+        ),
+    )),
+    arg(&["reflectionproperty::setvalue"], &[Count(1, 1)], rule(
+        "deprecated.reflection_set_value_single",
+        Text::new("Tek argümanlı ReflectionProperty::setValue()", "ReflectionProperty::setValue() with one argument"),
+        D, (8, 3), code("setValue(null, $value)"),
+        Text::new("ReflectionProperty::setValue() tek argümanla çağrılması PHP 8.3'te kullanımdan kalktı.", "Calling ReflectionProperty::setValue() with one argument is deprecated since PHP 8.3."),
+    )),
+    arg(DRIVER_METHODS, &[], rule(
+        "deprecated.pdo_driver_method",
+        Text::new("PDO'nun sürücüye özel metodu", "Driver-specific PDO method"),
+        D, (8, 5), code("Pdo\\Sqlite / Pdo\\Pgsql"),
+        Text::new(
+            "PDO::sqlite* ve PDO::pgsql* metotları PHP 8.5'te kullanımdan kalktı; Pdo\\Sqlite ve Pdo\\Pgsql sınıflarındaki karşılıklarını kullanın.",
+            "The PDO::sqlite* and PDO::pgsql* methods are deprecated since PHP 8.5; use their counterparts on Pdo\\Sqlite and Pdo\\Pgsql.",
+        ),
+    )),
     arg(&["curl_setopt"], &[Has(1, "CURLOPT_SAFE_UPLOAD"), False(2)], rule(
         "removed.curl_safe_upload_off",
         Text::new("CURLOPT_SAFE_UPLOAD kapatma", "Turning off CURLOPT_SAFE_UPLOAD"),

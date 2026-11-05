@@ -536,6 +536,23 @@ describe("Ferry app", () => {
     expect(save.mock.calls[0][1]).toMatchObject({ target: "8.3", exclude: ["legacy"], docker: { test: "vendor/bin/pest", pages: ["/shop"] } });
   });
 
+  it("says where new messages come from and finds a package's next version", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    const find = vi.spyOn(api, "findCompatibleVersions");
+    render(<App api={api} />);
+    await openAndScan(user);
+    await user.click(nav(/Docker karşılaştırması/));
+    await user.click(await screen.findByRole("button", { name: "Karşılaştırmayı başlat" }));
+    expect(await screen.findByText("Yeni mesajlar nereden geliyor")).toBeInTheDocument();
+    expect(screen.getByText("Önce WordPress'i güncelleyin.")).toBeInTheDocument();
+    expect(screen.getByText("acme/mailer 1.4.0")).toBeInTheDocument();
+    expect(find).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Uyumlu sürümleri bul" }));
+    await waitFor(() => expect(find).toHaveBeenCalled());
+    expect(await screen.findByText(/composer require acme\/mailer:\^/)).toBeInTheDocument();
+  });
+
   it("asks again before a trial copies data from a server", async () => {
     const user = userEvent.setup();
     const api = mockApi({ delay: 0 });

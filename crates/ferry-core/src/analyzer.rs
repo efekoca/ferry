@@ -392,6 +392,7 @@ pub fn analyze_source_in(file: &str, src: &str, target: PhpVersion, index: &crat
     line_starts.extend(src.match_indices('\n').map(|(i, _)| i + 1));
     let methods = method_tokens(&tokens);
     let mut ctx = Ctx {
+        html_flags_reported: false,
         file,
         src,
         line_starts,
@@ -712,6 +713,7 @@ impl GeneratedRow for (&str, (u32, u32), &str, &str) {
 }
 
 struct Ctx<'a> {
+    html_flags_reported: bool,
     file: &'a str,
     src: &'a str,
     line_starts: Vec<usize>,
@@ -1072,7 +1074,11 @@ impl<'a> Ctx<'a> {
                     }
                 }
                 if let Some((rule, at)) = crate::arguments::find(&lower, &args) {
-                    self.pattern(&rule.rule, at.unwrap_or(tok), None);
+                    let repeated =
+                        rule.rule.id == crate::arguments::HTML_FLAGS_ID && std::mem::replace(&mut self.html_flags_reported, true);
+                    if !repeated {
+                        self.pattern(&rule.rule, at.unwrap_or(tok), None);
+                    }
                 }
                 if lower == "class_alias" {
                     if let Some(name) = single(1).and_then(|t| crate::arguments::string_literal(&t.text)) {
@@ -2737,7 +2743,7 @@ fn concat_with_arithmetic(tokens: &[Token]) -> Vec<usize> {
     out
 }
 
-fn class_bodies(tokens: &[Token]) -> Vec<(usize, usize, usize)> {
+pub(crate) fn class_bodies(tokens: &[Token]) -> Vec<(usize, usize, usize)> {
     let mut out = Vec::new();
     for i in 0..tokens.len() {
         if !tokens[i].is_ident_ci("class") || i > 0 && (tokens[i - 1].is_punct("::") || tokens[i - 1].is_ident_ci("new")) {
@@ -3806,6 +3812,22 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
             ("<?php setcookie('', 'v'); setcookie('a', '');", "behavior.setcookie_empty_name", 1),
             ("<?php gmp_setbit($g, -1); gmp_setbit($g, 1);", "removed.gmp_setbit_negative", 1),
             ("<?php setlocale('LC_ALL', 'C'); setlocale(LC_ALL, 'C');", "removed.setlocale_string_category", 1),
+            ("<?php setlocale(LC_ALL, 'tr_TR.UTF-8'); setlocale(LC_ALL, $l); setlocale(LC_ALL, 'C'); setlocale(LC_ALL, 0); setlocale(LC_MONETARY, 'tr_TR');", "behavior.locale_conversions", 2),
+            ("<?php setlocale(LC_NUMERIC, 'tr_TR'); setlocale(LC_NUMERIC, 'POSIX');", "behavior.locale_float", 1),
+            ("<?php setlocale(LC_CTYPE, 'tr_TR'); setlocale(LC_CTYPE, 'C');", "behavior.locale_case", 1),
+            ("<?php htmlspecialchars($a); htmlentities($b); htmlspecialchars($c, ENT_QUOTES);", "behavior.html_default_flags", 1),
+            ("<?php htmlspecialchars($c, ENT_QUOTES); html_entity_decode($d, ENT_COMPAT, 'UTF-8');", "behavior.html_default_flags", 0),
+            ("<?php explode('', $s); explode(',', $s); str_repeat($s, -1); str_repeat($s, 2); array_fill(0, -1, 'x'); array_fill(0, 1, 'x'); array_chunk($a, 0); array_chunk($a, 1); str_split($s, 0); str_split($s); str_pad($s, 5, ''); str_pad($s, 5, ' '); mb_substr_count($s, ''); mb_substr_count($s, 'a'); array_rand([], 1); array_rand(array(), 1); array_rand([1], 1); array_rand($a);", "removed.literal_value_error", 9),
+            ("<?php vsprintf('%s', 'x'); vsprintf('%s', ['x']); vprintf('%s', 'x'); vsprintf('%s', $a);", "removed.vsprintf_string", 2),
+            ("<?php new FilesystemIterator($p, FilesystemIterator::KEY_AS_PATHNAME); new FilesystemIterator($p, FilesystemIterator::KEY_AS_PATHNAME | FilesystemIterator::SKIP_DOTS); new FilesystemIterator($p); new FilesystemIterator($p, $flags);", "behavior.filesystem_iterator_dots", 1),
+            ("<?php $r = new ReflectionProperty('A', 'b'); $r->setValue(1); $r->setValue($o, 1);", "deprecated.reflection_set_value_single", 1),
+            ("<?php $d = new PDO('sqlite::memory:'); $d->sqliteCreateFunction('f', 'g'); $d->pgsqlGetPid(); $d->query('x');", "deprecated.pdo_driver_method", 2),
+            ("<?php preg_match('/[\\\\w-.]+/', $s); preg_match('/[a\\\\d-z]/', $s); preg_match('/[\\\\w-]+/', $s); preg_match('/[\\\\w\\\\-.]+/', $s); preg_match('/\\\\w-.[a-z]/', $s); preg_match('/[a-z\\\\s]/', $s);", "removed.regex_class_range", 2),
+            ("<?php $d = new PDO($s); $r = $d->query('x'); if ($r === false) {} $d->query('y') === false; $d->exec('z') or die('no'); if (!$d->prepare('p')) {} $d->query('fine');", "behavior.pdo_default_exceptions", 4),
+            ("<?php $d = new PDO($s, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_SILENT]); $d->query('y') === false;", "behavior.pdo_default_exceptions", 0),
+            ("<?php function f($d) { $d->query('y') === false; }", "behavior.pdo_default_exceptions", 0),
+            ("<?php class A { public function n() { static $c = 0; return ++$c; } private function p() { static $d; } public function o() { static $e; } public function k() { $x = static function () {}; } } class B extends A { public function o() {} }", "behavior.inherited_static_variable", 1),
+            ("<?php class A { public function n() { static $c = 0; return ++$c; } }", "behavior.inherited_static_variable", 0),
             ("<?php hash_hmac('crc32', $d, $k); hash_hmac('sha256', $d, $k); hash_init('fnv132', HASH_HMAC, $k); hash_init('fnv132');", "removed.hash_hmac_non_crypto", 2),
             ("<?php json_decode($s, null, 512, JSON_OBJECT_AS_ARRAY); json_decode($s, true, 512, JSON_OBJECT_AS_ARRAY);", "behavior.json_decode_null_assoc", 1),
             ("<?php strpos($h, 65); strstr($h, '65'); strrchr($h, 0x41); mb_ereg_replace(65, 'b', $s); strpos($h, $n);", "behavior.int_as_char_code", 3),

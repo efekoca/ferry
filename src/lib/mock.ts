@@ -295,17 +295,17 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
       const event = { path: "/app/includes/class-cart.php", line: 118, level: "fatal" as const, message: "Error: Call to undefined function each()", count: 1 };
       await new Promise((r) => setTimeout(r, opts.delay ?? 0));
       if (fix) {
-        const comparison = { source: run(source, 0, true, "OK (12 tests)"), target: run(target, 0, true, "OK (12 tests)"), dependenciesInstalled: true, installLog: "", newFailures: [], dataChanges: [], databaseUsed: !!database, pages: [], newOnTarget: [], goneOnTarget: [event] };
+        const comparison = { source: run(source, 0, true, "OK (12 tests)"), target: run(target, 0, true, "OK (12 tests)"), dependenciesInstalled: true, installLog: "", newFailures: [], dataChanges: [], databaseUsed: !!database, pages: [], newOnTarget: [], goneOnTarget: [event], origins: [] };
         const none = { fixed: [], remaining: [], introduced: [] };
         dockerTrial = comparison;
-        return { comparison, scan: null, outcome: { messages: { ...none, fixed: [event] }, tests: { ...none, fixed: ["CartTest::testTotal"] }, pages: { ...none, fixed: pages.length ? ["/cart.php"] : [] }, tables: none, lintBefore: 1, lintAfter: 0, regressedBefore: true, regressedAfter: false } };
+        return { comparison, scan: null, outcome: { messages: { ...none, fixed: [event] }, tests: { ...none, fixed: ["CartTest::testTotal"] }, pages: { ...none, fixed: pages.length ? ["/cart.php"] : [] }, tables: none, lintBefore: 1, lintAfter: 0, regressedBefore: true, regressedAfter: false, origins: [] } };
       }
       dockerImages = extensions && !cleanImages ? 2 : dockerImages;
       dockerRuns = [{ at: Date.now() / 1000, source, target, regressed: true, testsCompared: true, pages: pages.length ? 2 : 0, brokenPages: pages.length ? 1 : 0, differingPages: pages.length ? 1 : 0, unverifiedPages: 0, newFailures: 1, newMessages: 1, dataChanges: database ? 1 : 0 }, ...dockerRuns];
       runtimeLog = `Docker · PHP ${source} → ${target}`;
       runtimeCheck = null;
       return {
-        comparison: { source: run(source, 0, true, "OK (12 tests)"), target: { ...run(target, 1, false, "ERRORS!"), events: [event] }, dependenciesInstalled: true, installLog: "", newFailures: ["CartTest::testTotal"], dataChanges: database ? [{ table: "orders", sourceRows: 3, targetRows: 4 }] : [], databaseUsed: !!database, pages: pages.length ? [{ path: "/cart.php", change: "errors" as const, sourceStatus: 200, targetStatus: 200, newErrors: ["Uncaught Error: Call to undefined function each()"], sourceText: "Sepet", targetText: "Fatal error" }, { path: "/", change: "same" as const, sourceStatus: 200, targetStatus: 200, newErrors: [], sourceText: "Mağaza", targetText: "Mağaza" }] : [], newOnTarget: [event], goneOnTarget: [] },
+        comparison: { source: run(source, 0, true, "OK (12 tests)"), target: { ...run(target, 1, false, "ERRORS!"), events: [event] }, dependenciesInstalled: true, installLog: "", newFailures: ["CartTest::testTotal"], dataChanges: database ? [{ table: "orders", sourceRows: 3, targetRows: 4 }] : [], databaseUsed: !!database, pages: pages.length ? [{ path: "/cart.php", change: "errors" as const, sourceStatus: 200, targetStatus: 200, newErrors: ["Uncaught Error: Call to undefined function each()"], sourceText: "Sepet", targetText: "Fatal error" }, { path: "/", change: "same" as const, sourceStatus: 200, targetStatus: 200, newErrors: [], sourceText: "Mağaza", targetText: "Mağaza" }] : [], newOnTarget: [event], goneOnTarget: [], origins: [{ kind: "project" as const, name: "", version: null, messages: 1, fatal: 1, advice: null }, { kind: "package" as const, name: "acme/mailer", version: "1.4.0", messages: 2, fatal: 0, advice: null }, { kind: "core" as const, name: "WordPress", version: null, messages: 1, fatal: 0, advice: { tr: "Önce WordPress'i güncelleyin.", en: "Update WordPress first." } }] },
         scan: withIgnores(lastScan),
         outcome: null,
       };
@@ -385,7 +385,7 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
     },
     findCompatibleVersions: async (_target, packages) => {
       await sleep(delay / 3);
-      const known: Record<string, [string, boolean]> = { "phpmailer/phpmailer": ["v6.9.1", true], "illuminate/database": ["v10.0.0", true], "phpunit/phpunit": ["9.6.0", true] };
+      const known: Record<string, [string, boolean]> = { "phpmailer/phpmailer": ["v6.9.1", true], "illuminate/database": ["v10.0.0", true], "phpunit/phpunit": ["9.6.0", true], "acme/mailer": ["v2.1.0", true] };
       return packages.filter((p) => known[p.name]).map((p) => ({ name: p.name, version: known[p.name][0], majorChange: known[p.name][1] }));
     },
     gitStatus: async (_path, files) => ({ repo: true, dirty: files.filter((f) => f === "includes/class-cart.php") }),

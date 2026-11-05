@@ -87,6 +87,40 @@ fn regex(pattern: &str) -> Option<Regex<'_>> {
     Some(Regex { body: &pattern[start + open.len_utf8()..end], modifiers: &pattern[end + close.len_utf8()..] })
 }
 
+fn class_range(body: &str) -> bool {
+    let b = body.as_bytes();
+    let mut i = 0;
+    let mut in_class = false;
+    while i < b.len() {
+        match b[i] {
+            b'\\' if i + 1 < b.len() => {
+                let starts_range = in_class
+                    && b"wWdDsShHvV".contains(&b[i + 1])
+                    && b.get(i + 2) == Some(&b'-')
+                    && b.get(i + 3).is_some_and(|&c| c != b']');
+                if starts_range {
+                    return true;
+                }
+                i += 2;
+                continue;
+            }
+            b'[' if !in_class => {
+                in_class = true;
+                if b.get(i + 1) == Some(&b'^') {
+                    i += 1;
+                }
+                if b.get(i + 1) == Some(&b']') {
+                    i += 1;
+                }
+            }
+            b']' => in_class = false,
+            _ => {}
+        }
+        i += 1;
+    }
+    false
+}
+
 const INVALID_ESCAPES: &str = "ijlmquyFIJLMOTUY";
 
 fn invalid_escape(body: &str) -> bool {
@@ -247,6 +281,9 @@ pub(crate) fn check(tokens: &[Token]) -> Vec<(usize, &'static PatternRule)> {
         }
         if call_is(PREG, 0) {
             if let Some(re) = regex(&text) {
+                if class_range(re.body) {
+                    out.push((k, &REGEX_RANGE));
+                }
                 if re.modifiers.contains('X') || invalid_escape(re.body) {
                     out.push((k, &REGEX_ESCAPE));
                 }
@@ -383,6 +420,18 @@ const REGEX_ESCAPE: PatternRule = rule(
     Text::new(
         "PHP 8.0'dan beri \\i gibi bilinmeyen kaçışlar düz karakter sayılmaz, derleme hatası verir ve X bayrağı yok sayılır; desen hiç eşleşmez.",
         "Since PHP 8.0 unknown escapes such as \\i are no longer literal characters but a compile error, and the X modifier is ignored, so the pattern never matches.",
+    ),
+);
+
+const REGEX_RANGE: PatternRule = rule(
+    "removed.regex_class_range",
+    Text::new("Karakter sınıfı aralığı", "Character class range"),
+    Severity::Breaking,
+    (7, 3),
+    Some(Text::new("tireyi kaçırın ya da sınıfın sonuna yazın: [\\w.-]", "escape the hyphen or put it last: [\\w.-]")),
+    Text::new(
+        "PHP 7.3'teki PCRE2 [\\w-.] gibi \\w ile başlayan aralıkları derlemez; desen uyarı verip false döner.",
+        "PCRE2 in PHP 7.3 doesn't compile ranges that start at a class such as [\\w-.]; the pattern warns and returns false.",
     ),
 );
 

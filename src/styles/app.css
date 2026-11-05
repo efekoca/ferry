@@ -1930,6 +1930,15 @@ select.input {
   margin-top: var(--space-3);
 }
 
+.docker-origins h3 {
+  margin-bottom: var(--space-2);
+  font-size: var(--text-sm);
+}
+
+.docker-origins__step {
+  flex-basis: 100%;
+}
+
 .docker-fixes {
   display: flex;
   flex-direction: column;

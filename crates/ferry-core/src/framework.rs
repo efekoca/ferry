@@ -551,7 +551,7 @@ fn wordpress(root: &Path, target: PhpVersion) -> Option<Finding> {
         let rel = if base.is_empty() { "wp-includes/version.php".to_string() } else { format!("{base}/wp-includes/version.php") };
         std::fs::read_to_string(root.join(&rel)).ok().map(|t| (rel, t))
     })?;
-    let (line, snippet) = line_of(&text, "$wp_version")?;
+    let (line, snippet) = line_of(&text, "$wp_version =")?;
     let quoted = snippet.split(['\'', '"']).nth(1)?;
     let current = version_parts(quoted)?;
     let &(breaks_at, _) = WORDPRESS_MIN.iter().find(|(_, min)| current < *min)?;
@@ -686,6 +686,8 @@ mod tests {
         let f = &check(dir.path(), Framework::WordPress, PhpVersion::new(8, 4))[0];
         assert_eq!((f.file.as_str(), f.line, f.since), ("wp-includes/version.php", 2, PhpVersion::new(8, 3)));
         assert!(f.message.en.contains("at least WordPress 6.7"), "{}", f.message.en);
+        let documented = project(&[("wp-includes/version.php", "<?php\n/**\n * @global string $wp_version\n */\n$wp_version = '4.9';\n")]);
+        assert_eq!(check(documented.path(), Framework::WordPress, PhpVersion::new(8, 4))[0].line, 5);
         let old = project(&[("web/wp/wp-includes/version.php", "<?php\n$wp_version = \"4.9.8\";\n")]);
         assert_eq!(check(old.path(), Framework::WordPress, PhpVersion::new(8, 1))[0].since, PhpVersion::new(7, 4));
     }

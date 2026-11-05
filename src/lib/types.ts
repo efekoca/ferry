@@ -190,6 +190,15 @@ export interface DockerDataChange {
   targetRows: number | null;
 }
 
+export interface DockerOrigin {
+  kind: "project" | "core" | "package" | "extension";
+  name: string;
+  version: string | null;
+  messages: number;
+  fatal: number;
+  advice: Localized | null;
+}
+
 export interface DockerComparison {
   source: DockerRun;
   target: DockerRun;
@@ -201,6 +210,7 @@ export interface DockerComparison {
   databaseUsed: boolean;
   newOnTarget: DockerEvent[];
   goneOnTarget: DockerEvent[];
+  origins: DockerOrigin[];
 }
 
 export interface DockerSummary {
@@ -243,6 +253,7 @@ export interface DockerOutcome {
   lintAfter: number;
   regressedBefore: boolean;
   regressedAfter: boolean;
+  origins: DockerOrigin[];
 }
 
 export interface DockerResponse {

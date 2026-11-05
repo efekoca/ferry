@@ -6,32 +6,7 @@ Items that need verification before they're built are marked *(verify)*.
 
 ## 1. Language changes Ferry doesn't detect yet
 
-Ferry covers roughly half of the PHP 7.0–8.5 change catalog. Function, constant and syntax coverage is strong. The gaps are mostly runtime errors that can be found statically and are common in PHP 5.x and 7.x code. Most of them can be built on the project index (`index.rs`, which already knows parents, traits, static methods and signatures) and the existing guard parsing (`guards.rs`).
-
-### Highest value
-
-| Change | Version | Detection | Size |
-|---|---|---|---|
-| `fn` and `match` as class names; `use ... as Match` | 7.4, 8.0 | Extend `RESERVED_CLASS_NAMES` | S |
-
-### Cheap additions to existing tables
-
-- Argument-form deprecations from 8.1 to 8.5: `pg_*` without a connection, `imagepolygon` with four arguments, `ldap_connect($host, $port)`, one-argument `ReflectionProperty::setValue()`, `new ReflectionMethod('A::b')`, two-argument `stream_context_set_option()`, the ISO string `DatePeriod` constructor and others.
-- Signatures removed in 8.0: one-argument `mb_parse_str`, the encoding as the third argument of `mb_strrpos`, `vsprintf` with a non-array, `spl_autoload_register(..., false)` and others.
-- Removed symbols: the DOM classes removed in 8.0, `SplFixedArray`'s iterator methods, the `MYSQLI_*` constants removed in 8.4, `SID` (8.4), `NIL` (8.1), the `PDO::pgsql*` and `PDO::sqlite*` methods (8.5).
-- `DEPRECATED_INI`: the 7.x removals, `allow_url_include` (7.4), the remaining 8.4 session keys, `intl.error_level` and `report_memleaks` (8.5).
-- `new FilesystemIterator($path, $flags)` without `SKIP_DOTS` (8.2).
-- Literal arguments that now throw `ValueError`: `explode('', $s)`, `str_repeat($s, -1)`, `range(1, 10, 0)` and others.
-
-### Silent behavior changes worth a review-level finding
-
-- The default flags of `htmlspecialchars` and related functions (8.1).
-- Static variables in inherited methods are shared between subclasses (8.1), which breaks per-class singletons.
-- An integer needle in `strpos` and related functions now means the digits, not a character code (8.0).
-- PDO (8.0) and mysqli (8.1) throw exceptions by default; code that checks `=== false` stops working.
-- Locale-dependent code: since 8.0 floats are converted to strings without the locale, and since 8.2 `strtolower` and related functions are ASCII-only. This matters for Turkish (`tr_TR`) projects.
-- Sort callbacks that return a bool (8.0 deprecation, plus stable sorting).
-- Literal regex patterns that PCRE2 rejects (`[\w-.]` in 7.3, invalid escapes in 8.0, `{,3}` in 8.4).
+Function, constant, syntax and literal-argument coverage is strong, and the common silent changes are reviewed, including locale-dependent code for Turkish projects. What's left needs runtime evidence.
 
 ### Out of reach for static analysis
 

@@ -25,6 +25,7 @@ pub mod index;
 pub mod lexer;
 pub mod localcheck;
 mod objects;
+pub mod origin;
 pub mod packagist;
 pub mod probe;
 pub mod project;

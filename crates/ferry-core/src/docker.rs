@@ -127,6 +127,7 @@ pub struct Comparison {
     pub database_used: bool,
     pub new_on_target: Vec<Event>,
     pub gone_on_target: Vec<Event>,
+    pub origins: Vec<crate::origin::Origin>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize)]
@@ -223,6 +224,7 @@ pub struct Outcome {
     pub lint_after: usize,
     pub regressed_before: bool,
     pub regressed_after: bool,
+    pub origins: Vec<crate::origin::Origin>,
 }
 
 impl Outcome {
@@ -275,6 +277,7 @@ pub fn outcome(before: &Comparison, after: &Comparison) -> Outcome {
         lint_after: after.target.lint_errors,
         regressed_before: before.regressed(),
         regressed_after: after.regressed(),
+        origins: after.origins.clone(),
     }
 }
 
@@ -821,6 +824,7 @@ pub fn compare(
     let new_failures = target_run.failed_tests.iter().filter(|t| !source_run.failed_tests.contains(t)).cloned().collect();
     let new_on_target = differs(&target_run.events, &source_run.events);
     let gone_on_target = differs(&source_run.events, &target_run.events);
+    let origins = crate::origin::group(root, &new_on_target, target);
     Ok(Comparison {
         source: source_run,
         target: target_run,
@@ -832,6 +836,7 @@ pub fn compare(
         database_used: options.database.is_some(),
         new_on_target,
         gone_on_target,
+        origins,
     })
 }
 
@@ -878,6 +883,7 @@ mod tests {
             database_used: false,
             new_on_target: events,
             gone_on_target: Vec::new(),
+            origins: Vec::new(),
         }
     }
 
