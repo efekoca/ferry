@@ -20,20 +20,20 @@ function write(key: string, value: number) {
   }
 }
 
-export function Splitter({ id, side, label }: { id: string; side: "start" | "end"; label: string }) {
+export function Splitter({ id, side, label, narrowAt = NARROW }: { id: string; side: "start" | "end"; label: string; narrowAt?: string }) {
   const ref = useRef<HTMLDivElement>(null);
-  const [narrow, setNarrow] = useState(() => window.matchMedia?.(NARROW).matches ?? false);
+  const [narrow, setNarrow] = useState(() => window.matchMedia?.(narrowAt).matches ?? false);
   const [size, setSize] = useState<number | null>(null);
   const [percent, setPercent] = useState(50);
   const key = `ferry.split.${id}.${narrow ? "rows" : "cols"}`;
 
   useEffect(() => {
-    const query = window.matchMedia?.(NARROW);
+    const query = window.matchMedia?.(narrowAt);
     if (!query) return;
     const update = () => setNarrow(query.matches);
     query.addEventListener("change", update);
     return () => query.removeEventListener("change", update);
-  }, []);
+  }, [narrowAt]);
 
   useEffect(() => setSize(read(key)), [key]);
 

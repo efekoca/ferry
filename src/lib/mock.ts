@@ -1,6 +1,6 @@
 import type { Api } from "./api";
 import type { Localized } from "../i18n";
-import type { DockerComparison, DockerSummary, ProjectConfig,
+import type { CheckSummary, DockerComparison, DockerSummary, ProjectConfig,
   CheckRun,
   DependencyReport,
   DiffLine,
@@ -181,6 +181,7 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
   let runtimeRoots: string[] = [];
   let dockerImages = 0;
   let dockerRuns: DockerSummary[] = [];
+  const checkRuns: CheckSummary[] = [];
   let config: ProjectConfig = opts.config ?? { target: null, exclude: [], baseline: null, docker: { source: null, extensions: null, pages: null, dump: null, prepare: null, test: null }, git: { requireClean: false, branchPerBatch: false } };
   const info = async (path: string): Promise<ProjectInfo> => {
     await sleep(delay / 3);
@@ -343,6 +344,7 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
         notRun: 0,
         log: kind === "lint" ? "" : "OK (42 tests, 97 assertions)\n",
       };
+      checkRuns.unshift({ at: Math.floor(Date.now() / 1000) + checkRuns.length, target, label: runtimeLog, kind, passed: true, timedOut: false, exitCode: 0, failed: 0, durationMs: 1840 });
       return withIgnores(lastScan);
     },
     closeProject: async () => {
@@ -484,6 +486,7 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
       return withIgnores(lastScan);
     },
     interruptedWrites: async () => [],
+    checkHistory: async () => checkRuns,
     getSettings: async () => settings,
     saveSettings: async (s) => {
       settings = s;

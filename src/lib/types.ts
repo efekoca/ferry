@@ -134,6 +134,18 @@ export interface LocalPhp {
   path: string;
 }
 
+export interface CheckSummary {
+  at: number;
+  target: string;
+  label: string;
+  kind: "lint" | "tests";
+  passed: boolean;
+  timedOut: boolean;
+  exitCode: number | null;
+  failed: number;
+  durationMs: number;
+}
+
 export interface CheckRun {
   kind: "lint" | "tests";
   command: string;

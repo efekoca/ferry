@@ -318,7 +318,13 @@ fn release_check(
     target: PhpVersion,
 ) -> Option<Finding> {
     let current = release_parts(&found.version)?;
-    check_release(found, current, release_label, table, (product, rule), severity, target)
+    check_release(found, current, release_label, table, (product, rule, true), severity, target)
+}
+
+/// For projects with no published maximum, where the table comes from changelogs and CI.
+fn derived_check(found: Located, table: &[(Release, (u32, u32))], product: &str, rule: &str, target: PhpVersion) -> Option<Finding> {
+    let current = release_parts(&found.version)?;
+    check_release(found, current, release_label, table, (product, rule, false), Severity::Behavior, target)
 }
 
 fn check_release(
@@ -326,7 +332,7 @@ fn check_release(
     current: Release,
     label: fn(Release) -> String,
     table: &[(Release, (u32, u32))],
-    (product, rule): (&str, &str),
+    (product, rule, official): (&str, &str, bool),
     severity: Severity,
     target: PhpVersion,
 ) -> Option<Finding> {
@@ -337,15 +343,27 @@ fn check_release(
     }
     let needed = table.iter().find(|(v, m)| *v > current && PhpVersion::new(m.0, m.1) >= target).map(|(v, _)| label(*v));
     let (cur, t, t_acc) = (found.version.clone(), target.to_string(), crate::i18n::tr_accusative(&target.to_string()));
-    let (tr, en, replacement) = match &needed {
-        Some(n) => (
+    let source_tr = "Proje en yüksek sürümü yayımlamıyor; bu sonuç değişiklik günlüğünden ve CI'dan çıkarıldı.";
+    let source_en = "The project publishes no maximum, so this comes from its changelog and CI.";
+    let (tr, en, replacement) = match (&needed, official) {
+        (Some(n), true) => (
             format!("{product} {cur} resmi olarak PHP {t_acc} desteklemiyor. PHP {t} için {product}'u en az {n} sürümüne yükseltin."),
             format!("{product} {cur} doesn't officially support PHP {t}. PHP {t} needs at least {product} {n}."),
             format!("{product} {n}+"),
         ),
-        None => (
+        (Some(n), false) => (
+            format!("{product} {cur} sürümünün PHP {t_acc} desteklediğini gösteren bir kayıt yok. {source_tr} PHP {t} için {product}'u en az {n} sürümüne yükseltin."),
+            format!("{product} {cur} isn't known to work on PHP {t}. {source_en} PHP {t} needs at least {product} {n}."),
+            format!("{product} {n}+"),
+        ),
+        (None, true) => (
             format!("{product} {cur} resmi olarak PHP {t_acc} desteklemiyor ve bunu destekleyen bir sürümü henüz yayımlanmadı."),
             format!("{product} {cur} doesn't officially support PHP {t}, and no release that does has been published yet."),
+            format!("PHP {}", max.0.to_string() + "." + &max.1.to_string()),
+        ),
+        (None, false) => (
+            format!("{product} {cur} sürümünün PHP {t_acc} desteklediğini gösteren bir kayıt yok ve bunu destekleyen bir sürümü henüz yayımlanmadı. {source_tr}"),
+            format!("{product} {cur} isn't known to work on PHP {t}, and no release that does has been published yet. {source_en}"),
             format!("PHP {}", max.0.to_string() + "." + &max.1.to_string()),
         ),
     };
@@ -413,12 +431,10 @@ fn locked(root: &Path, package: &str) -> Option<Located> {
 fn codeigniter(root: &Path, target: PhpVersion) -> Option<Finding> {
     let found = locate(root, &[("system/CodeIgniter.php", "CI_VERSION ="), ("system/core/CodeIgniter.php", "'CI_VERSION'")])
         .or_else(|| locked(root, "codeigniter4/framework"))?;
-    let (table, severity) = if release_parts(&found.version)?.0 >= 4 {
-        (&CODEIGNITER_MAX_PHP[2..], Severity::Breaking)
-    } else {
-        (&CODEIGNITER_MAX_PHP[..2], Severity::Behavior)
-    };
-    release_check(found, table, "CodeIgniter", "framework.codeigniter_version", severity, target)
+    if release_parts(&found.version)?.0 < 4 {
+        return derived_check(found, &CODEIGNITER_MAX_PHP[..2], "CodeIgniter", "framework.codeigniter_version", target);
+    }
+    release_check(found, &CODEIGNITER_MAX_PHP[2..], "CodeIgniter", "framework.codeigniter_version", Severity::Breaking, target)
 }
 
 fn yii(root: &Path, target: PhpVersion) -> Option<Finding> {
@@ -426,7 +442,7 @@ fn yii(root: &Path, target: PhpVersion) -> Option<Finding> {
         .or_else(|| locked(root, "yiisoft/yii"))
         .or_else(|| locate(root, &[("framework/YiiBase.php", "return '1."), ("framework/BaseYii.php", "return '2.")]))?;
     let table = if release_parts(&found.version)?.0 == 1 { &YII_MAX_PHP[..6] } else { &YII_MAX_PHP[6..] };
-    release_check(found, table, "Yii", "framework.yii_version", Severity::Behavior, target)
+    derived_check(found, table, "Yii", "framework.yii_version", target)
 }
 
 fn cakephp(root: &Path, target: PhpVersion) -> Option<Finding> {
@@ -438,7 +454,7 @@ fn cakephp(root: &Path, target: PhpVersion) -> Option<Finding> {
         let version = lines[line];
         Some(Located { file: rel.into(), line: line + 1, snippet: version.to_string(), version: version.trim().to_string() })
     })?;
-    release_check(found, &CAKEPHP_MAX_PHP, "CakePHP", "framework.cakephp_version", Severity::Behavior, target)
+    derived_check(found, &CAKEPHP_MAX_PHP, "CakePHP", "framework.cakephp_version", target)
 }
 
 fn opencart(root: &Path, target: PhpVersion) -> Option<Finding> {
@@ -451,7 +467,7 @@ fn opencart(root: &Path, target: PhpVersion) -> Option<Finding> {
         (a, b, c * 100 + d),
         label,
         &OPENCART_MAX_PHP,
-        ("OpenCart", "framework.opencart_version"),
+        ("OpenCart", "framework.opencart_version", false),
         Severity::Behavior,
         target,
     )
@@ -895,6 +911,7 @@ mod tests {
         let f = &check(dir.path(), Framework::OpenCart, PhpVersion::new(8, 5))[0];
         assert_eq!((f.title.en.as_str(), f.severity), ("OpenCart 4.1.0.3", Severity::Behavior));
         assert!(f.message.en.contains("at least OpenCart 4.1.0.4"), "{}", f.message.en);
+        assert!(!f.message.en.contains("officially"), "{}", f.message.en);
 
         let old = project(&[
             ("upload/index.php", "<?php\ndefine('VERSION', '3.0.3.8');\n"),

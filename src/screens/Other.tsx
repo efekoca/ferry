@@ -457,7 +457,7 @@ function ServerProbe({ target, extensions }: { target: string; extensions: Exten
 
 export function History() {
   const { t } = useI18n();
-  const { api, project, snapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, dockerHistory } = useStore();
+  const { api, project, snapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, dockerHistory, checkHistory } = useStore();
   const [clearing, setClearing] = useState(false);
   const [pending, setPending] = useState<{ snapshot: Snapshot; action: "restore" | "delete" } | null>(null);
   const [reviewing, setReviewing] = useState<Snapshot | null>(null);
@@ -508,6 +508,21 @@ export function History() {
                   </li>
                 ))}
               </ul>
+            </Card>
+          )}
+          {checkHistory.length > 0 && (
+            <Card title={t.history.checksTitle}>
+              <ul className="docker-events">
+                {checkHistory.map((run) => (
+                  <li key={run.at}>
+                    <Badge tone={run.passed ? "auto" : "danger"}>{t.history.checkState(run.passed, run.timedOut)}</Badge>
+                    <code>{run.label}</code>
+                    <span>{formatRelative(run.at * 1000, t)}</span>
+                    {run.failed > 0 && <span>{t.history.checkFailed(run.failed)}</span>}
+                  </li>
+                ))}
+              </ul>
+              <p className="hint">{t.history.checksNote}</p>
             </Card>
           )}
           {snapshots.length === 0 ? (

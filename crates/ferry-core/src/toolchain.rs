@@ -253,6 +253,15 @@ pub fn php_version(php: &Path) -> Option<String> {
     String::from_utf8_lossy(&out.stdout).lines().map(str::trim).rfind(|l| !l.is_empty()).map(str::to_string)
 }
 
+/// The Rector folder for tests. They may skip on a developer's computer, but not in CI, where a
+/// missing setting would otherwise turn them into silent passes.
+#[doc(hidden)]
+pub fn test_tools() -> Option<PathBuf> {
+    let tools = std::env::var_os("FERRY_TEST_TOOLS").map(PathBuf::from);
+    assert!(tools.is_some() || std::env::var_os("CI").is_none(), "CI must set FERRY_TEST_TOOLS");
+    tools
+}
+
 const LINT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -115,7 +115,7 @@ fn laravel_api_is_nearly_ready() {
 
 #[test]
 fn rector_handles_every_demo_project() {
-    let Some(tools) = std::env::var_os("FERRY_TEST_TOOLS").map(PathBuf::from) else {
+    let Some(tools) = ferry_core::toolchain::test_tools() else {
         eprintln!("FERRY_TEST_TOOLS ayarlı değil; demo Rector testi atlandı");
         return;
     };
@@ -161,7 +161,7 @@ fn rector_handles_every_demo_project() {
 
 #[test]
 fn auto_findings_are_fixed_by_rector() {
-    let Some(tools) = std::env::var_os("FERRY_TEST_TOOLS").map(PathBuf::from) else {
+    let Some(tools) = ferry_core::toolchain::test_tools() else {
         return;
     };
     let php = ferry_core::toolchain::find_php(None).expect("php gerekli");
