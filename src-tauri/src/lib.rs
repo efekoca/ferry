@@ -898,6 +898,9 @@ async fn rector_preview(state: State<'_, AppState>, path: String, target: String
     let preview = blocking(move || {
         let _running = RunningGuard(running);
         let root = project_root(&path)?;
+        if mode == RectorMode::Pins {
+            return Ok(ferry_core::server::bump(&root, target));
+        }
         let php = toolchain::find_php(php_override.as_deref()).ok_or_else(|| toolchain::ToolError::PhpMissing.to_string())?;
         toolchain::require_supported_php(&php).map_err(|e| e.to_string())?;
         let info = project::inspect(&root).map_err(|e| e.to_string())?;

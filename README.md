@@ -91,7 +91,7 @@ Ferry also reads the files around the code that decide which PHP actually runs:
 - `.htaccess`: `php_value` and `php_flag` lines outside `<IfModule mod_php.c>`, which give a 500 error on PHP-FPM, and `<IfModule mod_php5.c>` or `mod_php7.c` blocks that PHP 8 no longer matches
 - `.user.ini`, `php.ini` and `.htaccess` settings that PHP removed or deprecated, such as `register_globals` (PHP won't start with it on), `track_errors`, `allow_url_include` and `session.trans_sid_hosts`
 - `composer.json` with `platform-check` turned off, and a `composer.lock` written by Composer 1
-- PHP versions pinned below your target in `Dockerfile`, Docker Compose, GitHub Actions, GitLab CI, Travis, Bitbucket Pipelines, `.tool-versions`, `.php-version`, and `config.platform.php` in `composer.json`
+- PHP versions pinned below your target in `Dockerfile`, Docker Compose, GitHub Actions, GitLab CI, Travis, Bitbucket Pipelines, DDEV, Lando, Platform.sh, PHP-FPM socket paths in `.conf` files and Caddyfiles, `.tool-versions`, `.php-version`, and `config.platform.php` in `composer.json`. The **Version files** mode on the Changes screen, or `ferry-cli pins <project> --write`, updates them
 
 ### Review every change before it is applied
 
@@ -278,7 +278,7 @@ When something is missing, the **Fixes** page says what and offers **Install Rec
 
 > **Your code never leaves your computer.** Ferry reads and changes files only in the folder you open, and has no telemetry.
 
-- **Read:** the PHP files in the project folder you choose, plus `composer.json`, `composer.lock`, and the files that decide which PHP runs: `.htaccess`, `.user.ini`, `php.ini`, Dockerfiles, Docker Compose and CI configuration.
+- **Read:** the PHP files in the project folder you choose, plus `composer.json`, `composer.lock`, and the files that decide which PHP runs: `.htaccess`, `.user.ini`, `php.ini`, Dockerfiles, Docker Compose, CI and hosting configuration, and web server `.conf` files.
 - **Written:** only the files you apply changes to, and `.ferry/ignore.json` when you ignore a finding. Every other file stays untouched.
 - **Stored:** backups of the files before each apply (all of them, or only the newest if you set a limit), a record of what was applied, the last 30 scan summaries per target, Rector's cache, and your settings, in the app's data folder: `~/Library/Application Support/io.github.efekoca.ferry` on macOS, `%APPDATA%\io.github.efekoca.ferry` on Windows, and `~/.local/share/io.github.efekoca.ferry` on Linux.
 - **Project code:** scanning never runs your code. Calculating fixes runs Rector in the project folder, and Rector loads the project's `vendor/autoload.php`, so files listed under Composer's `autoload.files` are executed. Only calculate fixes for projects you trust.

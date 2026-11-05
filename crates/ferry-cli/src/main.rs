@@ -10,6 +10,7 @@ use std::process::ExitCode;
 
 const USAGE: &str = "Usage: ferry-cli scan <project> [--target <8.2|8.3|8.4|8.5>] [options]
        ferry-cli compare <project> --target <version> [--source <version>] [--no-extensions] [--clean-images] [--page <path>] [--no-pages] [--db-dump <file>] [--db-live] [--db-seed] [--db-ssh <host:database:user>] [--prepare <command>] [--test <command>] [--try-fixes <rector>] [--format <text|json>]
+       ferry-cli pins <project> --target <version> [--write]
        ferry-cli clean-images
 
 Options:
@@ -38,6 +39,9 @@ Each version can get its own copy of the database: --db-dump imports a .sql or .
 --db-live copies a database on this computer, and --db-seed runs the project's migrations and seeders.
 --db-ssh reads a dump through your own ssh, read-only. Add --db-engine postgres for PostgreSQL.
 --prepare runs a command once in the project copy with network access, for example to build assets.
+
+pins lists the PHP versions pinned below the target in Dockerfiles, Compose, CI and hosting files.
+--write updates them. There is no backup, so commit first.
 
 Exit codes: 0 passed, 1 findings at the --fail-on level, 2 usage or run error,
 3 some files couldn't be scanned (unless --allow-incomplete).
@@ -694,6 +698,51 @@ fn print_outcome(outcome: &ferry_core::docker::Outcome) {
     println!("The fixed copy is {verdict}.");
 }
 
+fn run_pins(args: &[String]) -> Result<(), String> {
+    let (mut root, mut target, mut write) = (None, None, false);
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--target" => target = Some(it.next().ok_or("--target needs a value")?.parse::<PhpVersion>().map_err(|e| e.to_string())?),
+            "--write" => write = true,
+            other if root.is_none() && !other.starts_with('-') => root = Some(PathBuf::from(other)),
+            other => return Err(format!("unknown argument: {other}")),
+        }
+    }
+    let root = root.ok_or("pins needs a project path")?;
+    let target = match target {
+        Some(target) => target,
+        None => ferry_core::config::load(&root)?.target.ok_or("pins needs --target")?.parse::<PhpVersion>().map_err(|e| e.to_string())?,
+    };
+    let preview = ferry_core::server::bump(&root, target);
+    for error in &preview.errors {
+        eprintln!("{error}");
+    }
+    for change in &preview.changes {
+        println!("{}", change.file);
+        for line in change.diff.hunks.iter().flat_map(|h| &h.lines) {
+            match line.kind {
+                ferry_core::diff::LineKind::Del => println!("  - {}", line.text.trim()),
+                ferry_core::diff::LineKind::Add => println!("  + {}", line.text.trim()),
+                _ => {}
+            }
+        }
+        for rule in &change.rules {
+            println!("  {}", rule.title.en);
+        }
+    }
+    if preview.changes.is_empty() {
+        println!("Nothing to update for PHP {target}.");
+    } else if write {
+        let refs: Vec<_> = preview.changes.iter().collect();
+        ferry_core::rector::write_changes(&root, &refs, &mut Vec::new()).map_err(|e| e.to_string())?;
+        println!("Updated {} files.", refs.len());
+    } else {
+        println!("{} files would change. Run again with --write to update them.", preview.changes.len());
+    }
+    Ok(())
+}
+
 fn run_compare(args: &[String]) -> Result<bool, String> {
     let (mut root, mut source, mut target, mut json_output) = (None, None, None, false);
     let extensions = true;
@@ -848,6 +897,15 @@ fn main() -> ExitCode {
                 println!("Removed {count} images");
                 ExitCode::SUCCESS
             }
+            Err(e) => {
+                eprintln!("ferry-cli: {e}");
+                ExitCode::from(2)
+            }
+        };
+    }
+    if args.first().is_some_and(|a| a == "pins") {
+        return match run_pins(&args[1..]) {
+            Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
                 eprintln!("ferry-cli: {e}");
                 ExitCode::from(2)

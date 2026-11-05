@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { CircleAlert, CircleCheck, CircleStop, Download, GitBranch, GitCompareArrows, RotateCw, ShieldCheck, Sparkles, Wand2 } from "lucide-react";
+import { CircleAlert, CircleCheck, CircleStop, Download, GitBranch, GitCompareArrows, Pin, RotateCw, ShieldCheck, Sparkles, Wand2 } from "lucide-react";
 import { DiffViewer, type HunkChoice } from "../components/DiffViewer";
 import { ConfirmDialog } from "../components/Modal";
 import { PageHeader } from "../components/Shell";
@@ -23,7 +23,16 @@ export function Changes() {
   const modes = [
     { value: "compat" as const, label: t.changes.compat },
     { value: "modernize" as const, label: t.changes.modernize },
+    { value: "pins" as const, label: t.changes.pins },
   ];
+  const modeIcon = { compat: ShieldCheck, modernize: Sparkles, pins: Pin };
+  const modeText = { compat: t.changes.compatText, modernize: t.changes.modernizeText, pins: t.changes.pinsText };
+  const nothingText = { compat: t.changes.nothingCompat, modernize: t.changes.nothingModern, pins: t.changes.nothingPins };
+  const pinsInstead = (
+    <Button variant="secondary" icon={<Pin size={15} />} onClick={() => setMode("pins")}>
+      {t.changes.pinsInstead}
+    </Button>
+  );
 
   useEffect(() => {
     if (preview?.changes.length) setAppliedAll(false);
@@ -165,7 +174,7 @@ export function Changes() {
     );
   }
 
-  if (!toolchain.php) {
+  if (!toolchain.php && mode !== "pins") {
     return (
       <>
         {header}
@@ -173,9 +182,12 @@ export function Changes() {
           icon={<CircleAlert size={24} />}
           title={t.changes.noPhp}
           action={
-            <Button variant="primary" onClick={() => setView("settings")}>
-              {t.changes.openSettings}
-            </Button>
+            <div className="row">
+              <Button variant="primary" onClick={() => setView("settings")}>
+                {t.changes.openSettings}
+              </Button>
+              {pinsInstead}
+            </div>
           }
         >
           {t.changes.noPhpText}
@@ -184,7 +196,7 @@ export function Changes() {
     );
   }
 
-  if (!toolchain.rector) {
+  if (!toolchain.rector && mode !== "pins") {
     return (
       <>
         {header}
@@ -192,9 +204,12 @@ export function Changes() {
           icon={<Download size={24} />}
           title={t.changes.needRector}
           action={
-            <Button variant="primary" icon={<Download size={15} />} onClick={installRector} loading={installingRector} disabled={!toolchain.composer}>
-              {installingRector ? t.changes.installing : t.changes.installRector}
-            </Button>
+            <div className="row">
+              <Button variant="primary" icon={<Download size={15} />} onClick={installRector} loading={installingRector} disabled={!toolchain.composer}>
+                {installingRector ? t.changes.installing : t.changes.installRector}
+              </Button>
+              {pinsInstead}
+            </div>
           }
         >
           {toolchain.composer ? t.changes.needRectorText : t.changes.needComposerText}
@@ -214,10 +229,12 @@ export function Changes() {
                 <Wand2 size={18} aria-hidden />
                 <h2>{t.changes.introTitle(target)}</h2>
               </div>
-              <p className="muted">{t.changes.introText}</p>
-              <p className="hint">{t.changes.introTrust}</p>
+              <p className="muted">{mode === "pins" ? t.changes.introPins : t.changes.introText}</p>
+              {mode !== "pins" && <p className="hint">{t.changes.introTrust}</p>}
               <div className="mode-cards" role="radiogroup" aria-label={t.changes.mode}>
-                {modes.map((m) => (
+                {modes.map((m) => {
+                  const Icon = modeIcon[m.value];
+                  return (
                   <label key={m.value} className="mode-card" data-checked={mode === m.value}>
                     <input
                       type="radio"
@@ -229,13 +246,14 @@ export function Changes() {
                       onChange={() => setMode(m.value)}
                     />
                     <span className="mode-card__title">
-                      {m.value === "compat" ? <ShieldCheck size={15} aria-hidden /> : <Sparkles size={15} aria-hidden />}
+                      <Icon size={15} aria-hidden />
                       {m.label}
                       {m.value === "compat" && <span className="mode-card__tag">{t.changes.recommended}</span>}
                     </span>
-                    <span className="mode-card__text">{m.value === "compat" ? t.changes.compatText : t.changes.modernizeText}</span>
+                    <span className="mode-card__text">{modeText[m.value]}</span>
                   </label>
-                ))}
+                  );
+                })}
               </div>
               {previewing ? (
                 <div className="stack stack--tight">
@@ -279,7 +297,7 @@ export function Changes() {
           </EmptyState>
         ) : (
           <EmptyState icon={<CircleCheck size={24} />} title={t.changes.nothing}>
-            {preview.mode === "compat" ? t.changes.nothingCompat(preview.target) : t.changes.nothingModern(preview.target)}
+            {nothingText[preview.mode](preview.target)}
           </EmptyState>
         )}
         {preview.errors.length > 0 && (

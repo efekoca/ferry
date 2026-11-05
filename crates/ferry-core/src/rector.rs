@@ -17,6 +17,8 @@ const RECTOR_TIMEOUT: Duration = Duration::from_secs(20 * 60);
 pub enum RectorMode {
     Compat,
     Modernize,
+    /// PHP version pins in config files. Runs without Rector or PHP.
+    Pins,
 }
 
 const UNVERSIONED_RULES: &[(&str, (u32, u32))] = &[

@@ -137,6 +137,13 @@ const CHANGES: FileChange[] = [
   ]),
 ];
 
+const PIN_FILE = "Dockerfile";
+
+const pinChange = (target: string) =>
+  change(PIN_FILE, "likely", [["server.php_version_pin", L(`PHP sürümü ${target} olur`, `PHP version becomes ${target}`), target, "likely"]], [
+    { old: 1, spec: [["del", "FROM php:7.4-apache"], ["add", `FROM php:${target}-apache`], ["context", "RUN docker-php-ext-install pdo_mysql"]] },
+  ]);
+
 const DEPS: Omit<DependencyReport, "target" | "rootStatus"> = {
   rootConstraint: ">=5.6",
   hasLockFile: true,
@@ -413,6 +420,7 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
       const id = ++previewId;
       await sleep(delay * 2);
       if (cancelled) throw new Error("Rector was stopped.");
+      if (mode === "pins") return { id, target, mode, changes: fixed.has(PIN_FILE) ? [] : [pinChange(target)], errors: [], durationMs: 12 };
       const changes = pending.filter((c) => c.rules.some((r) => !r.since || versionLte(r.since, target)));
       return { id, target, mode, changes, errors: [], durationMs: 2140 };
     },

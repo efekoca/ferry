@@ -994,4 +994,26 @@ describe("Ferry app", () => {
     await user.keyboard("{ArrowRight}");
     expect(screen.getByRole("radio", { name: "8.5" })).toHaveAttribute("aria-checked", "true");
   });
+
+  it("moves version files to the target without Rector, through the same backup", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    const status = await api.toolchainStatus();
+    api.toolchainStatus = async () => ({ ...status, php: null, rector: null });
+    const apply = vi.spyOn(api, "applyChanges");
+    render(<App api={api} />);
+    await openAndScan(user);
+    await user.click(nav(/Düzeltmeler/));
+    await user.click(await screen.findByRole("button", { name: "Sürüm dosyalarını güncelle" }));
+    await user.click(await screen.findByRole("button", { name: "Değişiklikleri hesapla" }));
+    const hunk = await screen.findByRole("checkbox", { name: /satırdaki değişikliği uygula/ });
+    await user.click(hunk);
+    await user.click(screen.getByRole("button", { name: "Tümünü uygula" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: /uygula/i }));
+    await waitFor(() => expect(apply).toHaveBeenCalled());
+    expect(apply.mock.calls[0][2]).toEqual(["Dockerfile"]);
+    expect(apply.mock.calls[0][3]).toMatch(/^Sürüm dosyaları · PHP/);
+    expect(await screen.findByText("Hepsi uygulandı")).toBeInTheDocument();
+  });
 });

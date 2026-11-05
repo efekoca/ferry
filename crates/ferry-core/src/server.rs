@@ -1,5 +1,6 @@
 use crate::analyzer::{relative_path, FileError, Finding};
 use crate::i18n::{Localized, Text};
+use crate::rector::{AppliedRule, FileChange, RectorMode, RectorPreview};
 use crate::rules::{FixKind, Severity, DEPRECATED_INI, REMOVED_INI};
 use crate::version::PhpVersion;
 use std::path::Path;
@@ -18,21 +19,23 @@ struct Hit {
 }
 
 const MAX_ENTRIES: usize = MAX_FILES * 20;
+const HIDDEN_DIRS: [&str; 4] = [".github", ".ddev", ".upsun", ".platform"];
 
-pub fn scan(root: &Path, target: PhpVersion) -> (Vec<Finding>, Vec<FileError>) {
+fn visit_files(root: &Path, mut visit: impl FnMut(String, Kind, String)) -> Vec<FileError> {
     let keep = |e: &walkdir::DirEntry| {
         if e.depth() == 0 || !e.file_type().is_dir() {
             return true;
         }
         let name = e.file_name().to_string_lossy();
-        (e.depth() == 1 && name == ".github") || (!name.starts_with('.') && !crate::project::ALWAYS_SKIP.contains(&name.as_ref()))
+        (e.depth() == 1 && HIDDEN_DIRS.contains(&name.as_ref()))
+            || (!name.starts_with('.') && !crate::project::ALWAYS_SKIP.contains(&name.as_ref()))
     };
-    let mut out = Vec::new();
     let mut errors = Vec::new();
     let mut seen = 0;
+    let mut files = 0;
     for entry in WalkDir::new(root).follow_links(false).into_iter().filter_entry(keep) {
         seen += 1;
-        if seen > MAX_ENTRIES || out.len() > MAX_FILES {
+        if seen > MAX_ENTRIES || files > MAX_FILES {
             errors.push(FileError {
                 file: ".".into(),
                 message: crate::t!(
@@ -55,19 +58,25 @@ pub fn scan(root: &Path, target: PhpVersion) -> (Vec<Finding>, Vec<FileError>) {
         }
         let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
         let rel = relative_path(root, entry.path());
-        let in_workflows = rel.replace('\\', "/").starts_with(".github/workflows/");
+        let unix = rel.replace('\\', "/");
+        let in_workflows = unix.starts_with(".github/workflows/");
+        let yaml = name.ends_with(".yml") || name.ends_with(".yaml");
+        let hosting = (unix.starts_with(".ddev/") && name == "config.yaml")
+            || ((unix.starts_with(".upsun/") || unix.starts_with(".platform/")) && yaml)
+            || (entry.depth() == 1 && matches!(name.as_str(), ".lando.yml" | ".lando.yaml" | ".platform.app.yaml"));
         let kind = match name.as_str() {
+            _ if hosting => Kind::Hosting,
             ".htaccess" => Kind::Htaccess,
             ".user.ini" | "php.ini" => Kind::Ini,
             "composer.json" if entry.depth() == 1 => Kind::Composer,
             "composer.lock" if entry.depth() == 1 => Kind::ComposerLock,
             ".tool-versions" | ".php-version" if entry.depth() == 1 => Kind::Pin,
             ".gitlab-ci.yml" | "bitbucket-pipelines.yml" | ".travis.yml" => Kind::Ci,
+            "caddyfile" => Kind::Socket,
+            n if n.ends_with(".conf") => Kind::Socket,
             n if n == "dockerfile" || n.starts_with("dockerfile.") || n.ends_with(".dockerfile") => Kind::Docker,
-            n if (n.starts_with("docker-compose") || n.starts_with("compose")) && (n.ends_with(".yml") || n.ends_with(".yaml")) => {
-                Kind::Docker
-            }
-            n if in_workflows && (n.ends_with(".yml") || n.ends_with(".yaml")) => Kind::Ci,
+            n if (n.starts_with("docker-compose") || n.starts_with("compose")) && yaml => Kind::Docker,
+            _ if in_workflows && yaml => Kind::Ci,
             _ => continue,
         };
         if std::fs::metadata(entry.path()).is_ok_and(|m| m.len() > crate::project::MAX_FILE_BYTES) {
@@ -77,19 +86,26 @@ pub fn scan(root: &Path, target: PhpVersion) -> (Vec<Finding>, Vec<FileError>) {
             });
             continue;
         }
-        let text = match std::fs::read_to_string(entry.path()) {
-            Ok(text) => text,
-            Err(e) => {
-                errors.push(FileError { file: rel, message: crate::i18n::io_error(&e) });
-                continue;
+        match std::fs::read_to_string(entry.path()) {
+            Ok(text) => {
+                files += 1;
+                visit(rel, kind, text);
             }
-        };
+            Err(e) => errors.push(FileError { file: rel, message: crate::i18n::io_error(&e) }),
+        }
+    }
+    errors
+}
+
+pub fn scan(root: &Path, target: PhpVersion) -> (Vec<Finding>, Vec<FileError>) {
+    let mut out = Vec::new();
+    let errors = visit_files(root, |rel, kind, text| {
         let hits = match kind {
             Kind::Htaccess => htaccess(&text),
             Kind::Ini => ini(&text),
             Kind::Composer => composer(&text, target),
             Kind::ComposerLock => composer_lock(&text, target),
-            Kind::Pin | Kind::Docker | Kind::Ci => pins(&text, kind, target),
+            Kind::Pin | Kind::Docker | Kind::Ci | Kind::Hosting | Kind::Socket => pins(&text, kind, target),
         };
         let lines: Vec<&str> = text.lines().collect();
         for h in hits.into_iter().filter(|h| h.since <= target) {
@@ -109,8 +125,128 @@ pub fn scan(root: &Path, target: PhpVersion) -> (Vec<Finding>, Vec<FileError>) {
                 runtime_hits: 0,
             });
         }
-    }
+    });
     (out, errors)
+}
+
+/// Every pin that `scan` reports, moved to the target. Nothing is written here: the changes go
+/// through the same preview, backup and undo as Rector's.
+pub fn bump(root: &Path, target: PhpVersion) -> RectorPreview {
+    let started = std::time::Instant::now();
+    let mut changes = Vec::new();
+    let errors = visit_files(root, |rel, kind, text| {
+        let Some((after, note)) = bumped(&text, kind, target) else { return };
+        let rule = AppliedRule {
+            class: note.class().to_string(),
+            name: note.class().to_string(),
+            title: note.title(target),
+            since: Some(target),
+            fix: FixKind::Likely,
+        };
+        changes.push(FileChange {
+            file: rel,
+            rules: vec![rule],
+            fix: FixKind::Likely,
+            diff: crate::diff::compute(&text, &after, 3),
+            original_hash: crate::snapshot::fnv1a(text.as_bytes()),
+            new_content: after,
+        });
+    });
+    changes.sort_by(|a, b| a.file.cmp(&b.file));
+    RectorPreview {
+        target,
+        mode: RectorMode::Pins,
+        changes,
+        errors: errors.into_iter().map(|e| format!("{}: {}", e.file, e.message)).collect(),
+        duration_ms: started.elapsed().as_millis() as u64,
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BumpNote {
+    Moved,
+    Exact,
+    Composer,
+}
+
+impl BumpNote {
+    fn class(self) -> &'static str {
+        match self {
+            BumpNote::Moved => "server.php_version_pin",
+            BumpNote::Exact => "server.php_version_exact",
+            BumpNote::Composer => "server.composer_platform",
+        }
+    }
+
+    fn title(self, target: PhpVersion) -> Localized {
+        let text = match self {
+            BumpNote::Moved => (format!("PHP sürümü {target} olur"), format!("PHP version becomes {target}")),
+            BumpNote::Exact => (
+                format!("PHP {target}.0 yazılır; kullandığınız yama sürümüyle değiştirin"),
+                format!("Writes PHP {target}.0; change it to the patch release you use"),
+            ),
+            BumpNote::Composer => (
+                format!("config.platform.php {target} olur; ardından composer update çalıştırın"),
+                format!("config.platform.php becomes {target}; run composer update afterwards"),
+            ),
+        };
+        Localized { tr: text.0, en: text.1 }
+    }
+}
+
+fn bumped(text: &str, kind: Kind, target: PhpVersion) -> Option<(String, BumpNote)> {
+    if kind == Kind::Composer {
+        let (line, found) = composer_platform(text)?;
+        return (found < target).then(|| {
+            let after = edit_lines(text, |k, raw| (k + 1 == line).then(|| replace_platform(raw, target)).flatten());
+            (after, BumpNote::Composer)
+        });
+    }
+    if !matches!(kind, Kind::Pin | Kind::Docker | Kind::Ci | Kind::Hosting | Kind::Socket) {
+        return None;
+    }
+    let lines = stale_lines(text, kind, target);
+    let mut exact = false;
+    let after = edit_lines(text, |k, raw| {
+        let (_, spans) = lines.iter().find(|(line, _)| *line == k + 1)?;
+        let (new, full) = bumped_line(raw, spans, kind, target)?;
+        exact |= full;
+        Some(new)
+    });
+    (after != text).then_some((after, if exact { BumpNote::Exact } else { BumpNote::Moved }))
+}
+
+fn edit_lines(text: &str, mut edit: impl FnMut(usize, &str) -> Option<String>) -> String {
+    text.split_inclusive('\n').enumerate().map(|(k, raw)| edit(k, raw).unwrap_or_else(|| raw.to_string())).collect()
+}
+
+fn replace_platform(raw: &str, target: PhpVersion) -> Option<String> {
+    let start = raw.find(':')? + 1;
+    let value = start + raw[start..].find(|c: char| c.is_ascii_digit())?;
+    let end = value + version_len(&raw[value..]);
+    let full = raw[value..end].matches('.').count() == 2;
+    let version = if full { format!("{target}.0") } else { target.to_string() };
+    Some(format!("{}{version}{}", &raw[..value], &raw[end..]))
+}
+
+/// Returns the edited line and whether an exact release was written. Images pinned by digest stay
+/// as they are: the digest wouldn't match a new tag. In a list of versions the target is added,
+/// so CI keeps testing what it tested.
+fn bumped_line(raw: &str, spans: &[Span], kind: Kind, target: PhpVersion) -> Option<(String, bool)> {
+    if raw.contains("@sha256:") {
+        return None;
+    }
+    let last = spans.last()?;
+    if spans.len() > 1 {
+        let before = raw[..last.0.start].chars().next_back().filter(|c| matches!(c, '\'' | '"'));
+        let after = raw[last.0.end..].chars().next().filter(|c| Some(*c) == before);
+        let quote = after.map_or(String::new(), String::from);
+        let end = last.0.end + quote.len();
+        return Some((format!("{}, {quote}{target}{quote}{}", &raw[..end], &raw[end..]), false));
+    }
+    let full = kind == Kind::Pin && raw[last.0.clone()].matches('.').count() == 2;
+    let version = if full { format!("{target}.0") } else { target.to_string() };
+    Some((format!("{}{version}{}", &raw[..last.0.start], &raw[last.0.end..]), full))
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -122,6 +258,8 @@ enum Kind {
     Pin,
     Docker,
     Ci,
+    Hosting,
+    Socket,
 }
 
 fn truthy(value: &str) -> bool {
@@ -316,22 +454,33 @@ const JIT_DEFAULT: Text = Text::new(
     "In PHP 8.4 opcache.jit defaults to disable. Setting only jit_buffer_size, without opcache.jit, now silently leaves the JIT off.",
 );
 
+type Span = (std::ops::Range<usize>, PhpVersion);
+
+fn version_len(s: &str) -> usize {
+    s.bytes().take_while(|c| c.is_ascii_digit() || *c == b'.').count()
+}
+
 fn version_at(s: &str) -> Option<PhpVersion> {
-    let digits: String = s.chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
-    let mut parts = digits.split('.');
+    let mut parts = s[..version_len(s)].split('.');
     let major: u32 = parts.next()?.parse().ok()?;
     let minor: u32 = parts.next()?.parse().ok()?;
     (5..=9).contains(&major).then(|| PhpVersion::new(major, minor))
 }
 
-fn image_version(line: &str) -> Option<PhpVersion> {
+fn span_at(line: &str, start: usize) -> Option<Span> {
+    let rest = &line[start..];
+    let found = version_at(rest)?;
+    Some((start..start + rest[..version_len(rest)].trim_end_matches('.').len(), found))
+}
+
+fn image_version(line: &str) -> Option<Span> {
     let lower = line.to_ascii_lowercase();
     for marker in ["php:", ":php", "/php"] {
         let mut from = 0;
         while let Some(k) = lower[from..].find(marker) {
             let start = from + k + marker.len();
-            if let Some(v) = version_at(&lower[start..]) {
-                return Some(v);
+            if let Some(span) = span_at(line, start) {
+                return Some(span);
             }
             from = start;
         }
@@ -339,17 +488,69 @@ fn image_version(line: &str) -> Option<PhpVersion> {
     None
 }
 
-fn listed_versions(line: &str) -> Vec<PhpVersion> {
+fn listed_versions(line: &str, from: usize) -> Vec<Span> {
     let mut out = Vec::new();
     let bytes = line.as_bytes();
-    for k in 0..bytes.len() {
+    for k in from..bytes.len() {
         if bytes[k].is_ascii_digit() && (k == 0 || !(bytes[k - 1].is_ascii_alphanumeric() || bytes[k - 1] == b'.')) {
-            if let Some(v) = version_at(&line[k..]) {
-                out.push(v);
-            }
+            out.extend(span_at(line, k));
         }
     }
     out
+}
+
+fn socket_version(line: &str) -> Option<Span> {
+    let lower = line.to_ascii_lowercase();
+    lower.match_indices("php").find_map(|(k, _)| {
+        let span = span_at(line, k + 3)?;
+        lower[span.0.end..].starts_with("-fpm").then_some(span)
+    })
+}
+
+fn yaml_key(line: &str) -> (&str, usize) {
+    let start = line.len() - line.trim_start_matches(|c: char| c.is_whitespace() || c == '-').len();
+    let Some(colon) = line[start..].find(':') else { return ("", 0) };
+    (line[start..start + colon].trim().trim_matches(|c| c == '"' || c == '\''), start + colon + 1)
+}
+
+fn line_spans(line: &str, kind: Kind) -> Vec<Span> {
+    let trimmed = line.trim_start();
+    let lower = trimmed.to_ascii_lowercase();
+    let indent = line.len() - trimmed.len();
+    let (key, value) = yaml_key(line);
+    let key = key.to_ascii_lowercase();
+    match kind {
+        Kind::Pin => span_at(line, indent + if lower.starts_with("php ") { 4 } else { 0 }).into_iter().collect(),
+        Kind::Docker => {
+            let image = lower.starts_with("from ") || key == "image";
+            image.then(|| image_version(line)).flatten().into_iter().collect()
+        }
+        Kind::Socket => socket_version(line).into_iter().collect(),
+        Kind::Hosting if matches!(key.as_str(), "type" | "via") => image_version(line).into_iter().collect(),
+        _ if matches!(key.as_str(), "php" | "php-version" | "php-versions" | "php_version") => listed_versions(line, value),
+        _ if key == "image" => image_version(line).into_iter().collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn pin_lines(text: &str, kind: Kind) -> Vec<(usize, Vec<Span>)> {
+    let lines = text.lines().enumerate().filter(|(_, raw)| !raw.trim_start().starts_with('#'));
+    lines.map(|(i, raw)| (i + 1, line_spans(raw, kind))).filter(|(_, spans)| !spans.is_empty()).collect()
+}
+
+fn newest(spans: &[Span]) -> PhpVersion {
+    spans.iter().map(|s| s.1).max().unwrap_or(PhpVersion::new(0, 0))
+}
+
+/// A CI file passes as long as one job reaches the target, so only its newest pins count as stale.
+fn stale_lines(text: &str, kind: Kind, target: PhpVersion) -> Vec<(usize, Vec<Span>)> {
+    let lines = pin_lines(text, kind);
+    let best = lines.iter().map(|(_, spans)| newest(spans)).max();
+    match kind {
+        Kind::Ci if best.is_some_and(|b| b >= target) => Vec::new(),
+        Kind::Ci => lines.into_iter().filter(|(_, spans)| Some(newest(spans)) == best).collect(),
+        _ => lines.into_iter().filter(|(_, spans)| newest(spans) < target).collect(),
+    }
 }
 
 const PINNED: Text = Text::new(
@@ -375,44 +576,9 @@ fn pin_hit(line: usize, found: PhpVersion, target: PhpVersion, message: Text) ->
 }
 
 fn pins(text: &str, kind: Kind, target: PhpVersion) -> Vec<Hit> {
-    let mut out: Vec<(usize, PhpVersion)> = Vec::new();
-    for (i, raw) in text.lines().enumerate() {
-        let line = raw.trim();
-        if line.starts_with('#') {
-            continue;
-        }
-        let lower = line.to_ascii_lowercase();
-        let found = match kind {
-            Kind::Pin => {
-                let rest = lower.strip_prefix("php ").unwrap_or(&lower);
-                version_at(rest.trim()).into_iter().collect()
-            }
-            Kind::Docker => {
-                let image = lower.starts_with("from ") || lower.starts_with("image:") || lower.starts_with("- image:");
-                image.then(|| image_version(line)).flatten().into_iter().collect()
-            }
-            _ => {
-                let key =
-                    lower.trim_start_matches("- ").split(':').next().unwrap_or_default().trim().trim_matches(|c| c == '"' || c == '\'');
-                if matches!(key, "php" | "php-version" | "php-versions" | "php_version") {
-                    listed_versions(line.split_once(':').map_or("", |(_, v)| v))
-                } else if key == "image" || key == "- image" {
-                    image_version(line).into_iter().collect()
-                } else {
-                    Vec::new()
-                }
-            }
-        };
-        if let Some(&max) = found.iter().max() {
-            out.push((i + 1, max));
-        }
-    }
-    let old = |&(_, v): &(usize, PhpVersion)| v < target;
-    if kind == Kind::Ci {
-        let best = out.iter().copied().max_by_key(|&(line, v)| (v, std::cmp::Reverse(line)));
-        return best.filter(old).map(|(line, v)| pin_hit(line, v, target, PINNED)).into_iter().collect();
-    }
-    out.into_iter().filter(old).map(|(line, v)| pin_hit(line, v, target, PINNED)).collect()
+    let stale = stale_lines(text, kind, target);
+    let reported = if kind == Kind::Ci { &stale[..stale.len().min(1)] } else { &stale[..] };
+    reported.iter().map(|(line, spans)| pin_hit(*line, newest(spans), target, PINNED)).collect()
 }
 
 const PLATFORM_CHECK: Text = Text::new(
@@ -443,14 +609,20 @@ fn composer(text: &str, target: PhpVersion) -> Vec<Hit> {
             replacement: Some(Localized::same("\"platform-check\": true")),
         });
     }
-    let pinned = json.pointer("/config/platform/php").and_then(|v| v.as_str());
-    if let Some(found) = pinned.and_then(|p| version_at(p.trim_start_matches(['^', '~', '>', '=', ' ']))).filter(|f| *f < target) {
-        let lines: Vec<&str> = text.lines().collect();
-        let platform = lines.iter().position(|l| l.contains("\"platform\"")).unwrap_or(0);
-        let line = (platform..lines.len()).find(|&k| lines[k].contains("\"php\"")).map_or(platform + 1, |k| k + 1);
+    if let Some((line, found)) = composer_platform(text).filter(|(_, found)| *found < target) {
         out.push(pin_hit(line, found, target, PLATFORM));
     }
     out
+}
+
+fn composer_platform(text: &str) -> Option<(usize, PhpVersion)> {
+    let json = serde_json::from_str::<serde_json::Value>(text).ok()?;
+    let pinned = json.pointer("/config/platform/php")?.as_str()?;
+    let found = version_at(pinned.trim_start_matches(['^', '~', '>', '=', ' ']))?;
+    let lines: Vec<&str> = text.lines().collect();
+    let platform = lines.iter().position(|l| l.contains("\"platform\"")).unwrap_or(0);
+    let line = (platform..lines.len()).find(|&k| lines[k].contains("\"php\"")).map_or(platform + 1, |k| k + 1);
+    Some((line, found))
 }
 
 fn composer_lock(text: &str, target: PhpVersion) -> Vec<Hit> {
@@ -525,6 +697,105 @@ mod tests {
         let docker = found.iter().find(|f| f.file == "Dockerfile").unwrap();
         assert_eq!((docker.title.en.as_str(), docker.since.to_string()), ("PHP 7.4 pinned", "8.4".to_string()));
         assert!(scan(root, PhpVersion::new(8, 2)).0.iter().all(|f| f.file != ".tool-versions"));
+    }
+
+    fn write_all(root: &Path, files: &[(&str, &str)]) {
+        for (path, text) in files {
+            let p = root.join(path);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, text).unwrap();
+        }
+    }
+
+    #[test]
+    fn hosting_files_and_fpm_sockets_are_pins_too() {
+        let dir = tempfile::tempdir().unwrap();
+        write_all(
+            dir.path(),
+            &[
+                (".ddev/config.yaml", "name: site\nphp_version: \"7.4\"\n"),
+                (".lando.yml", "config:\n  php: '7.4'\nservices:\n  app:\n    type: php:8.0\n"),
+                (".platform.app.yaml", "name: app\ntype: 'php:8.1'\n"),
+                (".upsun/config.yaml", "applications:\n  app:\n    type: 'php:8.2'\n"),
+                ("docker/nginx/site.conf", "# php7.0-fpm.sock\nfastcgi_pass unix:/run/php/php7.4-fpm.sock;\n"),
+                ("Caddyfile", "php_fastcgi unix//run/php/php8.1-fpm.sock\n"),
+                ("other.conf", "listen = /run/php/php8.4-fpm.sock\nserver_name php7.example;\n"),
+            ],
+        );
+        let found = scan(dir.path(), PhpVersion::new(8, 4)).0;
+        let pins: Vec<_> = ids(&found).into_iter().map(|(f, l, _)| (f, l)).collect();
+        let expected = [
+            (".ddev/config.yaml", 2),
+            (".lando.yml", 2),
+            (".lando.yml", 5),
+            (".platform.app.yaml", 2),
+            (".upsun/config.yaml", 3),
+            ("Caddyfile", 1),
+            ("docker/nginx/site.conf", 2),
+        ];
+        assert_eq!(pins, expected.map(|(f, l)| (f.to_string(), l)));
+    }
+
+    #[test]
+    fn pins_move_to_the_target() {
+        let dir = tempfile::tempdir().unwrap();
+        write_all(
+            dir.path(),
+            &[
+                (".php-version", "8.2.10\n"),
+                (".tool-versions", "nodejs 20.1.0\nphp 8.2\n"),
+                ("Dockerfile", "FROM php:7.4-fpm-alpine AS app\r\nFROM node:20\r\n"),
+                ("Dockerfile.locked", "FROM php:7.4@sha256:abc\n"),
+                ("docker-compose.yml", "services:\n  app:\n    image: wordpress:php7.4.33-apache\n"),
+                (
+                    ".github/workflows/ci.yml",
+                    "jobs:\n  a:\n    php: ['7.4', '8.0']\n  b:\n    php-versions: \"7.4, 8.0\"\n  c:\n    php-version: 7.3\n",
+                ),
+                (".github/workflows/done.yml", "php: '8.4'\nother:\n  php: 7.4\n"),
+                ("composer.json", "{\n  \"config\": {\n    \"platform\": {\n      \"php\": \"7.4.33\"\n    }\n  }\n}\n"),
+                (".ddev/config.yaml", "php_version: \"7.4\"\n"),
+                ("nginx.conf", "fastcgi_pass unix:/run/php/php7.4-fpm.sock;\n"),
+            ],
+        );
+        let preview = bump(dir.path(), PhpVersion::new(8, 4));
+        let after: std::collections::HashMap<_, _> =
+            preview.changes.iter().map(|c| (c.file.replace('\\', "/"), (c.new_content.as_str(), c.rules[0].class.as_str()))).collect();
+        assert_eq!(after.len(), 8, "{:?}", after.keys());
+        assert_eq!(after[".php-version"], ("8.4.0\n", "server.php_version_exact"));
+        assert_eq!(after[".tool-versions"], ("nodejs 20.1.0\nphp 8.4\n", "server.php_version_pin"));
+        assert_eq!(after["Dockerfile"].0, "FROM php:8.4-fpm-alpine AS app\r\nFROM node:20\r\n");
+        assert_eq!(after["docker-compose.yml"].0, "services:\n  app:\n    image: wordpress:php8.4-apache\n");
+        assert_eq!(
+            after[".github/workflows/ci.yml"].0,
+            "jobs:\n  a:\n    php: ['7.4', '8.0', '8.4']\n  b:\n    php-versions: \"7.4, 8.0, 8.4\"\n  c:\n    php-version: 7.3\n"
+        );
+        assert_eq!(
+            after["composer.json"],
+            ("{\n  \"config\": {\n    \"platform\": {\n      \"php\": \"8.4.0\"\n    }\n  }\n}\n", "server.composer_platform")
+        );
+        assert_eq!(after[".ddev/config.yaml"].0, "php_version: \"8.4\"\n");
+        assert_eq!(after["nginx.conf"].0, "fastcgi_pass unix:/run/php/php8.4-fpm.sock;\n");
+    }
+
+    #[test]
+    fn a_bumped_project_has_no_pins_left() {
+        let dir = tempfile::tempdir().unwrap();
+        write_all(
+            dir.path(),
+            &[
+                (".php-version", "8.2.10\n"),
+                ("Dockerfile", "FROM php:7.4-cli\n"),
+                (".github/workflows/ci.yml", "php: [7.4, 8.0]\n"),
+                (".lando.yml", "services:\n  app:\n    type: php:8.0\n"),
+                ("composer.json", "{\"config\":{\"platform\":{\"php\":\"7.4\"}}}"),
+            ],
+        );
+        let target = PhpVersion::new(8, 4);
+        for change in bump(dir.path(), target).changes {
+            std::fs::write(dir.path().join(&change.file), &change.new_content).unwrap();
+        }
+        assert_eq!(ids(&scan(dir.path(), target).0), Vec::new());
+        assert!(bump(dir.path(), target).changes.is_empty());
     }
 
     #[test]

@@ -4,7 +4,7 @@ export type Framework = "wordpress" | "laravel" | "symfony" | "drupal" | "magent
 export type Severity = "breaking" | "deprecated" | "behavior";
 export type FixKind = "auto" | "likely" | "manual";
 export type DependencyStatus = "compatible" | "incompatible" | "unknown";
-export type RectorMode = "compat" | "modernize";
+export type RectorMode = "compat" | "modernize" | "pins";
 
 export const TARGETS = ["8.1", "8.2", "8.3", "8.4", "8.5"] as const;
 export type Target = (typeof TARGETS)[number];
