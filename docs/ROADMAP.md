@@ -17,7 +17,7 @@ String-to-number comparisons with `==` (8.0), `null` passed to built-ins from va
 | Addition | Why | Size |
 |---|---|---|
 | **Composer platform pitfalls, the rest.** `config.platform.ext-*` pinned below the target and plugins that need `composer-plugin-api ^1` (`platform-check: false`, Composer 1 lock files and `config.platform.php` are done). | Each one makes Composer install packages for the wrong platform | S |
-| **More platforms.** CodeIgniter, Yii, CakePHP and OpenCart, plus re-checking the MediaWiki matrix and Joomla 6 once they publish firm ranges (Joomla, Moodle, MediaWiki and phpBB are done). | Legacy CMS users are Ferry's core audience | M |
+| **Platform checks.** Re-check the MediaWiki matrix and Joomla 6 once they publish firm ranges. | Legacy CMS users are Ferry's core audience | S |
 | **Polyfill cleanup.** `symfony/polyfill-php*` and `random_compat` become no-ops once the target passes their version. | Smaller dependency tree | S |
 
 ## 3. Workflow features

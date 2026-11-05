@@ -31,6 +31,7 @@ const GENERATED: [&str; 9] = ["cache", "tmp", "var", "storage", "store", "files"
 fn framework_name(framework: Framework) -> String {
     match framework {
         Framework::Phpbb => "phpBB".to_string(),
+        Framework::CakePhp => "CakePHP".to_string(),
         other => format!("{other:?}"),
     }
 }

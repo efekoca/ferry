@@ -87,6 +87,10 @@ export const FRAMEWORK_LABEL = {
   moodle: "Moodle",
   mediawiki: "MediaWiki",
   phpbb: "phpBB",
+  codeigniter: "CodeIgniter",
+  yii: "Yii",
+  cakephp: "CakePHP",
+  opencart: "OpenCart",
   generic: "PHP",
 } as const satisfies Record<Framework, string>;
 

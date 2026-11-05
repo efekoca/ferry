@@ -16,6 +16,10 @@ pub enum Framework {
     Moodle,
     MediaWiki,
     Phpbb,
+    CodeIgniter,
+    Yii,
+    CakePhp,
+    OpenCart,
     Generic,
 }
 
@@ -77,7 +81,29 @@ pub fn detect_framework(root: &Path) -> Framework {
     {
         return Framework::Phpbb;
     }
+    if ["", "upload"].iter().any(|d| root.join(d).join("system/startup.php").is_file() && root.join(d).join("catalog/controller").is_dir())
+    {
+        return Framework::OpenCart;
+    }
+    if root.join("system/CodeIgniter.php").is_file() || root.join("system/core/CodeIgniter.php").is_file() {
+        return Framework::CodeIgniter;
+    }
+    if root.join("framework/YiiBase.php").is_file() {
+        return Framework::Yii;
+    }
+    if root.join("lib/Cake/VERSION.txt").is_file() {
+        return Framework::CakePhp;
+    }
     let composer = std::fs::read_to_string(root.join("composer.json")).unwrap_or_default();
+    if composer.contains("\"codeigniter4/framework\"") {
+        return Framework::CodeIgniter;
+    }
+    if composer.contains("\"yiisoft/yii2\"") || composer.contains("\"yiisoft/yii\"") {
+        return Framework::Yii;
+    }
+    if composer.contains("\"cakephp/cakephp\"") {
+        return Framework::CakePhp;
+    }
     if composer.contains("\"laravel/framework\"") {
         return Framework::Laravel;
     }
@@ -120,6 +146,10 @@ pub fn framework_excludes(framework: Framework) -> Vec<String> {
             "phpBB/install",
             "phpBB/vendor",
         ],
+        Framework::CodeIgniter => &["system", "writable"],
+        Framework::Yii => &["framework", "runtime", "web/assets", "protected/runtime", "assets"],
+        Framework::CakePhp => &["lib/Cake", "tmp", "logs", "app/tmp"],
+        Framework::OpenCart => &["system", "image", "install", "upload/system", "upload/image", "upload/install"],
         Framework::Generic => &[],
     };
     dirs.iter().map(|d| d.to_string()).collect()
