@@ -75,8 +75,8 @@ const INSTALLABLE: &[&str] = &[
     "zip",
 ];
 
-const LINT_SCRIPT: &str = "find /app -type f -name '*.php' -not -path '/app/vendor/*' -print0 \
-    | xargs -0 -P 4 -n 1 php -n -d error_reporting=-1 -d display_errors=stderr -d log_errors=0 -l 2>&1 | grep -v '^No syntax errors'";
+const LINT_COMMAND: &str = "-print0 | xargs -0 -P 4 -n 1 php -n -d error_reporting=-1 -d display_errors=stderr -d log_errors=0 -l 2>&1 \
+    | grep -v '^No syntax errors'";
 const TEST_SCRIPT: &str = "flags='--display-deprecations --display-warnings --no-progress'; \
     php vendor/bin/phpunit --version | grep -qE 'PHPUnit [0-9]\\.' && flags=''; \
     exec php -d error_reporting=-1 -d display_errors=1 -d memory_limit=1G vendor/bin/phpunit $flags";
@@ -518,11 +518,25 @@ fn extended_image(
     Ok(done.status.is_some_and(|s| s.success()).then_some(tag))
 }
 
+/// Paths the project's config leaves out of the scan stay out of the syntax check too.
+fn lint_script(excluded: &[String]) -> String {
+    let mut script = "find /app -type f -name '*.php' -not -path '/app/vendor/*'".to_string();
+    for path in excluded {
+        let path = path.replace('\\', "/");
+        let path = path.trim_start_matches("./").trim_end_matches('/');
+        let pattern: String = path.chars().flat_map(|c| matches!(c, '*' | '?' | '[').then_some('\\').into_iter().chain([c])).collect();
+        let pattern = pattern.replace('\'', "'\\''");
+        script.push_str(&format!(" -not -path '/app/{pattern}' -not -path '/app/{pattern}/*'"));
+    }
+    format!("{script} {LINT_COMMAND}")
+}
+
 fn lint_lines(text: &str) -> impl Iterator<Item = &str> {
     text.lines().filter(|l| l.contains(" on line ")).filter(|l| !l.contains("Deprecated: ") && !l.contains("Warning: "))
 }
 
 struct Setup<'a> {
+    lint: &'a str,
     used: &'a [String],
     install_extensions: bool,
     pages: &'a [String],
@@ -579,7 +593,7 @@ fn run_version(
     let PreparedImage { image, modules, wanted, image_failed } = prepare_image(container, version, project, setup, step)?;
     let installed_extensions = wanted.iter().filter(|e| modules.contains(*e)).cloned().collect();
     step(Step::Lint(version));
-    let lint = container.run(&format!("lint-{}", version.compact()), project, &image, false, LINT_SCRIPT, LINT_TIMEOUT)?;
+    let lint = container.run(&format!("lint-{}", version.compact()), project, &image, false, setup.lint, LINT_TIMEOUT)?;
     let lint_output = output(&lint);
     let lint_errors = lint_lines(&lint_output).count();
     let missing_extensions = used.iter().filter(|e| !modules.contains(*e)).cloned().collect();
@@ -764,6 +778,7 @@ pub fn compare(
             install_log = tail(&output(&done));
         }
     }
+    let lint = lint_script(&crate::config::load(root).unwrap_or_default().exclude);
     let files = crate::project::collect_php_files(root, &[]);
     let mut used: Vec<String> = crate::extensions::used(root, &files).into_iter().map(|e| e.name.to_ascii_lowercase()).collect();
     let drivers: Vec<String> =
@@ -774,6 +789,7 @@ pub fn compare(
     let images = work.path().join("images");
     let mut setup = Setup {
         used: &used,
+        lint: &lint,
         install_extensions: options.install_extensions,
         pages: &options.pages,
         test: options.test.as_deref(),
@@ -1189,6 +1205,15 @@ mod tests {
     }
 
     #[test]
+    fn the_syntax_check_leaves_out_excluded_paths() {
+        let script = lint_script(&["legacy/".into(), "./old[1]".into(), "it's".into()]);
+        assert!(script.contains("-not -path '/app/legacy' -not -path '/app/legacy/*'"), "{script}");
+        assert!(script.contains("-not -path '/app/old\\[1]/*'"), "{script}");
+        assert!(script.contains("-not -path '/app/it'\\''s/*'"), "{script}");
+        assert!(script.contains("-not -path '/app/legacy/*' -not -path '/app/old"), "{script}");
+    }
+
+    #[test]
     fn compares_two_versions_in_docker() {
         if std::env::var_os("FERRY_TEST_DOCKER").is_none() {
             eprintln!("FERRY_TEST_DOCKER ayarlı değil; Docker testi atlandı");
@@ -1202,5 +1227,22 @@ mod tests {
         assert_eq!((result.source.lint_errors, result.target.lint_errors), (0, 1), "{}", result.target.log);
         assert!(result.target.events.iter().all(|e| e.path == "/app/a.php"), "{:?}", result.target.events);
         assert!(result.new_on_target.iter().any(|e| e.level == Level::Fatal), "{:?}", result.new_on_target);
+    }
+
+    #[test]
+    fn excluded_paths_skip_the_syntax_check_in_docker() {
+        if std::env::var_os("FERRY_TEST_DOCKER").is_none() {
+            eprintln!("FERRY_TEST_DOCKER ayarlı değil; Docker testi atlandı");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("legacy")).unwrap();
+        std::fs::write(dir.path().join("legacy/old.php"), "<?php\n$x = (real) 1;\n").unwrap();
+        std::fs::write(dir.path().join("a.php"), "<?php\necho 1;\n").unwrap();
+        let config = crate::config::Config { exclude: vec!["legacy/".into()], ..Default::default() };
+        crate::config::save(dir.path(), &config).unwrap();
+        let result =
+            compare(dir.path(), PhpVersion::new(7, 4), PhpVersion::new(8, 4), Options::default(), &AtomicBool::new(false), |_| {}).unwrap();
+        assert_eq!(result.target.lint_errors, 0, "{}", result.target.log);
     }
 }
