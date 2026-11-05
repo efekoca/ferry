@@ -80,7 +80,6 @@ enum Bound {
     Le(Triple),
     Lt(Triple),
     Ne(Triple),
-    Outside(Triple, Triple),
 }
 
 impl Bound {
@@ -91,7 +90,6 @@ impl Bound {
             Bound::Le(b) => v <= b,
             Bound::Lt(b) => v < b,
             Bound::Ne(b) => v != b,
-            Bound::Outside(lo, hi) => v < lo || v >= hi,
         }
     }
 }
@@ -163,18 +161,6 @@ fn group_patches(group: &[Bound], line: (u32, u32)) -> Vec<(u64, u64)> {
             },
             Bound::Ne(v) if (v.0, v.1) == line => excluded.push((u64::from(v.2), u64::from(v.2))),
             Bound::Ne(_) => {}
-            Bound::Outside(a, b) => {
-                let start = patch_floor(a);
-                let end = match (b.0, b.1).cmp(&line) {
-                    std::cmp::Ordering::Less => None,
-                    std::cmp::Ordering::Equal if b.2 == 0 => None,
-                    std::cmp::Ordering::Equal => Some(u64::from(b.2) - 1),
-                    std::cmp::Ordering::Greater => Some(u64::MAX),
-                };
-                if let (Some(start), Some(end)) = (start, end) {
-                    excluded.push((start, end));
-                }
-            }
         }
     }
     subtract(&[(lo, hi)], &excluded)
@@ -233,6 +219,10 @@ fn parse_and_group(input: &str) -> Option<Vec<Bound>> {
         return Some(vec![Bound::Ge(lo), upper]);
     }
 
+    let trimmed = input.trim();
+    if trimmed.starts_with(',') || trimmed.ends_with(',') || input.split(',').any(|part| part.trim().is_empty()) {
+        return None;
+    }
     let raw: Vec<&str> = input.split(|c: char| c == ',' || c.is_whitespace()).filter(|t| !t.is_empty()).collect();
     let mut tokens: Vec<String> = Vec::new();
     let mut pending_op: Option<&str> = None;
@@ -260,8 +250,14 @@ fn parse_and_group(input: &str) -> Option<Vec<Bound>> {
 }
 
 fn parse_atom(token: &str) -> Option<Vec<Bound>> {
-    let token = token.split('@').next().unwrap_or(token);
-    let token = token.strip_suffix("-dev").unwrap_or(token);
+    let (token, stability) = token.split_once('@').unwrap_or((token, "stable"));
+    if !["dev", "alpha", "beta", "rc", "stable"].contains(&stability.to_ascii_lowercase().as_str()) {
+        return None;
+    }
+    if let Some(branch) = token.strip_suffix("-dev") {
+        let digits = branch.trim_start_matches(['v', 'V', '^', '~', '=', '>', '<', '!']).trim_end_matches(['.', 'x', 'X', '*']);
+        return parse_version(digits).map(|_| vec![Bound::Lt((0, 0, 0))]);
+    }
     if token == "*" {
         return Some(vec![]);
     }
@@ -270,15 +266,15 @@ fn parse_atom(token: &str) -> Option<Vec<Bound>> {
     let rest = rest.trim();
 
     if rest.contains('*') || rest.contains('x') || rest.contains('X') {
+        if !op.is_empty() {
+            return None;
+        }
         let parts: Vec<&str> = rest.split('.').collect();
         let prefix: Vec<&str> = parts.iter().take_while(|p| !matches!(**p, "*" | "x" | "X")).copied().collect();
         if parts[prefix.len()..].iter().any(|p| !matches!(*p, "*" | "x" | "X")) {
             return None;
         }
         let (base, parts) = parse_version(&prefix.join("."))?;
-        if op == "!=" {
-            return Some(vec![Bound::Outside(base, bump(base, parts))]);
-        }
         return Some(vec![Bound::Ge(base), Bound::Lt(bump(base, parts))]);
     }
 
@@ -306,7 +302,6 @@ fn parse_atom(token: &str) -> Option<Vec<Bound>> {
             };
             vec![Bound::Ge(v), Bound::Lt(upper)]
         }
-        _ if parts < 3 => vec![Bound::Ge(v), Bound::Lt(bump(v, parts))],
         _ => vec![Bound::Ge(v), Bound::Le(v)],
     };
     Some(bounds)
@@ -373,7 +368,6 @@ mod tests {
             (">8.4.99999", true),
             (">=8.4 <8.4.0", false),
             ("<8.4.0", false),
-            (">=8.4.0 !=8.4.*", false),
             ("!=8.4.0", true),
             ("8.4.*", true),
             ("~8.4.3", true),
@@ -389,10 +383,9 @@ mod tests {
     }
 
     #[test]
-    fn not_equal_wildcards_exclude_the_whole_line() {
-        assert_eq!(constraint_allows("!=8.2.*", PhpVersion::new(8, 2)), Some(false));
-        assert_eq!(constraint_allows("!=8.2.*", PhpVersion::new(8, 3)), Some(true));
-        assert_eq!(constraint_allows(">=7.4 !=8.0.*", PhpVersion::new(8, 0)), Some(false));
+    fn composer_rejects_operators_on_wildcards() {
+        assert_eq!(constraint_allows("!=8.2.*", PhpVersion::new(8, 2)), None);
+        assert_eq!(constraint_allows(">=7.4 !=8.0.*", PhpVersion::new(8, 0)), None);
     }
 
     #[test]
@@ -452,5 +445,77 @@ mod tests {
         assert_eq!(c.lowest_known_line(), Some(v("7.4")));
         let c = Constraint::parse(">=8.2").unwrap();
         assert_eq!(c.lowest_known_line(), Some(v("8.2")));
+    }
+
+    /// Expected values come from Composer's own VersionParser, for a PHP 8.4 line.
+    #[test]
+    fn constraints_match_composer() {
+        let cases: &[(&str, Option<bool>)] = &[
+            ("8", Some(false)),
+            ("=8", Some(false)),
+            ("==8", Some(false)),
+            ("8.4", Some(true)),
+            ("8.4.0", Some(true)),
+            ("8.4.1", Some(true)),
+            ("=8.4", Some(true)),
+            ("8.4.*", Some(true)),
+            ("8.*", Some(true)),
+            ("8.4.x", Some(true)),
+            ("=8.4.*", None),
+            ("!=8.4.*", None),
+            (">=7.*", None),
+            (">8.3.*", None),
+            ("<8.*", None),
+            ("^8.*", None),
+            ("~8.*", None),
+            ("~8.4.*", None),
+            ("8.4,", None),
+            ("8.4,,8.5", None),
+            (",8.4", None),
+            ("8.4@bananas", None),
+            ("8.4@dev", Some(true)),
+            ("^8.4@stable", Some(true)),
+            ("8.4.x-dev", Some(false)),
+            ("^8.4", Some(true)),
+            ("^8.0", Some(true)),
+            ("^7.4 || ^8.0", Some(true)),
+            ("^7.4|^8.0", Some(true)),
+            ("~8.3", Some(true)),
+            ("~8.3.0", Some(false)),
+            ("~8", Some(true)),
+            (">=8.1 <8.5", Some(true)),
+            (">=8.1,<8.5", Some(true)),
+            (">=8.4.41 <8.4.100", Some(true)),
+            (">8.4", Some(true)),
+            (">=8.5", Some(false)),
+            ("<8.4", Some(false)),
+            ("<8.4.1", Some(true)),
+            ("<=8.4", Some(true)),
+            ("!=8.4.0", Some(true)),
+            ("!=8.4", Some(true)),
+            ("8.0 - 8.4", Some(true)),
+            ("8.0 - 8.4.1", Some(true)),
+            (">= 8.1", Some(true)),
+            (">=8.1 || <7", Some(true)),
+            ("*", Some(true)),
+            (">", None),
+            ("8.4bananas", None),
+            ("", None),
+            ("v8.4", Some(true)),
+            ("^v8.4", Some(true)),
+            (">=8.2.0-beta1", Some(true)),
+            ("8.4.0.0", Some(true)),
+            ("8.4.1.2.3", None),
+            ("^0.3", Some(false)),
+            ("~0.3", Some(false)),
+            ("8.4 8.5", Some(false)),
+            (">=7.4 <8.0 || >=8.1", Some(true)),
+        ];
+        let wrong: Vec<_> = cases
+            .iter()
+            .filter(|(c, want)| constraint_allows(c, PhpVersion::new(8, 4)) != *want)
+            .map(|(c, want)| (*c, *want, constraint_allows(c, PhpVersion::new(8, 4))))
+            .collect();
+        assert!(wrong.is_empty(), "{wrong:#?}");
     }
 }
