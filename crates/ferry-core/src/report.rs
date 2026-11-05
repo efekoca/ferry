@@ -83,7 +83,7 @@ fn md_escape(s: &str) -> String {
 fn docker_section(result: &crate::docker::Comparison, lang: Lang) -> String {
     let l = |t: Text| t.get(lang).to_string();
     let summary = result.summary(0);
-    let mut md = format!("## {}\n\n", l(Text::new("Docker karşılaştırması", "Docker comparison")));
+    let mut md = format!("## {}\n\n", l(Text::new("Gerçek test", "Real test")));
     let line = match lang {
         Lang::Tr => format!("PHP {} ile PHP {} karşılaştırıldı.", summary.source, summary.target),
         Lang::En => format!("PHP {} was compared with PHP {}.", summary.source, summary.target),

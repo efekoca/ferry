@@ -90,7 +90,7 @@ describe("accessibility", { timeout: 30_000 }, () => {
     await user.type(screen.getByRole("searchbox", { name: "Bulgularda ara" }), "zzzz-none");
     await screen.findByText("Eşleşen bulgu yok");
     await check("no matching findings");
-    await user.click(screen.getByRole("button", { name: /Docker karşılaştırması|Canlı test/ }));
+    await user.click(screen.getByRole("button", { name: /Gerçek test/ }));
     await check("roadmap");
     expect(Object.fromEntries(Object.entries(found).filter(([, v]) => v.length))).toEqual({});
   });
