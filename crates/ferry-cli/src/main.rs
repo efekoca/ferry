@@ -737,7 +737,17 @@ fn run_pins(args: &[String]) -> Result<(), String> {
         println!("Nothing to update for PHP {target}.");
     } else if write {
         let refs: Vec<_> = preview.changes.iter().collect();
-        ferry_core::rector::write_changes(&root, &refs, &mut Vec::new()).map_err(|e| e.to_string())?;
+        let before: Vec<(PathBuf, Vec<u8>)> = refs
+            .iter()
+            .map(|c| root.join(&c.file))
+            .map(|p| std::fs::read(&p).map(|b| (p.clone(), b)).map_err(|e| format!("{}: {e}", p.display())))
+            .collect::<Result<_, _>>()?;
+        if let Err(e) = ferry_core::rector::write_changes(&root, &refs, &mut Vec::new()) {
+            for (path, bytes) in &before {
+                let _ = std::fs::write(path, bytes);
+            }
+            return Err(format!("{e}\nThe files were put back."));
+        }
         println!("Updated {} files.", refs.len());
     } else {
         println!("{} files would change. Run again with --write to update them.", preview.changes.len());

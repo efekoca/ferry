@@ -483,6 +483,7 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
       stale = [];
       return withIgnores(lastScan);
     },
+    interruptedWrites: async () => [],
     getSettings: async () => settings,
     saveSettings: async (s) => {
       settings = s;

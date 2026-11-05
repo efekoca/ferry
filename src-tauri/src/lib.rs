@@ -155,6 +155,11 @@ async fn inspect_project(path: String) -> CmdResult<ProjectInfo> {
 }
 
 #[tauri::command]
+fn interrupted_writes(state: State<'_, AppState>, path: String) -> Vec<Snapshot> {
+    state.snapshots().take_interrupted(Path::new(&normalize_path(path)))
+}
+
+#[tauri::command]
 async fn save_project_config(path: String, config: ferry_core::config::Config) -> CmdResult<ProjectInfo> {
     let path = normalize_path(path);
     blocking(move || {
@@ -1144,8 +1149,11 @@ async fn apply_changes(
             None => None,
         };
         let mut written = Vec::new();
-        match rector::write_changes(&root, &refs, &mut written) {
+        store.mark_writing(&root, &snapshot.id).map_err(|e| e.to_string())?;
+        let outcome = rector::write_changes(&root, &refs, &mut written);
+        match outcome {
             Ok(()) => {
+                store.clear_writing(&root, &snapshot.id);
                 if let Some(limit) = snapshot_limit {
                     let _ = store.prune(&root, limit.max(1) as usize);
                 }
@@ -1175,6 +1183,7 @@ async fn apply_changes(
             }
             Err(e) => match store.restore_files(&root, &snapshot.id, Some(&written)) {
                 Ok(_) => {
+                    store.clear_writing(&root, &snapshot.id);
                     let _ = store.delete(&root, &snapshot.id);
                     if let Some(batch) = &batch {
                         git::abort_batch(&root, batch);
@@ -1236,7 +1245,10 @@ async fn restore_snapshot(
         if !found.is_empty() {
             keep_overwritten(&store, &root, &id, &found)?;
         }
-        store.restore(&root, &id).map_err(|e| e.to_string()).map(|files| (path, files))
+        store.mark_writing(&root, &id).map_err(|e| e.to_string())?;
+        let restored = store.restore(&root, &id).map_err(|e| e.to_string());
+        store.clear_writing(&root, &id);
+        restored.map(|files| (path, files))
     })
     .await?;
     state.forget_check(&restored.0);
@@ -1410,6 +1422,7 @@ pub fn with_commands<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R
     builder.invoke_handler(tauri::generate_handler![
         inspect_project,
         save_project_config,
+        interrupted_writes,
         scan_project,
         check_dependencies,
         write_probe,

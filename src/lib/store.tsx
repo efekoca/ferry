@@ -285,6 +285,9 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
         const pinned = info.config.target as Target | null;
         if (pinned && TARGETS.includes(pinned) && !isBlockedTarget(pinned)) setTargetState(pinned);
         if (info.configError) toast.push({ tone: "error", title: t.toast.configFailed, description: info.configError });
+        void api.interruptedWrites(info.root).then((list) => {
+          for (const s of list) toast.push({ tone: "error", title: t.toast.interruptedWrite, description: t.toast.interruptedWriteText(s.label) });
+        }).catch(() => {});
         setDockerHistory([]);
         void api.dockerHistory(info.root).then(setDockerHistory).catch(() => {});
         setView("overview");

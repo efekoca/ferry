@@ -649,6 +649,8 @@ export const tr = {
     rectorInstalledText: "Otomatik düzeltmeler artık hazır.",
     rectorFailed: "Rector kurulamadı",
     previewFailed: "Değişiklikler hesaplanamadı",
+    interruptedWrite: "Önceki yazma yarım kalmış",
+    interruptedWriteText: (label: string) => `"${label}" sırasında uygulama durmuş, bazı dosyalar değişmiş olabilir. Geçmiş'ten bu kaydı geri yükleyebilirsiniz.`,
     applied: (n: number) => `${n} dosya güncellendi`,
     appliedText: "Önceki hâlleri Geçmiş'te, isterseniz geri alabilirsiniz.",
     applyFailed: "Değişiklikler uygulanamadı",

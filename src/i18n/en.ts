@@ -652,6 +652,8 @@ export const en: Dict = {
     rectorInstalledText: "Automatic fixes are ready.",
     rectorFailed: "Couldn't install Rector",
     previewFailed: "Couldn't calculate changes",
+    interruptedWrite: "An earlier write didn't finish",
+    interruptedWriteText: (label) => `The app stopped during "${label}", so some files may have changed. You can restore this entry from History.`,
     applied: (n) => (n === 1 ? "1 file updated" : `${n} files updated`),
     appliedText: "Previous versions are in History if you want to undo.",
     appliedWithErrors: (n, broken) =>

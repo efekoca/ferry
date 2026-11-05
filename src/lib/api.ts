@@ -46,6 +46,7 @@ export interface Api {
   scanProject(path: string, target: string, run: number): Promise<ScanResult>;
   onScanProgress(handler: (p: ScanProgress) => void): Promise<() => void>;
   checkDependencies(path: string, target: string): Promise<DependencyReport>;
+  interruptedWrites(path: string): Promise<Snapshot[]>;
   gitStatus(path: string, files: string[]): Promise<{ repo: boolean; dirty: string[] }>;
   compareTargets(path: string): Promise<TargetSummary[]>;
   findCompatibleVersions(target: string, packages: { name: string; version: string }[]): Promise<VersionSuggestion[]>;
@@ -131,6 +132,7 @@ async function tauriApi(): Promise<Api> {
     removeDockerImages: () => invoke("remove_docker_images"),
     cancelDockerCompare: (path) => invoke("cancel_docker_compare", { path }),
     onDockerStep: (handler) => listen<DockerStep>("docker://step", (e) => handler(e.payload)),
+    interruptedWrites: (path) => invoke("interrupted_writes", { path }),
     applyChanges: (path, previewId, files, label, skipped, commitMessage) =>
       invoke("apply_changes", { path, previewId, files, skipped: skipped ?? null, label, commitMessage: commitMessage ?? null }),
     listSnapshots: (path) => invoke("list_snapshots", { path }),
