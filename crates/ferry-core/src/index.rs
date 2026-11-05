@@ -404,7 +404,7 @@ impl ProjectIndex {
         if info.open || depth > 32 {
             return None;
         }
-        let mut all = info.props.clone();
+        let mut all: HashSet<String> = info.props.difference(&info.static_props).cloned().collect();
         let mut private = info.private_props.clone();
         for t in &info.traits {
             let (props, hidden) = self.collect(self.unique(t)?, depth + 1)?;
@@ -433,6 +433,10 @@ fn qualify(namespace: &str, name: &str) -> String {
 
 fn short(name: &str) -> String {
     name.rsplit('\\').next().unwrap_or_default().to_ascii_lowercase()
+}
+
+pub(crate) fn namespace_section(spaces: &[(usize, String)], at: usize) -> usize {
+    spaces.iter().rev().find(|(start, _)| *start <= at).map_or(0, |(start, _)| *start)
 }
 
 pub(crate) fn namespaces(tokens: &[Token]) -> Vec<(usize, String)> {

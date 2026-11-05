@@ -170,23 +170,9 @@ fn curly_offsets(tokens: &[Token]) -> Vec<(usize, Vec<(usize, usize)>)> {
     out
 }
 
-fn class_references(tokens: &[Token]) -> std::collections::HashSet<String> {
-    let before = ["new", "instanceof", "extends", "implements", "use", "catch"];
-    tokens
-        .iter()
-        .enumerate()
-        .filter(|&(i, t)| {
-            t.kind == TokenKind::Ident
-                && (i > 0
-                    && (before.iter().any(|b| tokens[i - 1].is_ident_ci(b))
-                        || tokens[i - 1].is_punct("(") && tokens.get(i + 1).is_some_and(|n| n.kind == TokenKind::Variable))
-                    || tokens.get(i + 1).is_some_and(|n| n.is_punct("::") || n.kind == TokenKind::Variable))
-        })
-        .map(|(_, t)| t.text.rsplit('\\').next().unwrap_or_default().to_ascii_lowercase())
-        .collect()
-}
-
-fn function_imports(tokens: &[Token]) -> std::collections::HashMap<String, String> {
+/// Imports count per namespace block: `use function` in one block says nothing about the next.
+fn function_imports(tokens: &[Token]) -> std::collections::HashMap<(usize, String), String> {
+    let spaces = crate::index::namespaces(tokens);
     let mut out = std::collections::HashMap::new();
     for i in 0..tokens.len() {
         if !(tokens[i].is_ident_ci("use") && tokens.get(i + 1).is_some_and(|t| t.is_ident_ci("function"))) {
@@ -211,7 +197,7 @@ fn function_imports(tokens: &[Token]) -> std::collections::HashMap<String, Strin
                     .filter(|n| n.is_ident_ci("as"))
                     .and_then(|_| tokens.get(j + 2))
                     .map_or_else(|| full.rsplit('\\').next().unwrap_or_default().to_string(), |a| a.text.to_ascii_lowercase());
-                out.insert(alias, full);
+                out.insert((crate::index::namespace_section(&spaces, i), alias), full);
                 if tokens.get(j + 1).is_some_and(|n| n.is_ident_ci("as")) {
                     j += 2;
                 }
@@ -252,12 +238,13 @@ pub fn fix_legacy_syntax_with(
     let mut applied = Vec::new();
     let mut defined = defined_constants(&tokens);
     defined.extend(project_constants.iter().cloned());
-    let mut keys = bareword_keys(&tokens, |name| defined.contains(name));
+    let unknown = defined.contains(DYNAMIC_CONSTANT);
+    let mut keys = bareword_keys(&tokens, |name| unknown || defined.contains(name));
     for (_, pairs) in curly_offsets(&tokens) {
         for (open, close) in pairs {
             edits.push((tokens[open].start, tokens[open].end, "[".into()));
             edits.push((tokens[close].start, tokens[close].end, "]".into()));
-            if close == open + 2 && is_bareword(&tokens[open + 1]) && !defined.contains(&tokens[open + 1].text) {
+            if close == open + 2 && is_bareword(&tokens[open + 1]) && !unknown && !defined.contains(&tokens[open + 1].text) {
                 keys.push(open + 1);
             }
         }
@@ -423,10 +410,10 @@ pub fn analyze_source_in(file: &str, src: &str, target: PhpVersion, index: &crat
         function_imports: function_imports(&tokens),
         methods,
         namespaced: tokens.windows(2).any(|w| w[0].is_ident_ci("namespace") && (w[1].kind == TokenKind::Ident || w[1].is_punct("{"))),
-        classes: class_references(&tokens),
         dead: [crate::guards::dead_spans(&tokens, target), crate::guards::dead_expressions(&tokens, target)].concat(),
         index,
         namespaces: crate::index::namespaces(&tokens),
+        receivers: Receivers::new(&tokens),
         out: Vec::new(),
     };
     for &(line, column) in &lexed.stray_hash_brackets {
@@ -744,9 +731,9 @@ struct Ctx<'a> {
     src: &'a str,
     line_starts: Vec<usize>,
     target: PhpVersion,
-    function_imports: std::collections::HashMap<String, String>,
+    function_imports: std::collections::HashMap<(usize, String), String>,
+    receivers: Receivers,
     methods: std::collections::HashSet<usize>,
-    classes: std::collections::HashSet<String>,
     namespaced: bool,
     dead: Vec<crate::guards::Span>,
     index: &'a crate::index::ProjectIndex,
@@ -1037,7 +1024,8 @@ impl<'a> Ctx<'a> {
             let mut rooted = tok.text.starts_with('\\');
             let mut lower = lower;
             if !rooted && !bare.contains('\\') {
-                if let Some(imported) = self.function_imports.get(&lower) {
+                let section = crate::index::namespace_section(&self.namespaces, i);
+                if let Some(imported) = self.function_imports.get(&(section, lower.clone())) {
                     if imported.contains('\\') {
                         return;
                     }
@@ -1203,17 +1191,20 @@ impl<'a> Ctx<'a> {
         if bare.bytes().any(|b| b.is_ascii_lowercase()) {
             return;
         }
+        if self.index.defines_constant(bare) {
+            return;
+        }
         if let Some(rule) = CONSTANTS.iter().find(|r| r.matches(&lower)) {
             if rule.id == "deprecated.e_user_error" && !inside_call(tokens, i, "trigger_error") && !inside_call(tokens, i, "user_error") {
                 return;
             }
             self.symbol(rule, tok, false);
-        } else if !self.index.defines_constant(bare) {
-            if let Some(&(_, since, _)) = generated(crate::symbols::REMOVED_CONSTANTS, bare) {
-                self.builtin(Builtin::RemovedConstant, bare.to_string(), since, tok);
-            } else if let Some(&(_, since, _)) = generated(crate::symbols::DEPRECATED_CONSTANTS, bare) {
-                self.builtin(Builtin::DeprecatedConstant, bare.to_string(), since, tok);
-            }
+        } else if let Some(&(_, since, _)) = generated(crate::symbols::REMOVED_CONSTANTS, bare) {
+            self.builtin(Builtin::RemovedConstant, bare.to_string(), since, tok);
+        } else if let Some(&(_, since, _)) = generated(crate::symbols::DEPRECATED_CONSTANTS, bare) {
+            self.builtin(Builtin::DeprecatedConstant, bare.to_string(), since, tok);
+        } else if MYSQL_CONSTANTS.contains(&bare) {
+            self.builtin(Builtin::RemovedConstant, bare.to_string(), (7, 0), tok);
         }
     }
 
@@ -1254,16 +1245,24 @@ impl<'a> Ctx<'a> {
         } else {
             return;
         };
-        let receiver = (i >= 2 && tokens[i - 2].kind == TokenKind::Variable).then(|| tokens[i - 2].text.as_str());
-        let known = receiver.map(|r| receiver_types(tokens).remove(r).unwrap_or_default());
-        let is = |c: &String, family: &str| c == family || family == "reflection" && c.starts_with(family);
+        let known = class.is_none().then(|| self.receivers.of_receiver(tokens, i - 2));
+        let is = |c: &str, family: &str| c == family || family == "reflection" && c.starts_with(family);
+        if class.is_some() {
+            let named = &tokens[i - 2].text;
+            let special = ["self", "static", "parent"].iter().any(|s| named.eq_ignore_ascii_case(s));
+            let resolved = self.receivers.names.resolve(i - 2, named);
+            let builtin = resolved.split_once('\\').is_none_or(|(space, _)| BUILTIN_NAMESPACES.contains(&space));
+            if !special && !builtin {
+                return;
+            }
+        }
         let Some(m) = MEMBERS.iter().find(|m| {
             m.kind == kind
                 && m.rule.matches(&lower)
                 && match (class, &known) {
-                    (Some(c), _) => c.to_ascii_lowercase().starts_with(m.class),
+                    (Some(c), _) => is(&c.to_ascii_lowercase(), m.class),
                     (None, Some(types)) => types.iter().any(|c| is(c, m.class)),
-                    (None, None) => m.class != "reflectionparameter" && self.classes.iter().any(|c| is(c, m.class)),
+                    (None, None) => false,
                 }
         }) else {
             if is_call {
@@ -2441,39 +2440,195 @@ fn case_semicolons(tokens: &[Token]) -> Vec<usize> {
     out
 }
 
-pub(crate) fn receiver_types(tokens: &[Token]) -> std::collections::HashMap<&str, std::collections::HashSet<String>> {
-    let mut out: std::collections::HashMap<&str, std::collections::HashSet<String>> = std::collections::HashMap::new();
-    let names = crate::index::Names::new(tokens);
-    let class = |k: usize| names.resolve(k, &tokens[k].text).rsplit('\\').next().unwrap_or_default().to_string();
-    for k in 0..tokens.len() {
-        let t = &tokens[k];
-        if t.kind != TokenKind::Variable {
-            continue;
+/// What the code shows about a variable at a given point: the nearest assignment, parameter type
+/// or `instanceof` before it, inside the same function.
+pub(crate) struct Receivers {
+    pub(crate) names: crate::index::Names,
+    scopes: Vec<(usize, usize, usize)>,
+}
+
+/// `$r->getMethod()` and `$r->getProperty()`, the usual way to reach a Reflection object.
+fn reflection_getter(tokens: &[Token], k: usize) -> Option<&'static str> {
+    let method = tokens.get(k + 1).filter(|a| a.is_punct("->")).and_then(|_| tokens.get(k + 2))?;
+    match method.text.to_ascii_lowercase().as_str() {
+        "getmethod" => Some("reflectionmethod"),
+        "getproperty" => Some("reflectionproperty"),
+        _ => None,
+    }
+}
+
+const BUILTIN_NAMESPACES: [&str; 5] = ["pdo", "dom", "random", "bcmath", "uri"];
+
+const NOT_A_TYPE: [&str; 15] =
+    ["return", "echo", "print", "global", "static", "clone", "yield", "throw", "and", "or", "xor", "case", "new", "var", "else"];
+
+impl Receivers {
+    pub(crate) fn new(tokens: &[Token]) -> Self {
+        let mut scopes = Vec::new();
+        for (k, _) in tokens.iter().enumerate().filter(|(_, t)| t.is_ident_ci("function")) {
+            let Some(body) = (k + 1..tokens.len()).find(|&j| tokens[j].is_punct("{") || tokens[j].is_punct(";")) else { continue };
+            let open = (k + 1..body).find(|&j| tokens[j].is_punct("(")).unwrap_or(body);
+            let body = crate::declarations::close_of(tokens, open)
+                .and_then(|c| (c..tokens.len()).find(|&j| tokens[j].is_punct("{") || tokens[j].is_punct(";")));
+            let Some(body) = body.filter(|&b| tokens[b].is_punct("{")) else { continue };
+            let mut depth = 0usize;
+            let close = (body..tokens.len()).find(|&j| {
+                depth += usize::from(tokens[j].is_punct("{"));
+                depth -= usize::from(tokens[j].is_punct("}"));
+                depth == 0
+            });
+            scopes.push((k, body, close.unwrap_or(tokens.len())));
         }
-        let mut add = |name: String| {
-            out.entry(t.text.as_str()).or_default().insert(name);
-        };
-        if k > 0 && tokens[k - 1].kind == TokenKind::Ident && !tokens[k - 1].is_ident_ci("as") {
-            add(class(k - 1));
+        Self { names: crate::index::Names::new(tokens), scopes }
+    }
+
+    fn class(&self, tokens: &[Token], k: usize) -> String {
+        self.names.resolve(k, &tokens[k].text)
+    }
+
+    fn evidence(&self, tokens: &[Token], k: usize) -> Option<std::collections::HashSet<String>> {
+        let one = |name: String| Some(std::iter::once(name).collect());
+        let next = tokens.get(k + 1);
+        if next.is_some_and(|n| n.is_punct("=")) {
+            let created =
+                tokens.get(k + 2).is_some_and(|n| n.is_ident_ci("new")) && tokens.get(k + 3).is_some_and(|n| n.kind == TokenKind::Ident);
+            if created {
+                return one(self.class(tokens, k + 3));
+            }
+            return Some(
+                reflection_getter(tokens, k + 2).map_or_else(Default::default, |class| std::iter::once(class.to_string()).collect()),
+            );
         }
-        if tokens.get(k + 1).is_some_and(|n| n.is_punct("="))
-            && tokens.get(k + 2).is_some_and(|n| n.is_ident_ci("new"))
-            && tokens.get(k + 3).is_some_and(|n| n.kind == TokenKind::Ident)
-        {
-            add(class(k + 3));
+        if next.is_some_and(|n| n.is_ident_ci("instanceof")) && tokens.get(k + 2).is_some_and(|n| n.kind == TokenKind::Ident) {
+            return one(self.class(tokens, k + 2));
         }
-        if tokens.get(k + 1).is_some_and(|n| n.is_ident_ci("instanceof")) && tokens.get(k + 2).is_some_and(|n| n.kind == TokenKind::Ident) {
-            add(class(k + 2));
+        let previous = k.checked_sub(1).map(|p| &tokens[p])?;
+        if previous.is_ident_ci("as") {
+            let parameters =
+                (k.saturating_sub(8)..k).any(|j| tokens[j].is_ident_ci("getParameters")) && next.is_some_and(|n| n.is_punct(")"));
+            return if parameters { one("reflectionparameter".into()) } else { Some(Default::default()) };
         }
-        let looped = k > 0
-            && tokens[k - 1].is_ident_ci("as")
-            && (k.saturating_sub(8)..k).any(|j| tokens[j].is_ident_ci("getParameters"))
-            && tokens.get(k + 1).is_some_and(|n| n.is_punct(")"));
-        if looped {
-            add("reflectionparameter".into());
+        let typed = previous.kind == TokenKind::Ident && !NOT_A_TYPE.iter().any(|w| previous.is_ident_ci(w));
+        typed.then(|| self.class(tokens, k - 1)).map(|c| std::iter::once(c).collect())
+    }
+
+    pub(crate) fn at(&self, tokens: &[Token], at: usize, name: &str) -> std::collections::HashSet<String> {
+        let mut end = at;
+        loop {
+            let scope = self.scopes.iter().filter(|s| s.0 < end && end < s.2).min_by_key(|s| s.2 - s.0);
+            let start = scope.map_or(0, |s| s.0);
+            for k in (start..end).rev() {
+                if tokens[k].kind == TokenKind::Variable && tokens[k].text == name {
+                    if let Some(found) = self.evidence(tokens, k) {
+                        return found;
+                    }
+                }
+            }
+            let Some(&(open, body, _)) = scope else { return self.anywhere(tokens, name) };
+            let captured = (open..body)
+                .filter(|&j| tokens[j].is_ident_ci("use"))
+                .any(|u| tokens[u..body].iter().any(|t| t.kind == TokenKind::Variable && t.text == name));
+            if !captured {
+                return self.anywhere(tokens, name);
+            }
+            end = open;
         }
     }
-    out
+
+    /// An untyped parameter says nothing, and code often names a variable the same way throughout
+    /// a file, so what's shown elsewhere in the file is the next best thing.
+    fn anywhere(&self, tokens: &[Token], name: &str) -> std::collections::HashSet<String> {
+        let same = |k: &usize| tokens[*k].kind == TokenKind::Variable && tokens[*k].text == name;
+        (0..tokens.len()).filter(same).filter_map(|k| self.evidence(tokens, k)).find(|found| !found.is_empty()).unwrap_or_default()
+    }
+
+    /// `$this->name`: what's assigned to it anywhere in the file, or its declared type.
+    fn property(&self, tokens: &[Token], name: &str, element: bool) -> std::collections::HashSet<String> {
+        for k in 0..tokens.len() {
+            let declared = tokens[k].kind == TokenKind::Variable && tokens[k].text == name;
+            if declared
+                && !element
+                && k > 0
+                && tokens[k - 1].kind == TokenKind::Ident
+                && !NOT_A_TYPE.iter().any(|w| tokens[k - 1].is_ident_ci(w))
+            {
+                let modifier = ["public", "private", "protected", "readonly"].iter().any(|m| tokens[k - 1].is_ident_ci(m));
+                if !modifier {
+                    return std::iter::once(self.class(tokens, k - 1)).collect();
+                }
+            }
+            let member = tokens[k].is_ident_ci(name) && k >= 2 && tokens[k - 1].is_punct("->") && tokens[k - 2].text == "this";
+            if !member {
+                continue;
+            }
+            let mut after = k + 1;
+            while tokens.get(after).is_some_and(|t| t.is_punct("[")) {
+                let mut depth = 0usize;
+                let Some(close) = (after..tokens.len()).find(|&j| {
+                    depth += usize::from(tokens[j].is_punct("["));
+                    depth -= usize::from(tokens[j].is_punct("]"));
+                    depth == 0
+                }) else {
+                    break;
+                };
+                after = close + 1;
+            }
+            let created = tokens.get(after).is_some_and(|t| t.is_punct("=")) && tokens.get(after + 1).is_some_and(|t| t.is_ident_ci("new"));
+            if (after > k + 1) != element {
+                continue;
+            }
+            if created && tokens.get(after + 2).is_some_and(|t| t.kind == TokenKind::Ident) {
+                return std::iter::once(self.class(tokens, after + 2)).collect();
+            }
+            if tokens.get(after).is_some_and(|t| t.is_punct("=")) {
+                if let Some(class) = reflection_getter(tokens, after + 1) {
+                    return std::iter::once(class.to_string()).collect();
+                }
+            }
+        }
+        Default::default()
+    }
+
+    /// The class of the thing before `->`, when the code shows it: a variable, a property or `(new X)`.
+    pub(crate) fn of_receiver(&self, tokens: &[Token], k: usize) -> std::collections::HashSet<String> {
+        if tokens[k].kind == TokenKind::Variable {
+            return self.at(tokens, k, &tokens[k].text);
+        }
+        let mut name = k;
+        while tokens[name].is_punct("]") {
+            let mut depth = 0usize;
+            let Some(open) = (0..=name).rev().find(|&j| {
+                depth += usize::from(tokens[j].is_punct("]"));
+                depth -= usize::from(tokens[j].is_punct("["));
+                depth == 0
+            }) else {
+                return Default::default();
+            };
+            let Some(before) = open.checked_sub(1) else { return Default::default() };
+            name = before;
+        }
+        if tokens[name].kind == TokenKind::Ident && name >= 2 && tokens[name - 1].is_punct("->") && tokens[name - 2].text == "this" {
+            return self.property(tokens, &tokens[name].text, name != k);
+        }
+        if !tokens[k].is_punct(")") {
+            return Default::default();
+        }
+        let mut depth = 0usize;
+        let open = (0..=k).rev().find(|&j| {
+            depth += usize::from(tokens[j].is_punct(")"));
+            depth -= usize::from(tokens[j].is_punct("("));
+            depth == 0
+        });
+        match open {
+            Some(o)
+                if tokens.get(o + 1).is_some_and(|t| t.is_ident_ci("new"))
+                    && tokens.get(o + 2).is_some_and(|t| t.kind == TokenKind::Ident) =>
+            {
+                std::iter::once(self.class(tokens, o + 2)).collect()
+            }
+            _ => Default::default(),
+        }
+    }
 }
 
 fn globals_writes(tokens: &[Token]) -> Vec<usize> {
@@ -3255,6 +3410,19 @@ fn dynamic_properties(tokens: &[Token], index: &crate::index::ProjectIndex) -> V
     out
 }
 
+const MYSQL_CONSTANTS: [&str; 7] = [
+    "MYSQL_ASSOC",
+    "MYSQL_NUM",
+    "MYSQL_BOTH",
+    "MYSQL_CLIENT_COMPRESS",
+    "MYSQL_CLIENT_IGNORE_SPACE",
+    "MYSQL_CLIENT_INTERACTIVE",
+    "MYSQL_CLIENT_SSL",
+];
+
+/// Marks a project with a `define()` whose name only exists at run time.
+pub(crate) const DYNAMIC_CONSTANT: &str = "*";
+
 pub(crate) fn defined_constants(tokens: &[Token]) -> std::collections::HashSet<String> {
     let mut names = std::collections::HashSet::new();
     for (i, t) in tokens.iter().enumerate() {
@@ -3274,8 +3442,15 @@ pub(crate) fn defined_constants(tokens: &[Token]) -> std::collections::HashSet<S
             }
         }
         if t.is_ident_ci("define") && tokens.get(i + 1).is_some_and(|n| n.is_punct("(")) {
-            if let Some(name) = tokens.get(i + 2).filter(|n| matches!(n.kind, TokenKind::Str { .. })) {
-                names.insert(name.text.get(1..name.text.len().saturating_sub(1)).unwrap_or_default().to_string());
+            let literal = tokens.get(i + 2).filter(|n| matches!(n.kind, TokenKind::Str { interpolates: false, .. }));
+            match literal.filter(|_| tokens.get(i + 3).is_some_and(|n| n.is_punct(","))) {
+                Some(name) => {
+                    let name = name.text.get(1..name.text.len().saturating_sub(1)).unwrap_or_default();
+                    names.insert(name.rsplit('\\').next().unwrap_or_default().to_string());
+                }
+                None => {
+                    names.insert(DYNAMIC_CONSTANT.to_string());
+                }
             }
         }
     }
@@ -3447,6 +3622,60 @@ mod tests {
         assert_eq!(count("<?php class C { function __construct(private $p, public $q) {} } class D extends C { function f() { $this->p = 1; $this->q = 2; } }"), 1);
         assert_eq!(count("<?php class C { private $v; } class D extends C { function f() { \\Closure::bind(function () { $this->v = 1; }, $this, C::class)(); } }"), 0);
         assert_eq!(count("<?php class C { private $v; } class D extends C { function f() { (function () { $this->v = 1; })->bindTo($this, C::class)(); } }"), 0);
+    }
+
+    #[test]
+    fn imports_stay_in_their_namespace_block() {
+        assert!(rule_ids("<?php namespace A { use function Foo\\each; each($x); } namespace B { each($x); }")
+            .contains(&"removed.each".to_string()));
+        assert!(rule_ids("<?php namespace A; use function Foo\\each; each($x);").is_empty());
+    }
+
+    #[test]
+    fn a_receiver_is_only_known_where_the_code_shows_it() {
+        let flagged = |src: &str| rule_ids(src).iter().any(|r| r == "deprecated.reflection_method");
+        assert!(flagged("<?php $r = new ReflectionFunction('f'); $r->isDisabled();"));
+        assert!(flagged("<?php (new ReflectionFunction('f'))->isDisabled();"));
+        assert!(flagged("<?php function a(ReflectionFunction $r) { return function () use ($r) { $r->isDisabled(); }; }"));
+        assert!(flagged("<?php function a() { $r = new ReflectionFunction('f'); } function b($r) { $r->isDisabled(); }"));
+        assert!(flagged(
+            "<?php class A { function a() { $this->r = new ReflectionFunction('f'); } function b() { $this->r->isDisabled(); } }"
+        ));
+        assert!(flagged("<?php class A { private ReflectionFunction $r; function b() { $this->r->isDisabled(); } }"));
+        assert!(!flagged(
+            "<?php class A { private Mine $r; function a() { new ReflectionFunction('f'); } function b() { $this->r->isDisabled(); } }"
+        ));
+        assert!(!flagged("<?php new ReflectionFunction('f'); $x->mine->isDisabled();"));
+        assert!(!flagged("<?php new ReflectionFunction('f'); getMine()->isDisabled();"));
+        assert!(!flagged("<?php function a() { $r = new ReflectionFunction('f'); } function b(Mine $r) { $r->isDisabled(); }"));
+        assert!(!flagged("<?php $r = new ReflectionFunction('f'); $r = new Mine; $r->isDisabled();"));
+        assert!(!flagged("<?php namespace App; class ReflectionFunction {} $r = new ReflectionFunction('f'); $r->isDisabled();"));
+        assert!(!flagged("<?php use Foo\\ReflectionFunction; $r = new ReflectionFunction('f'); $r->isDisabled();"));
+        let accessible = "<?php $c = new ReflectionClass($o); $m = $c->getMethod('x'); $m->setAccessible(true);";
+        assert!(analyze_source("t.php", accessible, "8.5".parse().unwrap()).iter().any(|f| f.rule_id == "deprecated.set_accessible"));
+        let element = "<?php class A { function a() { $this->s = new SplObjectStorage; $this->s[$k] = new V; } function b() { $this->s->contains(1); } }";
+        assert!(analyze_source("t.php", element, "8.5".parse().unwrap()).iter().any(|f| f.rule_id == "deprecated.spl_object_storage"));
+    }
+
+    #[test]
+    fn a_project_constant_hides_the_builtin_of_that_name() {
+        assert!(rule_ids("<?php namespace Q; const FILTER_SANITIZE_STRING = 1; echo FILTER_SANITIZE_STRING;").is_empty());
+        assert!(rule_ids("<?php const INPUT_REQUEST = 99; echo INPUT_REQUEST;").is_empty());
+        assert!(rule_ids("<?php define('App\\\\E_STRICT', 1); echo E_STRICT;").is_empty());
+        assert!(rule_ids("<?php echo MYSQL_ASSOC;").iter().any(|r| r.contains("constant")));
+    }
+
+    #[test]
+    fn unknown_constants_keep_barewords_as_they_are() {
+        assert!(fix_legacy_syntax("<?php define('App\\\\active', 'k'); echo $a[active], $a[other];").unwrap().0.contains("$a[active]"));
+        assert_eq!(fix_legacy_syntax("<?php foreach ($c as $n => $v) define($n, $v); echo $a[active];"), None);
+        assert_eq!(fix_legacy_syntax("<?php define('act' . 'ive', 1); echo $a[active];"), None);
+    }
+
+    #[test]
+    fn static_properties_are_not_instance_properties() {
+        assert!(rule_ids("<?php class S { public static $count; function f() { $this->count = 1; } }")
+            .contains(&"deprecated.dynamic_property".to_string()));
     }
 
     #[test]
