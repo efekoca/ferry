@@ -653,6 +653,27 @@ fn safe_fixes(root: &Path, rector: &Path, target: PhpVersion) -> Result<Vec<(Str
     Ok(preview.changes.into_iter().filter(|c| c.fix == FixKind::Auto).map(|c| (c.file, c.new_content)).collect())
 }
 
+fn print_origins(origins: &[ferry_core::origin::Origin]) {
+    use ferry_core::origin::OriginKind;
+    if origins.iter().all(|o| o.kind == OriginKind::Project) {
+        return;
+    }
+    println!("Where the new messages come from:");
+    for o in origins {
+        let kind = match o.kind {
+            OriginKind::Project => "your code",
+            OriginKind::Core => "core",
+            OriginKind::Package => "package",
+            OriginKind::Extension => "plugin or theme",
+        };
+        let version = o.version.as_deref().map_or(String::new(), |v| format!(" {v}"));
+        println!("  {kind} {}{version}: {} messages, {} fatal", o.name, o.messages, o.fatal);
+        if let Some(advice) = &o.advice {
+            println!("    {}", advice.en);
+        }
+    }
+}
+
 fn print_outcome(outcome: &ferry_core::docker::Outcome) {
     use ferry_core::docker::Delta;
     fn line<T>(name: &str, delta: &Delta<T>) {
@@ -666,6 +687,7 @@ fn print_outcome(outcome: &ferry_core::docker::Outcome) {
     for e in outcome.messages.remaining.iter().chain(&outcome.messages.introduced) {
         println!("  {}:{} {}", e.path.trim_start_matches("/app/"), e.line, e.message);
     }
+    print_origins(&outcome.origins);
     let verdict = if outcome.regressed_after { "still worse than the source" } else { "no longer worse than the source" };
     println!("The fixed copy is {verdict}.");
 }
@@ -787,6 +809,7 @@ fn run_compare(args: &[String]) -> Result<bool, String> {
         for e in &result.new_on_target {
             println!("  {}:{} {}", e.path.trim_start_matches("/app/"), e.line, e.message);
         }
+        print_origins(&result.origins);
     }
     let broke = !result.new_failures.is_empty() || result.pages.iter().any(|p| p.broke());
     let regressed = result.source.tests.as_ref().is_some_and(|t| t.passed) && result.target.tests.as_ref().is_some_and(|t| !t.passed);

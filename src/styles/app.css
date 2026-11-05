@@ -1922,6 +1922,15 @@ select.input {
   color: var(--text-2);
 }
 
+.docker-origins h3 {
+  margin-bottom: var(--space-2);
+  font-size: var(--text-sm);
+}
+
+.docker-origins__step {
+  flex-basis: 100%;
+}
+
 .docker-fixes {
   display: flex;
   flex-direction: column;

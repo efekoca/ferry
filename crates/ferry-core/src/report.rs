@@ -1,6 +1,7 @@
 use crate::analyzer::{Finding, ScanResult};
 use crate::deps::{DependencyReport, DependencyStatus};
 use crate::i18n::{Lang, Text};
+use crate::origin::OriginKind;
 use crate::project::ProjectInfo;
 use crate::rules::{FixKind, Severity};
 use serde::Serialize;
@@ -122,6 +123,23 @@ fn docker_section(result: &crate::docker::Comparison, lang: Lang) -> String {
         md.push_str(&format!("- `{}` ({} → {})\n", md_escape(&page.path), page.source_status, page.target_status));
     }
     if !result.new_failures.is_empty() || result.pages.iter().any(|p| p.broke()) {
+        md.push('\n');
+    }
+    if result.origins.iter().any(|o| o.kind != OriginKind::Project) {
+        md.push_str(&format!("{}\n\n", l(Text::new("Yeni mesajların kaynağı:", "Where the new messages come from:"))));
+        for o in &result.origins {
+            let kind = match o.kind {
+                OriginKind::Project => Text::new("Proje kodu", "Your code"),
+                OriginKind::Core => Text::new("Çekirdek", "Core"),
+                OriginKind::Package => Text::new("Paket", "Package"),
+                OriginKind::Extension => Text::new("Eklenti ya da tema", "Plugin or theme"),
+            };
+            let name = [o.name.as_str(), o.version.as_deref().unwrap_or_default()].join(" ");
+            md.push_str(&format!("- {} {}: {}\n", l(kind), md_escape(name.trim()), o.messages));
+            if let Some(advice) = &o.advice {
+                md.push_str(&format!("  {}\n", md_escape(advice.get(lang))));
+            }
+        }
         md.push('\n');
     }
     md
@@ -361,11 +379,20 @@ mod tests {
             database_used: false,
             new_on_target: Vec::new(),
             gone_on_target: Vec::new(),
+            origins: vec![crate::origin::Origin {
+                kind: OriginKind::Core,
+                name: "WordPress".into(),
+                version: None,
+                messages: 3,
+                fatal: 1,
+                advice: Some(crate::i18n::Localized::same("Update it.".to_string())),
+            }],
         };
         assert!(comparison.regressed());
         let text = docker_section(&comparison, Lang::En);
         assert!(text.contains("PHP 7.4 was compared with PHP 8.4. The target version has new problems."), "{text}");
         assert!(text.contains("`CartTest::testTotal`"), "{text}");
+        assert!(text.contains("- Core WordPress: 3\n  Update it."), "{text}");
     }
 
     #[test]
