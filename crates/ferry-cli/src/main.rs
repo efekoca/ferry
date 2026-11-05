@@ -579,8 +579,10 @@ fn run(o: &Options) -> Result<Outcome, String> {
     let mut outside_fatals = 0;
     if let Some(path) = &o.runtime_log {
         let text = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
-        let events = ferry_core::runtime::parse(&String::from_utf8_lossy(&text));
-        let merged = ferry_core::runtime::merge(&root, &mut scan.findings, &events, o.target, &o.runtime_roots);
+        let text = String::from_utf8_lossy(&text);
+        let events = ferry_core::runtime::parse(&text);
+        let php = ferry_core::runtime::php_version(&text);
+        let merged = ferry_core::runtime::merge_from(&root, &mut scan.findings, &events, o.target, &o.runtime_roots, php);
         eprintln!(
             "ferry-cli: runtime log: {} events, {} matched findings, {} new, {} outside the project",
             events.len(),

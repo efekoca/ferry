@@ -188,6 +188,15 @@ struct RuntimeLog {
     events: Vec<runtime::Event>,
     check: Option<ferry_core::localcheck::CheckRun>,
     roots: Vec<String>,
+    /// Set for checks run here: their result only says something about this target.
+    target: Option<PhpVersion>,
+    php: Option<PhpVersion>,
+}
+
+impl RuntimeLog {
+    fn applies_to(&self, target: PhpVersion) -> bool {
+        self.target.is_none_or(|t| t == target)
+    }
 }
 
 #[derive(Serialize)]
@@ -205,15 +214,15 @@ struct RuntimeSummary {
 
 fn presented(root: &Path, scan: &ScanResult, log: Option<&RuntimeLog>) -> Vec<ferry_core::analyzer::Finding> {
     let mut findings = scan.findings.clone();
-    if let Some(log) = log {
-        runtime::merge(root, &mut findings, &log.events, scan.target, &log.roots);
+    if let Some(log) = log.filter(|l| l.applies_to(scan.target)) {
+        runtime::merge_from(root, &mut findings, &log.events, scan.target, &log.roots, log.php);
     }
     findings
 }
 
 fn respond(root: &Path, mut scan: ScanResult, log: Option<&RuntimeLog>) -> ScanResponse {
-    let runtime = log.map(|log| {
-        let merged = runtime::merge(root, &mut scan.findings, &log.events, scan.target, &log.roots);
+    let runtime = log.filter(|l| l.applies_to(scan.target)).map(|log| {
+        let merged = runtime::merge_from(root, &mut scan.findings, &log.events, scan.target, &log.roots, log.php);
         RuntimeSummary {
             file: log.file.clone(),
             events: log.events.len(),
@@ -236,6 +245,14 @@ impl AppState {
         self.data_dir.join("docker").join(format!("{:016x}.json", fnv1a(path.as_bytes())))
     }
 
+    /// A check ran on the old files, so it says nothing about the new ones.
+    fn forget_check(&self, path: &str) {
+        let mut logs = self.runtime.lock().unwrap();
+        if logs.get(path).is_some_and(|l| l.check.is_some()) {
+            logs.remove(path);
+        }
+    }
+
     fn runtime_log(&self, path: &str) -> Option<RuntimeLog> {
         self.runtime.lock().unwrap().get(path).cloned()
     }
@@ -253,7 +270,8 @@ async fn import_runtime_log(state: State<'_, AppState>, path: String, log: Strin
             return Err(t!("Log 200 MB'tan büyük.", "The log is larger than 200 MB."));
         }
         let bytes = std::fs::read(&log).map_err(|e| failed(&ferry_core::i18n::io_error(&e)))?;
-        let events = runtime::parse(&String::from_utf8_lossy(&bytes));
+        let text = String::from_utf8_lossy(&bytes);
+        let events = runtime::parse(&text);
         if events.is_empty() {
             return Err(t!(
                 "Log'da PHP uyarısı, kullanımdan kalkma ya da hata satırı bulunamadı.",
@@ -261,7 +279,7 @@ async fn import_runtime_log(state: State<'_, AppState>, path: String, log: Strin
             ));
         }
         let name = Path::new(&log).file_name().map_or(log.clone(), |n| n.to_string_lossy().to_string());
-        Ok((root, RuntimeLog { file: name, events, check: None, roots: Vec::new() }))
+        Ok((root, RuntimeLog { file: name, php: runtime::php_version(&text), events, check: None, roots: Vec::new(), target: None }))
     })
     .await?;
     let mut entry = entry;
@@ -323,7 +341,8 @@ async fn run_local_check(state: State<'_, AppState>, path: String, target: Strin
             ),
             _ => return Err(t!("Bilinmeyen kontrol.", "Unknown check.")),
         };
-        Ok((root, RuntimeLog { file: label, events: runtime::parse(&run.output), check: Some(run), roots: Vec::new() }))
+        let events = runtime::parse(&run.output);
+        Ok((root, RuntimeLog { file: label, events, check: Some(run), roots: Vec::new(), target: Some(target), php: None }))
     })
     .await?;
     state.runtime.lock().unwrap().insert(root.to_string_lossy().to_string(), entry.clone());
@@ -407,6 +426,8 @@ impl AppState {
             events: comparison.new_on_target.clone(),
             check: None,
             roots: vec![docker::CONTAINER_ROOT.to_string()],
+            target: Some(comparison.target.version),
+            php: None,
         };
         let scan = self.scans.lock().unwrap().get(&path).cloned();
         if scan.is_some() {
@@ -1180,6 +1201,7 @@ async fn apply_changes(
     if let Some((_, preview)) = state.previews.lock().unwrap().get_mut(&path) {
         preview.changes.retain(|c| !result.written.contains(&c.file));
     }
+    state.forget_check(&path);
     Ok(result)
 }
 
@@ -1229,6 +1251,7 @@ async fn restore_snapshot(
         restored.map(|files| (path, files))
     })
     .await?;
+    state.forget_check(&restored.0);
     state.previews.lock().unwrap().remove(&restored.0);
     Ok(restored.1)
 }

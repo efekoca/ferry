@@ -277,7 +277,7 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
       try {
         const info = await api.inspectProject(chosen);
         if (seq !== openSeq.current) return;
-        if (rootRef.current && rootRef.current !== info.root) void api.closeProject(rootRef.current).catch(() => {});
+        if (rootRef.current) void api.closeProject(rootRef.current).catch(() => {});
         rootRef.current = info.root;
         resetResults();
         setFindingsFilter(NO_FILTER);
