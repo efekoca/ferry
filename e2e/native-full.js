@@ -389,7 +389,7 @@
       const before = seen.length;
       await openRecent(projects.unicode);
       await scan();
-      await nav("Docker karşılaştırması");
+      await nav("Gerçek test");
       await click("Karşılaştırmayı başlat");
       await until(() => /PHP 8\.\d sürümünde yeni: [1-9]/.test(text()), "new messages on the target", 300000);
       await emit(`  docker: ${$("main").innerText.replace(/\n+/g, " / ").slice(300, 900)}`);
@@ -397,7 +397,7 @@
       await click("Bulgularda göster");
       await until(() => text().includes("Docker · PHP"), "merged into the findings");
       await click("Log'u kaldır");
-      await nav("Docker karşılaştırması");
+      await nav("Gerçek test");
       await click("Düzeltmeleri hazırla");
       await until(() => text().includes("geçici kopyada dene"), "fixes prepared", 120000);
       await click("geçici kopyada dene");
@@ -422,7 +422,7 @@
       const images = (await invoke("docker_image_usage")).images;
       await openRecent(projects.unicode);
       await scan();
-      await nav("Docker karşılaştırması");
+      await nav("Gerçek test");
       await click("Karşılaştırmayı başlat");
       await click("Durdur", undefined, 30000);
       await until(() => button("Karşılaştırmayı başlat"), "start button back after stop", 60000);
@@ -443,7 +443,7 @@
       const before = seen.length;
       await openRecent(projects.unicode);
       await scan();
-      await nav("Docker karşılaştırması");
+      await nav("Gerçek test");
       const select = await until(() => $$("select").find((s) => [...s.options].some((o) => o.value.startsWith("dump:"))), "database choices");
       const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set;
       setter.call(select, "dump:database/dump.sql");

@@ -421,7 +421,7 @@ describe("Ferry app", () => {
     const user = userEvent.setup();
     render(<App api={mockApi({ delay: 0 })} />);
     await openAndScan(user);
-    await user.click(nav(/Docker karşılaştırması/));
+    await user.click(nav(/Gerçek test/));
     await user.click(await screen.findByRole("button", { name: "Karşılaştırmayı başlat" }));
     expect(await screen.findByText("PHP 8.4 sürümünde yeni sorunlar var.")).toBeInTheDocument();
     expect(screen.getByText("Error: Call to undefined function each()")).toBeInTheDocument();
@@ -435,7 +435,7 @@ describe("Ferry app", () => {
     await user.click(nav(/Genel bakış/));
     expect(await screen.findByRole("button", { name: "Yeni sorunlar var" })).toBeInTheDocument();
     await user.click(nav(/Geçmiş/));
-    expect(await screen.findByText("Docker karşılaştırmaları")).toBeInTheDocument();
+    expect(await screen.findByText("Gerçek testler")).toBeInTheDocument();
     expect(screen.queryByText("Sunucudaki proje kökü")).not.toBeInTheDocument();
   });
 
@@ -462,7 +462,7 @@ describe("Ferry app", () => {
     const user = userEvent.setup();
     render(<App api={mockApi({ delay: 0 })} />);
     await openAndScan(user);
-    await user.click(nav(/Docker karşılaştırması/));
+    await user.click(nav(/Gerçek test/));
     await user.selectOptions(await screen.findByRole("combobox", { name: "Veritabanı" }), await screen.findByRole("option", { name: "Canlı kopya: magaza (127.0.0.1)" }));
     expect(screen.getByText(/Canlı veritabanınıza yazılmaz/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Karşılaştırmayı başlat" }));
@@ -476,7 +476,7 @@ describe("Ferry app", () => {
     const compare = vi.spyOn(api, "dockerCompare");
     render(<App api={api} />);
     await openAndScan(user);
-    await user.click(nav(/Docker karşılaştırması/));
+    await user.click(nav(/Gerçek test/));
     await user.selectOptions(await screen.findByRole("combobox", { name: "Veritabanı" }), "ssh");
     await user.type(screen.getByRole("combobox", { name: "SSH sunucusu" }), "prod");
     await user.type(screen.getByRole("textbox", { name: "Veritabanı adı" }), "magaza");
@@ -498,7 +498,7 @@ describe("Ferry app", () => {
     const keep = vi.spyOn(api, "keepDockerTrial");
     render(<App api={api} />);
     await openAndScan(user);
-    await user.click(nav(/Docker karşılaştırması/));
+    await user.click(nav(/Gerçek test/));
     await user.click(await screen.findByRole("button", { name: "Karşılaştırmayı başlat" }));
     await user.click(await screen.findByRole("button", { name: "Düzeltmeleri hazırla" }));
     expect(await screen.findByText(/Yeni 1 mesajdan 1 tanesi/)).toBeInTheDocument();
@@ -524,7 +524,7 @@ describe("Ferry app", () => {
     const save = vi.spyOn(api, "saveProjectConfig");
     render(<App api={api} />);
     await openAndScan(user);
-    await user.click(nav(/Docker karşılaştırması/));
+    await user.click(nav(/Gerçek test/));
     expect(await screen.findByDisplayValue("vendor/bin/pest")).toBeInTheDocument();
     expect(screen.getByDisplayValue("make assets")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Karşılaştırmayı başlat" }));
@@ -542,7 +542,7 @@ describe("Ferry app", () => {
     const find = vi.spyOn(api, "findCompatibleVersions");
     render(<App api={api} />);
     await openAndScan(user);
-    await user.click(nav(/Docker karşılaştırması/));
+    await user.click(nav(/Gerçek test/));
     await user.click(await screen.findByRole("button", { name: "Karşılaştırmayı başlat" }));
     expect(await screen.findByText("Yeni mesajlar nereden geliyor")).toBeInTheDocument();
     expect(screen.getByText("Önce WordPress'i güncelleyin.")).toBeInTheDocument();
@@ -559,7 +559,7 @@ describe("Ferry app", () => {
     const compare = vi.spyOn(api, "dockerCompare");
     render(<App api={api} />);
     await openAndScan(user);
-    await user.click(nav(/Docker karşılaştırması/));
+    await user.click(nav(/Gerçek test/));
     await user.selectOptions(await screen.findByRole("combobox", { name: "Veritabanı" }), "ssh");
     await user.type(screen.getByRole("combobox", { name: "SSH sunucusu" }), "prod");
     await user.type(screen.getByRole("textbox", { name: "Veritabanı adı" }), "magaza");
@@ -579,7 +579,7 @@ describe("Ferry app", () => {
     const user = userEvent.setup();
     render(<App api={mockApi({ delay: 0 })} />);
     await openAndScan(user);
-    await user.click(nav(/Docker karşılaştırması/));
+    await user.click(nav(/Gerçek test/));
     await user.click(await screen.findByRole("button", { name: "Karşılaştırmayı başlat" }));
     await screen.findByText("PHP 8.4 sürümünde yeni sorunlar var.");
     await user.click(screen.getByRole("button", { name: /Ayarlar/ }));
