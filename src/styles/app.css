@@ -1922,6 +1922,56 @@ select.input {
   color: var(--text-2);
 }
 
+.docker-fixes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: var(--space-3) 0;
+}
+
+.docker-fix > label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+}
+
+.docker-fix code {
+  font-family: var(--font-mono);
+}
+
+.docker-fix details {
+  margin-top: var(--space-1);
+  font-size: var(--text-sm);
+}
+
+.docker-delta {
+  width: 100%;
+  margin: var(--space-3) 0;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.docker-delta th,
+.docker-delta td {
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--border);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.docker-delta th:first-child,
+.docker-delta td:first-child {
+  text-align: left;
+}
+
+.docker-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
 .runtime-root {
   display: flex;
   gap: var(--space-2);

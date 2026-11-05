@@ -397,6 +397,23 @@
       await click("Bulgularda göster");
       await until(() => text().includes("Docker · PHP"), "merged into the findings");
       await click("Log'u kaldır");
+      await nav("Docker karşılaştırması");
+      await click("Düzeltmeleri hazırla");
+      await until(() => text().includes("geçici kopyada dene"), "fixes prepared", 120000);
+      await click("geçici kopyada dene");
+      await until(() => text().includes("Kapandı") && text().includes("projeye yaz"), "trial result", 300000);
+      await emit(`  trial: ${$(".docker-delta").innerText.replace(/\s+/g, " ")}`);
+      noErrorToast(before);
+      const backups = (await invoke("list_snapshots", { path: projects.unicode })).length;
+      const runs = (await invoke("docker_history", { path: projects.unicode })).length;
+      await click("projeye yaz");
+      await click("Projeye yaz", await dialog());
+      await until(async () => !$('[role="dialog"]'), "fixes written", 30000);
+      await until(() => !text().includes("Kapandı"), "trial closed", 30000);
+      check((await invoke("list_snapshots", { path: projects.unicode })).length === backups + 1, "a backup was taken");
+      check((await invoke("docker_history", { path: projects.unicode })).length === runs + 1, "the trial became the latest comparison");
+      await until(() => /PHP 8\.\d sürümünde yeni: 0/.test(text()), "no new messages after writing", 30000);
+      noErrorToast(before);
     },
 
     async function dockerStopAndClean() {

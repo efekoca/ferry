@@ -1,3 +1,5 @@
+import { touches } from "../lib/fixes";
+import type { DockerEvent, FileChange } from "../lib/types";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { DiffViewer, wordHighlight } from "../components/DiffViewer";
@@ -214,3 +216,19 @@ describe("ErrorBoundary", () => {
   });
 });
 
+
+describe("touches", () => {
+  const change = {
+    file: "a.php",
+    rules: [],
+    fix: "auto",
+    diff: { additions: 1, deletions: 1, hunks: [{ oldStart: 8, newStart: 8, lines: [{ kind: "context", oldNo: 8, newNo: 8, text: "" }, { kind: "del", oldNo: 9, newNo: null, text: "" }, { kind: "add", oldNo: null, newNo: 9, text: "" }, { kind: "context", oldNo: 10, newNo: 10, text: "" }] }] },
+  } as FileChange;
+  const at = (path: string, line: number) => ({ path, line, level: "fatal", message: "", count: 1 }) as DockerEvent;
+
+  it("matches an event inside a hunk of the same file", () => {
+    expect(touches(at("/app/a.php", 9), change)).toBe(true);
+    expect(touches(at("/app/a.php", 11), change)).toBe(false);
+    expect(touches(at("/app/b.php", 9), change)).toBe(false);
+  });
+});

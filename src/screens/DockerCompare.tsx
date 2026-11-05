@@ -1,13 +1,14 @@
-import { useEffect, useState } from "react";
-import { CircleAlert, CircleCheck, Container, Play, ShieldAlert, Square } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { CircleAlert, CircleCheck, Container, Play, ShieldAlert, Square, Wand2 } from "lucide-react";
+import { DiffViewer } from "../components/DiffViewer";
 import { ConfirmDialog } from "../components/Modal";
 import { PageHeader } from "../components/Shell";
-import { Badge, Button, Callout, Card, EmptyState } from "../components/ui";
+import { Badge, Button, Callout, Card, EmptyState, RiskBadge } from "../components/ui";
 import { useI18n } from "../i18n";
+import { containerPath as shortPath, touches } from "../lib/fixes";
 import { useStore } from "../lib/store";
-import { KNOWN_SOURCES, type DatabaseChoice, type DatabasePlan, type DockerComparison, type DockerPage, type DockerRun, type Target } from "../lib/types";
+import { KNOWN_SOURCES, type DatabaseChoice, type DatabasePlan, type DockerComparison, type DockerDelta, type DockerEvent, type DockerOutcome, type DockerPage, type DockerRun, type Target } from "../lib/types";
 
-const shortPath = (path: string) => path.replace(/^\/app\//, "");
 const choice = (source: string, file: string | null, root: string): DatabaseChoice | null => {
   if (source === "live" || source === "seed") return { kind: source };
   if (source === "file") return file ? { kind: "dump", path: file } : null;
@@ -79,7 +80,177 @@ function PagesCard({ pages, version }: { pages: DockerPage[]; version: string })
   );
 }
 
-function Result({ result }: { result: DockerComparison }) {
+function EventList({ events, label, tone }: { events: DockerEvent[]; label: string; tone: "danger" | "manual" }) {
+  return (
+    <ul className="docker-events">
+      {events.map((e) => (
+        <li key={`${e.path}:${e.line}:${e.message}`}>
+          <Badge tone={tone}>{label}</Badge>
+          <code>
+            {shortPath(e.path)}:{e.line}
+          </code>
+          <span>{e.message}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function TrialResult({ outcome, version, files, onEdit }: { outcome: DockerOutcome; version: string; files: string[]; onEdit: () => void }) {
+  const { t } = useI18n();
+  const { applyChanges, applying } = useStore();
+  const [confirming, setConfirming] = useState(false);
+  const rows: [string, DockerDelta<unknown>][] = [
+    [t.docker.fixMessages, outcome.messages],
+    [t.docker.fixTests, outcome.tests],
+    [t.docker.fixPages, outcome.pages],
+    [t.docker.fixTables, outcome.tables],
+  ];
+  const introduced = rows.some(([, d]) => d.introduced.length > 0) || outcome.lintAfter > outcome.lintBefore;
+  const left = rows.some(([, d]) => d.remaining.length > 0) || outcome.lintAfter > 0;
+  const named = [...outcome.tests.introduced, ...outcome.pages.introduced, ...outcome.tables.introduced];
+  const open = [...outcome.tests.remaining, ...outcome.pages.remaining, ...outcome.tables.remaining];
+  const write = async () => {
+    await applyChanges(files, undefined, true);
+    setConfirming(false);
+  };
+  return (
+    <>
+      <Callout tone={introduced ? "danger" : outcome.regressedAfter || left ? "warn" : "success"} icon={introduced || outcome.regressedAfter ? <CircleAlert size={15} /> : <CircleCheck size={15} />}>
+        {introduced ? t.docker.fixWorse : outcome.regressedAfter ? t.docker.fixStillBroken(version) : left ? t.docker.fixPartly(version) : t.docker.fixClean(version)}
+      </Callout>
+      <table className="docker-delta">
+        <thead>
+          <tr>
+            <th scope="col">{t.docker.fixKind}</th>
+            <th scope="col">{t.docker.fixFixed}</th>
+            <th scope="col">{t.docker.fixRemaining}</th>
+            <th scope="col">{t.docker.fixIntroduced}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(([name, d]) => (
+            <tr key={name}>
+              <th scope="row">{name}</th>
+              <td>{d.fixed.length}</td>
+              <td>{d.remaining.length}</td>
+              <td>{d.introduced.length}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {outcome.lintBefore + outcome.lintAfter > 0 && <p className="subtle">{t.docker.fixLint(outcome.lintBefore, outcome.lintAfter)}</p>}
+      <EventList events={outcome.messages.introduced} label={t.docker.fixIntroduced} tone="danger" />
+      {named.length > 0 && (
+        <ul className="docker-events">
+          {named.map((name) => (
+            <li key={name}>
+              <Badge tone="danger">{t.docker.fixIntroduced}</Badge>
+              <code>{name}</code>
+            </li>
+          ))}
+        </ul>
+      )}
+      <EventList events={outcome.messages.remaining} label={t.docker.fixRemaining} tone="manual" />
+      {open.length > 0 && (
+        <ul className="docker-events">
+          {open.map((name) => (
+            <li key={name}>
+              <Badge tone="manual">{t.docker.fixRemaining}</Badge>
+              <code>{name}</code>
+            </li>
+          ))}
+        </ul>
+      )}
+      {left && <p className="subtle">{t.docker.fixManual}</p>}
+      <div className="docker-actions">
+        <Button variant={introduced ? "secondary" : "primary"} onClick={() => setConfirming(true)}>
+          {t.docker.fixWrite(files.length)}
+        </Button>
+        <Button variant="secondary" onClick={onEdit}>
+          {t.docker.fixEdit}
+        </Button>
+      </div>
+      <ConfirmDialog open={confirming} icon={<Wand2 size={20} />} title={t.docker.fixConfirmTitle} confirmLabel={t.docker.fixConfirm} loading={applying} onCancel={() => setConfirming(false)} onConfirm={() => void write()}>
+        {t.docker.fixConfirmText(files.length)}
+      </ConfirmDialog>
+    </>
+  );
+}
+
+function FixLoop({ result, onTry }: { result: DockerComparison; onTry: (files: string[]) => void }) {
+  const { t } = useI18n();
+  const { toolchain, preview, previewMode, previewing, loadPreview, dockerTrial, setView } = useStore();
+  const [editing, setEditing] = useState(false);
+  const ready = preview && previewMode === "compat" && preview.target === result.target.version ? preview : null;
+  const changes = useMemo(() => ready?.changes ?? [], [ready]);
+  const known = dockerTrial?.previewId === ready?.id && dockerTrial?.files.every((f) => changes.some((c) => c.file === f)) ? dockerTrial : null;
+  const related = (file: string) => result.newOnTarget.filter((e) => changes.some((c) => c.file === file && touches(e, c))).length;
+  const [picked, setPicked] = useState<{ previewId: number; files: Set<string> } | null>(null);
+  const chosen = useMemo(() => {
+    if (ready && picked?.previewId === ready.id) return picked.files;
+    if (known) return new Set(known.files);
+    return new Set(changes.filter((c) => c.fix === "auto" || result.newOnTarget.some((e) => touches(e, c))).map((c) => c.file));
+  }, [ready, picked, known, changes, result]);
+  const toggle = (file: string) => {
+    if (!ready) return;
+    const files = new Set(chosen);
+    if (!files.delete(file)) files.add(file);
+    setPicked({ previewId: ready.id, files });
+  };
+  const matched = result.newOnTarget.filter((e) => changes.some((c) => touches(e, c))).length;
+  return (
+    <Card title={t.docker.fixTitle}>
+      {known && !editing ? (
+        <TrialResult outcome={known.outcome} version={result.target.version} files={known.files} onEdit={() => setEditing(true)} />
+      ) : !ready ? (
+        <>
+          <p>{t.docker.fixIntro}</p>
+          {toolchain && !toolchain.rector ? (
+            <>
+              <p className="subtle">{t.docker.fixNeedsRector}</p>
+              <Button variant="secondary" onClick={() => setView("changes")}>
+                {t.docker.fixOpenChanges}
+              </Button>
+            </>
+          ) : (
+            <Button variant="primary" icon={<Wand2 size={14} />} loading={previewing} onClick={() => void loadPreview("compat")}>
+              {t.docker.fixPrepare}
+            </Button>
+          )}
+        </>
+      ) : changes.length === 0 ? (
+        <p className="subtle">{t.docker.fixNone}</p>
+      ) : (
+        <>
+          <p>{t.docker.fixIntro}</p>
+          {result.newOnTarget.length > 0 && <p className="subtle">{t.docker.fixMatched(matched, result.newOnTarget.length)}</p>}
+          <div className="docker-fixes">
+            {changes.map((c) => (
+              <div className="docker-fix" key={c.file}>
+                <label>
+                  <input type="checkbox" className="checkbox" checked={chosen.has(c.file)} onChange={() => toggle(c.file)} />
+                  <code>{c.file}</code>
+                  <RiskBadge fix={c.fix} />
+                  {related(c.file) > 0 && <Badge tone="danger">{t.docker.fixRelated(related(c.file))}</Badge>}
+                </label>
+                <details>
+                  <summary>{t.docker.fixShow}</summary>
+                  <DiffViewer diff={c.diff} file={c.file} />
+                </details>
+              </div>
+            ))}
+          </div>
+          <Button variant="primary" icon={<Play size={14} />} disabled={chosen.size === 0} onClick={() => onTry(changes.filter((c) => chosen.has(c.file)).map((c) => c.file))}>
+            {t.docker.fixTry(chosen.size)}
+          </Button>
+        </>
+      )}
+    </Card>
+  );
+}
+
+function Result({ result, onTry }: { result: DockerComparison; onTry: (files: string[]) => void }) {
   const { t } = useI18n();
   const { showFindings } = useStore();
   const fatal = result.newOnTarget.filter((e) => e.level === "fatal").length;
@@ -88,11 +259,13 @@ function Result({ result }: { result: DockerComparison }) {
   const missing = [...new Set([...result.source.missingExtensions, ...result.target.missingExtensions])];
   const brokenPages = result.pages.some((p) => p.change === "status" || p.change === "errors" || p.change === "missing");
   const bad = fatal > 0 || regressed || brokenPages || result.target.lintErrors > result.source.lintErrors;
+  const fixable = bad || result.newOnTarget.length > 0 || result.pages.some((p) => p.change !== "same");
   return (
     <>
       <Callout tone={bad ? "danger" : tested ? "success" : "warn"} icon={bad ? <CircleAlert size={15} /> : <CircleCheck size={15} />}>
         {bad ? t.docker.worse(result.target.version) : tested ? t.docker.same(result.target.version) : t.docker.notTested}
       </Callout>
+      {fixable && <FixLoop result={result} onTry={onTry} />}
       {!result.dependenciesInstalled && (
         <Callout tone="warn">
           {t.docker.notInstalled}
@@ -170,7 +343,8 @@ function Result({ result }: { result: DockerComparison }) {
 
 export function DockerCompare() {
   const { t } = useI18n();
-  const { api, project, target, toolchain, docker, dockerStep, runDocker, cancelDocker } = useStore();
+  const { api, project, target, toolchain, docker, dockerStep, runDocker, cancelDocker, dockerArgs, tryFixes } = useStore();
+  const [trying, setTrying] = useState<string[] | null>(null);
   const [plan, setPlan] = useState<DatabasePlan | null>(null);
   const [dataSource, setDataSource] = useState("none");
   const [dumpFile, setDumpFile] = useState<string | null>(null);
@@ -192,8 +366,17 @@ export function DockerCompare() {
   const sources = KNOWN_SOURCES.filter((v) => Number(v) < Number(target));
   const source = picked ?? project.currentVersion ?? "";
   const running = !!dockerStep;
+  const lastDatabase = dockerArgs?.database;
+  const lastRemote = lastDatabase?.kind === "ssh" ? lastDatabase : null;
+  const shown = trying && lastRemote ? lastRemote : remote;
+  const attempt = (files: string[]) => (lastRemote ? setTrying(files) : void tryFixes(files));
   const start = () => {
     setConfirming(false);
+    if (trying) {
+      setTrying(null);
+      void tryFixes(trying);
+      return;
+    }
     const database = dataSource === "ssh" ? ({ kind: "ssh", ...remote } as const) : choice(dataSource, dumpFile, project.root);
     void runDocker(source, extensions, extensions && cleanImages, comparePages ? parsePaths(paths) : [], database, prepare.trim() || null);
   };
@@ -303,17 +486,20 @@ export function DockerCompare() {
               )}
             </Card>
           )}
-          {docker && !running && <Result result={docker} />}
+          {docker && !running && <Result result={docker} onTry={attempt} />}
           <ConfirmDialog
-            open={confirming}
+            open={confirming || !!trying}
             tone="danger"
             icon={<ShieldAlert size={20} />}
             title={t.docker.sshConfirmTitle}
             confirmLabel={t.docker.sshConfirm}
-            onCancel={() => setConfirming(false)}
+            onCancel={() => {
+              setConfirming(false);
+              setTrying(null);
+            }}
             onConfirm={start}
           >
-            {t.docker.sshConfirmText(remote.host, remote.name, remote.user)}
+            {t.docker.sshConfirmText(shown.host, shown.name, shown.user)}
           </ConfirmDialog>
         </div>
       </div>

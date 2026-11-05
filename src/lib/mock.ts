@@ -1,6 +1,6 @@
 import type { Api } from "./api";
 import type { Localized } from "../i18n";
-import type { DockerSummary,
+import type { DockerComparison, DockerSummary,
   CheckRun,
   DependencyReport,
   DiffLine,
@@ -174,6 +174,7 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
   let runtimeRoots: string[] = [];
   let dockerImages = 0;
   let dockerRuns: DockerSummary[] = [];
+  let dockerTrial: DockerComparison | null = null;
   const withRuntime = (findings: Finding[]): { findings: Finding[]; runtime: ScanResult["runtime"] } => {
     if (!runtimeLog) return { findings: findings.map((f) => ({ ...f, runtimeHits: 0 })), runtime: null };
     const hit = new Set(findings.filter((f) => f.ruleId.startsWith("removed.")).slice(0, 3).map((f) => f.id));
@@ -259,7 +260,7 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
     },
     sshHosts: async () => ["prod", "staging"],
     databasePlan: async () => ({ engine: "mysql" as const, host: "127.0.0.1", name: "magaza", user: "app", live: true, seed: null, dumps: ["database/dump.sql"] }),
-    dockerCompare: async (_path, source, target, extensions, cleanImages, pages, database) => {
+    dockerCompare: async (_path, source, target, extensions, cleanImages, pages, database, _prepare, fix) => {
       if (!lastScan) throw new Error("Scan the project first.");
       const run = (version: string, lintErrors: number, passed: boolean, log: string) => ({
         version,
@@ -273,8 +274,14 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
         events: [],
         log,
       });
-      const event = { path: "/app/includes/cart.php", line: 44, level: "fatal" as const, message: "Error: Call to undefined function each()", count: 1 };
+      const event = { path: "/app/includes/class-cart.php", line: 118, level: "fatal" as const, message: "Error: Call to undefined function each()", count: 1 };
       await new Promise((r) => setTimeout(r, opts.delay ?? 0));
+      if (fix) {
+        const comparison = { source: run(source, 0, true, "OK (12 tests)"), target: run(target, 0, true, "OK (12 tests)"), dependenciesInstalled: true, installLog: "", newFailures: [], dataChanges: [], databaseUsed: !!database, pages: [], newOnTarget: [], goneOnTarget: [event] };
+        const none = { fixed: [], remaining: [], introduced: [] };
+        dockerTrial = comparison;
+        return { comparison, scan: null, outcome: { messages: { ...none, fixed: [event] }, tests: { ...none, fixed: ["CartTest::testTotal"] }, pages: { ...none, fixed: pages.length ? ["/cart.php"] : [] }, tables: none, lintBefore: 1, lintAfter: 0, regressedBefore: true, regressedAfter: false } };
+      }
       dockerImages = extensions && !cleanImages ? 2 : dockerImages;
       dockerRuns = [{ at: Date.now() / 1000, source, target, regressed: true, testsCompared: true, pages: pages.length ? 2 : 0, brokenPages: pages.length ? 1 : 0, differingPages: pages.length ? 1 : 0, unverifiedPages: 0, newFailures: 1, newMessages: 1, dataChanges: database ? 1 : 0 }, ...dockerRuns];
       runtimeLog = `Docker · PHP ${source} → ${target}`;
@@ -282,7 +289,12 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
       return {
         comparison: { source: run(source, 0, true, "OK (12 tests)"), target: { ...run(target, 1, false, "ERRORS!"), events: [event] }, dependenciesInstalled: true, installLog: "", newFailures: ["CartTest::testTotal"], dataChanges: database ? [{ table: "orders", sourceRows: 3, targetRows: 4 }] : [], databaseUsed: !!database, pages: pages.length ? [{ path: "/cart.php", change: "errors" as const, sourceStatus: 200, targetStatus: 200, newErrors: ["Uncaught Error: Call to undefined function each()"], sourceText: "Sepet", targetText: "Fatal error" }, { path: "/", change: "same" as const, sourceStatus: 200, targetStatus: 200, newErrors: [], sourceText: "Mağaza", targetText: "Mağaza" }] : [], newOnTarget: [event], goneOnTarget: [] },
         scan: withIgnores(lastScan),
+        outcome: null,
       };
+    },
+    keepDockerTrial: async () => {
+      if (!dockerTrial) throw new Error("Try the fixes first.");
+      return { comparison: dockerTrial, scan: null, outcome: null };
     },
     cancelDockerCompare: async () => {},
     onDockerStep: async () => () => {},

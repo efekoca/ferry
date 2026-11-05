@@ -3,7 +3,7 @@ use crate::toolchain::{self, Stop};
 use crate::version::PhpVersion;
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
@@ -145,6 +145,9 @@ pub struct Options {
     pub database: Option<crate::database::Source>,
     /// Runs once on the source version with network access, before anything is compared.
     pub prepare: Option<String>,
+    /// Files replaced only in the target's copy, as (relative path, content), so the old code
+    /// on the old version is compared with the fixed code on the new one.
+    pub fixes: Vec<(String, String)>,
 }
 
 const HISTORY_LIMIT: usize = 20;
@@ -195,6 +198,81 @@ impl Comparison {
             new_messages: self.new_on_target.len(),
             data_changes: self.data_changes.len(),
         }
+    }
+}
+
+/// How one kind of problem moved between a comparison and its rerun with fixes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Delta<T> {
+    pub fixed: Vec<T>,
+    pub remaining: Vec<T>,
+    pub introduced: Vec<T>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Outcome {
+    pub messages: Delta<Event>,
+    pub tests: Delta<String>,
+    pub pages: Delta<String>,
+    pub tables: Delta<String>,
+    pub lint_before: usize,
+    pub lint_after: usize,
+    pub regressed_before: bool,
+    pub regressed_after: bool,
+}
+
+impl Outcome {
+    pub fn worsened(&self) -> bool {
+        self.lint_after > self.lint_before
+            || !self.messages.introduced.is_empty()
+            || !self.tests.introduced.is_empty()
+            || !self.pages.introduced.is_empty()
+            || !self.tables.introduced.is_empty()
+    }
+}
+
+fn delta<T: Clone, K: Eq + std::hash::Hash>(before: &[T], after: &[T], key: impl Fn(&T) -> K) -> Delta<T> {
+    let counts = |items: &[T]| {
+        let mut map: HashMap<K, usize> = HashMap::new();
+        items.iter().for_each(|item| *map.entry(key(item)).or_default() += 1);
+        map
+    };
+    let take = |map: &mut HashMap<K, usize>, item: &T| map.get_mut(&key(item)).filter(|n| **n > 0).map(|n| *n -= 1).is_some();
+    let mut unseen = counts(after);
+    let fixed = before.iter().filter(|item| !take(&mut unseen, item)).cloned().collect();
+    let mut unseen = counts(before);
+    let (remaining, introduced) = after.iter().cloned().partition(|item| take(&mut unseen, item));
+    Delta { fixed, remaining, introduced }
+}
+
+/// Lines shift when code is fixed, so messages are matched without them or any number inside.
+fn event_key(event: &Event) -> (String, runtime::Level, String) {
+    let message = event.message.chars().filter(|c| !c.is_ascii_digit()).collect();
+    (event.path.clone(), event.level, message)
+}
+
+/// What a rerun with fixes changed. A test or page the rerun couldn't check stays open.
+pub fn outcome(before: &Comparison, after: &Comparison) -> Outcome {
+    let differing = |c: &Comparison| -> Vec<String> {
+        c.pages.iter().filter(|p| p.change != crate::web::PageChange::Same).map(|p| p.path.clone()).collect()
+    };
+    let (pages_before, mut pages_after) = (differing(before), differing(after));
+    let unchecked = pages_before.iter().filter(|path| !after.pages.iter().any(|p| &p.path == *path)).cloned();
+    pages_after.extend(unchecked.collect::<Vec<_>>());
+    let tests_checked = after.target.tests.as_ref().is_some_and(|t| !t.timed_out && (t.passed || !after.target.failed_tests.is_empty()));
+    let tests = if tests_checked { after.new_failures.as_slice() } else { before.new_failures.as_slice() };
+    let tables = |c: &Comparison| -> Vec<String> { c.data_changes.iter().map(|d| d.table.clone()).collect() };
+    Outcome {
+        messages: delta(&before.new_on_target, &after.new_on_target, event_key),
+        tests: delta(&before.new_failures, tests, Clone::clone),
+        pages: delta(&pages_before, &pages_after, Clone::clone),
+        tables: delta(&tables(before), &tables(after), Clone::clone),
+        lint_before: before.target.lint_errors,
+        lint_after: after.target.lint_errors,
+        regressed_before: before.regressed(),
+        regressed_after: after.regressed(),
     }
 }
 
@@ -711,6 +789,11 @@ pub fn compare(
     }
     let target_dir = work.path().join("target");
     copy_project(&base, &target_dir).map_err(|e| crate::t!("Proje kopyalanamadı: {e}", "Couldn't copy the project: {e}"))?;
+    for (file, content) in &options.fixes {
+        crate::safefs::resolve(&target_dir, file)
+            .and_then(|path| crate::safefs::replace(&path, content.as_bytes()))
+            .map_err(|e| crate::t!("Düzeltme kopyaya yazılamadı ({file}): {e}", "Couldn't write the fix to the copy ({file}): {e}"))?;
+    }
     let runs = run_version(&container, source, &base, &setup, &step)
         .and_then(|first| run_version(&container, target, &target_dir, &setup, &step).map(|second| (first, second)));
     if options.clean_images {
@@ -751,6 +834,108 @@ mod tests {
         let new = [Event { count: 5, ..event("/app/a.php", 1, "same") }, event("/app/a.php", 3, "new")];
         assert_eq!(differs(&new, &old), [event("/app/a.php", 3, "new")]);
         assert_eq!(differs(&old, &new), [event("/app/a.php", 2, "gone")]);
+    }
+
+    fn comparison(new_failures: &[&str], events: Vec<Event>) -> Comparison {
+        let run = |version| VersionRun {
+            version,
+            image: String::new(),
+            lint_errors: 0,
+            tests: Some(TestRun { exit_code: Some(1), timed_out: false, passed: new_failures.is_empty(), by_file: false }),
+            failed_tests: new_failures.iter().map(|t| t.to_string()).collect(),
+            crawl: Default::default(),
+            data: Default::default(),
+            missing_extensions: Vec::new(),
+            installed_extensions: Vec::new(),
+            image_failed: false,
+            events: Vec::new(),
+            log: String::new(),
+        };
+        Comparison {
+            source: run(PhpVersion::new(7, 4)),
+            target: run(PhpVersion::new(8, 4)),
+            dependencies_installed: true,
+            install_log: String::new(),
+            new_failures: new_failures.iter().map(|t| t.to_string()).collect(),
+            pages: Vec::new(),
+            data_changes: Vec::new(),
+            database_used: false,
+            new_on_target: events,
+            gone_on_target: Vec::new(),
+        }
+    }
+
+    fn page(path: &str, change: crate::web::PageChange) -> crate::web::PageDiff {
+        crate::web::PageDiff {
+            path: path.into(),
+            change,
+            source_status: 200,
+            target_status: 200,
+            new_errors: Vec::new(),
+            source_text: String::new(),
+            target_text: String::new(),
+        }
+    }
+
+    #[test]
+    fn an_outcome_follows_messages_across_shifted_lines() {
+        let before = comparison(&["A::x", "A::y"], vec![event("/app/a.php", 10, "moved at 10"), event("/app/a.php", 20, "gone")]);
+        let after = comparison(&["A::y", "A::z"], vec![event("/app/a.php", 14, "moved at 14"), event("/app/b.php", 3, "new")]);
+        let result = outcome(&before, &after);
+        assert_eq!(result.messages.fixed, [event("/app/a.php", 20, "gone")]);
+        assert_eq!(result.messages.remaining, [event("/app/a.php", 14, "moved at 14")]);
+        assert_eq!(result.messages.introduced, [event("/app/b.php", 3, "new")]);
+        assert_eq!(result.tests.fixed, ["A::x"]);
+        assert_eq!(result.tests.remaining, ["A::y"]);
+        assert_eq!(result.tests.introduced, ["A::z"]);
+        assert!(result.worsened());
+    }
+
+    #[test]
+    fn repeated_messages_are_counted_one_by_one() {
+        let same = |line| event("/app/a.php", line, "same");
+        let before = comparison(&[], vec![same(1), same(2)]);
+        let result = outcome(&before, &comparison(&[], vec![same(1)]));
+        assert_eq!((result.messages.fixed.len(), result.messages.remaining.len()), (1, 1));
+        assert!(!result.worsened());
+    }
+
+    #[test]
+    fn what_the_rerun_could_not_check_is_not_called_fixed() {
+        use crate::web::PageChange::{Errors, Same, Unverified};
+        let mut before = comparison(&["A::x"], Vec::new());
+        before.pages = vec![page("/a", Errors), page("/b", Errors), page("/c", Errors)];
+        let mut after = comparison(&[], Vec::new());
+        after.target.tests.as_mut().unwrap().passed = false;
+        after.pages = vec![page("/a", Same), page("/b", Unverified)];
+        let result = outcome(&before, &after);
+        assert_eq!(result.tests.remaining, ["A::x"]);
+        assert!(result.tests.fixed.is_empty());
+        assert_eq!(result.pages.fixed, ["/a"]);
+        assert_eq!(result.pages.remaining, ["/b", "/c"]);
+        assert!(result.regressed_after);
+    }
+
+    #[test]
+    fn a_fix_runs_on_the_target_copy_only() {
+        if std::env::var_os("FERRY_TEST_DOCKER").is_none() {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let broken = "<?php\nfunction total($a) { return each($a); }\necho PHP_MAJOR_VERSION, ' ', json_encode(total(['ok']));\n";
+        std::fs::write(dir.path().join("index.php"), broken).unwrap();
+        let options = Options { pages: vec!["/".to_string()], ..Options::default() };
+        let (source, target) = (PhpVersion::new(7, 4), PhpVersion::new(8, 4));
+        let before = compare(dir.path(), source, target, options.clone(), &AtomicBool::new(false), |_| {}).unwrap();
+        assert!(before.regressed(), "{before:?}");
+        let fixed = "<?php\nfunction total($a) { return [1 => current($a), 'value' => current($a), 0 => key($a), 'key' => key($a)]; }\necho 7, ' ', json_encode(total(['ok']));\n";
+        let options = Options { fixes: vec![("index.php".to_string(), fixed.to_string())], ..options };
+        let after = compare(dir.path(), source, target, options, &AtomicBool::new(false), |_| {}).unwrap();
+        assert_eq!(std::fs::read_to_string(dir.path().join("index.php")).unwrap(), broken);
+        let result = outcome(&before, &after);
+        assert!(result.regressed_before && !result.regressed_after, "{result:?}");
+        assert!(result.messages.remaining.is_empty() && !result.messages.fixed.is_empty(), "{result:?}");
+        assert_eq!(result.pages.fixed, ["/"], "{result:?}\n{:?}", after.pages);
     }
 
     #[test]
@@ -818,7 +1003,7 @@ mod tests {
                 clean_images: true,
                 pages: vec!["/".to_string()],
                 database: Some(crate::database::Source::Dump(file)),
-                prepare: None,
+                ..Options::default()
             };
             let result =
                 compare(dir.path(), PhpVersion::new(8, 3), PhpVersion::new(8, 4), options, &AtomicBool::new(false), |_| {}).unwrap();

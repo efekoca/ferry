@@ -212,9 +212,47 @@ export interface DockerStep {
   version: string | null;
 }
 
+export interface DockerDelta<T> {
+  fixed: T[];
+  remaining: T[];
+  introduced: T[];
+}
+
+export interface DockerOutcome {
+  messages: DockerDelta<DockerEvent>;
+  tests: DockerDelta<string>;
+  pages: DockerDelta<string>;
+  tables: DockerDelta<string>;
+  lintBefore: number;
+  lintAfter: number;
+  regressedBefore: boolean;
+  regressedAfter: boolean;
+}
+
 export interface DockerResponse {
   comparison: DockerComparison;
   scan: ScanResult | null;
+  outcome: DockerOutcome | null;
+}
+
+export interface DockerFixChoice {
+  previewId: number;
+  files: string[];
+}
+
+export interface DockerRunArgs {
+  source: string;
+  extensions: boolean;
+  cleanImages: boolean;
+  pages: string[];
+  database: DatabaseChoice | null;
+  prepare: string | null;
+}
+
+export interface DockerTrial {
+  previewId: number;
+  files: string[];
+  outcome: DockerOutcome;
 }
 
 export interface RuntimeSummary {
