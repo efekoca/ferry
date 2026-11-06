@@ -838,6 +838,17 @@ impl Drop for BuiltImages<'_> {
     }
 }
 
+/// A custom command or a crash fails without naming a test, and that still has to count.
+fn failures_on_target(source: &VersionRun, target: &VersionRun, command: Option<&str>) -> Vec<String> {
+    let named: Vec<String> = target.failed_tests.iter().filter(|t| !source.failed_tests.contains(t)).cloned().collect();
+    let passed_before = source.tests.as_ref().is_some_and(|t| t.passed);
+    let failed_now = target.tests.as_ref().is_some_and(|t| !t.passed && !t.timed_out);
+    if named.is_empty() && passed_before && failed_now {
+        return vec![command.map_or_else(|| crate::t!("Test paketi", "Test suite"), str::to_string)];
+    }
+    named
+}
+
 /// Symfony's bridge exits with 1 over deprecations even though every test passed.
 fn tests_passed(output: &str) -> bool {
     output.lines().any(|l| l.starts_with("OK (") || l.starts_with("OK, but"))
@@ -999,7 +1010,7 @@ pub fn compare(
     }
     let pages = crate::web::compare(&source_run.crawl, &target_run.crawl);
     let data_changes = crate::database::data_changes(&source_run.data, &target_run.data);
-    let new_failures = target_run.failed_tests.iter().filter(|t| !source_run.failed_tests.contains(t)).cloned().collect();
+    let new_failures = failures_on_target(&source_run, &target_run, options.test.as_deref());
     let (new_on_target, gone_on_target) = changed_events(&source_run.events, &target_run.events, !options.fixes.is_empty());
     let origins = crate::origin::group(root, &new_on_target, target);
     let mut comparison = Comparison {
@@ -1120,6 +1131,23 @@ mod tests {
             gaps: Vec::new(),
             stamp: String::new(),
         }
+    }
+
+    #[test]
+    fn a_suite_that_fails_without_names_counts_as_a_new_failure() {
+        let mut result = comparison(&[], Vec::new());
+        let (source, target) = (&mut result.source, &mut result.target);
+        assert!(failures_on_target(source, target, None).is_empty());
+        target.tests.as_mut().unwrap().passed = false;
+        assert_eq!(failures_on_target(source, target, Some("php tests/run.php")), ["php tests/run.php"]);
+        target.tests.as_mut().unwrap().timed_out = true;
+        assert!(failures_on_target(source, target, None).is_empty());
+        target.tests.as_mut().unwrap().timed_out = false;
+        source.tests.as_mut().unwrap().passed = false;
+        assert!(failures_on_target(source, target, None).is_empty());
+        source.tests.as_mut().unwrap().passed = true;
+        target.failed_tests = vec!["CartTest::testTotal".to_string()];
+        assert_eq!(failures_on_target(source, target, None), ["CartTest::testTotal"]);
     }
 
     #[test]

@@ -1887,6 +1887,11 @@ select.input {
   color: var(--text-3);
 }
 
+.docker-version .input:disabled {
+  border-color: var(--border);
+  color: var(--text-3);
+}
+
 .docker-version .input {
   width: 132px;
   height: 40px;
