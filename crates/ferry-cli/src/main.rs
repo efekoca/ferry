@@ -48,7 +48,8 @@ pins lists the PHP versions pinned below the target in Dockerfiles, Compose, CI 
 
 Exit codes: 0 passed, 1 findings at the --fail-on level, 2 usage or run error,
 3 some files couldn't be scanned (unless --allow-incomplete).
-compare exits with 1 when the target adds fatal errors or failing tests";
+compare exits with 1 when the target is worse, and with 3 when the result isn't conclusive:
+a step didn't finish, or pages or tables differ with no error to explain why";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Format {
@@ -772,7 +773,17 @@ fn run_pins(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-fn run_compare(args: &[String]) -> Result<bool, String> {
+/// A result that isn't conclusive exits with 3, the same as a scan that couldn't read a file.
+fn verdict_code(result: &ferry_core::docker::Comparison) -> u8 {
+    use ferry_core::docker::Verdict;
+    match result.verdict {
+        Verdict::Clean => 0,
+        Verdict::Regressed => 1,
+        Verdict::Incomplete => 3,
+    }
+}
+
+fn run_compare(args: &[String]) -> Result<u8, String> {
     let (mut send_password, mut allow_config_commands) = (false, false);
     let (mut root, mut source, mut target, mut json_output) = (None, None, None, false);
     let extensions = true;
@@ -869,9 +880,8 @@ fn run_compare(args: &[String]) -> Result<bool, String> {
         } else {
             print_outcome(&outcome);
         }
-        return Ok(outcome.regressed_after || outcome.worsened());
+        return Ok(if outcome.regressed_after || outcome.worsened() { 1 } else { verdict_code(&after) });
     }
-    let fatal = result.new_on_target.iter().any(|e| e.level == ferry_core::runtime::Level::Fatal);
     if json_output {
         println!("{}", serde_json::to_string_pretty(&result).map_err(|e| e.to_string())?);
     } else {
@@ -894,6 +904,9 @@ fn run_compare(args: &[String]) -> Result<bool, String> {
             if !run.missing_extensions.is_empty() {
                 println!("  missing in {}: {}", run.image, run.missing_extensions.join(", "));
             }
+        }
+        if !result.gaps.is_empty() {
+            println!("Not fully checked: {:?}", result.gaps);
         }
         if !result.dependencies_installed {
             println!("Dependencies couldn't be installed, so tests may not have run:\n{}", result.install_log.trim());
@@ -919,9 +932,7 @@ fn run_compare(args: &[String]) -> Result<bool, String> {
         }
         print_origins(&result.origins);
     }
-    let broke = !result.new_failures.is_empty() || result.pages.iter().any(|p| p.broke());
-    let regressed = result.source.tests.as_ref().is_some_and(|t| t.passed) && result.target.tests.as_ref().is_some_and(|t| !t.passed);
-    Ok(fatal || broke || regressed)
+    Ok(verdict_code(&result))
 }
 
 fn main() -> ExitCode {
@@ -957,8 +968,7 @@ fn main() -> ExitCode {
     }
     if args.first().is_some_and(|a| a == "compare") {
         return match run_compare(&args[1..]) {
-            Ok(false) => ExitCode::SUCCESS,
-            Ok(true) => ExitCode::from(1),
+            Ok(code) => ExitCode::from(code),
             Err(e) => {
                 eprintln!("ferry-cli: {e}");
                 ExitCode::from(2)

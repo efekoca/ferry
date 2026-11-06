@@ -45,10 +45,11 @@ export interface Readiness {
   deps: { state: "blocked" | "unknown" | "verified" | "missing" | "pending"; count: number };
   check: { state: "passed" | "failed" | "none"; kind: "lint" | "tests" | null };
   docker: "passed" | "partial" | "failed" | "none";
+  ignoredBreaking: number;
 }
 
 export function readiness(scan: ScanResult, deps: DependencyReport | null, runs: DockerSummary[] = []): Readiness {
-  const run = runs.find((r) => r.target === scan.target);
+  const run = runs.find((r) => r.target === scan.target && r.stamp === scan.stamp);
   const blocked = dependencyBlockers(deps).total;
   const unknown = deps ? deps.packages.filter((p) => p.status === "unknown").length + (deps.rootStatus === "unknown" && deps.rootConstraint ? 1 : 0) : 0;
   const check = scan.runtime?.check;
@@ -65,7 +66,8 @@ export function readiness(scan: ScanResult, deps: DependencyReport | null, runs:
             ? { state: "unknown", count: unknown }
             : { state: "verified", count: 0 },
     check: { state: !check ? "none" : check.passed ? "passed" : "failed", kind: check?.kind ?? null },
-    docker: !run ? "none" : run.regressed ? "failed" : run.testsCompared ? "passed" : "partial",
+    docker: !run ? "none" : run.regressed ? "failed" : run.testsCompared && !run.incomplete ? "passed" : "partial",
+    ignoredBreaking: scan.ignored.filter((i) => i.finding.severity === "breaking").length,
   };
 }
 

@@ -90,6 +90,11 @@ fn docker_section(result: &crate::docker::Comparison, lang: Lang) -> String {
     };
     let verdict = if summary.regressed {
         l(Text::new("Hedef sürümde yeni sorunlar var.", "The target version has new problems."))
+    } else if summary.incomplete {
+        l(Text::new(
+            "Yeni hata görülmedi ama sonuç kesin değil: bir adım tamamlanmadı ya da fark var.",
+            "No new error was seen, but the result isn't conclusive: a step didn't finish or something differs.",
+        ))
     } else if summary.tests_compared {
         l(Text::new(
             "Testler iki sürümde de çalıştı ve hedef yeni bir hata eklemedi.",
@@ -348,6 +353,7 @@ mod tests {
             findings: vec![],
             errors: vec![],
             duration_ms: 1,
+            stamp: String::new(),
         };
         let md = to_markdown(&project, &scan, Some(&deps), None, Lang::En);
         assert!(md.contains("1 package also couldn't be confirmed for PHP 8.4."), "{md}");
@@ -360,6 +366,10 @@ mod tests {
             version: version.parse().unwrap(),
             image: String::new(),
             lint_errors: 0,
+            lint_files: 1,
+            lint_stopped: false,
+            pages_stopped: false,
+            pages_limited: false,
             tests: None,
             failed_tests: Vec::new(),
             crawl: Default::default(),
@@ -381,6 +391,9 @@ mod tests {
             database_used: false,
             new_on_target: Vec::new(),
             gone_on_target: Vec::new(),
+            verdict: crate::docker::Verdict::Regressed,
+            gaps: Vec::new(),
+            stamp: String::new(),
             origins: vec![crate::origin::Origin {
                 kind: OriginKind::Core,
                 name: "WordPress".into(),
@@ -439,6 +452,7 @@ mod tests {
             findings: findings("<?php each($a);"),
             errors: vec![],
             duration_ms: 1,
+            stamp: String::new(),
         };
         let md = to_markdown(&project, &scan, None, None, Lang::Tr);
         assert!(md.starts_with("# Ferry raporu: demo"));
@@ -451,6 +465,7 @@ mod tests {
             files_scanned: 0,
             findings: vec![],
             errors: vec![crate::analyzer::FileError { file: "big.php".into(), message: "too large".into() }],
+            stamp: String::new(),
             ..scan
         };
         let dir = tempfile::tempdir().unwrap();

@@ -191,11 +191,13 @@ struct RuntimeLog {
     /// Set for checks run here: their result only says something about this target.
     target: Option<PhpVersion>,
     php: Option<PhpVersion>,
+    /// The project state a run here saw. Imported logs have none: they say what they say.
+    stamp: Option<String>,
 }
 
 impl RuntimeLog {
-    fn applies_to(&self, target: PhpVersion) -> bool {
-        self.target.is_none_or(|t| t == target)
+    fn applies_to(&self, scan: &ScanResult) -> bool {
+        self.target.is_none_or(|t| t == scan.target) && self.stamp.as_ref().is_none_or(|s| *s == scan.stamp)
     }
 }
 
@@ -214,14 +216,14 @@ struct RuntimeSummary {
 
 fn presented(root: &Path, scan: &ScanResult, log: Option<&RuntimeLog>) -> Vec<ferry_core::analyzer::Finding> {
     let mut findings = scan.findings.clone();
-    if let Some(log) = log.filter(|l| l.applies_to(scan.target)) {
+    if let Some(log) = log.filter(|l| l.applies_to(scan)) {
         runtime::merge_from(root, &mut findings, &log.events, scan.target, &log.roots, log.php);
     }
     findings
 }
 
 fn respond(root: &Path, mut scan: ScanResult, log: Option<&RuntimeLog>) -> ScanResponse {
-    let runtime = log.filter(|l| l.applies_to(scan.target)).map(|log| {
+    let runtime = log.filter(|l| l.applies_to(&scan)).map(|log| {
         let merged = runtime::merge_from(root, &mut scan.findings, &log.events, scan.target, &log.roots, log.php);
         RuntimeSummary {
             file: log.file.clone(),
@@ -249,12 +251,13 @@ impl AppState {
         self.data_dir.join("docker").join(format!("{:016x}.json", fnv1a(path.as_bytes())))
     }
 
-    /// A check ran on the old files, so it says nothing about the new ones.
+    /// A check or a Real test ran on the old files, so it says nothing about the new ones.
     fn forget_check(&self, path: &str) {
         let mut logs = self.runtime.lock().unwrap();
-        if logs.get(path).is_some_and(|l| l.check.is_some()) {
+        if logs.get(path).is_some_and(|l| l.stamp.is_some()) {
             logs.remove(path);
         }
+        self.docker_results.lock().unwrap().remove(path);
     }
 
     fn runtime_log(&self, path: &str) -> Option<RuntimeLog> {
@@ -283,7 +286,10 @@ async fn import_runtime_log(state: State<'_, AppState>, path: String, log: Strin
             ));
         }
         let name = Path::new(&log).file_name().map_or(log.clone(), |n| n.to_string_lossy().to_string());
-        Ok((root, RuntimeLog { file: name, php: runtime::php_version(&text), events, check: None, roots: Vec::new(), target: None }))
+        Ok((
+            root,
+            RuntimeLog { file: name, php: runtime::php_version(&text), events, check: None, roots: Vec::new(), target: None, stamp: None },
+        ))
     })
     .await?;
     let mut entry = entry;
@@ -325,6 +331,7 @@ async fn run_local_check(state: State<'_, AppState>, path: String, target: Strin
     let scan = state.scans.lock().unwrap().get(&path).cloned().ok_or_else(|| t!("Önce projeyi tarayın.", "Scan the project first."))?;
     let shutdown = state.shutdown.clone();
     let chosen = state.php_override();
+    let stamp = scan.stamp.clone();
     let (root, entry) = blocking(move || {
         let root = project_root(&path)?;
         let local = toolchain::local_php_with(&[target.to_string()], chosen.as_deref()).into_iter().next().ok_or_else(|| {
@@ -346,7 +353,10 @@ async fn run_local_check(state: State<'_, AppState>, path: String, target: Strin
             _ => return Err(t!("Bilinmeyen kontrol.", "Unknown check.")),
         };
         let events = runtime::parse(&run.output);
-        Ok((root, RuntimeLog { file: label, events, check: Some(run), roots: Vec::new(), target: Some(target), php: None }))
+        Ok((
+            root,
+            RuntimeLog { file: label, events, check: Some(run), roots: Vec::new(), target: Some(target), php: None, stamp: Some(stamp) },
+        ))
     })
     .await?;
     if let Some(run) = &entry.check {
@@ -450,6 +460,7 @@ impl AppState {
             roots: vec![docker::CONTAINER_ROOT.to_string()],
             target: Some(comparison.target.version),
             php: None,
+            stamp: Some(comparison.stamp.clone()),
         };
         let scan = self.scans.lock().unwrap().get(&path).cloned();
         if scan.is_some() {
@@ -1409,7 +1420,8 @@ async fn export_report(state: State<'_, AppState>, path: String, destination: St
     let path = normalize_path(path);
     let scan = state.scans.lock().unwrap().get(&path).cloned().ok_or_else(|| t!("Önce projeyi tarayın.", "Scan the project first."))?;
     let log = state.runtime_log(&path);
-    let comparison = state.docker_results.lock().unwrap().get(&path).filter(|c| c.target.version == scan.target).cloned();
+    let comparison =
+        state.docker_results.lock().unwrap().get(&path).filter(|c| c.target.version == scan.target && c.stamp == scan.stamp).cloned();
     blocking(move || {
         let root = project_root(&path)?;
         let info = project::inspect(&root).map_err(|e| e.to_string())?;

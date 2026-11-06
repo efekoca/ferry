@@ -10,7 +10,8 @@ pub const LOG_MARKER: &str = "FERRY-SERVER-LOG";
 /// PHP's built-in server treats paths with a dot differently between versions, so one script decides.
 const ROUTER: &str = r#"<?php
 $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-if ($path !== '/' && is_file($_SERVER['DOCUMENT_ROOT'] . $path)) {
+$file = $_SERVER['DOCUMENT_ROOT'] . $path;
+if ($path !== '/' && (is_file($file) || is_file(rtrim($file, '/') . '/index.php'))) {
     return false;
 }
 if (!is_file($_SERVER['DOCUMENT_ROOT'] . '/index.php')) {
@@ -45,7 +46,7 @@ while ($queue && count($seen) < $limit) {
     $seen[$path] = true;
     list($status, $location, $body) = $fetch($path);
     list(, , $again) = $fetch($path);
-    $plain = function ($html) { return preg_replace('/\b[a-f0-9]{6,}\b|\d+(?:\.\d+)? ?(?:ms|MiB)|\d{1,2}[:.]\d{2}[:.]\d{2}(?: ?[AP]M)?/i', '', $html); };
+    $plain = function ($html) { return preg_replace('/\b(?=[a-f]*\d)(?=\d*[a-f])[a-f0-9]{6,}\b|\d+(?:\.\d+)? ?(?:ms|MiB)|\d{1,2}[:.]\d{2}[:.]\d{2}(?: ?[AP]M)?/i', '', $html); };
     preg_match_all('/(?:Fatal error|Parse error|Uncaught|Warning|Deprecated|Notice):? [^<\n]{0,200}/', $body, $errors);
     $raw = trim(preg_replace('/\s+/', ' ', $plain($body)));
     echo 'FERRYPAGE ' . json_encode(array(
@@ -57,13 +58,28 @@ while ($queue && count($seen) < $limit) {
         'errors' => array_values(array_unique(array_map('utf8_clean', $errors[0]))),
         'text' => utf8_clean(substr($raw, 0, 60000)),
     )) . "\n";
-    preg_match_all('/href=["\']([^"\'#?]+)/i', $body, $links);
-    foreach ($links[1] as $link) {
-        $link = preg_replace('#^https?://127\.0\.0\.1:8080#', '', $link);
-        if ($link === '') { continue; }
-        $unsafe = preg_match('#logout|logoff|signout|delete|remove|destroy|_profiler|_wdt|_debugbar|telescope|horizon|\.(css|js|png|jpe?g|gif|svg|ico|woff2?|pdf|zip)$#i', $link);
-        if ($link[0] === '/' && substr($link, 0, 2) !== '//' && !$unsafe) { $queue[] = $link; }
+    preg_match_all('/href=["\']([^"\'#]+)/i', $body, $links);
+    foreach (array_merge($location === '' ? array() : array($location), $links[1]) as $link) {
+        $next = same_site($path, $link);
+        if ($next === null) { continue; }
+        $unsafe = preg_match('#logout|logoff|signout|delete|remove|destroy|_profiler|_wdt|_debugbar|telescope|horizon|\.(css|js|png|jpe?g|gif|svg|ico|woff2?|pdf|zip)$#i', (string) strtok($next, '?'));
+        if (!$unsafe) { $queue[] = $next; }
     }
+}
+if ($queue) { echo "FERRYLIMIT\n"; }
+function same_site($base, $link) {
+    $link = preg_replace('#^https?://127\.0\.0\.1:8080#', '', trim($link));
+    if ($link === '' || preg_match('#^(//|[a-z][a-z0-9+.-]*:)#i', $link)) { return null; }
+    list($query) = array(strstr($link, '?') ?: '');
+    $path = $query === '' ? $link : substr($link, 0, -strlen($query));
+    $from = (string) strtok($base, '?');
+    if ($path === '') { return $from . $query; }
+    if ($path[0] !== '/') { $path = rtrim(dirname($from . 'x'), '/') . '/' . $path; }
+    $parts = array();
+    foreach (explode('/', $path) as $part) {
+        if ($part === '..') { array_pop($parts); } elseif ($part !== '.' && $part !== '') { $parts[] = $part; }
+    }
+    return '/' . implode('/', $parts) . (substr($path, -1) === '/' && $parts ? '/' : '') . $query;
 }
 function utf8_clean($text) {
     return (string) @iconv('UTF-8', 'UTF-8//IGNORE', $text);
@@ -111,13 +127,23 @@ pub struct PageDiff {
 impl PageDiff {
     /// Whether a page that worked on the source breaks on the target.
     pub fn broke(&self) -> bool {
-        !failed(self.source_status) && (failed(self.target_status) || fatal(&self.new_errors))
+        let lost_success = self.source_status < 300 && self.target_status >= 300;
+        let lost_redirect = self.source_status < 400 && self.target_status >= 400;
+        !failed(self.source_status) && (failed(self.target_status) || fatal(&self.new_errors) || lost_success || lost_redirect)
     }
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct Crawl {
     pages: Vec<Fetched>,
+    /// The page limit stopped the crawl with links left to visit.
+    pub limited: bool,
+}
+
+impl Crawl {
+    pub fn paths(&self) -> Vec<String> {
+        self.pages.iter().map(|p| p.path.clone()).collect()
+    }
 }
 
 pub fn document_root(project: &Path) -> &'static str {
@@ -144,7 +170,7 @@ pub fn script(project: &Path, paths: &[String]) -> String {
 
 pub fn parse(output: &str) -> Crawl {
     let pages = output.lines().filter_map(|l| l.strip_prefix("FERRYPAGE ")).filter_map(|l| serde_json::from_str(l).ok()).collect();
-    Crawl { pages }
+    Crawl { pages, limited: output.lines().any(|l| l == "FERRYLIMIT") }
 }
 
 pub fn server_log(output: &str) -> &str {
@@ -176,7 +202,7 @@ fn classify(source: &Fetched, target: &Fetched, new_errors: &[String]) -> PageCh
         PageChange::Redirect
     } else if !new_errors.is_empty() {
         PageChange::Errors
-    } else if !source.stable {
+    } else if !source.stable || !target.stable {
         PageChange::Unstable
     } else if source.hash != target.hash {
         PageChange::Body
@@ -236,7 +262,7 @@ mod tests {
     }
 
     fn change(source: Fetched, target: Fetched) -> PageChange {
-        compare(&Crawl { pages: vec![source] }, &Crawl { pages: vec![target] })[0].change
+        compare(&Crawl { pages: vec![source], limited: false }, &Crawl { pages: vec![target], limited: false })[0].change
     }
 
     #[test]
@@ -262,7 +288,7 @@ mod tests {
 
     #[test]
     fn a_page_missing_on_the_target_is_reported() {
-        let diffs = compare(&Crawl { pages: vec![page("/a", 200, "a", &[])] }, &Crawl::default());
+        let diffs = compare(&Crawl { pages: vec![page("/a", 200, "a", &[])], limited: false }, &Crawl::default());
         assert_eq!(diffs[0].change, PageChange::Missing);
     }
 

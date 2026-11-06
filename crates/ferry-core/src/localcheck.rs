@@ -129,7 +129,7 @@ pub fn run_tests(php: &Path, root: &Path, timeout: Duration, cancel: &std::sync:
     })
 }
 
-fn ran_tests(output: &str) -> bool {
+pub(crate) fn ran_tests(output: &str) -> bool {
     !output.contains("No tests executed")
 }
 

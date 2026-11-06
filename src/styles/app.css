@@ -2840,6 +2840,11 @@ select.input {
   font-size: var(--text-sm);
 }
 
+.docker-gaps {
+  margin: var(--space-1) 0 0;
+  padding-left: var(--space-4);
+}
+
 .step-picker {
   display: flex;
   align-items: center;
