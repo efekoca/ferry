@@ -21,6 +21,23 @@ async function openAndScan(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("Ferry app", () => {
+  it("stops a running scan and ignores its late result", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    let finish: (value: never) => void = () => {};
+    vi.spyOn(api, "scanProject").mockImplementation(() => new Promise((resolve) => (finish = resolve as never)));
+    const cancel = vi.spyOn(api, "cancelScan");
+    render(<App api={api} />);
+    await user.click(await screen.findByRole("button", { name: "Proje klasörü seçin" }));
+    await user.click(await screen.findByRole("button", { name: /Taramayı başlat/ }));
+    await user.click(await screen.findByRole("button", { name: "Durdur" }));
+    expect(cancel).toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Durdur" })).not.toBeInTheDocument();
+    finish(null as never);
+    expect(await screen.findByRole("button", { name: /Taramayı başlat/ })).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: /Hazırlık skoru/ })).not.toBeInTheDocument();
+  });
+
   it("shows the welcome screen with navigation disabled", async () => {
     setup();
     expect(await screen.findByRole("heading", { name: "Kodunuz yeni sürüme hazır olsun" })).toBeInTheDocument();

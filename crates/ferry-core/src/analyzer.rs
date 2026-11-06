@@ -57,9 +57,65 @@ pub fn relative_path(root: &Path, path: &Path) -> String {
     rel.to_string_lossy().replace('\\', "/")
 }
 
-pub fn analyze_files(root: &Path, files: &[PathBuf], target: PhpVersion, mut progress: impl FnMut(usize, usize, &str)) -> ScanResult {
+const FILE_BUDGET: std::time::Duration = std::time::Duration::from_secs(20);
+const FILE_STACK: usize = 64 * 1024 * 1024;
+
+enum FileRun {
+    Done(Vec<Finding>),
+    Failed,
+    TooSlow,
+    Cancelled,
+}
+
+/// One unusual file can't stop a scan: it gets its own thread with room for deep recursion, and
+/// the scan moves on when its time is up. A thread left behind ends on its own.
+fn analyze_bounded(
+    rel: String,
+    src: String,
+    target: PhpVersion,
+    index: &std::sync::Arc<crate::index::ProjectIndex>,
+    cancel: &std::sync::atomic::AtomicBool,
+    budget: std::time::Duration,
+) -> FileRun {
+    use std::sync::mpsc::RecvTimeoutError;
+    let (done, result) = std::sync::mpsc::channel();
+    let index = index.clone();
+    let spawned = std::thread::Builder::new().stack_size(FILE_STACK).spawn(move || {
+        let found = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| analyze_source_in(&rel, &src, target, &index)));
+        let _ = done.send(found.ok());
+    });
+    if spawned.is_err() {
+        return FileRun::Failed;
+    }
     let started = Instant::now();
-    let index = crate::index::ProjectIndex::build_for(root, files, Some(target));
+    loop {
+        match result.recv_timeout(std::time::Duration::from_millis(50).min(budget)) {
+            Ok(Some(found)) => return FileRun::Done(found),
+            Ok(None) | Err(RecvTimeoutError::Disconnected) => return FileRun::Failed,
+            Err(RecvTimeoutError::Timeout) if cancel.load(std::sync::atomic::Ordering::Relaxed) => return FileRun::Cancelled,
+            Err(RecvTimeoutError::Timeout) if started.elapsed() >= budget => return FileRun::TooSlow,
+            Err(RecvTimeoutError::Timeout) => {}
+        }
+    }
+}
+
+pub fn analyze_files(root: &Path, files: &[PathBuf], target: PhpVersion, progress: impl FnMut(usize, usize, &str)) -> ScanResult {
+    let never = std::sync::atomic::AtomicBool::new(false);
+    analyze_until(root, files, target, &never, progress).expect("the scan can't be cancelled")
+}
+
+/// `None` if `cancel` was set before the scan finished.
+pub fn analyze_until(
+    root: &Path,
+    files: &[PathBuf],
+    target: PhpVersion,
+    cancel: &std::sync::atomic::AtomicBool,
+    mut progress: impl FnMut(usize, usize, &str),
+) -> Option<ScanResult> {
+    use std::sync::atomic::Ordering;
+    let started = Instant::now();
+    let stamp = crate::project::stamp(root, files);
+    let index = std::sync::Arc::new(crate::index::ProjectIndex::build_until(root, files, Some(target), cancel));
     let mut findings = Vec::new();
     let mut errors = Vec::new();
     if files.is_empty() {
@@ -70,6 +126,9 @@ pub fn analyze_files(root: &Path, files: &[PathBuf], target: PhpVersion, mut pro
     }
     let mut lines = 0;
     for (i, path) in files.iter().enumerate() {
+        if cancel.load(Ordering::Relaxed) {
+            return None;
+        }
         let rel = relative_path(root, path);
         progress(i, files.len(), &rel);
         if path.is_dir() {
@@ -89,22 +148,32 @@ pub fn analyze_files(root: &Path, files: &[PathBuf], target: PhpVersion, mut pro
         }
         match std::fs::read(path) {
             Ok(bytes) => {
-                let src = String::from_utf8_lossy(&bytes);
+                let src = String::from_utf8_lossy(&bytes).into_owned();
                 lines += src.lines().count();
-                let one = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| analyze_source_in(&rel, &src, target, &index)));
-                match one {
-                    Ok(found) => findings.extend(found),
-                    Err(_) => errors.push(FileError {
+                match analyze_bounded(rel.clone(), src, target, &index, cancel, FILE_BUDGET) {
+                    FileRun::Done(found) => findings.extend(found),
+                    FileRun::Cancelled => return None,
+                    FileRun::Failed => errors.push(FileError {
                         file: rel,
                         message: crate::t!(
                             "Bu dosya okunurken Ferry durdu; dosya atlandı.",
                             "Ferry stopped while reading this file, so it was skipped."
                         ),
                     }),
+                    FileRun::TooSlow => errors.push(FileError {
+                        file: rel,
+                        message: crate::t!(
+                            "Bu dosyanın incelenmesi çok uzun sürdü; dosya atlandı.",
+                            "This file took too long to check, so it was skipped."
+                        ),
+                    }),
                 }
             }
             Err(e) => errors.push(FileError { file: rel, message: e.to_string() }),
         }
+    }
+    if cancel.load(Ordering::Relaxed) {
+        return None;
     }
     progress(files.len(), files.len(), "");
     let files_scanned = files.len().saturating_sub(errors.len());
@@ -115,7 +184,7 @@ pub fn analyze_files(root: &Path, files: &[PathBuf], target: PhpVersion, mut pro
     findings.extend(server);
     errors.extend(server_errors);
     findings.sort_by(|a, b| (a.severity, &a.file, a.line, a.column).cmp(&(b.severity, &b.file, b.line, b.column)));
-    ScanResult {
+    Some(ScanResult {
         target,
         files_found: files.len(),
         files_scanned,
@@ -123,8 +192,8 @@ pub fn analyze_files(root: &Path, files: &[PathBuf], target: PhpVersion, mut pro
         findings,
         errors,
         duration_ms: started.elapsed().as_millis() as u64,
-        stamp: crate::project::stamp(root, files),
-    }
+        stamp,
+    })
 }
 
 fn offset_base(tokens: &[Token], i: usize) -> bool {
@@ -2481,6 +2550,7 @@ fn case_semicolons(tokens: &[Token]) -> Vec<usize> {
 pub(crate) struct Receivers {
     pub(crate) names: crate::index::Names,
     scopes: Vec<(usize, usize, usize)>,
+    known: std::cell::RefCell<std::collections::HashMap<(String, u8), std::collections::HashSet<String>>>,
 }
 
 /// `$r->getMethod()` and `$r->getProperty()`, the usual way to reach a Reflection object.
@@ -2515,7 +2585,7 @@ impl Receivers {
             });
             scopes.push((k, body, close.unwrap_or(tokens.len())));
         }
-        Self { names: crate::index::Names::new(tokens), scopes }
+        Self { names: crate::index::Names::new(tokens), scopes, known: Default::default() }
     }
 
     fn class(&self, tokens: &[Token], k: usize) -> String {
@@ -2574,12 +2644,34 @@ impl Receivers {
     /// An untyped parameter says nothing, and code often names a variable the same way throughout
     /// a file, so what's shown elsewhere in the file is the next best thing.
     fn anywhere(&self, tokens: &[Token], name: &str) -> std::collections::HashSet<String> {
-        let same = |k: &usize| tokens[*k].kind == TokenKind::Variable && tokens[*k].text == name;
-        (0..tokens.len()).filter(same).filter_map(|k| self.evidence(tokens, k)).find(|found| !found.is_empty()).unwrap_or_default()
+        self.remembered(name, 0, || {
+            let same = |k: &usize| tokens[*k].kind == TokenKind::Variable && tokens[*k].text == name;
+            (0..tokens.len()).filter(same).filter_map(|k| self.evidence(tokens, k)).find(|found| !found.is_empty()).unwrap_or_default()
+        })
+    }
+
+    /// These read the whole file and give the same answer every time they're asked in it.
+    fn remembered(
+        &self,
+        name: &str,
+        kind: u8,
+        work: impl FnOnce() -> std::collections::HashSet<String>,
+    ) -> std::collections::HashSet<String> {
+        let key = (name.to_string(), kind);
+        if let Some(found) = self.known.borrow().get(&key) {
+            return found.clone();
+        }
+        let found = work();
+        self.known.borrow_mut().insert(key, found.clone());
+        found
     }
 
     /// `$this->name`: what's assigned to it anywhere in the file, or its declared type.
     fn property(&self, tokens: &[Token], name: &str, element: bool) -> std::collections::HashSet<String> {
+        self.remembered(name, 1 + u8::from(element), || self.find_property(tokens, name, element))
+    }
+
+    fn find_property(&self, tokens: &[Token], name: &str, element: bool) -> std::collections::HashSet<String> {
         for k in 0..tokens.len() {
             let declared = tokens[k].kind == TokenKind::Variable && tokens[k].text == name;
             if declared
@@ -3511,6 +3603,46 @@ fn bareword_keys(tokens: &[Token], defined: impl Fn(&str) -> bool) -> Vec<usize>
                 && offset_base(tokens, i - 2)
         })
         .collect()
+}
+
+#[cfg(test)]
+mod bounded_tests {
+    use super::*;
+    use std::sync::atomic::AtomicBool;
+
+    fn file(budget: std::time::Duration, cancel: bool) -> FileRun {
+        let index = std::sync::Arc::new(crate::index::ProjectIndex::default());
+        let src = format!("<?php {}", "$a = 1;\n".repeat(200_000));
+        analyze_bounded("a.php".into(), src, PhpVersion::new(8, 4), &index, &AtomicBool::new(cancel), budget)
+    }
+
+    #[test]
+    fn a_file_is_dropped_when_its_time_is_up() {
+        assert!(matches!(file(std::time::Duration::ZERO, false), FileRun::TooSlow));
+        assert!(matches!(file(std::time::Duration::from_secs(1), true), FileRun::Cancelled));
+        let quick = std::sync::Arc::new(crate::index::ProjectIndex::default());
+        let never = AtomicBool::new(false);
+        let done = analyze_bounded("a.php".into(), "<?php\n".into(), PhpVersion::new(8, 4), &quick, &never, FILE_BUDGET);
+        assert!(matches!(done, FileRun::Done(_)));
+    }
+
+    #[test]
+    fn a_cancelled_scan_gives_no_result() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.php"), "<?php\n").unwrap();
+        let files = vec![dir.path().join("a.php")];
+        assert!(analyze_until(dir.path(), &files, PhpVersion::new(8, 4), &AtomicBool::new(true), |_, _, _| {}).is_none());
+        assert!(analyze_until(dir.path(), &files, PhpVersion::new(8, 4), &AtomicBool::new(false), |_, _, _| {}).is_some());
+    }
+
+    #[test]
+    fn subclasses_are_read_with_one_lookup() {
+        let src = "<?php class P { function a() {} function b() {} } class C extends P { function a() {} } class D extends P { function a() {} function b() {} }";
+        let index = crate::index::ProjectIndex::from_tokens(&lex(src).tokens);
+        assert!(!index.inherits_unchanged("P", "a"), "every subclass overrides it");
+        assert!(index.inherits_unchanged("\\App\\P", "B"), "C inherits it");
+        assert!(!index.inherits_unchanged("C", "a"), "nothing extends C");
+    }
 }
 
 #[cfg(test)]

@@ -361,6 +361,9 @@ pub enum Stop {
     TimedOut,
 }
 
+/// More than any report needs. A runaway process keeps being read so it can't block on a full
+/// pipe, but what it prints past this is dropped.
+const MAX_OUTPUT: usize = 256 * 1024 * 1024;
 const READER_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
 
 pub struct Finished {
@@ -369,6 +372,11 @@ pub struct Finished {
     pub stderr: Vec<u8>,
     pub stopped: Option<Stop>,
     pub duration: std::time::Duration,
+}
+
+fn keep_output(kept: &mut Vec<u8>, chunk: &[u8], limit: usize) {
+    let room = limit.saturating_sub(kept.len());
+    kept.extend_from_slice(&chunk[..chunk.len().min(room)]);
 }
 
 pub fn run_process(
@@ -393,7 +401,7 @@ pub fn run_process(
                 if n == 0 {
                     break;
                 }
-                sink.lock().unwrap().extend_from_slice(&chunk[..n]);
+                keep_output(&mut sink.lock().unwrap(), &chunk[..n], MAX_OUTPUT);
             }
         });
         (buf, reader)
@@ -559,6 +567,15 @@ pub fn install_rector(tools_dir: &Path, php_override: Option<&Path>, cancel: &st
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn output_past_the_limit_is_dropped() {
+        let mut kept = Vec::new();
+        super::keep_output(&mut kept, b"abcd", 6);
+        super::keep_output(&mut kept, b"efgh", 6);
+        super::keep_output(&mut kept, b"ij", 6);
+        assert_eq!(kept, b"abcdef");
+    }
+
     #[cfg(unix)]
     #[test]
     fn a_background_child_holding_the_pipes_does_not_hang_the_run() {

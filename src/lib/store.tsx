@@ -111,6 +111,7 @@ interface AppStore {
   scanning: boolean;
   progress: ScanProgress | null;
   runScan(target?: Target): Promise<void>;
+  cancelScan(): void;
 
   deps: DependencyReport | null;
 
@@ -375,6 +376,13 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
       }
     }
   }, [api, project, target, fail, t]);
+
+  const cancelScan = useCallback(() => {
+    generation.current += 1;
+    setScanning(false);
+    setProgress(null);
+    if (project) api?.cancelScan(project.root).catch(() => {});
+  }, [api, project]);
 
   const saveConfig = useCallback(
     async (config: ProjectConfig) => {
@@ -680,13 +688,13 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
   const value = useMemo<AppStore>(
     () => ({
       api, view, setView, findingsFilter, setFindingsFilter, showFindings, theme, setTheme, recent, forgetRecent, project, opening, openProject, closeProject,
-      target, setTarget, scan, scanning, progress, runScan, deps, toolchain, refreshToolchain, installingRector,
+      target, setTarget, scan, scanning, progress, runScan, cancelScan, deps, toolchain, refreshToolchain, installingRector,
       installRector, preview, previewMode, previewing, loadPreview, cancelPreview, skippedHunks, skipHunks, docker, dockerHistory, checkHistory, dockerStep, runDocker, cancelDocker, saveConfig, dockerArgs, dockerTrial, tryFixes, applying, applyChanges, snapshots,
       refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport, ignoreFinding, unignoreFinding, pruneIgnores, importRuntimeLog, setRuntimeRoots, clearRuntimeLog, runLocalCheck,
     }),
     [
       api, view, findingsFilter, showFindings, theme, setTheme, recent, forgetRecent, project, opening, openProject, closeProject, target,
-      setTarget, scan, scanning, progress, runScan, deps, toolchain, refreshToolchain, installingRector,
+      setTarget, scan, scanning, progress, runScan, cancelScan, deps, toolchain, refreshToolchain, installingRector,
       installRector, preview, previewMode, previewing, loadPreview, cancelPreview, skippedHunks, skipHunks, docker, dockerHistory, checkHistory, dockerStep, runDocker, cancelDocker, saveConfig, dockerArgs, dockerTrial, tryFixes, applying, applyChanges, snapshots,
       refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport, ignoreFinding, unignoreFinding, pruneIgnores, importRuntimeLog, setRuntimeRoots, clearRuntimeLog, runLocalCheck,
     ],

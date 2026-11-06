@@ -6,10 +6,27 @@ pub type Span = ((usize, usize), (usize, usize));
 
 const PECL: [&str; 6] = ["removed.mcrypt", "removed.imap", "removed.pspell", "removed.oci8", "removed.xmlrpc", "removed.interbase"];
 
+/// Nothing written by hand nests this deep, and walking such a file for every `if` takes minutes.
+fn too_deep(tokens: &[Token]) -> bool {
+    let mut depth = 0usize;
+    tokens.iter().any(|t| {
+        if t.is_punct("(") || t.is_punct("[") || t.is_punct("{") {
+            depth += 1;
+        } else if t.is_punct(")") || t.is_punct("]") || t.is_punct("}") {
+            depth = depth.saturating_sub(1);
+        }
+        depth > 256
+    })
+}
+
 pub fn dead_spans(tokens: &[Token], target: PhpVersion) -> Vec<Span> {
     let mut out = Vec::new();
+    if too_deep(tokens) {
+        return out;
+    }
+    let mut in_chain = std::collections::HashSet::new();
     for i in 0..tokens.len() {
-        if !(tokens[i].is_ident_ci("if") || tokens[i].is_ident_ci("elseif")) {
+        if !(tokens[i].is_ident_ci("if") || tokens[i].is_ident_ci("elseif")) || in_chain.contains(&i) {
             continue;
         }
         if tokens[i].is_ident_ci("if") && i > 0 && tokens[i - 1].is_ident_ci("else") {
@@ -32,7 +49,10 @@ pub fn dead_spans(tokens: &[Token], target: PhpVersion) -> Vec<Span> {
                 }
             }
             match tokens.get(next) {
-                Some(t) if t.is_ident_ci("elseif") => k = next,
+                Some(t) if t.is_ident_ci("elseif") => {
+                    in_chain.insert(next);
+                    k = next;
+                }
                 Some(t) if t.is_ident_ci("else") && tokens.get(next + 1).is_some_and(|n| n.is_ident_ci("if")) => k = next + 1,
                 Some(t) if t.is_ident_ci("else") => {
                     if taken {
@@ -51,6 +71,9 @@ pub fn dead_spans(tokens: &[Token], target: PhpVersion) -> Vec<Span> {
 
 pub fn dead_expressions(tokens: &[Token], target: PhpVersion) -> Vec<Span> {
     let mut out = Vec::new();
+    if too_deep(tokens) {
+        return out;
+    }
     for (k, t) in tokens.iter().enumerate() {
         let and = t.is_punct("&&") || t.is_ident_ci("and");
         let or = t.is_punct("||") || t.is_ident_ci("or");
@@ -289,13 +312,23 @@ fn split<'a>(cond: &'a [Token], ops: &[&str]) -> Vec<&'a [Token]> {
     parts
 }
 
+/// No real version check nests this far, and a file written to overflow the stack can't get past it.
+const MAX_NESTING: usize = 64;
+
 fn evaluate(cond: &[Token], target: PhpVersion) -> Option<bool> {
+    value_of(cond, target, 0)
+}
+
+fn value_of(cond: &[Token], target: PhpVersion, nesting: usize) -> Option<bool> {
+    if nesting > MAX_NESTING {
+        return None;
+    }
     let any = split(cond, &["||", "or", "xor"]);
     if any.len() > 1 {
         if cond.iter().any(|t| t.is_ident_ci("xor")) {
             return None;
         }
-        let values: Vec<_> = any.iter().map(|p| evaluate(p, target)).collect();
+        let values: Vec<_> = any.iter().map(|p| value_of(p, target, nesting + 1)).collect();
         return if values.contains(&Some(true)) {
             Some(true)
         } else if values.iter().all(|v| *v == Some(false)) {
@@ -306,7 +339,7 @@ fn evaluate(cond: &[Token], target: PhpVersion) -> Option<bool> {
     }
     let all = split(cond, &["&&", "and"]);
     if all.len() > 1 {
-        let values: Vec<_> = all.iter().map(|p| evaluate(p, target)).collect();
+        let values: Vec<_> = all.iter().map(|p| value_of(p, target, nesting + 1)).collect();
         return if values.contains(&Some(false)) {
             Some(false)
         } else if values.iter().all(|v| *v == Some(true)) {
@@ -315,16 +348,19 @@ fn evaluate(cond: &[Token], target: PhpVersion) -> Option<bool> {
             None
         };
     }
-    atom(cond, target)
+    atom(cond, target, nesting)
 }
 
-fn atom(cond: &[Token], target: PhpVersion) -> Option<bool> {
+fn atom(cond: &[Token], target: PhpVersion, nesting: usize) -> Option<bool> {
+    if nesting > MAX_NESTING {
+        return None;
+    }
     let first = cond.first()?;
     if first.is_punct("!") {
-        return atom(&cond[1..], target).map(|v| !v);
+        return atom(&cond[1..], target, nesting + 1).map(|v| !v);
     }
     if first.is_punct("(") && matching(cond, 0) == Some(cond.len() - 1) {
-        return evaluate(&cond[1..cond.len() - 1], target);
+        return value_of(&cond[1..cond.len() - 1], target, nesting + 1);
     }
     if let Some(k) = cond.iter().position(|t| ["<", "<=", ">", ">="].iter().any(|op| t.is_punct(op))) {
         let (left, right) = (&cond[..k], &cond[k + 1..]);
@@ -477,6 +513,32 @@ fn function_exists(cond: &[Token], target: PhpVersion) -> Option<bool> {
 mod tests {
     use crate::analyzer::analyze_source;
     use crate::version::PhpVersion;
+
+    #[test]
+    fn extreme_conditions_end_quickly_on_a_small_stack() {
+        let run = |src: String| {
+            std::thread::Builder::new()
+                .stack_size(256 * 1024)
+                .spawn(move || super::dead_spans(&crate::lexer::lex(&src).tokens, PhpVersion::new(8, 4)).len())
+                .unwrap()
+                .join()
+                .unwrap()
+        };
+        let not = "!".repeat(200_000);
+        run(format!("<?php if ({not}PHP_VERSION_ID) {{}}"));
+        let open = "(".repeat(200_000);
+        let close = ")".repeat(200_000);
+        run(format!("<?php if ({open}1{close}) {{}}"));
+        let chain = "elseif($a){} ".repeat(100_000);
+        run(format!("<?php if($a){{}} {chain}"));
+    }
+
+    #[test]
+    fn every_branch_of_a_chain_is_still_read_once() {
+        let src = "<?php if (PHP_VERSION_ID < 50000) { a(); } elseif (PHP_VERSION_ID < 60000) { b(); } elseif ($x) { c(); }";
+        let spans = super::dead_spans(&crate::lexer::lex(src).tokens, PhpVersion::new(8, 4));
+        assert_eq!(spans.len(), 2);
+    }
 
     fn ids(src: &str, target: (u32, u32)) -> Vec<String> {
         analyze_source("a.php", src, PhpVersion::new(target.0, target.1)).into_iter().map(|f| f.rule_id).collect()

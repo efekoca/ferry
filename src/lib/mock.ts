@@ -430,6 +430,7 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
       const changes = pending.filter((c) => c.rules.some((r) => !r.since || versionLte(r.since, target)));
       return { id, target, mode, changes, errors: [], durationMs: 2140 };
     },
+    cancelScan: async () => {},
     cancelPreview: async () => {
       cancelled = true;
     },

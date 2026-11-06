@@ -679,6 +679,22 @@ fn an_ignored_file_stops_a_separate_commit_before_anything_is_written() {
 }
 
 #[test]
+fn a_new_scan_stops_the_old_one_and_closing_stops_the_last() {
+    let h = harness();
+    let state = h._app.state::<AppState>();
+    let old = Arc::new(AtomicBool::new(false));
+    state.scan_cancel.lock().unwrap().insert(normalize_path(h.root.clone()), old.clone());
+    h.ok("scan_project", json!({ "path": h.root, "target": "8.4", "run": 1 }));
+    assert!(old.load(Ordering::Relaxed));
+    assert!(state.scan_cancel.lock().unwrap().is_empty());
+
+    let running = Arc::new(AtomicBool::new(false));
+    state.scan_cancel.lock().unwrap().insert(normalize_path(h.root.clone()), running.clone());
+    h.ok("close_project", json!({ "path": h.root }));
+    assert!(running.load(Ordering::Relaxed));
+}
+
+#[test]
 fn cancelling_one_project_leaves_other_previews_running() {
     let h = harness();
     let state = h._app.state::<AppState>();

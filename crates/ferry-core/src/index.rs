@@ -1,4 +1,5 @@
 use crate::lexer::{lex, Token, TokenKind};
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
@@ -98,6 +99,7 @@ pub struct ProjectIndex {
     mysqli_report: bool,
     enums: HashSet<String>,
     target: Option<crate::version::PhpVersion>,
+    overridden_by_all: std::sync::OnceLock<HashMap<String, HashSet<String>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -117,10 +119,23 @@ impl ProjectIndex {
     }
 
     pub fn build_for(root: &Path, files: &[PathBuf], target: Option<crate::version::PhpVersion>) -> Self {
+        Self::build_until(root, files, target, &std::sync::atomic::AtomicBool::new(false))
+    }
+
+    /// Stops reading when `cancel` is set, and whatever came of it isn't meant to be used.
+    pub fn build_until(
+        root: &Path,
+        files: &[PathBuf],
+        target: Option<crate::version::PhpVersion>,
+        cancel: &std::sync::atomic::AtomicBool,
+    ) -> Self {
         let mut index = Self { framework: Some(crate::project::detect_framework(root)), target, ..Self::default() };
         let mut seen = HashSet::new();
         let mut declared = Vec::new();
         for path in files.iter().cloned().chain(composer_files(root)) {
+            if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                break;
+            }
             if !seen.insert(std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone())) {
                 continue;
             }
@@ -173,9 +188,19 @@ impl ProjectIndex {
 
     /// Whether a known subclass inherits this method instead of overriding it.
     pub(crate) fn inherits_unchanged(&self, class: &str, method: &str) -> bool {
-        let short = |name: &str| name.rsplit('\\').next().unwrap_or(name).to_ascii_lowercase();
-        let (class, method) = (short(class), method.to_ascii_lowercase());
-        self.types.values().flatten().any(|t| t.parent.as_deref().is_some_and(|p| short(p) == class) && !t.methods.contains(&method))
+        let by_all = self.overridden_by_all.get_or_init(|| {
+            let mut common: HashMap<String, HashSet<String>> = HashMap::new();
+            for (parent, methods) in self.types.values().flatten().filter_map(|t| Some((t.parent.as_deref()?, &t.methods))) {
+                match common.entry(short(parent)) {
+                    Entry::Vacant(slot) => {
+                        slot.insert(methods.iter().cloned().collect());
+                    }
+                    Entry::Occupied(mut slot) => slot.get_mut().retain(|m| methods.contains(m)),
+                }
+            }
+            common
+        });
+        by_all.get(&short(class)).is_some_and(|common| !common.contains(&method.to_ascii_lowercase()))
     }
 
     pub(crate) fn sets_mysqli_report(&self) -> bool {

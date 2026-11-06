@@ -99,6 +99,7 @@ export const tr = {
     startScan: "Taramayı başlat",
     scanning: (t: string) => `PHP ${t} uyumluluğu kontrol ediliyor`,
     preparing: "Dosyalar hazırlanıyor…",
+    stopScan: "Durdur",
     scanProgress: "Tarama ilerlemesi",
     steps: {
       scan: { title: "Tara", text: "Kaldırılan fonksiyonları, değişen sözdizimini ve riskli kullanımları bulur." },

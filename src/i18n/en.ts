@@ -99,6 +99,7 @@ export const en: Dict = {
     startScan: "Start scan",
     scanning: (t) => `Checking compatibility with PHP ${t}`,
     preparing: "Preparing files…",
+    stopScan: "Stop",
     scanProgress: "Scan progress",
     steps: {
       scan: { title: "Scan", text: "Finds removed functions, changed syntax and risky patterns." },
