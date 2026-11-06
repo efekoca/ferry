@@ -370,6 +370,7 @@ export const en: Dict = {
     allGood: (t) => `All locked packages look compatible with PHP ${t}.`,
     someUnknown: (n, t) =>
       `No blockers found, but ${n === 1 ? "1 package" : `${n} packages`} couldn't be confirmed for PHP ${t}: their PHP requirement is missing or couldn't be read.`,
+    manifestUnreadable: "composer.json couldn't be read; the file may be damaged. The project's PHP constraint wasn't checked.",
     lockUnreadable: "composer.lock couldn't be read; the file may be damaged. Packages weren't checked.",
     rootConflictText: (c, t) => `The conflict field in composer.json (php: ${c}) blocks installing on PHP ${t}.`,
     rootConstraint: "Project's PHP constraint",
@@ -671,6 +672,7 @@ export const en: Dict = {
     historyFailed: "Couldn't load history",
     openFailed: "Couldn't open the project",
     scanFailed: "Scan failed",
+    depsFailed: "Dependencies couldn't be checked",
     rectorInstalled: "Rector installed",
     rectorInstalledText: "Automatic fixes are ready.",
     rectorFailed: "Couldn't install Rector",

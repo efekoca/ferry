@@ -133,7 +133,11 @@ fn drupal(root: &Path, target: PhpVersion) -> Option<Finding> {
     if target < since {
         return None;
     }
-    let needed = if target >= PhpVersion::new(8, 5) { "11.3" } else { "10.4" };
+    let needed = match (target >= PhpVersion::new(8, 5), current.0 >= 11) {
+        (true, _) => "11.3",
+        (false, true) => "11.1",
+        (false, false) => "10.4",
+    };
     let (file, line, snippet) = package_line(root, &package, &version);
     let (cur, max_s, t) = (format!("{}.{}", current.0, current.1), format!("{}.{}", max.0, max.1), target.to_string());
     let max_s_acc = crate::i18n::tr_accusative(&max_s);
@@ -194,7 +198,7 @@ type Release = (u32, u32, u32);
 const MAGENTO2_MAX_PHP: [(Release, (u32, u32)); 6] =
     [((2, 0, 0), (7, 4)), ((2, 4, 4), (8, 1)), ((2, 4, 6), (8, 2)), ((2, 4, 7), (8, 3)), ((2, 4, 8), (8, 4)), ((2, 4, 9), (8, 5))];
 
-const PRESTASHOP_MAX_PHP: [(Release, (u32, u32)); 3] = [((1, 6, 0), (7, 4)), ((8, 0, 0), (8, 1)), ((9, 0, 0), (8, 5))];
+const PRESTASHOP_MAX_PHP: [(Release, (u32, u32)); 4] = [((1, 6, 0), (7, 4)), ((8, 0, 0), (8, 1)), ((9, 0, 0), (8, 4)), ((9, 1, 0), (8, 5))];
 
 const JOOMLA_MAX_PHP: [(Release, (u32, u32)); 8] = [
     ((3, 0, 0), (8, 0)),
@@ -207,7 +211,7 @@ const JOOMLA_MAX_PHP: [(Release, (u32, u32)); 8] = [
     ((6, 0, 0), (8, 4)),
 ];
 
-const MOODLE_MAX_PHP: [(Release, (u32, u32)); 19] = [
+const MOODLE_MAX_PHP: [(Release, (u32, u32)); 18] = [
     ((3, 0, 0), (7, 0)),
     ((3, 2, 0), (7, 1)),
     ((3, 4, 0), (7, 2)),
@@ -226,7 +230,6 @@ const MOODLE_MAX_PHP: [(Release, (u32, u32)); 19] = [
     ((4, 3, 0), (8, 2)),
     ((4, 4, 0), (8, 3)),
     ((5, 0, 0), (8, 4)),
-    ((5, 4, 0), (8, 5)),
 ];
 
 const MEDIAWIKI_MAX_PHP: [(Release, (u32, u32)); 5] =
@@ -592,6 +595,9 @@ fn symfony(root: &Path, target: PhpVersion) -> Option<Finding> {
     let (file, line, snippet) = package_line(root, &package, &version);
     let (cur, t) = (format!("{}.{}", current.0, current.1), target.to_string());
     let after = since.to_string();
+    let lts = if current.0 >= 7 { "7.4" } else { "6.4" };
+    let advice = if current.0 >= 7 { "7.4 LTS" } else { "6.4 ya da 7.4 LTS" };
+    let advice_en = if current.0 >= 7 { "7.4 LTS" } else { "6.4 or 7.4 LTS" };
     Some(finding(
         &file,
         line,
@@ -601,10 +607,10 @@ fn symfony(root: &Path, target: PhpVersion) -> Option<Finding> {
         since,
         Severity::Behavior,
         Localized {
-            tr: format!("Symfony {cur}'in bakımı PHP {after} çıkmadan bitti; bu sürüm PHP {t} ile hiç test edilmedi. Symfony 6.4 ya da 7.4 LTS'ye geçmeniz önerilir."),
-            en: format!("Symfony {cur} stopped receiving fixes before PHP {after} came out, so it was never tested on PHP {t}. Moving to Symfony 6.4 or 7.4 LTS is recommended."),
+            tr: format!("Symfony {cur}'in bakımı PHP {after} çıkmadan bitti; bu sürüm PHP {t} ile hiç test edilmedi. Symfony {advice}'ye geçmeniz önerilir."),
+            en: format!("Symfony {cur} stopped receiving fixes before PHP {after} came out, so it was never tested on PHP {t}. Moving to Symfony {advice_en} is recommended."),
         },
-        Localized::same("composer require symfony/framework-bundle:^6.4"),
+        Localized::same(format!("composer require symfony/framework-bundle:^{lts}")),
     ))
 }
 
@@ -723,6 +729,19 @@ fn wordpress(root: &Path, target: PhpVersion) -> Option<Finding> {
 }
 
 #[cfg(test)]
+mod support_tables {
+    use super::*;
+
+    #[test]
+    fn php_8_5_needs_the_releases_that_really_support_it() {
+        let max = |table: &[(Release, (u32, u32))], v: Release| table.iter().rev().find(|(r, _)| *r <= v).map(|(_, m)| *m);
+        assert_eq!(max(&PRESTASHOP_MAX_PHP, (9, 0, 2)), Some((8, 4)));
+        assert_eq!(max(&PRESTASHOP_MAX_PHP, (9, 1, 0)), Some((8, 5)));
+        assert_eq!(MOODLE_MAX_PHP.last().map(|(_, m)| *m), Some((8, 4)));
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::project;
@@ -809,7 +828,11 @@ mod tests {
         assert_eq!(project::detect_framework(eight.path()), Framework::PrestaShop);
         assert_eq!(check(eight.path(), Framework::PrestaShop, PhpVersion::new(8, 2))[0].since, PhpVersion::new(8, 2));
         let nine = project(&[("app/AppKernel.php", "<?php\nclass AppKernel {\n    const VERSION = '9.0.1';\n} // PrestaShop\n")]);
-        assert!(check(nine.path(), Framework::PrestaShop, PhpVersion::new(8, 5)).is_empty());
+        assert!(check(nine.path(), Framework::PrestaShop, PhpVersion::new(8, 4)).is_empty());
+        let f = &check(nine.path(), Framework::PrestaShop, PhpVersion::new(8, 5))[0];
+        assert!(f.message.en.contains("at least PrestaShop 9.1"), "{}", f.message.en);
+        let current = project(&[("app/AppKernel.php", "<?php\nclass AppKernel {\n    const VERSION = '9.1.0';\n} // PrestaShop\n")]);
+        assert!(check(current.path(), Framework::PrestaShop, PhpVersion::new(8, 5)).is_empty());
     }
 
     #[test]
