@@ -338,6 +338,9 @@ impl Staging {
         let mut candidates = Vec::new();
         for path in crate::project::collect_php_files(root, excluded_dirs) {
             scope.insert(crate::analyzer::relative_path(root, &path));
+            if std::fs::metadata(&path).is_ok_and(|m| m.len() > crate::project::MAX_FILE_BYTES) {
+                continue;
+            }
             let Ok(bytes) = std::fs::read(&path) else { continue };
             let text = match String::from_utf8(bytes) {
                 Ok(text) => text,
@@ -820,6 +823,17 @@ mod tests {
         assert!(errors.is_empty(), "{errors:?}");
         let files: Vec<&str> = changes.iter().map(|c| c.file.as_str()).collect();
         assert_eq!(files, ["src/a.php"]);
+    }
+
+    #[test]
+    fn files_over_the_size_limit_are_not_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.php"), "<?php\n").unwrap();
+        let big = format!("<?php\ndefine('from_big_file', 1);{}", " ".repeat(crate::project::MAX_FILE_BYTES as usize));
+        std::fs::write(root.join("big.php"), big).unwrap();
+        let staging = Staging::prepare(root, &[], root.join(".ferry-staged"), PhpVersion::new(8, 5)).unwrap();
+        assert!(parse_output(root, r#"{"file_diffs": []}"#, &staging).unwrap().0.is_empty());
     }
 
     #[test]

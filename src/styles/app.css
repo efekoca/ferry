@@ -1388,6 +1388,10 @@ select.input {
   padding: var(--space-5) var(--space-6);
 }
 
+.scan-progress__stop {
+  margin-left: auto;
+}
+
 .scan-progress__meta {
   display: flex;
   justify-content: space-between;

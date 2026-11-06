@@ -41,6 +41,7 @@ pub struct AppState {
     previews: Mutex<HashMap<String, (u64, RectorPreview)>>,
     writes: Arc<Mutex<()>>,
     rector_cancel: Mutex<HashMap<String, Arc<AtomicBool>>>,
+    scan_cancel: Mutex<HashMap<String, Arc<AtomicBool>>>,
     docker_cancel: Mutex<HashMap<String, Arc<AtomicBool>>>,
     docker_results: Mutex<HashMap<String, docker::Comparison>>,
     docker_trials: Mutex<HashMap<String, Trial>>,
@@ -62,6 +63,7 @@ impl AppState {
             previews: Mutex::new(HashMap::new()),
             writes: Arc::new(Mutex::new(())),
             rector_cancel: Mutex::new(HashMap::new()),
+            scan_cancel: Mutex::new(HashMap::new()),
             docker_cancel: Mutex::new(HashMap::new()),
             docker_results: Mutex::new(HashMap::new()),
             docker_trials: Mutex::new(HashMap::new()),
@@ -663,6 +665,7 @@ fn cancel_docker_compare(state: State<'_, AppState>, path: String) {
 #[tauri::command]
 fn close_project(state: State<'_, AppState>, path: String) {
     let path = normalize_path(path);
+    cancel_scan(state.clone(), path.clone());
     state.runtime.lock().unwrap().remove(&path);
     state.previews.lock().unwrap().remove(&path);
     state.docker_results.lock().unwrap().remove(&path);
@@ -682,23 +685,34 @@ async fn scan_project<R: Runtime>(app: AppHandle<R>, path: String, target: Strin
     let path = normalize_path(path);
     let target = parse_target(&target)?;
     app.state::<AppState>().latest_scan.lock().unwrap().insert(path.clone(), run);
+    let cancel = Arc::new(AtomicBool::new(false));
+    if let Some(previous) = app.state::<AppState>().scan_cancel.lock().unwrap().insert(path.clone(), cancel.clone()) {
+        previous.store(true, Ordering::Relaxed);
+    }
     let handle = app.clone();
+    let (key, mine) = (path.clone(), cancel.clone());
     let result = blocking(move || {
-        let root = project_root(&path)?;
+        let root = project_root(&key)?;
         let info = project::inspect(&root).map_err(|e| e.to_string())?;
         let files = project::collect_php_files(&root, &info.excluded_dirs);
         let mut last = Instant::now() - Duration::from_secs(1);
-        let scan = analyzer::analyze_files(&root, &files, target, |done, total, file| {
+        let scan = analyzer::analyze_until(&root, &files, target, &mine, |done, total, file| {
             if done == total || last.elapsed() >= Duration::from_millis(50) {
                 last = Instant::now();
                 let _ = handle.emit("scan://progress", ScanProgress { run, done, total, file: file.to_string() });
             }
         });
-        Ok((path, scan))
+        scan.ok_or_else(|| t!("Tarama durduruldu.", "The scan was stopped."))
     })
-    .await?;
-    let (path, scan) = result;
+    .await;
     let state = app.state::<AppState>();
+    {
+        let mut tokens = state.scan_cancel.lock().unwrap();
+        if tokens.get(&path).is_some_and(|t| Arc::ptr_eq(t, &cancel)) {
+            tokens.remove(&path);
+        }
+    }
+    let scan = result?;
     let latest = state.latest_scan.lock().unwrap().get(&path) == Some(&run);
     if latest {
         state.scans.lock().unwrap().insert(path.clone(), scan.clone());
@@ -710,6 +724,13 @@ async fn scan_project<R: Runtime>(app: AppHandle<R>, path: String, target: Strin
         response.progress = history::record(&file, now_secs(), &target, response.summary.score, &response.scan.findings).ok();
     }
     Ok(response)
+}
+
+#[tauri::command]
+fn cancel_scan(state: State<'_, AppState>, path: String) {
+    if let Some(token) = state.scan_cancel.lock().unwrap().get(&normalize_path(path)) {
+        token.store(true, Ordering::Relaxed);
+    }
 }
 
 fn now_secs() -> u64 {
@@ -1546,6 +1567,7 @@ pub fn with_commands<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R
         save_project_config,
         interrupted_writes,
         scan_project,
+        cancel_scan,
         check_dependencies,
         write_probe,
         git_status,

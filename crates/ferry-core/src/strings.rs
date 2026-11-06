@@ -30,39 +30,41 @@ fn content(t: &Token) -> Option<String> {
     Some(out)
 }
 
-/// The name of the function or method whose argument list contains token `k`, directly or inside an array
-/// literal, and the argument's position.
-fn enclosing_call(tokens: &[Token], k: usize) -> Option<(String, usize)> {
-    let mut depth = 0usize;
-    let mut position = 0;
-    for j in (0..k).rev() {
-        let t = &tokens[j];
-        if t.is_punct(")") || t.is_punct("]") || t.is_punct("}") {
-            depth += 1;
-        } else if t.is_punct("{") {
-            if depth == 0 {
-                return None;
-            }
-            depth -= 1;
+#[derive(Clone, Copy)]
+enum Open {
+    Call(Option<usize>),
+    Array(Option<(usize, usize)>),
+    Block,
+}
+
+/// For every token, the name token of the function or method whose argument list contains it,
+/// directly or inside an array literal, and the argument's position. One pass, because a large
+/// data file has a string on nearly every token.
+fn enclosing_calls(tokens: &[Token]) -> Vec<Option<(usize, usize)>> {
+    let around = |open: &[(Open, usize, bool)]| match open.last() {
+        Some(&(_, _, true)) | None | Some(&(Open::Block, ..)) => None,
+        Some(&(Open::Call(name), commas, _)) => name.map(|n| (n, commas)),
+        Some(&(Open::Array(call), ..)) => call,
+    };
+    let mut open: Vec<(Open, usize, bool)> = Vec::new();
+    let mut out = Vec::with_capacity(tokens.len());
+    for (k, t) in tokens.iter().enumerate() {
+        out.push(around(&open));
+        if t.is_punct("(") {
+            let name = k.checked_sub(1).filter(|&n| tokens[n].kind == TokenKind::Ident);
+            open.push((Open::Call(name), 0, false));
         } else if t.is_punct("[") {
-            if depth == 0 {
-                position = 0;
-            } else {
-                depth -= 1;
-            }
-        } else if t.is_punct("(") {
-            if depth == 0 {
-                let name = tokens.get(j.checked_sub(1)?).filter(|n| n.kind == TokenKind::Ident)?;
-                return Some((name.text.trim_start_matches('\\').to_ascii_lowercase(), position));
-            }
-            depth -= 1;
-        } else if depth == 0 && t.is_punct(",") {
-            position += 1;
-        } else if depth == 0 && t.is_punct(";") {
-            return None;
+            open.push((Open::Array(around(&open)), 0, false));
+        } else if t.is_punct("{") {
+            open.push((Open::Block, 0, false));
+        } else if t.is_punct(")") || t.is_punct("]") || t.is_punct("}") {
+            open.pop();
+        } else if let Some(top) = open.last_mut() {
+            top.1 += usize::from(t.is_punct(","));
+            top.2 |= t.is_punct(";");
         }
     }
-    None
+    out
 }
 
 struct Regex<'a> {
@@ -238,6 +240,7 @@ const SSL_REMOVED: &[&str] = &["rsa_key_size", "cn_match", "sni_server_name"];
 /// String literals whose content newer PHP versions read differently, as (token, rule).
 pub(crate) fn check(tokens: &[Token]) -> Vec<(usize, &'static PatternRule)> {
     let mut out = Vec::new();
+    let calls = enclosing_calls(tokens);
     for (k, t) in tokens.iter().enumerate() {
         let Some(text) = content(t) else { continue };
         let prev = k.checked_sub(1).map(|p| &tokens[p]);
@@ -245,7 +248,7 @@ pub(crate) fn check(tokens: &[Token]) -> Vec<(usize, &'static PatternRule)> {
         let key = next.is_some_and(|n| n.is_punct("=>"));
         let lower = text.to_ascii_lowercase();
         let compared = |n: Option<&Token>| n.is_some_and(|n| n.is_punct("==") || n.is_punct("!=") || n.is_punct("<>"));
-        let call = enclosing_call(tokens, k);
+        let call = calls[k].map(|(name, at)| (tokens[name].text.trim_start_matches('\\').to_ascii_lowercase(), at));
         let call_is = |names: &[&str], at: usize| call.as_ref().is_some_and(|(n, p)| *p == at && names.contains(&n.as_str()));
 
         let hex = lower.trim().strip_prefix("0x").is_some_and(|h| !h.is_empty() && h.bytes().all(|c| c.is_ascii_hexdigit()));
@@ -530,3 +533,22 @@ const HASH_OPTION_TYPE: PatternRule = rule(
         "Passing values of the wrong type to hash function options is deprecated since PHP 8.4.",
     ),
 );
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_call_around_each_token_is_found_in_one_pass() {
+        let tokens = crate::lexer::lex("<?php f('a', ['b', 'c'], 'd'); g(function () { 'e'; }); 'x'; [h('y')];").tokens;
+        let call_of = |text: &str| {
+            let at = tokens.iter().position(|t| t.text.contains(text)).unwrap();
+            super::enclosing_calls(&tokens)[at].map(|(name, position)| (tokens[name].text.clone(), position))
+        };
+        assert_eq!(call_of("'a'"), Some(("f".to_string(), 0)));
+        assert_eq!(call_of("'b'"), Some(("f".to_string(), 1)));
+        assert_eq!(call_of("'c'"), Some(("f".to_string(), 1)));
+        assert_eq!(call_of("'d'"), Some(("f".to_string(), 2)));
+        assert_eq!(call_of("'e'"), None);
+        assert_eq!(call_of("'x'"), None);
+        assert_eq!(call_of("'y'"), Some(("h".to_string(), 0)));
+    }
+}

@@ -16,6 +16,7 @@ import {
   ShieldAlert,
   Columns3,
   CircleDashed,
+  CircleStop,
 } from "lucide-react";
 import { ConfirmDialog } from "../components/Modal";
 import { PageHeader } from "../components/Shell";
@@ -49,7 +50,7 @@ function topRules(findings: Finding[], loc: (f: Finding) => string) {
 
 export function Overview() {
   const { t, loc } = useI18n();
-  const { project, target, setTarget, scan, scanning, progress, runScan, deps, setView, showFindings, toolchain, exportReport, preview, dockerHistory } =
+  const { project, target, setTarget, scan, scanning, progress, runScan, cancelScan, deps, setView, showFindings, toolchain, exportReport, preview, dockerHistory } =
     useStore();
   const [pendingTarget, setPendingTarget] = useState<Target | null>(null);
   if (!project) return null;
@@ -141,6 +142,9 @@ export function Overview() {
               <div className="row">
                 <ScanSearch size={16} className="subtle" />
                 <strong>{t.overview.scanning(target)}</strong>
+                <Button variant="ghost" size="sm" icon={<CircleStop size={14} />} onClick={cancelScan} className="scan-progress__stop">
+                  {t.overview.stopScan}
+                </Button>
               </div>
               <Progress value={pct} label={t.overview.scanProgress} />
               <div className="scan-progress__meta">
