@@ -1,9 +1,9 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import App from "../App";
 import { mockApi } from "../lib/mock";
-import type { SnapshotConflict } from "../lib/types";
+import type { DockerStep, SnapshotConflict } from "../lib/types";
 
 function setup() {
   const user = userEvent.setup();
@@ -434,6 +434,39 @@ describe("Ferry app", () => {
     expect(screen.getByText("Testler geçti.")).toBeInTheDocument();
   });
 
+  it("folds the options around a Real test and reports each stage", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    let release: () => void = () => {};
+    const compare = api.dockerCompare.bind(api);
+    api.dockerCompare = async (...args) => {
+      await new Promise<void>((resolve) => (release = resolve));
+      return compare(...args);
+    };
+    let emit: (step: DockerStep) => void = () => {};
+    api.onDockerStep = async (listener) => {
+      emit = listener;
+      return () => {};
+    };
+    render(<App api={api} />);
+    await openAndScan(user);
+    await user.click(nav(/Gerçek test/));
+    const options = document.querySelector("details.docker-options") as HTMLDetailsElement;
+    expect(options.open).toBe(true);
+    await user.click(screen.getByRole("button", { name: "Testi başlat" }));
+    await waitFor(() => expect(options.open).toBe(false));
+    act(() => emit({ step: "pages", version: "8.4" }));
+    const lanes = within(screen.getByRole("region", { name: "Test ilerlemesi" }));
+    expect(lanes.getByText("Sayfalar PHP 8.4 ile açılıyor…")).toBeInTheDocument();
+    const states = [...document.querySelectorAll(".docker-lane li")].map((li) => (li as HTMLElement).dataset.state);
+    expect(states).toEqual(["done", "done", "done", "done", "done", "done", "active", "waiting"]);
+    release();
+    expect(await screen.findByText("PHP 8.4 sürümünde yeni sorunlar var.")).toBeInTheDocument();
+    expect(options.open).toBe(false);
+    await user.click(screen.getByText("Seçenekler"));
+    expect(options.open).toBe(true);
+  });
+
   it("compares two versions in Docker and feeds the findings", async () => {
     const user = userEvent.setup();
     render(<App api={mockApi({ delay: 0 })} />);
@@ -584,6 +617,8 @@ describe("Ferry app", () => {
     await waitFor(() => expect(compare).toHaveBeenCalled());
     const call = compare.mock.calls[0];
     expect([call[1], call[2], call[3], call[5], call[7], call[8]]).toEqual(["8.0", "8.3", false, ["/shop"], "make assets", "vendor/bin/pest"]);
+    await screen.findByText("PHP 8.3 sürümünde yeni sorunlar var.");
+    await user.click(screen.getByText("Seçenekler"));
     await user.click(await screen.findByRole("button", { name: "Seçenekleri projeye kaydet" }));
     await waitFor(() => expect(save).toHaveBeenCalled());
     expect(save.mock.calls[0][1]).toMatchObject({ target: "8.3", exclude: ["legacy"], docker: { test: "vendor/bin/pest", pages: ["/shop"] } });

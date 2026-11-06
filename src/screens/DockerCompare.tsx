@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { CircleAlert, CircleCheck, Container, Play, ShieldAlert, Square, Wand2 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { ArrowRight, Check, ChevronDown, CircleAlert, CircleCheck, Container, Database, Globe, Layers, Play, RotateCw, ShieldAlert, ShieldCheck, Square, Wand2 } from "lucide-react";
 import { DiffViewer } from "../components/DiffViewer";
 import { ConfirmDialog } from "../components/Modal";
 import { PageHeader } from "../components/Shell";
@@ -9,7 +9,7 @@ import { useI18n } from "../i18n";
 import { containerPath as shortPath, touches } from "../lib/fixes";
 import { errorMessage } from "../lib/api";
 import { useStore } from "../lib/store";
-import { KNOWN_SOURCES, type DatabaseChoice, type DatabasePlan, type DockerComparison, type DockerDelta, type DockerEvent, type DockerOrigin, type DockerPage, type DockerRun, type DockerTrial, type Target, type VersionSuggestion } from "../lib/types";
+import { KNOWN_SOURCES, type DatabaseChoice, type DatabasePlan, type DockerComparison, type DockerDelta, type DockerEvent, type DockerOrigin, type DockerPage, type DockerRun, type DockerStep, type DockerTrial, type Target, type VersionSuggestion } from "../lib/types";
 
 const choice = (source: string, file: string | null, root: string): DatabaseChoice | null => {
   if (source === "live" || source === "seed") return { kind: source };
@@ -18,41 +18,65 @@ const choice = (source: string, file: string | null, root: string): DatabaseChoi
 };
 const parsePaths = (text: string) => text.split(",").map((p) => p.trim()).filter(Boolean).map((p) => (p.startsWith("/") ? p : `/${p}`));
 
-function RunCard({ run }: { run: DockerRun }) {
+function RunsCard({ source, target }: { source: DockerRun; target: DockerRun }) {
   const { t } = useI18n();
-  const tests = !run.tests
-    ? t.docker.noTests
-    : run.tests.timedOut
-      ? t.docker.testsTimedOut
-      : run.tests.passed
-        ? t.docker.testsPassed
-        : t.docker.testsFailed(run.failedTests.length, run.tests.exitCode);
+  const tests = (run: DockerRun) => {
+    const state = !run.tests
+      ? t.docker.noTests
+      : run.tests.timedOut
+        ? t.docker.testsTimedOut
+        : run.tests.passed
+          ? t.docker.testsPassed
+          : t.docker.testsFailed(run.failedTests.length, run.tests.exitCode);
+    return run.tests?.byFile ? `${state} ${t.docker.byFile}` : state;
+  };
+  const rows: [string, (run: DockerRun) => ReactNode][] = [
+    [t.docker.syntax, (run) => t.docker.syntaxErrors(run.lintErrors)],
+    [t.docker.tests, tests],
+    [t.docker.messages, (run) => run.events.length],
+  ];
+  if (source.installedExtensions.length + target.installedExtensions.length > 0) {
+    rows.push([t.docker.added, (run) => run.installedExtensions.join(", ") || "—"]);
+  }
+  const runs = [source, target];
   return (
-    <Card title={`PHP ${run.version}`}>
-      <dl className="docker-run">
-        <dt>{t.docker.syntax}</dt>
-        <dd>{t.docker.syntaxErrors(run.lintErrors)}</dd>
-        <dt>{t.docker.tests}</dt>
-        <dd>
-          {tests}
-          {run.tests?.byFile && ` ${t.docker.byFile}`}
-        </dd>
-        <dt>{t.docker.messages}</dt>
-        <dd>{run.events.length}</dd>
-        {run.installedExtensions.length > 0 && (
-          <>
-            <dt>{t.docker.added}</dt>
-            <dd>{run.installedExtensions.join(", ")}</dd>
-          </>
+    <Card title={t.docker.sideBySide} bodyClassName="docker-runs">
+      <table className="docker-compare">
+        <thead>
+          <tr>
+            <td />
+            {runs.map((run) => (
+              <th key={run.version} scope="col">
+                PHP {run.version}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(([name, value]) => (
+            <tr key={name}>
+              <th scope="row">{name}</th>
+              {runs.map((run) => (
+                <td key={run.version}>{value(run)}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="docker-logs">
+        {runs.map(
+          (run) =>
+            run.log && (
+              <details className="check-log" key={run.version}>
+                <summary>
+                  {t.findings.showOutput} · PHP {run.version}
+                </summary>
+                <code className="check-log__command">{run.image}</code>
+                <pre>{run.log}</pre>
+              </details>
+            ),
         )}
-      </dl>
-      {run.log && (
-        <details className="check-log">
-          <summary>{t.findings.showOutput}</summary>
-          <code className="check-log__command">{run.image}</code>
-          <pre>{run.log}</pre>
-        </details>
-      )}
+      </div>
     </Card>
   );
 }
@@ -316,18 +340,20 @@ function FixLoop({ result, onTry }: { result: DockerComparison; onTry: (files: s
   );
 }
 
-function Result({ result, onTry }: { result: DockerComparison; onTry: (files: string[]) => void }) {
+function Verdict({ result }: { result: DockerComparison }) {
   const { t } = useI18n();
-  const { showFindings } = useStore();
   const bad = result.verdict === "regressed";
   const incomplete = result.verdict === "incomplete";
   const tested = !!result.source.tests?.passed && !!result.target.tests;
-  const missing = [...new Set([...result.source.missingExtensions, ...result.target.missingExtensions])];
-  const fixable = bad || result.newOnTarget.length > 0 || result.pages.some((p) => p.change !== "same");
+  const tone = bad ? "danger" : tested && !incomplete ? "success" : "warn";
   return (
-    <>
-      <Callout tone={bad ? "danger" : tested && !incomplete ? "success" : "warn"} icon={bad || incomplete ? <CircleAlert size={15} /> : <CircleCheck size={15} />}>
-        {bad ? t.docker.worse(result.target.version) : incomplete ? t.docker.incomplete : tested ? t.docker.same(result.target.version) : t.docker.notTested}
+    <section className={`docker-verdict docker-verdict--${tone}`} role={bad ? "alert" : undefined}>
+      <span className="docker-verdict__icon" aria-hidden>
+        {tone === "success" ? <CircleCheck size={22} /> : <CircleAlert size={22} />}
+      </span>
+      <div className="docker-verdict__text">
+        <span className="docker-verdict__label">{t.docker.verdictLabel[tone]}</span>
+        <h2>{bad ? t.docker.worse(result.target.version) : incomplete ? t.docker.incomplete : tested ? t.docker.same(result.target.version) : t.docker.notTested}</h2>
         {result.gaps.length > 0 && (
           <ul className="docker-gaps">
             {result.gaps.map((gap) => (
@@ -335,13 +361,42 @@ function Result({ result, onTry }: { result: DockerComparison; onTry: (files: st
             ))}
           </ul>
         )}
-      </Callout>
-      {result.origins.some((o) => o.kind !== "project") && (
-        <Card>
-          <Origins origins={result.origins} target={result.target.version} />
-        </Card>
-      )}
-      {fixable && <FixLoop result={result} onTry={onTry} />}
+      </div>
+    </section>
+  );
+}
+
+function Metrics({ result }: { result: DockerComparison }) {
+  const { t } = useI18n();
+  const metrics: [string, number][] = [
+    [t.docker.metricMessages, result.newOnTarget.length],
+    [t.docker.metricTests, result.newFailures.length],
+    [t.docker.metricSyntax, Math.max(0, result.target.lintErrors - result.source.lintErrors)],
+  ];
+  if (result.pages.length > 0) metrics.push([t.docker.metricPages, result.pages.filter((p) => p.change !== "same").length]);
+  if (result.databaseUsed) metrics.push([t.docker.metricTables, result.dataChanges.length]);
+  return (
+    <dl className="docker-metrics">
+      {metrics.map(([name, value]) => (
+        <div key={name} data-alert={value > 0 || undefined}>
+          <dd>{value}</dd>
+          <dt>{name}</dt>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function Result({ result, onTry }: { result: DockerComparison; onTry: (files: string[]) => void }) {
+  const { t } = useI18n();
+  const { showFindings } = useStore();
+  const bad = result.verdict === "regressed";
+  const missing = [...new Set([...result.source.missingExtensions, ...result.target.missingExtensions])];
+  const fixable = bad || result.newOnTarget.length > 0 || result.pages.some((p) => p.change !== "same");
+  return (
+    <>
+      <Verdict result={result} />
+      <Metrics result={result} />
       {!result.dependenciesInstalled && (
         <Callout tone="warn">
           {t.docker.notInstalled}
@@ -355,40 +410,6 @@ function Result({ result, onTry }: { result: DockerComparison; onTry: (files: st
       )}
       {(result.source.imageFailed || result.target.imageFailed) && <Callout tone="warn">{t.docker.imageFailed}</Callout>}
       {missing.length > 0 && <Callout tone="warn">{t.docker.missing(missing.join(", "))}</Callout>}
-      <div className="grid-2">
-        <RunCard run={result.source} />
-        <RunCard run={result.target} />
-      </div>
-      {result.pages.length > 0 && <PagesCard pages={result.pages} version={result.target.version} />}
-      {result.databaseUsed && (
-        <Card title={t.docker.dataTitle(result.dataChanges.length)}>
-          {result.dataChanges.length === 0 ? (
-            <p className="subtle">{t.docker.dataSame}</p>
-          ) : (
-            <ul className="docker-events">
-              {result.dataChanges.map((c) => (
-                <li key={c.table}>
-                  <code>{c.table}</code>
-                  <span>
-                    {c.sourceRows ?? "—"} → {c.targetRows ?? "—"}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
-      )}
-      {result.newFailures.length > 0 && (
-        <Card title={t.docker.failuresTitle(result.target.version, result.newFailures.length)}>
-          <ul className="docker-events">
-            {result.newFailures.map((name) => (
-              <li key={name}>
-                <code>{name}</code>
-              </li>
-            ))}
-          </ul>
-        </Card>
-      )}
       {result.source.tests && !result.source.tests.passed && <Callout tone="warn">{t.docker.sourceFailing(result.source.version)}</Callout>}
       <Card title={t.docker.newTitle(result.target.version, result.newOnTarget.length)}>
         {result.newOnTarget.length === 0 ? (
@@ -413,7 +434,112 @@ function Result({ result, onTry }: { result: DockerComparison; onTry: (files: st
         )}
         {result.goneOnTarget.length > 0 && <p className="subtle">{t.docker.gone(result.goneOnTarget.length)}</p>}
       </Card>
+      {result.newFailures.length > 0 && (
+        <Card title={t.docker.failuresTitle(result.target.version, result.newFailures.length)}>
+          <ul className="docker-events">
+            {result.newFailures.map((name) => (
+              <li key={name}>
+                <code>{name}</code>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
+      {result.pages.length > 0 && <PagesCard pages={result.pages} version={result.target.version} />}
+      {result.databaseUsed && (
+        <Card title={t.docker.dataTitle(result.dataChanges.length)}>
+          {result.dataChanges.length === 0 ? (
+            <p className="subtle">{t.docker.dataSame}</p>
+          ) : (
+            <ul className="docker-events">
+              {result.dataChanges.map((c) => (
+                <li key={c.table}>
+                  <code>{c.table}</code>
+                  <span>
+                    {c.sourceRows ?? "—"} → {c.targetRows ?? "—"}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      )}
+      {result.origins.some((o) => o.kind !== "project") && (
+        <Card>
+          <Origins origins={result.origins} target={result.target.version} />
+        </Card>
+      )}
+      {fixable && <FixLoop result={result} onTry={onTry} />}
+      <RunsCard source={result.source} target={result.target} />
     </>
+  );
+}
+
+const useElapsed = (running: boolean) => {
+  const [seconds, setSeconds] = useState(0);
+  useEffect(() => {
+    if (!running) return;
+    const started = Date.now();
+    const id = setInterval(() => setSeconds(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => {
+      clearInterval(id);
+      setSeconds(0);
+    };
+  }, [running]);
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+};
+
+type Stage = DockerStep["step"];
+
+function Progress({ step, label, source, target, stages }: { step: DockerStep; label: string; source: string; target: string; stages: [Stage, string][] }) {
+  const { t } = useI18n();
+  const elapsed = useElapsed(true);
+  const lane = useRef(0);
+  if (step.version === target) lane.current = 1;
+  const preparing = step.step === "install" || step.step === "prepare";
+  const at = stages.findIndex(([stage]) => stage === step.step);
+  const state = (line: number, index: number) => {
+    if (preparing || line > lane.current) return "waiting";
+    if (line < lane.current || index < at) return "done";
+    return index === at ? "active" : "waiting";
+  };
+  return (
+    <section className="docker-progress" aria-label={t.docker.progressLabel}>
+      <div className="docker-progress__head">
+        <span className="spinner" aria-hidden />
+        <p role="status">{label}</p>
+        <span className="docker-progress__time">{elapsed}</span>
+      </div>
+      <div className="docker-lanes">
+        {[source, target].map((version, line) => (
+          <div className="docker-lane" key={version}>
+            <span className="docker-lane__name">PHP {version}</span>
+            <ol>
+              {stages.map(([stage, name], index) => (
+                <li key={stage} data-state={state(line, index)}>
+                  <span className="docker-lane__dot" aria-hidden>
+                    {state(line, index) === "done" && <Check size={10} strokeWidth={3} />}
+                  </span>
+                  {name}
+                </li>
+              ))}
+            </ol>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function OptionGroup({ icon, title, children }: { icon: ReactNode; title: string; children: ReactNode }) {
+  return (
+    <section className="docker-group">
+      <h2>
+        {icon}
+        {title}
+      </h2>
+      {children}
+    </section>
   );
 }
 
@@ -428,6 +554,7 @@ export function DockerCompare() {
   const [hosts, setHosts] = useState<string[]>([]);
   const [remote, setRemote] = useState({ host: "", engine: "mysql" as "mysql" | "postgres", name: "", user: "", sendPassword: false });
   const [confirming, setConfirming] = useState(false);
+  const [showOptions, setShowOptions] = useState<boolean | null>(null);
   const root = project?.root;
   useEffect(() => {
     if (root) api?.databasePlan(root).then(setPlan).catch(() => setPlan(null));
@@ -467,127 +594,167 @@ export function DockerCompare() {
       docker: { source: source || null, extensions, pages: comparePages ? parsePaths(paths) : [], dump, prepare: prepare.trim() || null, test: test.trim() || null },
     });
   const stepText = dockerStep && (dockerStep.step === "install" ? t.docker.installing : dockerStep.step === "extensions" ? t.docker.preparing(dockerStep.version ?? "") : dockerStep.step === "database" ? t.docker.preparingData : dockerStep.step === "prepare" ? t.docker.runningPrepare : dockerStep.step === "pages" ? t.docker.requesting(dockerStep.version ?? "") : dockerStep.step === "lint" ? t.docker.linting(dockerStep.version ?? "") : t.docker.testing(dockerStep.version ?? ""));
+  const usesData = dataSource !== "none";
+  const lastPages = dockerArgs ? dockerArgs.pages.length > 0 : comparePages;
+  const lastData = dockerArgs ? !!dockerArgs.database : usesData;
+  const stages: [Stage, string][] = [
+    ["extensions", t.docker.stageImage],
+    ["lint", t.docker.stageSyntax],
+    ...(lastData ? ([["database", t.docker.stageData]] as [Stage, string][]) : []),
+    ...(lastPages ? ([["pages", t.docker.stagePages]] as [Stage, string][]) : []),
+    ["tests", t.docker.stageTests],
+  ];
+  const optionsShown = !running && (showOptions ?? !docker);
   return (
     <>
       <PageHeader title={t.docker.title} subtitle={t.docker.subtitle(source || "?", target as Target)} />
       <div className="page-scroll">
-        <div className="stack">
+        <div className="page-body stack docker-page">
           {toolchain && !toolchain.docker ? (
             <EmptyState icon={<Container size={24} />} title={t.docker.noDocker}>
               {t.docker.noDockerText}
             </EmptyState>
           ) : (
-            <Card>
-              <p>{t.docker.intro}</p>
-              <p className="subtle">{t.docker.safety}</p>
-              <div className="docker-start">
-                <label>
-                  <span>{t.docker.from}</span>
-                  <select className="input" value={source} disabled={running} onChange={(e) => setPicked(e.target.value)}>
-                    {!source && <option value="">{t.common.unknown}</option>}
-                    {[...new Set([...sources, ...(source ? [source] : [])])].map((v) => (
-                      <option key={v} value={v}>
-                        PHP {v}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+            <section className="docker-setup">
+              <div className="docker-hero">
+                <div className="docker-route">
+                  <label className="docker-version">
+                    <span>{t.docker.from}</span>
+                    <select className="input" value={source} disabled={running} onChange={(e) => setPicked(e.target.value)}>
+                      {!source && <option value="">{t.common.unknown}</option>}
+                      {[...new Set([...sources, ...(source ? [source] : [])])].map((v) => (
+                        <option key={v} value={v}>
+                          PHP {v}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <ArrowRight className="docker-route__arrow" size={18} aria-hidden />
+                  <div className="docker-version">
+                    <span>{t.docker.to}</span>
+                    <strong>PHP {target}</strong>
+                  </div>
+                </div>
                 {running ? (
-                  <Button variant="secondary" icon={<Square size={14} />} onClick={cancelDocker}>
+                  <Button variant="secondary" size="lg" icon={<Square size={14} />} onClick={cancelDocker}>
                     {t.docker.stop}
                   </Button>
                 ) : (
-                  <Button variant="primary" icon={<Play size={14} />} disabled={!source || (dataSource === "file" && !dumpFile) || (dataSource === "ssh" && !(remote.host && remote.name && remote.user))} onClick={() => (dataSource === "ssh" || projectCommands.length > 0 ? setConfirming(true) : start())}>
+                  <Button variant="primary" size="lg" icon={docker ? <RotateCw size={15} /> : <Play size={15} />} disabled={!source || (dataSource === "file" && !dumpFile) || (dataSource === "ssh" && !(remote.host && remote.name && remote.user))} onClick={() => (dataSource === "ssh" || projectCommands.length > 0 ? setConfirming(true) : start())}>
                     {docker ? t.docker.again : t.docker.start}
                   </Button>
                 )}
               </div>
-              <label className="docker-option">
-                <input type="checkbox" className="checkbox" checked={extensions} disabled={running} onChange={(e) => setExtensions(e.target.checked)} />
-                <span>{t.docker.installExtensions}</span>
-              </label>
-              <label className="docker-option">
-                <input type="checkbox" className="checkbox" checked={extensions && cleanImages} disabled={running || !extensions} onChange={(e) => setCleanImages(e.target.checked)} />
-                <span>{t.docker.cleanAfter}</span>
-              </label>
-              <label className="docker-option">
-                <input type="checkbox" className="checkbox" checked={comparePages} disabled={running} onChange={(e) => setComparePages(e.target.checked)} />
-                <span>{t.docker.comparePages}</span>
-              </label>
-              {comparePages && (
-                <input className="input docker-paths" aria-label={t.docker.pagesLabel} placeholder="/, /login" value={paths} disabled={running} onChange={(e) => setPaths(e.target.value)} />
-              )}
-              <label className="docker-field">
-                <span>{t.docker.dataSource}</span>
-                <select className="input" value={dataSource} disabled={running} onChange={(e) => setDataSource(e.target.value)}>
-                  <option value="none">{t.docker.dataNone}</option>
-                  <option value="file">{t.docker.dataFile}</option>
-                  {saved?.dump && !plan?.dumps.includes(saved.dump) && <option value={`dump:${saved.dump}`}>{t.docker.dataDump(saved.dump)}</option>}
-                  {plan?.dumps.map((d) => (
-                    <option key={d} value={`dump:${d}`}>
-                      {t.docker.dataDump(d)}
-                    </option>
-                  ))}
-                  {plan?.live && <option value="live">{t.docker.dataLive(plan.name ?? "", plan.host ?? "")}</option>}
-                  {plan?.seed && <option value="seed">{t.docker.dataSeed(plan.seed)}</option>}
-                  <option value="ssh">{t.docker.dataSsh}</option>
-                </select>
-              </label>
-              {dataSource === "file" && (
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={running}
-                  onClick={() => void api?.pickLogFile(t.docker.dataPick).then((f) => f && setDumpFile(f))}
-                >
-                  {dumpFile ?? t.docker.dataPick}
-                </Button>
-              )}
-              {dataSource === "live" && <p className="subtle">{t.docker.dataLiveNote}</p>}
-              {dataSource === "ssh" && (
-                <div className="docker-remote">
-                  <input className="input" list="ssh-hosts" aria-label={t.docker.sshHost} placeholder={t.docker.sshHost} value={remote.host} disabled={running} onChange={(e) => setRemote({ ...remote, host: e.target.value })} />
-                  <datalist id="ssh-hosts">
-                    {hosts.map((h) => (
-                      <option key={h} value={h} />
-                    ))}
-                  </datalist>
-                  <select className="input" aria-label={t.docker.sshEngine} value={remote.engine} disabled={running} onChange={(e) => setRemote({ ...remote, engine: e.target.value as "mysql" | "postgres" })}>
-                    <option value="mysql">MySQL / MariaDB</option>
-                    <option value="postgres">PostgreSQL</option>
-                  </select>
-                  <input className="input" aria-label={t.docker.sshName} placeholder={plan?.name ?? t.docker.sshName} value={remote.name} disabled={running} onChange={(e) => setRemote({ ...remote, name: e.target.value })} />
-                  <input className="input" aria-label={t.docker.sshUser} placeholder={plan?.user ?? t.docker.sshUser} value={remote.user} disabled={running} onChange={(e) => setRemote({ ...remote, user: e.target.value })} />
-                  <label className="docker-option">
-                    <input type="checkbox" className="checkbox" checked={remote.sendPassword} disabled={running} onChange={(e) => setRemote({ ...remote, sendPassword: e.target.checked })} />
-                    <span>{t.docker.sshSendPassword}</span>
-                  </label>
-                  <p className="subtle">{t.docker.sshNote}</p>
+              {!docker && !running && (
+                <div className="docker-about">
+                  <p>{t.docker.intro}</p>
+                  <p className="docker-safety">
+                    <ShieldCheck size={14} aria-hidden />
+                    <span>{t.docker.safety}</span>
+                  </p>
                 </div>
               )}
-              <label className="docker-field">
-                <span>{t.docker.prepare}</span>
-                <input className="input docker-paths" placeholder="php bin/console sass:build" value={prepare} disabled={running} onChange={(e) => setPrepare(e.target.value)} />
-                {prepare.trim() && <span className="subtle">{t.docker.prepareNote}</span>}
-              </label>
-              <label className="docker-field">
-                <span>{t.docker.testCommand}</span>
-                <input className="input docker-paths" placeholder="vendor/bin/pest" value={test} disabled={running} onChange={(e) => setTest(e.target.value)} />
-                {test.trim() && <span className="subtle">{t.docker.testCommandNote}</span>}
-              </label>
-              <div className="docker-save">
-                <Button variant="secondary" size="sm" disabled={running} onClick={saveOptions}>
-                  {t.docker.saveOptions}
-                </Button>
-                <span className="subtle">{t.docker.saveOptionsNote}</span>
-              </div>
-              {stepText && (
-                <p className="subtle" role="status">
-                  {stepText}
-                </p>
-              )}
-            </Card>
+              <details className="docker-options" open={optionsShown}>
+                <summary
+                  onClick={(e) => {
+                    e.preventDefault();
+                    if (!running) setShowOptions(!optionsShown);
+                  }}
+                >
+                  <ChevronDown size={15} aria-hidden />
+                  {t.docker.options}
+                </summary>
+                <div className="docker-groups">
+                  <OptionGroup icon={<Globe size={14} aria-hidden />} title={t.docker.groupCoverage}>
+                    <label className="docker-option">
+                      <input type="checkbox" className="checkbox" checked={comparePages} disabled={running} onChange={(e) => setComparePages(e.target.checked)} />
+                      <span>{t.docker.comparePages}</span>
+                    </label>
+                    {comparePages && (
+                      <input className="input docker-paths" aria-label={t.docker.pagesLabel} placeholder="/, /login" value={paths} disabled={running} onChange={(e) => setPaths(e.target.value)} />
+                    )}
+                    <label className="docker-field">
+                      <span>{t.docker.testCommand}</span>
+                      <input className="input docker-paths" placeholder="vendor/bin/pest" value={test} disabled={running} onChange={(e) => setTest(e.target.value)} />
+                      {test.trim() && <span className="subtle">{t.docker.testCommandNote}</span>}
+                    </label>
+                  </OptionGroup>
+                  <OptionGroup icon={<Database size={14} aria-hidden />} title={t.docker.groupData}>
+                <label className="docker-field">
+                  <span>{t.docker.dataSource}</span>
+                  <select className="input" value={dataSource} disabled={running} onChange={(e) => setDataSource(e.target.value)}>
+                    <option value="none">{t.docker.dataNone}</option>
+                    <option value="file">{t.docker.dataFile}</option>
+                    {saved?.dump && !plan?.dumps.includes(saved.dump) && <option value={`dump:${saved.dump}`}>{t.docker.dataDump(saved.dump)}</option>}
+                    {plan?.dumps.map((d) => (
+                      <option key={d} value={`dump:${d}`}>
+                        {t.docker.dataDump(d)}
+                      </option>
+                    ))}
+                    {plan?.live && <option value="live">{t.docker.dataLive(plan.name ?? "", plan.host ?? "")}</option>}
+                    {plan?.seed && <option value="seed">{t.docker.dataSeed(plan.seed)}</option>}
+                    <option value="ssh">{t.docker.dataSsh}</option>
+                  </select>
+                </label>
+                {dataSource === "file" && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={running}
+                    onClick={() => void api?.pickLogFile(t.docker.dataPick).then((f) => f && setDumpFile(f))}
+                  >
+                    {dumpFile ?? t.docker.dataPick}
+                  </Button>
+                )}
+                {dataSource === "live" && <p className="subtle">{t.docker.dataLiveNote}</p>}
+                {dataSource === "ssh" && (
+                  <div className="docker-remote">
+                    <input className="input" list="ssh-hosts" aria-label={t.docker.sshHost} placeholder={t.docker.sshHost} value={remote.host} disabled={running} onChange={(e) => setRemote({ ...remote, host: e.target.value })} />
+                    <datalist id="ssh-hosts">
+                      {hosts.map((h) => (
+                        <option key={h} value={h} />
+                      ))}
+                    </datalist>
+                    <select className="input" aria-label={t.docker.sshEngine} value={remote.engine} disabled={running} onChange={(e) => setRemote({ ...remote, engine: e.target.value as "mysql" | "postgres" })}>
+                      <option value="mysql">MySQL / MariaDB</option>
+                      <option value="postgres">PostgreSQL</option>
+                    </select>
+                    <input className="input" aria-label={t.docker.sshName} placeholder={plan?.name ?? t.docker.sshName} value={remote.name} disabled={running} onChange={(e) => setRemote({ ...remote, name: e.target.value })} />
+                    <input className="input" aria-label={t.docker.sshUser} placeholder={plan?.user ?? t.docker.sshUser} value={remote.user} disabled={running} onChange={(e) => setRemote({ ...remote, user: e.target.value })} />
+                    <label className="docker-option">
+                      <input type="checkbox" className="checkbox" checked={remote.sendPassword} disabled={running} onChange={(e) => setRemote({ ...remote, sendPassword: e.target.checked })} />
+                      <span>{t.docker.sshSendPassword}</span>
+                    </label>
+                    <p className="subtle">{t.docker.sshNote}</p>
+                  </div>
+                )}
+                  </OptionGroup>
+                  <OptionGroup icon={<Layers size={14} aria-hidden />} title={t.docker.groupEnvironment}>
+                    <label className="docker-option">
+                      <input type="checkbox" className="checkbox" checked={extensions} disabled={running} onChange={(e) => setExtensions(e.target.checked)} />
+                      <span>{t.docker.installExtensions}</span>
+                    </label>
+                    <label className="docker-option">
+                      <input type="checkbox" className="checkbox" checked={extensions && cleanImages} disabled={running || !extensions} onChange={(e) => setCleanImages(e.target.checked)} />
+                      <span>{t.docker.cleanAfter}</span>
+                    </label>
+                    <label className="docker-field">
+                      <span>{t.docker.prepare}</span>
+                      <input className="input docker-paths" placeholder="php bin/console sass:build" value={prepare} disabled={running} onChange={(e) => setPrepare(e.target.value)} />
+                      {prepare.trim() && <span className="subtle">{t.docker.prepareNote}</span>}
+                    </label>
+                  </OptionGroup>
+                </div>
+                <div className="docker-save">
+                  <Button variant="secondary" size="sm" disabled={running} onClick={saveOptions}>
+                    {t.docker.saveOptions}
+                  </Button>
+                  <span className="subtle">{t.docker.saveOptionsNote}</span>
+                </div>
+              </details>
+            </section>
           )}
+          {dockerStep && stepText && <Progress step={dockerStep} label={stepText} source={dockerArgs?.source ?? source} target={target} stages={stages} />}
           {docker && !running && <Result result={docker} onTry={attempt} />}
           <ConfirmDialog
             open={confirming || !!trying}
