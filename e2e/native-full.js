@@ -431,7 +431,7 @@
       const clean = $$(".docker-option").find((l) => l.textContent.includes("bitince"));
       clean.querySelector("input").click();
       await click("Testi başlat");
-      await until(() => text().includes("Kurulan eklentiler"), "extension installed", 600000);
+      await until(() => text().includes("Kurulan PHP eklentileri"), "extension installed", 600000);
       noErrorToast(before);
       const after = (await invoke("docker_image_usage")).images;
       await emit(`  images before=${images} after=${after}`);

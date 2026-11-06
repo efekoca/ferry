@@ -431,6 +431,7 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
       return { id, target, mode, changes, errors: [], durationMs: 2140 };
     },
     cancelScan: async () => {},
+    cancelLocalCheck: async () => {},
     cancelPreview: async () => {
       cancelled = true;
     },

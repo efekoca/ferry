@@ -119,21 +119,23 @@ code,
 }
 
 .page-header {
-  height: var(--header-height);
+  min-height: var(--header-height);
   flex: none;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-3);
-  padding: 0 var(--space-6);
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-2) var(--space-6);
   border-bottom: 1px solid var(--border);
   background: var(--bg);
 }
 
 .page-header__title {
   display: flex;
+  flex: 0 1 auto;
   align-items: baseline;
   gap: var(--space-2);
-  min-width: 0;
+  min-width: min(100%, 220px);
   pointer-events: none;
 }
 
@@ -156,6 +158,8 @@ code,
 .page-header__actions {
   margin-left: auto;
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   align-items: center;
   gap: var(--space-2);
 }
@@ -2321,8 +2325,11 @@ select.input {
 }
 
 .modal {
+  display: flex;
+  flex-direction: column;
   width: 100%;
   max-width: 460px;
+  max-height: calc(100vh - 2 * var(--space-6));
   border-radius: var(--radius-xl);
   background: var(--surface);
   box-shadow: var(--shadow-3);
@@ -2330,6 +2337,8 @@ select.input {
 }
 
 .modal__body {
+  min-height: 0;
+  overflow-y: auto;
   padding: var(--space-6);
   display: flex;
   flex-direction: column;

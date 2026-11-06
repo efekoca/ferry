@@ -43,6 +43,7 @@ pub struct AppState {
     rector_cancel: Mutex<HashMap<String, Arc<AtomicBool>>>,
     scan_cancel: Mutex<HashMap<String, Arc<AtomicBool>>>,
     docker_cancel: Mutex<HashMap<String, Arc<AtomicBool>>>,
+    check_cancel: Mutex<HashMap<String, Arc<AtomicBool>>>,
     docker_results: Mutex<HashMap<String, docker::Comparison>>,
     docker_trials: Mutex<HashMap<String, Trial>>,
     rector_running: Arc<AtomicUsize>,
@@ -65,6 +66,7 @@ impl AppState {
             rector_cancel: Mutex::new(HashMap::new()),
             scan_cancel: Mutex::new(HashMap::new()),
             docker_cancel: Mutex::new(HashMap::new()),
+            check_cancel: Mutex::new(HashMap::new()),
             docker_results: Mutex::new(HashMap::new()),
             docker_trials: Mutex::new(HashMap::new()),
             rector_running: Arc::new(AtomicUsize::new(0)),
@@ -360,9 +362,12 @@ async fn run_local_check(state: State<'_, AppState>, path: String, target: Strin
     let path = normalize_path(path);
     let target = parse_target(&target)?;
     let scan = state.scans.lock().unwrap().get(&path).cloned().ok_or_else(|| t!("Önce projeyi tarayın.", "Scan the project first."))?;
-    let shutdown = state.shutdown.clone();
+    let cancel = Arc::new(AtomicBool::new(false));
+    state.check_cancel.lock().unwrap().insert(path.clone(), cancel.clone());
+    let key = path.clone();
     let chosen = state.php_override();
-    let (root, entry) = blocking(move || {
+    let stop = cancel.clone();
+    let finished = blocking(move || {
         let root = project_root(&path)?;
         let stamp = project::stamp(&root, &project::scanned_files(&root));
         let local = toolchain::local_php_with(&[target.to_string()], chosen.as_deref()).into_iter().next().ok_or_else(|| {
@@ -379,7 +384,7 @@ async fn run_local_check(state: State<'_, AppState>, path: String, target: Strin
             }
             "tests" => (
                 format!("PHPUnit · PHP {}", local.version),
-                ferry_core::localcheck::run_tests(&local.path, &root, Duration::from_secs(20 * 60), &shutdown)?,
+                ferry_core::localcheck::run_tests(&local.path, &root, Duration::from_secs(20 * 60), &stop)?,
             ),
             _ => return Err(t!("Bilinmeyen kontrol.", "Unknown check.")),
         };
@@ -389,7 +394,12 @@ async fn run_local_check(state: State<'_, AppState>, path: String, target: Strin
             RuntimeLog { file: label, events, check: Some(run), roots: Vec::new(), target: Some(target), php: None, stamp: Some(stamp) },
         ))
     })
-    .await?;
+    .await;
+    state.check_cancel.lock().unwrap().remove(&key);
+    let (root, entry) = finished?;
+    if cancel.load(Ordering::Relaxed) {
+        return Err(t!("Kontrol durduruldu.", "The check was stopped."));
+    }
     if let Some(run) = &entry.check {
         let key = root.to_string_lossy();
         let _ = ferry_core::localcheck::record(
@@ -662,6 +672,13 @@ async fn docker_image_usage() -> CmdResult<docker::ImageUsage> {
 #[tauri::command]
 async fn remove_docker_images() -> CmdResult<usize> {
     blocking(docker::remove_images).await
+}
+
+#[tauri::command]
+fn cancel_local_check(state: State<'_, AppState>, path: String) {
+    if let Some(token) = state.check_cancel.lock().unwrap().get(&normalize_path(path)) {
+        token.store(true, Ordering::Relaxed);
+    }
 }
 
 #[tauri::command]
@@ -1607,6 +1624,7 @@ pub fn with_commands<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R
         database_plan,
         ssh_hosts,
         cancel_docker_compare,
+        cancel_local_check,
         docker_image_usage,
         docker_history,
         check_history,
@@ -1665,6 +1683,7 @@ pub fn run() {
             state.shutdown.store(true, Ordering::Relaxed);
             state.rector_cancel.lock().unwrap().values().for_each(|t| t.store(true, Ordering::Relaxed));
             state.docker_cancel.lock().unwrap().values().for_each(|t| t.store(true, Ordering::Relaxed));
+            state.check_cancel.lock().unwrap().values().for_each(|t| t.store(true, Ordering::Relaxed));
             let started = Instant::now();
             while state.rector_running.load(Ordering::SeqCst) > 0 && started.elapsed() < Duration::from_secs(3) {
                 std::thread::sleep(Duration::from_millis(50));

@@ -42,6 +42,7 @@ export interface Api {
   closeProject(path: string): Promise<void>;
   localPhpVersions(): Promise<LocalPhp[]>;
   runLocalCheck(path: string, target: string, kind: "lint" | "tests"): Promise<ScanResult>;
+  cancelLocalCheck(path: string): Promise<void>;
   inspectProject(path: string): Promise<ProjectInfo>;
   saveProjectConfig(path: string, config: ProjectConfig): Promise<ProjectInfo>;
   scanProject(path: string, target: string, run: number): Promise<ScanResult>;
@@ -114,6 +115,7 @@ async function tauriApi(): Promise<Api> {
     closeProject: (path) => invoke("close_project", { path }),
     localPhpVersions: () => invoke("local_php_versions"),
     runLocalCheck: (path, target, kind) => invoke("run_local_check", { path, target, kind }),
+    cancelLocalCheck: (path) => invoke("cancel_local_check", { path }),
     inspectProject: (path) => invoke("inspect_project", { path }),
     saveProjectConfig: (path, config) => invoke("save_project_config", { path, config }),
     scanProject: (path, target, run) => invoke("scan_project", { path, target, run }),

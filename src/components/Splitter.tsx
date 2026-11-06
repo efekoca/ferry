@@ -41,9 +41,18 @@ export function Splitter({ id, side, label, narrowAt = NARROW }: { id: string; s
     const parent = ref.current?.parentElement;
     if (!parent) return;
     const name = narrow ? "--split-row" : "--split-col";
-    parent.style.removeProperty("--split-row");
-    parent.style.removeProperty("--split-col");
-    if (size !== null) parent.style.setProperty(name, `${size}px`);
+    const apply = () => {
+      parent.style.removeProperty("--split-row");
+      parent.style.removeProperty("--split-col");
+      const rect = parent.getBoundingClientRect();
+      const total = narrow ? rect.height : rect.width;
+      if (size !== null) parent.style.setProperty(name, `${total > 0 ? Math.max(MIN, Math.min(total - MIN, size)) : size}px`);
+    };
+    apply();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(apply);
+    observer.observe(parent);
+    return () => observer.disconnect();
   }, [size, narrow]);
 
   useLayoutEffect(() => {

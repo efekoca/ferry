@@ -184,7 +184,7 @@ export function Dependencies() {
             <Callout tone="warn" icon={<CircleAlert size={16} />}>
               {t.deps.someUnknown(unknown, deps.target)}
             </Callout>
-          ) : (
+          ) : deps.rootStatus === "incompatible" || deps.manifestUnreadable ? null : (
             <Callout tone="info" icon={<CircleCheck size={16} />}>
               {t.deps.allGood(deps.target)}
             </Callout>
