@@ -46,17 +46,32 @@ struct Git {
 }
 
 impl Git {
-    fn find(root: &Path) -> Option<Git> {
-        let program = toolchain::find_executable("git")?;
+    /// `Ok(None)` means there's no repository to care about. Any other failure, like a folder Git
+    /// refuses to trust, is an error: treating it as "no repository" would skip the checks.
+    fn find(root: &Path) -> Result<Option<Git>, String> {
+        let Some(program) = toolchain::find_executable("git") else { return Ok(None) };
         let git = Git { program, root: root.to_path_buf() };
-        git.ok(&["rev-parse", "--is-inside-work-tree"]).then_some(git)
+        match git.call(&["rev-parse", "--is-inside-work-tree"], &[], true) {
+            Ok(out) => Ok((String::from_utf8_lossy(&out).trim() == "true").then_some(git)),
+            Err(reason) if reason.contains("not a git repository") => Ok(None),
+            Err(reason) => Err(reason),
+        }
     }
 
     /// Project hooks and terminal prompts stay off: a commit made for the user must not run the
     /// project's code or wait for input that can never come.
     fn run(&self, args: &[&str], paths: &[String]) -> Result<Vec<u8>, String> {
+        self.call(args, paths, false)
+    }
+
+    /// Paths are taken literally, so `a[1].php` can't match `a1.php` too.
+    fn call(&self, args: &[&str], paths: &[String], untranslated: bool) -> Result<Vec<u8>, String> {
         let mut cmd = toolchain::command(&self.program);
-        cmd.arg("-C").arg(&self.root).args(NO_PROJECT_CODE).args(args).args(paths).env("GIT_TERMINAL_PROMPT", "0");
+        cmd.arg("-C").arg(&self.root).args(NO_PROJECT_CODE).args(args).args(paths);
+        cmd.env("GIT_TERMINAL_PROMPT", "0").env("GIT_LITERAL_PATHSPECS", "1");
+        if untranslated {
+            cmd.env("LC_ALL", "C");
+        }
         let done = toolchain::run_process(cmd, &self.program, &AtomicBool::new(false), TIMEOUT).map_err(|e| e.to_string())?;
         if done.status.is_some_and(|s| s.success()) {
             return Ok(done.stdout);
@@ -110,7 +125,7 @@ pub fn porcelain_paths(out: &[u8], prefix: &str) -> Vec<String> {
 
 /// With no files, reports everything under the project.
 pub fn status(root: &Path, files: &[String]) -> Result<Status, String> {
-    let Some(git) = Git::find(root) else { return Ok(Status::default()) };
+    let Some(git) = Git::find(root)? else { return Ok(Status::default()) };
     git.refuse_project_programs()?;
     let prefix = git.text(&["rev-parse", "--show-prefix"]).unwrap_or_default();
     let everything = [".".to_string()];
@@ -119,16 +134,30 @@ pub fn status(root: &Path, files: &[String]) -> Result<Status, String> {
     Ok(Status { repo: true, dirty: porcelain_paths(&out, &prefix) })
 }
 
+/// Ignored files and files inside a submodule can't go into the project's commit. This has to be
+/// known before anything is written.
+pub fn check_committable(root: &Path, files: &[String]) -> Result<(), String> {
+    let Some(git) = Git::find(root)? else { return Ok(()) };
+    git.refuse_project_programs()?;
+    git.run(&["add", "--dry-run", "--"], files).map(|_| ()).map_err(|reason| {
+        crate::t!(
+            "Bu dosyalar ayrı commit'e alınamıyor: {reason}\nAyrı dal seçeneğini kapatıp yeniden deneyin.",
+            "These files can't go into a separate commit: {reason}\nTurn the separate branch off and try again."
+        )
+    })
+}
+
 /// A branch made for one batch of changes, and the place to return to if the batch fails.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Batch {
     pub branch: String,
+    /// A full `refs/heads/` name, or a commit if HEAD was detached.
     previous: String,
 }
 
 /// The working tree stays as it is, so a preview made on the old branch is still valid.
 pub fn start_batch(root: &Path, base: &str) -> Result<Batch, String> {
-    let git = Git::find(root).ok_or_else(|| crate::t!("Bu proje bir Git deposu değil.", "This project isn't a Git repository."))?;
+    let git = Git::find(root)?.ok_or_else(|| crate::t!("Bu proje bir Git deposu değil.", "This project isn't a Git repository."))?;
     git.refuse_project_programs()?;
     if !git.ok(&["rev-parse", "--verify", "HEAD"]) {
         return Err(crate::t!(
@@ -136,7 +165,7 @@ pub fn start_batch(root: &Path, base: &str) -> Result<Batch, String> {
             "The repository has no commits yet, so a separate branch can't be created."
         ));
     }
-    let previous = git.text(&["symbolic-ref", "--short", "-q", "HEAD"]).or_else(|| git.text(&["rev-parse", "HEAD"])).unwrap_or_default();
+    let previous = git.text(&["symbolic-ref", "-q", "HEAD"]).or_else(|| git.text(&["rev-parse", "HEAD"])).unwrap_or_default();
     let taken = |name: &str| git.ok(&["rev-parse", "--verify", "-q", &format!("refs/heads/{name}")]);
     let branch = (1..1000).map(|n| if n == 1 { base.to_string() } else { format!("{base}-{n}") }).find(|name| !taken(name));
     let branch = branch.ok_or_else(|| crate::t!("Boş bir dal adı bulunamadı.", "No free branch name was found."))?;
@@ -144,24 +173,25 @@ pub fn start_batch(root: &Path, base: &str) -> Result<Batch, String> {
     Ok(Batch { branch, previous })
 }
 
-pub fn abort_batch(root: &Path, batch: &Batch) {
-    let Some(git) = Git::find(root) else { return };
-    let back = if git.ok(&["rev-parse", "--verify", "-q", &format!("refs/heads/{}", batch.previous)]) {
-        git.ok(&["switch", &batch.previous])
-    } else {
-        git.ok(&["switch", "--detach", &batch.previous])
+/// Written files stay as they are. Returns whether the repository is back where it was.
+pub fn abort_batch(root: &Path, batch: &Batch) -> bool {
+    let Ok(Some(git)) = Git::find(root) else { return false };
+    let back = match batch.previous.strip_prefix("refs/heads/") {
+        Some(name) => git.ok(&["switch", name]),
+        None => git.ok(&["switch", "--detach", &batch.previous]),
     };
-    if back {
-        git.ok(&["branch", "-D", &batch.branch]);
-    }
+    back && git.ok(&["branch", "-D", &batch.branch])
 }
 
-/// Only these files go into the commit, whatever else is staged. Returns the short hash.
+/// Only these files go into the commit, whatever else is staged. Nothing stays staged if it
+/// fails. Returns the short hash.
 pub fn commit(root: &Path, files: &[String], message: &str) -> Result<String, String> {
-    let git = Git::find(root).ok_or_else(|| crate::t!("Git bulunamadı.", "Git wasn't found."))?;
+    let git = Git::find(root)?.ok_or_else(|| crate::t!("Git bulunamadı.", "Git wasn't found."))?;
     git.refuse_project_programs()?;
-    git.run(&["add", "--"], files)?;
-    git.run(&["commit", "-m", message, "--"], files)?;
+    if let Err(e) = git.run(&["add", "--"], files).and_then(|_| git.run(&["commit", "-m", message, "--"], files)) {
+        let _ = git.run(&["reset", "-q", "--"], files);
+        return Err(e);
+    }
     git.text(&["rev-parse", "--short", "HEAD"]).ok_or_else(|| crate::t!("Git yanıt vermedi.", "Git didn't respond."))
 }
 
@@ -207,7 +237,7 @@ mod tests {
     fn a_failed_batch_leaves_the_repository_where_it_was() {
         let Some((dir, git)) = repo() else { return };
         let batch = start_batch(dir.path(), "ferry/php-8.4").unwrap();
-        abort_batch(dir.path(), &batch);
+        assert!(abort_batch(dir.path(), &batch));
         assert_eq!(git.text(&["symbolic-ref", "--short", "HEAD"]).unwrap(), "main");
         assert!(!git.ok(&["rev-parse", "--verify", "-q", "refs/heads/ferry/php-8.4"]));
     }
@@ -261,5 +291,70 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         assert_eq!(status(dir.path(), &[]).unwrap(), Status::default());
         assert!(start_batch(dir.path(), "x").is_err());
+    }
+
+    #[test]
+    fn a_repository_git_refuses_is_not_treated_as_no_repository() {
+        let Some((dir, git)) = repo() else { return };
+        git.run(&["config", "core.repositoryformatversion", "99"], &[]).unwrap();
+        assert!(status(dir.path(), &[]).is_err());
+    }
+
+    #[test]
+    fn special_characters_in_a_path_are_literal() {
+        let Some((dir, git)) = repo() else { return };
+        let root = dir.path();
+        std::fs::write(root.join("a[1].php"), "x\n").unwrap();
+        std::fs::write(root.join("a1.php"), "y\n").unwrap();
+        git.run(&["add", "."], &[]).unwrap();
+        git.run(&["commit", "-qm", "both"], &[]).unwrap();
+        std::fs::write(root.join("a[1].php"), "x2\n").unwrap();
+        std::fs::write(root.join("a1.php"), "y2\n").unwrap();
+        assert_eq!(status(root, &files(&["a[1].php"])).unwrap().dirty, ["a[1].php"]);
+        commit(root, &files(&["a[1].php"]), "One").unwrap();
+        assert_eq!(git.text(&["show", "--format=", "--name-only", "HEAD"]).unwrap(), "a[1].php");
+        assert_eq!(status(root, &[]).unwrap().dirty, ["a1.php"]);
+    }
+
+    #[test]
+    fn ignored_files_are_found_before_writing() {
+        let Some((dir, _)) = repo() else { return };
+        let root = dir.path();
+        std::fs::write(root.join(".gitignore"), "skip.php\n").unwrap();
+        std::fs::write(root.join("skip.php"), "x\n").unwrap();
+        assert!(check_committable(root, &files(&["skip.php"])).is_err());
+        assert!(check_committable(root, &files(&["a.txt"])).is_ok());
+    }
+
+    #[test]
+    fn a_failed_commit_leaves_nothing_staged() {
+        let Some((dir, git)) = repo() else { return };
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "changed\n").unwrap();
+        git.run(&["config", "commit.cleanup", "nonsense"], &[]).unwrap();
+        assert!(commit(root, &files(&["a.txt"]), "Batch").is_err());
+        assert_eq!(git.text(&["diff", "--cached", "--name-only"]).unwrap(), "");
+        assert_eq!(status(root, &[]).unwrap().dirty, ["a.txt"]);
+    }
+
+    #[test]
+    fn a_batch_returns_to_a_branch_named_like_a_tag() {
+        let Some((dir, git)) = repo() else { return };
+        git.run(&["tag", "main"], &[]).unwrap();
+        let batch = start_batch(dir.path(), "ferry/php-8.4").unwrap();
+        assert!(abort_batch(dir.path(), &batch));
+        assert_eq!(git.text(&["symbolic-ref", "HEAD"]).unwrap(), "refs/heads/main");
+        assert!(!git.ok(&["rev-parse", "--verify", "-q", "refs/heads/ferry/php-8.4"]));
+    }
+
+    #[test]
+    fn a_batch_returns_to_a_detached_head() {
+        let Some((dir, git)) = repo() else { return };
+        let commit = git.text(&["rev-parse", "HEAD"]).unwrap();
+        git.run(&["switch", "--detach", "HEAD"], &[]).unwrap();
+        let batch = start_batch(dir.path(), "ferry/php-8.4").unwrap();
+        assert!(abort_batch(dir.path(), &batch));
+        assert_eq!(git.text(&["rev-parse", "HEAD"]).unwrap(), commit);
+        assert!(!git.ok(&["symbolic-ref", "-q", "HEAD"]));
     }
 }

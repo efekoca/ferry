@@ -514,7 +514,42 @@ describe("Ferry app", () => {
     await user.click(within(dialog).getByRole("button", { name: "Projeye yaz" }));
     await waitFor(() => expect(keep).toHaveBeenCalled());
     expect(apply.mock.calls[0][2]).toEqual(fix?.files);
-    expect(apply.mock.calls[0][4]).toBeUndefined();
+    expect(apply.mock.calls[0][4]).toEqual(fix?.skipped);
+  });
+
+  it("tries the hunks left on and writes exactly those", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    const compare = vi.spyOn(api, "dockerCompare");
+    const apply = vi.spyOn(api, "applyChanges");
+    render(<App api={api} />);
+    await openAndScan(user);
+    await user.click(nav(/Düzeltmeler/));
+    await user.click(await screen.findByRole("button", { name: "Değişiklikleri hesapla" }));
+    const hunks = await screen.findAllByRole("checkbox", { name: /satırdaki değişikliği uygula/ });
+    await user.click(hunks[0]);
+    await user.click(nav(/Gerçek test/));
+    await user.click(await screen.findByRole("button", { name: "Testi başlat" }));
+    await user.click(await screen.findByRole("button", { name: /geçici kopyada dene/ }));
+    await screen.findByText(/sürümüne özgü sorun kalmadı/);
+    const fix = compare.mock.calls.at(-1)?.[9];
+    expect(Object.keys(fix?.skipped ?? {})).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: /dosyayı projeye yaz/ }));
+    const dialog = await screen.findByRole("dialog", { name: "Düzeltmeler projeye yazılsın mı?" });
+    await user.click(within(dialog).getByRole("button", { name: "Projeye yaz" }));
+    await waitFor(() => expect(apply).toHaveBeenCalled());
+    expect(apply.mock.calls[0][4]).toEqual(fix?.skipped);
+  });
+
+  it("keeps warning about an interrupted write until it is checked", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    vi.spyOn(api, "interruptedWrites").mockResolvedValue([{ id: "s1", label: "Yarım iş", createdAt: 1, files: [] } as never]);
+    const dismiss = vi.spyOn(api, "dismissInterrupted");
+    render(<App api={api} />);
+    await openAndScan(user);
+    await user.click(await screen.findByRole("button", { name: "Dosyaları kontrol ettim" }));
+    expect(dismiss).toHaveBeenCalledWith(expect.any(String), "s1");
   });
 
   it("opens with the project's saved settings and saves them back", async () => {

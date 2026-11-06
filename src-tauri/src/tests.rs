@@ -509,6 +509,176 @@ fn restore_stops_on_an_unreadable_apply_record() {
 }
 
 #[test]
+fn an_incomplete_apply_record_still_catches_later_edits() {
+    let h = harness();
+    let root = PathBuf::from(normalize_path(h.root.clone()));
+    let store = h._app.state::<AppState>().snapshots();
+    let file = root.join("src/Greeter.php");
+    let snap = store.create(&root, &["src/Greeter.php".into()], "eski").unwrap();
+    std::fs::write(&file, "edited later").unwrap();
+    store.write_attachment(&root, &snap.id, WRITTEN_FILE, b"{}").unwrap();
+    let found = h.ok("snapshot_conflicts", json!({ "path": h.root, "id": snap.id }));
+    assert_eq!(found[0]["file"], "src/Greeter.php");
+    assert!(h.invoke("restore_snapshot", json!({ "path": h.root, "id": snap.id })).is_err());
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "edited later");
+}
+
+#[cfg(unix)]
+#[test]
+fn an_unreadable_file_stops_restore_instead_of_counting_as_deleted() {
+    use std::os::unix::fs::PermissionsExt;
+    let h = harness();
+    let root = PathBuf::from(normalize_path(h.root.clone()));
+    let store = h._app.state::<AppState>().snapshots();
+    let file = root.join("src/Greeter.php");
+    let snap = store.create(&root, &["src/Greeter.php".into()], "eski").unwrap();
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let unreadable = std::fs::read(&file).is_err();
+    let result = h.invoke("snapshot_conflicts", json!({ "path": h.root, "id": snap.id }));
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+    if unreadable {
+        assert!(result.is_err());
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn an_interrupted_write_stays_flagged_until_it_is_dealt_with() {
+    use std::os::unix::fs::PermissionsExt;
+    let h = harness();
+    let root = PathBuf::from(normalize_path(h.root.clone()));
+    let store = h._app.state::<AppState>().snapshots();
+    let snap = store.create(&root, &["src/Greeter.php".into()], "eski").unwrap();
+    store.mark_writing(&root, &snap.id).unwrap();
+    for _ in 0..2 {
+        assert_eq!(h.ok("interrupted_writes", json!({ "path": h.root })).as_array().unwrap().len(), 1);
+    }
+    std::fs::set_permissions(root.join("src"), std::fs::Permissions::from_mode(0o555)).unwrap();
+    let probe = std::fs::write(root.join("src/.probe"), "").is_ok();
+    std::fs::write(root.join("src/Greeter.php"), "<?php // edited\n").unwrap();
+    let found = h.ok("snapshot_conflicts", json!({ "path": h.root, "id": snap.id }));
+    let failed = h.invoke("restore_snapshot", json!({ "path": h.root, "id": snap.id, "acknowledged": found }));
+    std::fs::set_permissions(root.join("src"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    if !probe {
+        assert!(failed.is_err());
+        let left = h.ok("interrupted_writes", json!({ "path": h.root }));
+        assert!(left.as_array().unwrap().iter().any(|s| s["id"] == json!(snap.id)));
+    }
+    h.ok("dismiss_interrupted", json!({ "path": h.root, "id": snap.id }));
+    assert_eq!(h.ok("interrupted_writes", json!({ "path": h.root })), json!([]));
+}
+
+#[test]
+fn a_trial_is_kept_only_for_the_files_it_ran_on() {
+    let h = harness();
+    let root = PathBuf::from(normalize_path(h.root.clone()));
+    let scanned = project::scanned_files(&root);
+    let files = vec!["src/Greeter.php".to_string()];
+    let others = project::stamp_without(&root, &scanned, &files);
+    let fixed = vec![(files[0].clone(), content_hash(b"<?php // tried\n"))];
+    std::fs::write(root.join("src/Greeter.php"), "<?php // not what was tried\n").unwrap();
+    assert!(stamp_after_trial(&root, &fixed, &others).is_err());
+    std::fs::write(root.join("src/Greeter.php"), "<?php // tried\n").unwrap();
+    assert_eq!(stamp_after_trial(&root, &fixed, &others).unwrap(), project::stamp(&root, &scanned));
+    std::fs::write(root.join("composer.json"), "{\"name\": \"changed/too\"}").unwrap();
+    assert!(stamp_after_trial(&root, &fixed, &others).is_err());
+}
+
+#[test]
+fn skipped_hunks_are_left_out_of_what_is_tried_and_written() {
+    let dir = tempfile::tempdir().unwrap();
+    let lines: Vec<String> = (0..30).map(|n| format!("line {n}")).collect();
+    let before = lines.join("\n");
+    std::fs::write(dir.path().join("a.php"), &before).unwrap();
+    let after = before.replace("line 1\n", "first\n").replace("line 28\n", "second\n");
+    let change = FileChange {
+        file: "a.php".into(),
+        rules: Vec::new(),
+        fix: FixKind::Auto,
+        diff: diff::compute(&before, &after, 3),
+        original_hash: fnv1a(before.as_bytes()),
+        new_content: after,
+    };
+    let kept = without_skipped(dir.path(), &change, &HashMap::from([("a.php".to_string(), vec![0])])).unwrap();
+    assert!(!kept.new_content.contains("first") && kept.new_content.contains("second"));
+    assert_eq!(without_skipped(dir.path(), &change, &HashMap::new()).unwrap().new_content, change.new_content);
+}
+
+fn git_repo(root: &Path) -> impl Fn(&[&str]) -> String + '_ {
+    let run = move |args: &[&str]| {
+        let out = std::process::Command::new("git").arg("-C").arg(root).args(args).output().unwrap();
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+    run(&["init", "-q", "-b", "main"]);
+    run(&["config", "user.email", "t@example.com"]);
+    run(&["config", "user.name", "T"]);
+    run(&["add", "."]);
+    run(&["commit", "-qm", "first"]);
+    run
+}
+
+#[test]
+fn a_commit_that_fails_leaves_the_files_on_the_branch_it_started_from() {
+    let h = harness();
+    let root = PathBuf::from(normalize_path(h.root.clone()));
+    let git = git_repo(&root);
+    git(&["config", "commit.cleanup", "nonsense"]);
+    let id = stage_preview(&h, &[("src/Greeter.php", "<?php // changed\n")]);
+    let result = h.ok(
+        "apply_changes",
+        json!({ "path": h.root, "previewId": id, "files": ["src/Greeter.php"], "label": "x", "commitMessage": "Batch" }),
+    );
+    assert!(result["gitError"].is_string(), "{result}");
+    assert_eq!(result["branch"], Value::Null);
+    assert_eq!(git(&["symbolic-ref", "--short", "HEAD"]), "main");
+    assert_eq!(git(&["branch", "--list", "ferry/*"]), "");
+    assert_eq!(git(&["diff", "--cached", "--name-only"]), "");
+    assert_eq!(std::fs::read_to_string(root.join("src/Greeter.php")).unwrap(), "<?php // changed\n");
+    assert_eq!(h.ok("interrupted_writes", json!({ "path": h.root })), json!([]));
+}
+
+#[test]
+fn new_syntax_errors_are_not_committed() {
+    let Some(php) = toolchain::find_php(None) else { return };
+    let Some(version) = toolchain::php_version(&php).and_then(|v| v.parse::<PhpVersion>().ok()) else { return };
+    let h = harness();
+    let root = PathBuf::from(normalize_path(h.root.clone()));
+    let git = git_repo(&root);
+    let head = git(&["rev-parse", "HEAD"]);
+    let id = stage_preview(&h, &[("src/Greeter.php", "<?php function {\n")]);
+    h._app.state::<AppState>().previews.lock().unwrap().get_mut(&root.to_string_lossy().to_string()).unwrap().1.target = version;
+    let result = h.ok(
+        "apply_changes",
+        json!({ "path": h.root, "previewId": id, "files": ["src/Greeter.php"], "label": "x", "commitMessage": "Batch" }),
+    );
+    assert_eq!(result["lintErrors"].as_array().unwrap().len(), 1, "{result}");
+    assert_eq!(result["commit"], Value::Null);
+    assert!(result["gitError"].is_string());
+    assert_eq!(git(&["rev-parse", "HEAD"]), head);
+    assert_eq!(git(&["symbolic-ref", "--short", "HEAD"]), "main");
+}
+
+#[test]
+fn an_ignored_file_stops_a_separate_commit_before_anything_is_written() {
+    let h = harness();
+    let root = PathBuf::from(normalize_path(h.root.clone()));
+    let git = git_repo(&root);
+    std::fs::write(root.join(".gitignore"), "local.php\n").unwrap();
+    std::fs::write(root.join("local.php"), "<?php // local\n").unwrap();
+    git(&["add", ".gitignore"]);
+    git(&["commit", "-qm", "ignore"]);
+    let id = stage_preview(&h, &[("local.php", "<?php // changed\n")]);
+    let result = h.invoke(
+        "apply_changes",
+        json!({ "path": h.root, "previewId": id, "files": ["local.php"], "label": "x", "commitMessage": "Batch" }),
+    );
+    assert!(result.is_err());
+    assert_eq!(std::fs::read_to_string(root.join("local.php")).unwrap(), "<?php // local\n");
+    assert_eq!(h.ok("list_snapshots", json!({ "path": h.root })), json!([]));
+    assert_eq!(git(&["symbolic-ref", "--short", "HEAD"]), "main");
+}
+
+#[test]
 fn cancelling_one_project_leaves_other_previews_running() {
     let h = harness();
     let state = h._app.state::<AppState>();

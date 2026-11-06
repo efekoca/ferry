@@ -301,6 +301,7 @@ export interface DockerResponse {
 export interface DockerFixChoice {
   previewId: number;
   files: string[];
+  skipped: Record<string, number[]>;
 }
 
 export interface DockerRunArgs {
@@ -316,6 +317,7 @@ export interface DockerRunArgs {
 export interface DockerTrial {
   previewId: number;
   files: string[];
+  skipped: Record<string, number[]>;
   outcome: DockerOutcome;
 }
 

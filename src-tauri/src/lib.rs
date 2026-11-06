@@ -43,7 +43,7 @@ pub struct AppState {
     rector_cancel: Mutex<HashMap<String, Arc<AtomicBool>>>,
     docker_cancel: Mutex<HashMap<String, Arc<AtomicBool>>>,
     docker_results: Mutex<HashMap<String, docker::Comparison>>,
-    docker_trials: Mutex<HashMap<String, docker::Comparison>>,
+    docker_trials: Mutex<HashMap<String, Trial>>,
     rector_running: Arc<AtomicUsize>,
     shutdown: Arc<AtomicBool>,
     next_preview: AtomicU64,
@@ -155,8 +155,28 @@ async fn inspect_project(path: String) -> CmdResult<ProjectInfo> {
 }
 
 #[tauri::command]
-fn interrupted_writes(state: State<'_, AppState>, path: String) -> Vec<Snapshot> {
-    state.snapshots().take_interrupted(Path::new(&normalize_path(path)))
+async fn interrupted_writes(state: State<'_, AppState>, path: String) -> CmdResult<Vec<Snapshot>> {
+    let path = normalize_path(path);
+    let store = state.snapshots();
+    let writes = state.writes.clone();
+    blocking(move || {
+        let _guard = writes.lock().unwrap_or_else(|e| e.into_inner());
+        Ok(store.interrupted(Path::new(&path)))
+    })
+    .await
+}
+
+#[tauri::command]
+async fn dismiss_interrupted(state: State<'_, AppState>, path: String, id: String) -> CmdResult<()> {
+    let path = normalize_path(path);
+    let store = state.snapshots();
+    let writes = state.writes.clone();
+    blocking(move || {
+        let _guard = writes.lock().unwrap_or_else(|e| e.into_inner());
+        store.clear_writing(Path::new(&path), &id);
+        Ok(())
+    })
+    .await
 }
 
 #[tauri::command]
@@ -431,6 +451,25 @@ struct DockerResponse {
 struct FixChoice {
     preview_id: u64,
     files: Vec<String>,
+    #[serde(default)]
+    skipped: HashMap<String, Vec<usize>>,
+}
+
+/// A finished trial and what it ran on, so it's only kept for those exact files.
+struct Trial {
+    comparison: docker::Comparison,
+    fixed: Vec<(String, String)>,
+    others: String,
+}
+
+fn without_skipped(root: &Path, change: &FileChange, skipped: &HashMap<String, Vec<usize>>) -> CmdResult<FileChange> {
+    let mut change = change.clone();
+    if let Some(hunks) = skipped.get(&change.file).filter(|h| !h.is_empty()) {
+        let original = std::fs::read_to_string(root.join(&change.file)).map_err(|e| e.to_string())?;
+        change.new_content = diff::without_hunks(&original, &change.new_content, hunks, 3);
+        change.diff = diff::compute(&original, &change.new_content, 3);
+    }
+    Ok(change)
 }
 
 impl AppState {
@@ -503,6 +542,8 @@ async fn docker_compare<R: Runtime>(
         None => None,
     };
     let fixes = fix.as_ref().map(|choice| state.chosen_fixes(&path, target, choice)).transpose()?.unwrap_or_default();
+    let skipped = fix.map(|choice| choice.skipped).unwrap_or_default();
+    let before_stamp = before.as_ref().map(|c| c.stamp.clone());
     let cancel = Arc::new(AtomicBool::new(false));
     if let Some(previous) = state.docker_cancel.lock().unwrap().insert(path.clone(), cancel.clone()) {
         previous.store(true, Ordering::Relaxed);
@@ -514,6 +555,17 @@ async fn docker_compare<R: Runtime>(
         let _running = RunningGuard(running);
         let root = project_root(&key)?;
         rector::check_fresh(&root, &fixes.iter().collect::<Vec<_>>()).map_err(|e| e.to_string())?;
+        let scanned = project::scanned_files(&root);
+        if before_stamp.is_some_and(|stamp| stamp != project::stamp(&root, &scanned)) {
+            return Err(t!(
+                "Proje son karşılaştırmadan sonra değişti. Önce yeniden karşılaştırın.",
+                "The project changed after the last comparison. Compare it again first."
+            ));
+        }
+        let fixes: Vec<FileChange> = fixes.iter().map(|c| without_skipped(&root, c, &skipped)).collect::<CmdResult<_>>()?;
+        let fixed: Vec<(String, String)> = fixes.iter().map(|c| (c.file.clone(), content_hash(c.new_content.as_bytes()))).collect();
+        let files: Vec<String> = fixed.iter().map(|(file, _)| file.clone()).collect();
+        let others = project::stamp_without(&root, &scanned, &files);
         let options = docker::Options {
             install_extensions: extensions,
             clean_images,
@@ -535,7 +587,7 @@ async fn docker_compare<R: Runtime>(
             };
             let _ = handle.emit("docker://step", DockerStep { step, version });
         })?;
-        Ok((root, comparison))
+        Ok((root, comparison, fixed, others))
     })
     .await;
     {
@@ -544,22 +596,39 @@ async fn docker_compare<R: Runtime>(
             tokens.remove(&path);
         }
     }
-    let (root, comparison) = result?;
+    let (root, comparison, fixed, others) = result?;
     if let Some(before) = before {
         let outcome = Some(docker::outcome(&before, &comparison));
-        state.docker_trials.lock().unwrap().insert(path, comparison.clone());
+        state.docker_trials.lock().unwrap().insert(path, Trial { comparison: comparison.clone(), fixed, others });
         return Ok(DockerResponse { comparison, scan: None, outcome });
     }
     let scan = state.keep_docker_result(path, &root, &comparison);
     Ok(DockerResponse { comparison, scan, outcome: None })
 }
 
+/// The result of a trial only stands for the project if what's on disk is what ran in the trial.
+fn stamp_after_trial(root: &Path, fixed: &[(String, String)], others: &str) -> CmdResult<String> {
+    let scanned = project::scanned_files(root);
+    let files: Vec<String> = fixed.iter().map(|(file, _)| file.clone()).collect();
+    let same = fixed.iter().all(|(file, hash)| std::fs::read(root.join(file)).is_ok_and(|b| content_hash(&b) == *hash));
+    if !same || project::stamp_without(root, &scanned, &files) != others {
+        return Err(t!(
+            "Dosyalar denenen hâliyle aynı değil, bu yüzden deneme sonucu kaydedilmedi.",
+            "The files aren't the same as in the trial, so its result wasn't kept."
+        ));
+    }
+    Ok(project::stamp(root, &scanned))
+}
+
+/// Called once the tried fixes are written.
 #[tauri::command]
-fn keep_docker_trial(state: State<'_, AppState>, path: String) -> CmdResult<DockerResponse> {
+async fn keep_docker_trial(state: State<'_, AppState>, path: String) -> CmdResult<DockerResponse> {
     let path = normalize_path(path);
     let root = project_root(&path)?;
-    let comparison =
+    let Trial { mut comparison, fixed, others } =
         state.docker_trials.lock().unwrap().remove(&path).ok_or_else(|| t!("Önce düzeltmeleri deneyin.", "Try the fixes first."))?;
+    let folder = root.clone();
+    comparison.stamp = blocking(move || stamp_after_trial(&folder, &fixed, &others)).await?;
     let scan = state.keep_docker_result(path, &root, &comparison);
     Ok(DockerResponse { comparison, scan, outcome: None })
 }
@@ -1100,6 +1169,7 @@ fn check_git(root: &Path, files: &[String], own_commit: bool) -> Result<(), Stri
                 "{file} has uncommitted changes that would end up in the separate commit. Commit them first or turn the separate branch off."
             ));
         }
+        git::check_committable(root, files)?;
     }
     Ok(())
 }
@@ -1150,18 +1220,8 @@ async fn apply_changes(
         let refs: Vec<&FileChange> = selected.iter().collect();
         rector::check_fresh(&root, &refs).map_err(|e| e.to_string())?;
         check_git(&root, &applied_files, commit_message.is_some())?;
-        let selected: Vec<FileChange> = selected
-            .iter()
-            .map(|change| {
-                let mut change = change.clone();
-                if let Some(hunks) = skipped.as_ref().and_then(|s| s.get(&change.file)).filter(|h| !h.is_empty()) {
-                    let original = std::fs::read_to_string(root.join(&change.file)).map_err(|e| e.to_string())?;
-                    change.new_content = diff::without_hunks(&original, &change.new_content, hunks, 3);
-                    change.diff = diff::compute(&original, &change.new_content, 3);
-                }
-                Ok(change)
-            })
-            .collect::<Result<_, String>>()?;
+        let skipped = skipped.unwrap_or_default();
+        let selected: Vec<FileChange> = selected.iter().map(|c| without_skipped(&root, c, &skipped)).collect::<CmdResult<_>>()?;
         let refs: Vec<&FileChange> = selected.iter().collect();
         let snapshot = store.create(&root, &applied_files, &label).map_err(|e| e.to_string())?;
         let written_hashes: HashMap<&str, String> =
@@ -1177,6 +1237,10 @@ async fn apply_changes(
         }
         let originals: HashMap<String, String> =
             refs.iter().filter_map(|c| Some((c.file.clone(), std::fs::read_to_string(root.join(&c.file)).ok()?))).collect();
+        if let Err(e) = store.mark_writing(&root, &snapshot.id) {
+            let _ = store.delete(&root, &snapshot.id);
+            return Err(e.to_string());
+        }
         let batch = match commit_message {
             Some(_) => match git::start_batch(&root, &batch_branch(target, mode)) {
                 Ok(batch) => Some(batch),
@@ -1188,14 +1252,9 @@ async fn apply_changes(
             None => None,
         };
         let mut written = Vec::new();
-        store.mark_writing(&root, &snapshot.id).map_err(|e| e.to_string())?;
         let outcome = rector::write_changes(&root, &refs, &mut written);
         match outcome {
             Ok(()) => {
-                store.clear_writing(&root, &snapshot.id);
-                if let Some(limit) = snapshot_limit {
-                    let _ = store.prune(&root, limit.max(1) as usize);
-                }
                 let lint = toolchain::find_php(php_override.as_deref())
                     .filter(|php| toolchain::php_version(php).and_then(|v| v.parse::<PhpVersion>().ok()).is_some_and(|v| v >= target))
                     .map(|php| {
@@ -1204,36 +1263,51 @@ async fn apply_changes(
                         toolchain::new_syntax_errors(&php, files)
                     });
                 let lint_checked = lint.as_ref().is_some_and(|l| l.not_run.is_empty());
-                let committed = commit_message.as_deref().map(|message| git::commit(&root, &written, message));
+                let lint_errors = lint.map(|l| l.errors).unwrap_or_default();
+                let committed = commit_message.as_deref().map(|message| {
+                    if lint_errors.is_empty() {
+                        git::commit(&root, &written, message)
+                    } else {
+                        Err(t!(
+                            "Yeni sözdizimi hatası olduğu için commit yapılmadı. Hataları düzeltip kendiniz commit edin ya da yedeği geri yükleyin.",
+                            "No commit was made because of new syntax errors. Fix them and commit yourself, or restore the backup."
+                        ))
+                    }
+                });
                 let (commit, git_error) = match committed {
                     Some(Ok(hash)) => (Some(hash), None),
                     Some(Err(e)) => (None, Some(e)),
                     None => (None, None),
                 };
-                Ok(ApplyResult {
-                    snapshot,
-                    written,
-                    lint_errors: lint.map(|l| l.errors).unwrap_or_default(),
-                    lint_checked,
-                    branch: batch.map(|b| b.branch),
-                    commit,
-                    git_error,
-                })
-            }
-            Err(e) => match store.restore_files(&root, &snapshot.id, Some(&written)) {
-                Ok(_) => {
-                    store.clear_writing(&root, &snapshot.id);
-                    let _ = store.delete(&root, &snapshot.id);
-                    if let Some(batch) = &batch {
-                        git::abort_batch(&root, batch);
-                    }
-                    Err(e.to_string())
+                let stranded = batch.as_ref().filter(|batch| commit.is_some() || !git::abort_batch(&root, batch));
+                let branch = stranded.map(|b| b.branch.clone());
+                let git_error = git_error.map(|e| match &branch {
+                    Some(name) => t!("{e}\nDepo {name} dalında kaldı.", "{e}\nThe repository stayed on {name}."),
+                    None => e,
+                });
+                store.clear_writing(&root, &snapshot.id);
+                if let Some(limit) = snapshot_limit {
+                    let _ = store.prune(&root, limit.max(1) as usize);
                 }
-                Err(restore) => Err(t!(
-                    "{e}\nDosyalar geri alınamadı ({restore}). Yedek Geçmiş sayfasında duruyor; oradan geri yükleyebilirsiniz.",
-                    "{e}\nCouldn't roll the files back ({restore}). The backup is kept in History; you can restore it from there."
-                )),
-            },
+                Ok(ApplyResult { snapshot, written, lint_errors, lint_checked, branch, commit, git_error })
+            }
+            Err(e) => {
+                let rolled_back = store.restore_files(&root, &snapshot.id, Some(&written));
+                if let Some(batch) = &batch {
+                    git::abort_batch(&root, batch);
+                }
+                match rolled_back {
+                    Ok(_) => {
+                        store.clear_writing(&root, &snapshot.id);
+                        let _ = store.delete(&root, &snapshot.id);
+                        Err(e.to_string())
+                    }
+                    Err(restore) => Err(t!(
+                        "{e}\nDosyalar geri alınamadı ({restore}). Yedek Geçmiş sayfasında duruyor; oradan geri yükleyebilirsiniz.",
+                        "{e}\nCouldn't roll the files back ({restore}). The backup is kept in History; you can restore it from there."
+                    )),
+                }
+            }
         }
     })
     .await?;
@@ -1285,9 +1359,9 @@ async fn restore_snapshot(
             keep_overwritten(&store, &root, &id, &found)?;
         }
         store.mark_writing(&root, &id).map_err(|e| e.to_string())?;
-        let restored = store.restore(&root, &id).map_err(|e| e.to_string());
+        let files = store.restore(&root, &id).map_err(|e| e.to_string())?;
         store.clear_writing(&root, &id);
-        restored.map(|files| (path, files))
+        Ok((path, files))
     })
     .await?;
     state.forget_check(&restored.0);
@@ -1318,14 +1392,21 @@ fn keep_overwritten(store: &SnapshotStore, root: &Path, id: &str, found: &[Confl
 }
 
 fn conflicts(store: &SnapshotStore, root: &Path, id: &str) -> CmdResult<Vec<Conflict>> {
-    let current = |file: &str| std::fs::read(root.join(file)).ok().map(|b| content_hash(&b));
+    let current = |file: &str| match std::fs::read(root.join(file)) {
+        Ok(bytes) => Ok(Some(content_hash(&bytes))),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(t!(
+            "{file} okunamadığı için değişiklik kontrolü yapılamadı: {e}",
+            "Couldn't check {file} for edits because it can't be read: {e}"
+        )),
+    };
     let unreadable = || {
         t!(
             "Yedeğin uygulama kaydı okunamadı; değişiklik kontrolü yapılamadığı için geri yükleme durduruldu.",
             "The backup's apply record couldn't be read; restore stopped because edits can't be checked."
         )
     };
-    let expected: HashMap<String, Option<String>> = match store.read_attachment(root, id, WRITTEN_FILE).map_err(|e| e.to_string())? {
+    let mut written: HashMap<String, Option<String>> = match store.read_attachment(root, id, WRITTEN_FILE).map_err(|e| e.to_string())? {
         Some(bytes) => serde_json::from_slice::<HashMap<String, serde_json::Value>>(&bytes)
             .map_err(|_| unreadable())?
             .into_iter()
@@ -1336,15 +1417,16 @@ fn conflicts(store: &SnapshotStore, root: &Path, id: &str) -> CmdResult<Vec<Conf
                 _ => Err(unreadable()),
             })
             .collect::<CmdResult<_>>()?,
-        None => store.get(root, id).map_err(|e| e.to_string())?.files.into_iter().map(|f| (f.path, f.hash)).collect(),
+        None => HashMap::new(),
     };
-    let mut changed: Vec<Conflict> = expected
-        .into_iter()
-        .filter_map(|(file, hash)| {
-            let now = current(&file);
-            (now != hash).then_some(Conflict { file, hash: now })
-        })
-        .collect();
+    let mut changed = Vec::new();
+    for entry in store.get(root, id).map_err(|e| e.to_string())?.files {
+        let hash = written.remove(&entry.path).unwrap_or(entry.hash);
+        let now = current(&entry.path)?;
+        if now != hash {
+            changed.push(Conflict { file: entry.path, hash: now });
+        }
+    }
     changed.sort_by(|a, b| a.file.cmp(&b.file));
     Ok(changed)
 }
@@ -1490,6 +1572,7 @@ pub fn with_commands<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R
         set_runtime_roots,
         docker_compare,
         keep_docker_trial,
+        dismiss_interrupted,
         database_plan,
         ssh_hosts,
         cancel_docker_compare,

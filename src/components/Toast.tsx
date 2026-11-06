@@ -8,6 +8,7 @@ interface Toast {
   tone: Tone;
   title: string;
   description?: string;
+  action?: { label: string; run: () => void };
 }
 
 interface ToastApi {
@@ -50,6 +51,17 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             <div className="toast__text">
               <div className="toast__title">{item.title}</div>
               {item.description && <div className="toast__desc">{item.description}</div>}
+              {item.action && (
+                <button
+                  className="btn btn--ghost btn--sm toast__action"
+                  onClick={() => {
+                    item.action?.run();
+                    dismiss(item.id);
+                  }}
+                >
+                  {item.action.label}
+                </button>
+              )}
             </div>
             <button className="btn btn--ghost btn--sm btn--icon" aria-label={t.common.close} onClick={() => dismiss(item.id)}>
               <X size={14} />
