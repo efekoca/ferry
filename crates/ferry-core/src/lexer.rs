@@ -184,7 +184,8 @@ impl<'a> Lexer<'a> {
             return;
         }
         if self.starts_with("#[") {
-            if is_attribute(self.b, self.pos) {
+            let in_parameters = self.tokens.last().is_some_and(|t| t.is_punct("(") || t.is_punct(","));
+            if is_attribute(self.b, self.pos, in_parameters) {
                 self.pos += 2;
                 self.push(TokenKind::Punct, start, self.pos, "#[".into());
                 return;
@@ -276,7 +277,7 @@ impl<'a> Lexer<'a> {
 
     fn skip_line_comment(&mut self) {
         while self.pos < self.b.len() {
-            if self.b[self.pos] == b'\n' {
+            if self.b[self.pos] == b'\n' || self.b[self.pos] == b'\r' {
                 return;
             }
             if self.starts_with("?>") {
@@ -400,7 +401,7 @@ fn skip_space(b: &[u8], mut p: usize) -> usize {
         } else if b[p..].starts_with(b"/*") {
             p = b[p + 2..].windows(2).position(|w| w == b"*/").map_or(b.len(), |i| p + 2 + i + 2);
         } else if b[p..].starts_with(b"//") || (b[p] == b'#' && b.get(p + 1) != Some(&b'[')) {
-            p = b[p..].iter().position(|&c| c == b'\n').map_or(b.len(), |i| p + i);
+            p = b[p..].iter().position(|&c| c == b'\n' || c == b'\r').map_or(b.len(), |i| p + i);
         } else {
             break;
         }
@@ -437,7 +438,9 @@ const ATTRIBUTE_TARGETS: [&str; 17] = [
     "new",
 ];
 
-fn is_attribute(b: &[u8], at: usize) -> bool {
+/// An attribute must lead to something it can sit on. Only a parameter list allows a bare type or
+/// variable there, so `#[x]` before `$y = 1;` is a comment that PHP 8 reads as broken code.
+fn is_attribute(b: &[u8], at: usize, in_parameters: bool) -> bool {
     let mut p = at + 2;
     loop {
         p = skip_space(b, p);
@@ -456,6 +459,14 @@ fn is_attribute(b: &[u8], at: usize) -> bool {
                 match b[p] {
                     b'\'' | b'"' => {
                         p = skip_quoted(b, p);
+                        continue;
+                    }
+                    b'/' if matches!(b.get(p + 1), Some(b'/' | b'*')) => {
+                        p = skip_space(b, p);
+                        continue;
+                    }
+                    b'#' if b.get(p + 1) != Some(&b'[') => {
+                        p = skip_space(b, p);
                         continue;
                     }
                     b'(' | b'[' => depth += 1,
@@ -483,11 +494,12 @@ fn is_attribute(b: &[u8], at: usize) -> bool {
     }
     p = skip_space(b, p + 1);
     match b.get(p) {
-        Some(b'$' | b'?' | b'&' | b'#') => true,
-        Some(b'.') => b[p..].starts_with(b"..."),
+        Some(b'#') => is_attribute(b, p, in_parameters),
+        Some(b'$' | b'?' | b'&') => in_parameters,
+        Some(b'.') => in_parameters && b[p..].starts_with(b"..."),
         Some(b'(') => {
             let start = skip_space(b, p + 1);
-            skip_name(b, start).is_some_and(|end| b.get(skip_space(b, end)) == Some(&b'&'))
+            in_parameters && skip_name(b, start).is_some_and(|end| b.get(skip_space(b, end)) == Some(&b'&'))
         }
         Some(_) => {
             let Some(end) = skip_name(b, p) else { return false };
@@ -496,9 +508,24 @@ fn is_attribute(b: &[u8], at: usize) -> bool {
                 return true;
             }
             let after = skip_space(b, end);
-            matches!(b.get(after), Some(b'$' | b'|' | b'&' | b'.'))
+            if word.eq_ignore_ascii_case("get") || word.eq_ignore_ascii_case("set") {
+                return matches!(b.get(after), Some(b'{' | b'=' | b';' | b'('));
+            }
+            in_parameters && matches!(b.get(after), Some(b'$' | b'|' | b'&' | b'.'))
         }
         None => false,
+    }
+}
+
+impl Token {
+    /// The text of a quoted string with nothing to expand or unescape.
+    pub fn literal(&self) -> Option<&str> {
+        let TokenKind::Str { interpolates, backtick: false } = self.kind else { return None };
+        if self.text.starts_with("<<<") {
+            return None;
+        }
+        let inner = self.text.get(1..self.text.len().checked_sub(1)?)?;
+        (!interpolates || !inner.contains(['$', '\\'])).then_some(inner)
     }
 }
 
@@ -508,6 +535,23 @@ mod tests {
 
     fn kinds(src: &str) -> Vec<(TokenKind, String)> {
         tokenize(src).into_iter().map(|t| (t.kind, t.text)).collect()
+    }
+
+    #[test]
+    fn attributes_lead_to_something_they_can_sit_on() {
+        let stray = |src: &str| lex(src).stray_hash_brackets.len();
+        assert_eq!(stray("<?php class P { public string $a { #[Attr] get => 'x'; #[Attr] set { } } }"), 0);
+        assert_eq!(stray("<?php #[\n  Foo(1), // it's fine\n  Bar(a: 2),\n]\nclass Q {}"), 0);
+        assert_eq!(stray("<?php function f(#[A] $x, #[B] int $y, #[C] ?int $z, #[D] A&B $w, #[E] ...$r) {}"), 0);
+        assert_eq!(stray("<?php #[A] #[B] function f() {}"), 0);
+        assert_eq!(stray("<?php #[todo]\n$x = 1;"), 1);
+        assert_eq!(stray("<?php #[a, b] int $x;"), 1);
+    }
+
+    #[test]
+    fn a_lone_carriage_return_ends_a_comment() {
+        let idents = |src: &str| tokenize(src).into_iter().filter(|t| t.kind == TokenKind::Ident).map(|t| t.text).collect::<Vec<_>>();
+        assert_eq!(idents("<?php\r// note\reach($a);\r# more\rfoo();\r"), ["each", "foo"]);
     }
 
     #[test]

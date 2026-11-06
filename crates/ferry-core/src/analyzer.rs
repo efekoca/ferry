@@ -325,7 +325,7 @@ pub fn fix_legacy_syntax(src: &str) -> Option<(String, Vec<&'static str>)> {
 }
 
 pub fn constant_names(src: &str) -> std::collections::HashSet<String> {
-    defined_constants(&tokenize(src))
+    declared_constants(&tokenize(src))
 }
 
 /// `source` is the version the project runs on today: a fix that depends on the old meaning needs it.
@@ -338,15 +338,18 @@ pub fn fix_legacy_syntax_with(
     let tokens = tokenize(src);
     let mut edits: Vec<(usize, usize, std::borrow::Cow<str>)> = Vec::new();
     let mut applied = Vec::new();
-    let mut defined = defined_constants(&tokens);
-    defined.extend(project_constants.iter().cloned());
-    let unknown = defined.contains(DYNAMIC_CONSTANT);
-    let mut keys = bareword_keys(&tokens, |name| unknown || defined.contains(name));
+    let defined = defined_constants(&tokens);
+    let spaces = crate::index::namespaces(&tokens);
+    let unknown = defined.contains(DYNAMIC_CONSTANT) || project_constants.contains(DYNAMIC_CONSTANT);
+    let known = |k: usize, name: &str| {
+        unknown || defined.contains(name) || constant_visible(project_constants, crate::index::namespace_at(&spaces, k), name)
+    };
+    let mut keys = bareword_keys(&tokens, known);
     for (_, pairs) in curly_offsets(&tokens) {
         for (open, close) in pairs {
             edits.push((tokens[open].start, tokens[open].end, "[".into()));
             edits.push((tokens[close].start, tokens[close].end, "]".into()));
-            if close == open + 2 && is_bareword(&tokens[open + 1]) && !unknown && !defined.contains(&tokens[open + 1].text) {
+            if close == open + 2 && is_bareword(&tokens[open + 1]) && !known(open + 1, &tokens[open + 1].text) {
                 keys.push(open + 1);
             }
         }
@@ -516,6 +519,7 @@ pub fn analyze_source_in(file: &str, src: &str, target: PhpVersion, index: &crat
         index,
         namespaces: crate::index::namespaces(&tokens),
         receivers: Receivers::new(&tokens),
+        defined: defined_constants(&tokens),
         out: Vec::new(),
     };
     for &(line, column) in &lexed.stray_hash_brackets {
@@ -533,15 +537,16 @@ pub fn analyze_source_in(file: &str, src: &str, target: PhpVersion, index: &crat
     for k in php4_constructors(&tokens) {
         ctx.pattern(&patterns::PHP4_CONSTRUCTOR, &tokens[k], None);
     }
-    let defined = defined_constants(&tokens);
-    for k in bareword_keys(&tokens, |name| defined.contains(name) || index.defines_constant(name)) {
+    for k in bareword_keys(&tokens, |k, name| {
+        ctx.defined.contains(name) || index.defines_constant_in(crate::index::namespace_at(&ctx.namespaces, k), name)
+    }) {
         ctx.pattern(&patterns::BAREWORD_KEY, &tokens[k], None);
     }
-    for over in builtin_overrides(&tokens, index).into_iter().chain(trait_abstract_overrides(&tokens, index)) {
+    for over in builtin_overrides(&tokens, index, target).into_iter().chain(trait_abstract_overrides(&tokens, index)) {
         match over.problem {
             Override::MissingTentativeType => ctx.pattern(&patterns::RETURN_TYPE_WILL_CHANGE, &tokens[over.name], None),
             Override::Incompatible(method) => {
-                let &(_, is_static, required, params, variadic, returns, _) = method;
+                let &(_, is_static, required, params, variadic, returns, ..) = method;
                 let params: Vec<(bool, String, String)> = params
                     .iter()
                     .enumerate()
@@ -611,6 +616,15 @@ pub fn analyze_source_in(file: &str, src: &str, target: PhpVersion, index: &crat
     for k in stray_breaks(&tokens) {
         ctx.pattern(&patterns::BREAK_OUTSIDE_LOOP, &tokens[k], None);
     }
+    for k in repeated_statics(&tokens, &ctx.receivers) {
+        ctx.pattern(&patterns::REPEATED_STATIC, &tokens[k], None);
+    }
+    for k in assigned_this(&tokens) {
+        ctx.pattern(&patterns::ASSIGN_THIS, &tokens[k], None);
+    }
+    for k in overrides_nothing(&tokens, &ctx.namespaces) {
+        ctx.pattern(&patterns::OVERRIDE_WITHOUT_PARENT, &tokens[k], None);
+    }
     for k in concat_with_arithmetic(&tokens) {
         ctx.pattern(&patterns::CONCAT_PRECEDENCE, &tokens[k], None);
     }
@@ -679,8 +693,10 @@ pub fn analyze_source_in(file: &str, src: &str, target: PhpVersion, index: &crat
                 }
             }
             TokenKind::Variable if tok.text == "HTTP_RAW_POST_DATA" || tok.text == "php_errormsg" => {
-                let since = if tok.text == "php_errormsg" { PhpVersion::new(8, 0) } else { PhpVersion::new(7, 0) };
-                ctx.pattern_since(&patterns::REMOVED_VARIABLE, tok.line, tok.column, since);
+                if reads_magic_variable(&tokens, i, &ctx.receivers) {
+                    let since = if tok.text == "php_errormsg" { PhpVersion::new(8, 0) } else { PhpVersion::new(7, 0) };
+                    ctx.pattern_since(&patterns::REMOVED_VARIABLE, tok.line, tok.column, since);
+                }
             }
             TokenKind::Str { interpolates, .. } => {
                 if *interpolates {
@@ -840,6 +856,7 @@ struct Ctx<'a> {
     dead: Vec<crate::guards::Span>,
     index: &'a crate::index::ProjectIndex,
     namespaces: Vec<(usize, String)>,
+    defined: std::collections::HashSet<String>,
     out: Vec<Finding>,
 }
 
@@ -1094,7 +1111,7 @@ impl<'a> Ctx<'a> {
                 self.pattern_since(&patterns::RESERVED_NAME, tok.line, tok.column, since);
             } else if crate::index::namespace_at(&self.namespaces, i).is_empty() && !self.index.included_by_version_check(self.file) {
                 let added = if is_type_decl {
-                    crate::rules::added_class(&lower)
+                    crate::rules::added_class_any(&lower)
                 } else if is_function_decl && !self.methods.contains(&decl_idx) {
                     crate::rules::added_function(&lower)
                 } else {
@@ -1165,8 +1182,7 @@ impl<'a> Ctx<'a> {
             let readable = !spread && (!named || ordered.is_some());
             let single = |n: usize| in_order.get(n).filter(|a| a.len() == 1).map(|a| &a[0]);
             if !named && !spread && self.applies(PhpVersion::new(8, 0)) {
-                if let Ok(k) = crate::arity::ARITY.binary_search_by(|(n, _, _)| (*n).cmp(lower.as_str())) {
-                    let (_, required, max) = crate::arity::ARITY[k];
+                if let Some((required, max)) = arity_on(&lower, self.target) {
                     let n = args.len();
                     if (n < required as usize || (max != 255 && n > max as usize)) && !catches_error(tokens, i) {
                         self.arity(tok, n, required, max);
@@ -1257,7 +1273,9 @@ impl<'a> Ctx<'a> {
                             matches!(v.as_str(), "" | "0" | "off" | "false" | "no" | "none")
                         });
                         if let Some(&(_, a, b)) = crate::rules::DEPRECATED_INI.iter().find(|(k, _, _)| *k == name) {
-                            self.pattern_since(&patterns::INI_SETTING, key.line, key.column, PhpVersion::new(a, b));
+                            if !single(1).is_some_and(|t| crate::rules::ini_default(&name, t)) {
+                                self.pattern_since(&patterns::INI_SETTING, key.line, key.column, PhpVersion::new(a, b));
+                            }
                         } else if !off {
                             let hand = crate::rules::REMOVED_INI
                                 .iter()
@@ -1296,7 +1314,10 @@ impl<'a> Ctx<'a> {
         if bare.bytes().any(|b| b.is_ascii_lowercase()) {
             return;
         }
-        if self.index.defines_constant(bare) {
+        if self.defined.contains(bare) || self.index.defines_constant_in(crate::index::namespace_at(&self.namespaces, i), bare) {
+            return;
+        }
+        if not_a_constant(tokens, i) {
             return;
         }
         if let Some(rule) = CONSTANTS.iter().find(|r| r.matches(&lower)) {
@@ -1525,7 +1546,7 @@ impl<'a> Ctx<'a> {
             j += 1;
         }
 
-        let mut optional: Option<&Token> = None;
+        let mut optional: Option<(&Token, PhpVersion)> = None;
         let mut reported = false;
         for param in &params {
             let Some(var_pos) = param.iter().position(|t| t.kind == TokenKind::Variable) else {
@@ -1533,19 +1554,30 @@ impl<'a> Ctx<'a> {
             };
             let has_default = param[var_pos + 1..].first().is_some_and(|t| t.is_punct("="));
             let variadic = param[..var_pos].iter().any(|t| t.is_punct("..."));
-            let typed_null = has_default
+            let null_default = has_default
                 && param[var_pos + 1..].len() == 2
-                && param[var_pos + 2].is_ident_ci("null")
-                && param[..var_pos].iter().any(|t| {
-                    t.kind == TokenKind::Ident && !["public", "protected", "private", "readonly"].iter().any(|m| t.is_ident_ci(m))
-                });
+                && param[var_pos + 2].text.trim_start_matches('\\').eq_ignore_ascii_case("null");
+            let modifier = |t: &Token| ["public", "protected", "private", "readonly"].iter().any(|m| t.is_ident_ci(m));
+            let type_part: Vec<&Token> = param[..var_pos].iter().copied().filter(|t| !modifier(t) && !t.is_punct("&")).collect();
+            let typed = type_part.iter().any(|t| t.kind == TokenKind::Ident);
             if has_default {
-                if !typed_null && optional.is_none() {
-                    optional = Some(param[var_pos]);
+                // `T $x = null` before a required parameter is the old way to write a nullable one;
+                // the forms that say so outright started warning later.
+                let since = if !(null_default && typed) {
+                    Some(PhpVersion::new(8, 0))
+                } else if type_part.iter().any(|t| t.is_punct("?")) {
+                    Some(PhpVersion::new(8, 1))
+                } else if type_part.iter().any(|t| t.is_ident_ci("null") || t.is_ident_ci("mixed")) {
+                    Some(PhpVersion::new(8, 3))
+                } else {
+                    None
+                };
+                if optional.is_none() {
+                    optional = since.filter(|&s| self.applies(s)).map(|s| (param[var_pos], s));
                 }
             } else if !variadic {
-                if let Some(opt) = optional.filter(|_| !reported) {
-                    self.pattern(&patterns::OPTIONAL_BEFORE_REQUIRED, opt, None);
+                if let Some((opt, since)) = optional.filter(|_| !reported) {
+                    self.pattern_since(&patterns::OPTIONAL_BEFORE_REQUIRED, opt.line, opt.column, since);
                     reported = true;
                 }
             }
@@ -1585,7 +1617,8 @@ impl<'a> Ctx<'a> {
                 continue;
             }
             let rest = &param[var_pos + 1..];
-            let defaults_to_null = rest.len() == 2 && rest[0].is_punct("=") && rest[1].is_ident_ci("null");
+            let defaults_to_null =
+                rest.len() == 2 && rest[0].is_punct("=") && rest[1].text.trim_start_matches('\\').eq_ignore_ascii_case("null");
             if defaults_to_null {
                 self.pattern(&patterns::IMPLICIT_NULLABLE, type_tokens[0], None);
             }
@@ -1924,13 +1957,25 @@ fn php4_constructors(tokens: &[Token]) -> Vec<usize> {
     out
 }
 
-fn builtin_method(class: &str, name: &str) -> Option<&'static crate::builtin::Method> {
+fn arity_on(name: &str, target: PhpVersion) -> Option<(u8, u8)> {
+    let older = crate::symbols::ARITY_BEFORE;
+    let rows = older[older.partition_point(|r| r.0 < name)..].iter().take_while(|r| r.0 == name);
+    if let Some(&(_, _, required, max)) = rows.into_iter().find(|r| target <= PhpVersion::new(r.1 .0, r.1 .1)) {
+        return Some((required, max));
+    }
+    let k = crate::arity::ARITY.binary_search_by(|(n, _, _)| (*n).cmp(name)).ok()?;
+    Some((crate::arity::ARITY[k].1, crate::arity::ARITY[k].2))
+}
+
+fn builtin_method(class: &str, name: &str, target: PhpVersion) -> Option<&'static crate::builtin::Method> {
     let i = crate::builtin::CLASSES.binary_search_by(|(c, _, _)| (*c).cmp(class)).ok()?;
     let (_, parents, methods) = &crate::builtin::CLASSES[i];
-    if let Ok(m) = methods.binary_search_by(|m| m.0.cmp(name)) {
-        return Some(&methods[m]);
+    let php = target.major * 100 + target.minor;
+    let same_name = methods[methods.partition_point(|m| m.0 < name)..].iter().take_while(|m| m.0 == name);
+    if let Some(m) = same_name.into_iter().find(|m| (m.7 == 0 || m.7 <= php) && (m.8 == 0 || php <= m.8)) {
+        return Some(m);
     }
-    parents.iter().find_map(|p| builtin_method(p, name))
+    parents.iter().find_map(|p| builtin_method(p, name, target))
 }
 
 enum Override {
@@ -2057,7 +2102,7 @@ fn covariant(child: &[String], parent: &str) -> bool {
 }
 
 fn compatible(child: &[ParamShape], is_static: bool, child_return: Option<&[String]>, parent: &crate::builtin::Method) -> bool {
-    let &(name, parent_static, required, params, variadic, returns, tentative) = parent;
+    let &(name, parent_static, required, params, variadic, returns, tentative, ..) = parent;
     let params: Vec<(bool, String)> = params.iter().map(|&(by_ref, ty)| (by_ref, ty.to_string())).collect();
     let returns = if tentative { "" } else { returns };
     fits(child, is_static, child_return, &ParentShape { name, is_static: parent_static, required, params: &params, variadic, returns })
@@ -2348,7 +2393,7 @@ fn trait_abstract_overrides(tokens: &[Token], index: &crate::index::ProjectIndex
     out
 }
 
-fn builtin_overrides(tokens: &[Token], index: &crate::index::ProjectIndex) -> Vec<BuiltinOverride> {
+fn builtin_overrides(tokens: &[Token], index: &crate::index::ProjectIndex, target: PhpVersion) -> Vec<BuiltinOverride> {
     let mut out = Vec::new();
     let names = crate::index::Names::new(tokens);
     for i in 0..tokens.len() {
@@ -2446,10 +2491,10 @@ fn builtin_overrides(tokens: &[Token], index: &crate::index::ProjectIndex) -> Ve
                     user_parents.iter().find_map(|(at, u)| {
                         let mut found = Vec::new();
                         inherited_builtins(u, &lower, index, 0, &mut found);
-                        found.iter().find_map(|b| builtin_method(b, &lower)).map(|m| (*at, m))
+                        found.iter().find_map(|b| builtin_method(b, &lower, target)).map(|m| (*at, m))
                     })
                 };
-                let direct = parents.iter().find_map(|(at, p)| builtin_method(p, &lower).map(|m| (*at, m)));
+                let direct = parents.iter().find_map(|(at, p)| builtin_method(p, &lower, target).map(|m| (*at, m)));
                 let Some((parent, method)) = direct.or_else(inherited) else {
                     continue;
                 };
@@ -2550,7 +2595,10 @@ fn case_semicolons(tokens: &[Token]) -> Vec<usize> {
 pub(crate) struct Receivers {
     pub(crate) names: crate::index::Names,
     scopes: Vec<(usize, usize, usize)>,
-    known: std::cell::RefCell<std::collections::HashMap<(String, u8), std::collections::HashSet<String>>>,
+    in_type: Vec<bool>,
+    in_function: Vec<bool>,
+    types: Vec<(usize, usize)>,
+    known: std::cell::RefCell<std::collections::HashMap<(String, u8, usize), std::collections::HashSet<String>>>,
 }
 
 /// `$r->getMethod()` and `$r->getProperty()`, the usual way to reach a Reflection object.
@@ -2585,7 +2633,56 @@ impl Receivers {
             });
             scopes.push((k, body, close.unwrap_or(tokens.len())));
         }
-        Self { names: crate::index::Names::new(tokens), scopes, known: Default::default() }
+        let in_type = inside_types(tokens);
+        let mut types = Vec::new();
+        let mut from = None;
+        for k in 0..=tokens.len() {
+            match (from, in_type.get(k).copied().unwrap_or(false)) {
+                (None, true) => from = Some(k),
+                (Some(f), false) => {
+                    types.push((f, k));
+                    from = None;
+                }
+                _ => {}
+            }
+        }
+        let mut change = vec![0i32; tokens.len() + 2];
+        for s in &scopes {
+            change[s.0] += 1;
+            change[s.2 + 1] -= 1;
+        }
+        let mut depth = 0;
+        let in_function = (0..tokens.len())
+            .map(|k| {
+                depth += change[k];
+                depth > 0
+            })
+            .collect();
+        Self { names: crate::index::Names::new(tokens), scopes, in_type, in_function, types, known: Default::default() }
+    }
+
+    /// The function around `k` as (first token, last token + 1, end of its parameters), or the whole file.
+    fn scope_around(&self, k: usize, len: usize) -> (usize, usize, usize) {
+        match self.scopes.iter().filter(|s| s.0 < k && k < s.2).min_by_key(|s| s.2 - s.0) {
+            Some(&(start, body, close)) => (start, close, body),
+            None => (0, len, 0),
+        }
+    }
+
+    /// The class body around `at`, or the code outside any function as one more place after them.
+    /// A plain function shares nothing with the rest of its file.
+    fn place(&self, at: usize) -> usize {
+        if self.in_type.get(at).copied().unwrap_or(false) {
+            return self.types.partition_point(|t| t.1 <= at);
+        }
+        if self.in_function.get(at).copied().unwrap_or(false) {
+            return usize::MAX;
+        }
+        self.types.len()
+    }
+
+    fn same_place(&self, place: usize, k: usize) -> bool {
+        self.place(k) == place
     }
 
     fn class(&self, tokens: &[Token], k: usize) -> String {
@@ -2630,22 +2727,26 @@ impl Receivers {
                     }
                 }
             }
-            let Some(&(open, body, _)) = scope else { return self.anywhere(tokens, name) };
+            let Some(&(open, body, _)) = scope else { return self.anywhere(tokens, name, at) };
             let captured = (open..body)
                 .filter(|&j| tokens[j].is_ident_ci("use"))
                 .any(|u| tokens[u..body].iter().any(|t| t.kind == TokenKind::Variable && t.text == name));
             if !captured {
-                return self.anywhere(tokens, name);
+                return self.anywhere(tokens, name, at);
             }
             end = open;
         }
     }
 
     /// An untyped parameter says nothing, and code often names a variable the same way throughout
-    /// a file, so what's shown elsewhere in the file is the next best thing.
-    fn anywhere(&self, tokens: &[Token], name: &str) -> std::collections::HashSet<String> {
-        self.remembered(name, 0, || {
-            let same = |k: &usize| tokens[*k].kind == TokenKind::Variable && tokens[*k].text == name;
+    /// a class, so what's shown elsewhere in it is the next best thing.
+    fn anywhere(&self, tokens: &[Token], name: &str, at: usize) -> std::collections::HashSet<String> {
+        let place = self.place(at);
+        if place == usize::MAX {
+            return Default::default();
+        }
+        self.remembered(name, 0, place, || {
+            let same = |k: &usize| tokens[*k].kind == TokenKind::Variable && tokens[*k].text == name && self.same_place(place, *k);
             (0..tokens.len()).filter(same).filter_map(|k| self.evidence(tokens, k)).find(|found| !found.is_empty()).unwrap_or_default()
         })
     }
@@ -2655,9 +2756,10 @@ impl Receivers {
         &self,
         name: &str,
         kind: u8,
+        place: usize,
         work: impl FnOnce() -> std::collections::HashSet<String>,
     ) -> std::collections::HashSet<String> {
-        let key = (name.to_string(), kind);
+        let key = (name.to_string(), kind, place);
         if let Some(found) = self.known.borrow().get(&key) {
             return found.clone();
         }
@@ -2666,13 +2768,20 @@ impl Receivers {
         found
     }
 
-    /// `$this->name`: what's assigned to it anywhere in the file, or its declared type.
-    fn property(&self, tokens: &[Token], name: &str, element: bool) -> std::collections::HashSet<String> {
-        self.remembered(name, 1 + u8::from(element), || self.find_property(tokens, name, element))
+    /// `$this->name`: what's assigned to it anywhere in the class, or its declared type.
+    fn property(&self, tokens: &[Token], name: &str, element: bool, at: usize) -> std::collections::HashSet<String> {
+        let place = self.place(at);
+        if place == usize::MAX {
+            return Default::default();
+        }
+        self.remembered(name, 1 + u8::from(element), place, || self.find_property(tokens, name, element, place))
     }
 
-    fn find_property(&self, tokens: &[Token], name: &str, element: bool) -> std::collections::HashSet<String> {
+    fn find_property(&self, tokens: &[Token], name: &str, element: bool, place: usize) -> std::collections::HashSet<String> {
         for k in 0..tokens.len() {
+            if !self.same_place(place, k) {
+                continue;
+            }
             let declared = tokens[k].kind == TokenKind::Variable && tokens[k].text == name;
             if declared
                 && !element
@@ -2736,7 +2845,7 @@ impl Receivers {
             name = before;
         }
         if tokens[name].kind == TokenKind::Ident && name >= 2 && tokens[name - 1].is_punct("->") && tokens[name - 2].text == "this" {
-            return self.property(tokens, &tokens[name].text, name != k);
+            return self.property(tokens, &tokens[name].text, name != k, k);
         }
         if !tokens[k].is_punct(")") {
             return Default::default();
@@ -2758,6 +2867,130 @@ impl Receivers {
         }
     }
 }
+
+/// `static $a; static $a;` in one function, the same at the top of a file.
+fn repeated_statics(tokens: &[Token], receivers: &Receivers) -> Vec<usize> {
+    let in_type = &receivers.in_type;
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    let mut open: Vec<(usize, usize)> = Vec::new();
+    let mut scopes = receivers.scopes.iter().map(|s| (s.1, s.2)).collect::<Vec<_>>();
+    scopes.sort_unstable();
+    let mut next = 0;
+    let mut k = 0;
+    while k < tokens.len() {
+        while next < scopes.len() && scopes[next].0 <= k {
+            open.push(scopes[next]);
+            next += 1;
+        }
+        while open.last().is_some_and(|s| s.1 < k) {
+            open.pop();
+        }
+        let scope = open.last().map_or(0, |s| s.0 + 1);
+        let statement = k == 0 || [";", "{", "}"].iter().any(|p| tokens[k - 1].is_punct(p)) || tokens[k - 1].kind == TokenKind::CloseTag;
+        let declares = tokens.get(k + 1).is_some_and(|n| n.kind == TokenKind::Variable);
+        if !(tokens[k].is_ident_ci("static") && declares && statement && (scope != 0 || !in_type[k])) {
+            k += 1;
+            continue;
+        }
+        let mut depth = 0usize;
+        let mut item = true;
+        k += 1;
+        while k < tokens.len() && !tokens[k].is_punct(";") {
+            let t = &tokens[k];
+            if t.is_punct("(") || t.is_punct("[") {
+                depth += 1;
+            } else if t.is_punct(")") || t.is_punct("]") {
+                depth = depth.saturating_sub(1);
+            } else if depth == 0 && t.is_punct(",") {
+                item = true;
+            } else if depth == 0 && item && t.kind == TokenKind::Variable {
+                item = false;
+                if !seen.insert((scope, t.text.clone())) {
+                    out.push(k);
+                }
+            }
+            k += 1;
+        }
+    }
+    out
+}
+
+fn assigned_this(tokens: &[Token]) -> Vec<usize> {
+    let is_this = |k: usize| tokens[k].kind == TokenKind::Variable && tokens[k].text == "this";
+    (0..tokens.len())
+        .filter(|&k| is_this(k) && !k.checked_sub(1).is_some_and(|p| ["->", "?->", "::", "$"].iter().any(|o| tokens[p].is_punct(o))))
+        .filter(|&k| {
+            let prev = k.checked_sub(1).map(|p| &tokens[p]);
+            tokens.get(k + 1).is_some_and(|n| n.is_punct("="))
+                || prev.is_some_and(|p| p.is_ident_ci("global"))
+                || prev.is_some_and(|p| p.is_ident_ci("as")) && tokens.get(k + 1).is_some_and(|n| n.is_punct(")"))
+        })
+        .collect()
+}
+
+/// `#[\Override]` on a method of a class that inherits nothing at all.
+fn overrides_nothing(tokens: &[Token], spaces: &[(usize, String)]) -> Vec<usize> {
+    let mut out = Vec::new();
+    for (kw, open, close) in class_bodies(tokens) {
+        let head = &tokens[kw..open];
+        if head.iter().any(|t| t.is_ident_ci("extends") || t.is_ident_ci("implements")) {
+            continue;
+        }
+        let mut depth = 0usize;
+        let mut uses_trait = false;
+        let mut marked = Vec::new();
+        for k in open..close {
+            let t = &tokens[k];
+            if t.is_punct("{") {
+                depth += 1;
+            } else if t.is_punct("}") {
+                depth -= 1;
+            } else if depth == 1 && t.is_ident_ci("use") {
+                uses_trait = true;
+            } else if depth == 1 && t.is_punct("#[") {
+                let name = tokens.get(k + 1).filter(|n| {
+                    let global = crate::index::namespace_at(spaces, k).is_empty();
+                    n.text.eq_ignore_ascii_case("\\Override") || global && n.text.eq_ignore_ascii_case("Override")
+                });
+                if let Some(end) = name.and_then(|_| {
+                    (k..close).find(|&j| tokens[j].is_ident_ci("function") || tokens[j].is_punct(";") || tokens[j].is_punct("{"))
+                }) {
+                    if tokens[end].is_ident_ci("function") {
+                        marked.push(k + 1);
+                    }
+                }
+            }
+        }
+        if !uses_trait {
+            out.extend(marked);
+        }
+    }
+    out
+}
+
+const BY_REFERENCE_FIRST: [&str; 20] = [
+    "array_multisort",
+    "array_pop",
+    "array_push",
+    "array_shift",
+    "array_splice",
+    "array_unshift",
+    "array_walk",
+    "arsort",
+    "asort",
+    "end",
+    "krsort",
+    "ksort",
+    "natcasesort",
+    "natsort",
+    "reset",
+    "rsort",
+    "shuffle",
+    "sort",
+    "uasort",
+    "usort",
+];
 
 fn globals_writes(tokens: &[Token]) -> Vec<usize> {
     let assign = ["=", "**=", "??=", "<<=", ">>="];
@@ -2801,7 +3034,11 @@ fn globals_writes(tokens: &[Token]) -> Vec<usize> {
                 })
                 .is_some_and(|open| open > 0 && tokens[open - 1].is_ident_ci("unset"))
         };
-        if reference || written || appended || unset {
+        let by_ref = after("(")
+            && next.is_some_and(|n| n.is_punct(")") || n.is_punct(","))
+            && i >= 2
+            && BY_REFERENCE_FIRST.iter().any(|f| tokens[i - 2].text.trim_start_matches('\\').eq_ignore_ascii_case(f));
+        if reference || written || appended || unset || by_ref {
             out.push(i);
         }
     }
@@ -3031,6 +3268,18 @@ fn concat_with_arithmetic(tokens: &[Token]) -> Vec<usize> {
         }
         let level = stack.last_mut().unwrap();
         let binary = k > 0 && expression_end(&tokens[k - 1]);
+        let shift = |a: &Token, b: &Token| a.end == b.start && (a.is_punct("<") && b.is_punct("<") || a.is_punct(">") && b.is_punct(">"));
+        if k > 0 && shift(&tokens[k - 1], t) {
+            continue;
+        }
+        if tokens.get(k + 1).is_some_and(|n| shift(t, n)) {
+            level.1 |= binary && level.0;
+            if level.0 && level.1 {
+                out.push(level.2.unwrap());
+                *level = (false, false, None);
+            }
+            continue;
+        }
         let compound = tokens.get(k + 1).is_some_and(|n| n.is_punct("=") && n.start == t.end);
         if t.kind == TokenKind::CloseTag
             || (t.kind == TokenKind::Punct && resets.contains(&t.text.as_str()))
@@ -3041,7 +3290,7 @@ fn concat_with_arithmetic(tokens: &[Token]) -> Vec<usize> {
         } else if t.is_punct(".") && binary {
             level.0 = true;
             level.2.get_or_insert(k);
-        } else if (t.is_punct("+") || t.is_punct("-")) && binary && level.0 {
+        } else if (t.is_punct("+") || t.is_punct("-") || t.is_punct("<<") || t.is_punct(">>")) && binary && level.0 {
             level.1 = true;
         }
         if level.0 && level.1 {
@@ -3538,7 +3787,7 @@ fn dynamic_properties(tokens: &[Token], index: &crate::index::ProjectIndex) -> V
     out
 }
 
-const MYSQL_CONSTANTS: [&str; 7] = [
+pub(crate) const MYSQL_CONSTANTS: [&str; 7] = [
     "MYSQL_ASSOC",
     "MYSQL_NUM",
     "MYSQL_BOTH",
@@ -3551,55 +3800,214 @@ const MYSQL_CONSTANTS: [&str; 7] = [
 /// Marks a project with a `define()` whose name only exists at run time.
 pub(crate) const DYNAMIC_CONSTANT: &str = "*";
 
-pub(crate) fn defined_constants(tokens: &[Token]) -> std::collections::HashSet<String> {
-    let mut names = std::collections::HashSet::new();
-    for (i, t) in tokens.iter().enumerate() {
-        if t.is_ident_ci("const") {
-            let mut j = i + 1;
-            while let Some(n) = tokens.get(j).filter(|n| n.kind == TokenKind::Ident) {
-                if tokens.get(j + 1).is_some_and(|x| x.is_punct("=")) {
-                    names.insert(n.text.clone());
-                    break;
-                }
-                if tokens.get(j + 1).is_some_and(|x| x.is_ident_ci("as")) {
-                    j += 2;
-                    continue;
-                }
-                names.insert(n.text.rsplit('\\').next().unwrap_or_default().to_string());
-                j += 1;
+/// A `$php_errormsg` that the code fills itself, or only looks at to see whether it exists, isn't
+/// waiting for PHP to fill it. `$x = '';` doesn't count: that's the reset before a call that might fail.
+fn reads_magic_variable(tokens: &[Token], k: usize, receivers: &Receivers) -> bool {
+    let next = tokens.get(k + 1);
+    let prev = k.checked_sub(1).map(|p| &tokens[p]);
+    if prev.is_some_and(|p| p.is_ident_ci("global")) || next.is_some_and(|n| n.is_punct("=")) {
+        return false;
+    }
+    let (from, to, params) = receivers.scope_around(k, tokens.len());
+    let name = &tokens[k].text;
+    for j in from..to {
+        if tokens[j].kind != TokenKind::Variable || tokens[j].text != *name {
+            continue;
+        }
+        if j < params {
+            return false;
+        }
+        if tokens.get(j + 1).is_some_and(|n| n.is_punct("=")) && !tokens.get(j + 1).is_some_and(|n| n.is_punct("==")) {
+            let end = (j..to).find(|&e| tokens[e].is_punct(";")).unwrap_or(to);
+            let value = &tokens[j + 2..end];
+            let empty = matches!(value, [v] if v.text == "''" || v.text == "\"\"" || v.is_ident_ci("null") || v.is_ident_ci("false"));
+            if !empty && !value.iter().any(|t| t.kind == TokenKind::Variable && t.text == *name) {
+                return false;
             }
         }
-        if t.is_ident_ci("define") && tokens.get(i + 1).is_some_and(|n| n.is_punct("(")) {
-            let literal = tokens.get(i + 2).filter(|n| matches!(n.kind, TokenKind::Str { interpolates: false, .. }));
-            match literal.filter(|_| tokens.get(i + 3).is_some_and(|n| n.is_punct(","))) {
-                Some(name) => {
-                    let name = name.text.get(1..name.text.len().saturating_sub(1)).unwrap_or_default();
-                    names.insert(name.rsplit('\\').next().unwrap_or_default().to_string());
-                }
-                None => {
-                    names.insert(DYNAMIC_CONSTANT.to_string());
-                }
+        if ["isset", "empty", "unset"].iter().any(|f| inside_call(tokens, j, f)) {
+            return false;
+        }
+    }
+    true
+}
+
+/// Labels, `goto` targets, enum cases and the later names of a `const` list look like constants.
+fn not_a_constant(tokens: &[Token], i: usize) -> bool {
+    let prev = i.checked_sub(1).map(|p| &tokens[p]);
+    let next = tokens.get(i + 1);
+    if prev.is_some_and(|p| p.is_ident_ci("goto")) {
+        return true;
+    }
+    if next.is_some_and(|n| n.is_punct(":"))
+        && prev.is_none_or(|p| p.is_punct(";") || p.is_punct("{") || p.is_punct("}") || p.kind == TokenKind::CloseTag)
+    {
+        return true;
+    }
+    if prev.is_some_and(|p| p.is_ident_ci("case")) && next.is_some_and(|n| n.is_punct("=") || n.is_punct(";")) {
+        return true;
+    }
+    if !next.is_some_and(|n| n.is_punct("=")) {
+        return false;
+    }
+    let mut depth = 0usize;
+    for k in (0..i).rev() {
+        let t = &tokens[k];
+        if t.is_punct(")") || t.is_punct("]") {
+            depth += 1;
+        } else if t.is_punct("(") || t.is_punct("[") {
+            if depth == 0 {
+                return false;
             }
+            depth -= 1;
+        } else if t.is_punct(";") || t.is_punct("{") || t.is_punct("}") {
+            return false;
+        } else if depth == 0 && t.is_ident_ci("const") {
+            return true;
+        }
+    }
+    false
+}
+
+/// Which tokens sit inside a class-like body. One pass, whatever the nesting.
+pub(crate) fn inside_types(tokens: &[Token]) -> Vec<bool> {
+    let mut inside = vec![false; tokens.len()];
+    let mut stack: Vec<bool> = Vec::new();
+    let mut pending = false;
+    let mut depth = 0usize;
+    for (k, t) in tokens.iter().enumerate() {
+        let prev = k.checked_sub(1).map(|p| &tokens[p]);
+        let member = prev.is_some_and(|p| p.is_punct("::") || p.is_punct("->") || p.is_punct("?->"));
+        let named = tokens.get(k + 1).is_some_and(|n| n.kind == TokenKind::Ident);
+        let anonymous = t.is_ident_ci("class") && prev.is_some_and(|p| p.is_ident_ci("new"));
+        if !member && (["class", "interface", "trait", "enum"].iter().any(|w| t.is_ident_ci(w)) && named || anonymous) {
+            pending = true;
+        } else if t.is_punct(";") {
+            pending = false;
+        } else if t.is_punct("{") {
+            stack.push(pending);
+            depth += usize::from(pending);
+            pending = false;
+        } else if t.is_punct("}") {
+            depth -= usize::from(stack.pop().unwrap_or(false));
+        }
+        inside[k] = depth > 0;
+    }
+    inside
+}
+
+/// The names `const` declares from `at`, which holds the keyword.
+fn const_names(tokens: &[Token], at: usize) -> Vec<&Token> {
+    let mut depth = 0usize;
+    let mut names = Vec::new();
+    for k in at + 1..tokens.len() {
+        let t = &tokens[k];
+        if t.is_punct("(") || t.is_punct("[") || t.is_punct("{") {
+            depth += 1;
+        } else if t.is_punct(")") || t.is_punct("]") || t.is_punct("}") {
+            depth = depth.saturating_sub(1);
+        } else if t.is_punct(";") {
+            break;
+        } else if depth == 0 && t.is_punct("=") && k > at + 1 {
+            names.push(&tokens[k - 1]);
         }
     }
     names
+}
+
+fn defined_literal(tokens: &[Token], i: usize) -> Option<Option<&str>> {
+    if !(tokens[i].is_ident_ci("define") && tokens.get(i + 1).is_some_and(|n| n.is_punct("("))) {
+        return None;
+    }
+    if i > 0 && (tokens[i - 1].is_punct("->") || tokens[i - 1].is_punct("::") || tokens[i - 1].is_ident_ci("function")) {
+        return None;
+    }
+    Some(tokens.get(i + 2).filter(|_| tokens.get(i + 3).is_some_and(|n| n.is_punct(","))).and_then(Token::literal))
+}
+
+/// Names this file can use as plain constants, `use const` aliases included.
+pub(crate) fn defined_constants(tokens: &[Token]) -> std::collections::HashSet<String> {
+    let mut names = std::collections::HashSet::new();
+    let in_type = inside_types(tokens);
+    for (i, t) in tokens.iter().enumerate() {
+        if t.is_ident_ci("const") && !in_type[i] {
+            if i > 0 && tokens[i - 1].is_ident_ci("use") {
+                let end = (i..tokens.len()).find(|&k| tokens[k].is_punct(";")).unwrap_or(tokens.len());
+                for part in tokens[i + 1..end].split(|t| t.is_punct(",")) {
+                    if let Some(last) = part.iter().rfind(|t| t.kind == TokenKind::Ident) {
+                        names.insert(last.text.rsplit('\\').next().unwrap_or_default().to_string());
+                    }
+                }
+            } else {
+                names.extend(const_names(tokens, i).into_iter().map(|n| n.text.clone()));
+            }
+        }
+        match defined_literal(tokens, i) {
+            Some(Some(name)) => {
+                names.insert(name.rsplit('\\').next().unwrap_or_default().to_string());
+            }
+            Some(None) => {
+                names.insert(DYNAMIC_CONSTANT.to_string());
+            }
+            None => {}
+        }
+    }
+    names
+}
+
+fn constant_key(space: &str, name: &str) -> String {
+    if space.is_empty() {
+        name.to_string()
+    } else {
+        format!("{}\\{name}", space.to_ascii_lowercase())
+    }
+}
+
+/// What this file declares for the rest of the project: `demo\key` for a namespaced constant.
+pub(crate) fn declared_constants(tokens: &[Token]) -> std::collections::HashSet<String> {
+    let mut names = std::collections::HashSet::new();
+    let in_type = inside_types(tokens);
+    let spaces = crate::index::namespaces(tokens);
+    for (i, t) in tokens.iter().enumerate() {
+        if t.is_ident_ci("const") && !in_type[i] && !(i > 0 && tokens[i - 1].is_ident_ci("use")) {
+            let space = crate::index::namespace_at(&spaces, i);
+            names.extend(const_names(tokens, i).into_iter().map(|n| constant_key(space, &n.text)));
+        }
+        match defined_literal(tokens, i) {
+            Some(Some(name)) => {
+                let name = name.trim_start_matches('\\');
+                let (space, short) = name.rsplit_once('\\').unwrap_or(("", name));
+                names.insert(constant_key(space.replace("\\\\", "\\").trim_end_matches('\\'), short));
+            }
+            Some(None) => {
+                names.insert(DYNAMIC_CONSTANT.to_string());
+            }
+            None => {}
+        }
+    }
+    names
+}
+
+pub(crate) fn constant_visible(known: &std::collections::HashSet<String>, space: &str, name: &str) -> bool {
+    known.contains(name) || !space.is_empty() && known.contains(&constant_key(space, name))
 }
 
 fn is_bareword(t: &Token) -> bool {
     t.kind == TokenKind::Ident
         && !t.text.contains('\\')
         && t.text.bytes().any(|b| b.is_ascii_lowercase())
+        && crate::symbols::MIXED_CASE_CONSTANTS.binary_search(&t.text.as_str()).is_err()
         && !["true", "false", "null"].iter().any(|k| t.is_ident_ci(k))
         && !(t.text.starts_with("__") && t.text.ends_with("__"))
 }
 
-fn bareword_keys(tokens: &[Token], defined: impl Fn(&str) -> bool) -> Vec<usize> {
+fn bareword_keys(tokens: &[Token], defined: impl Fn(usize, &str) -> bool) -> Vec<usize> {
     (2..tokens.len().saturating_sub(1))
         .filter(|&i| {
             tokens[i - 1].is_punct("[")
                 && tokens[i + 1].is_punct("]")
                 && is_bareword(&tokens[i])
-                && !defined(&tokens[i].text)
+                && !defined(i, &tokens[i].text)
                 && offset_base(tokens, i - 2)
         })
         .collect()
@@ -3834,7 +4242,8 @@ mod tests {
         assert!(flagged("<?php $r = new ReflectionFunction('f'); $r->isDisabled();"));
         assert!(flagged("<?php (new ReflectionFunction('f'))->isDisabled();"));
         assert!(flagged("<?php function a(ReflectionFunction $r) { return function () use ($r) { $r->isDisabled(); }; }"));
-        assert!(flagged("<?php function a() { $r = new ReflectionFunction('f'); } function b($r) { $r->isDisabled(); }"));
+        assert!(!flagged("<?php function a() { $r = new ReflectionFunction('f'); } function b($r) { $r->isDisabled(); }"));
+        assert!(flagged("<?php class A { function a() { $r = new ReflectionFunction('f'); } function b($r) { $r->isDisabled(); } }"));
         assert!(flagged(
             "<?php class A { function a() { $this->r = new ReflectionFunction('f'); } function b() { $this->r->isDisabled(); } }"
         ));
@@ -4332,7 +4741,7 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
             ("<?php chr(256); chr(-1); chr(65);", "deprecated.chr_out_of_range", 2),
             ("<?php ord('ab'); ord(''); ord('a'); ord($s);", "deprecated.ord_length", 2),
             ("<?php class_alias('Foo', 'array'); class_alias('Foo', 'string'); class_alias('Foo', 'Bar'); class_alias('Foo', 'match');", "removed.reserved_name", 2),
-            ("<?php ini_set('session.use_only_cookies', 1); ini_set('intl.error_level', E_WARNING);", "deprecated.ini_setting", 2),
+            ("<?php ini_set('session.use_only_cookies', 0); ini_set('intl.error_level', E_WARNING);", "deprecated.ini_setting", 2),
         ];
         for (src, id, n) in cases {
             assert_eq!(count85(src, id), *n, "{id}: {src}");
@@ -4722,6 +5131,208 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
     }
 
     #[test]
+    fn guards_see_every_way_of_asking() {
+        let each = "removed.each";
+        assert_eq!(count85("<?php if (is_callable('each')) { each($a); }", each), 0);
+        assert_eq!(count85("<?php if (function_exists('each')): each($a); endif;", each), 0);
+        assert_eq!(count85("<?php if (false) { each($a); }", each), 0);
+        assert_eq!(count85("<?php if (function_exists('each')): else: each($a); endif;", each), 1);
+        assert_eq!(
+            count85(
+                "<?php if (PHP_VERSION_ID < 80000): each($a); elseif (PHP_VERSION_ID >= 90000): each($a); else: each($a); endif;",
+                each
+            ),
+            1
+        );
+        assert_eq!(count85("<?php if (PHP_VERSION_ID >= 80000): foo(); if ($x): bar(); endif; else: each($a); endif; each($b);", each), 1);
+        assert_eq!(count85("<?php namespace Demo; const PHP_VERSION_ID = 90000; if (PHP_VERSION_ID < 80000) { each($a); }", each), 1);
+        assert_eq!(
+            count85("<?php namespace Demo; function function_exists($n) { return true; } if (function_exists('each')) { each($a); }", each),
+            1
+        );
+        assert_eq!(
+            count85(
+                "<?php if (defined('MYSQL_ASSOC')) { echo MYSQL_ASSOC; } if (extension_loaded('mysql')) { echo MYSQL_ASSOC; }",
+                "removed.builtin_constant"
+            ),
+            0
+        );
+        assert_eq!(count85("<?php if (false) { function each($a) {} } each($b);", each), 1);
+    }
+
+    #[test]
+    fn constants_stay_in_their_namespace_and_scope() {
+        let key = "removed.bareword_key";
+        assert_eq!(count85("<?php namespace Demo; const key = 1; echo $a[key];", key), 0);
+        assert_eq!(count85("<?php class K { const key = 1; } echo $a[key];", key), 1);
+        assert_eq!(count85("<?php const a = 1, b = 2; echo $x[b];", key), 0);
+        assert_eq!(count85("<?php define(\"name\", 1); echo $x[name]; echo $x[other];", key), 1);
+        assert_eq!(count85("<?php use const Foo\\bar as key; echo $x[key];", key), 0);
+        assert_eq!(count85("<?php echo $x[CURL_SSLVERSION_TLSv1_2];", key), 0);
+        let index = crate::index::ProjectIndex::from_tokens(&tokenize("<?php namespace Demo; const key = 1;"));
+        let run = |src: &str| analyze_source_in("b.php", src, PhpVersion::new(8, 5), &index).iter().filter(|f| f.rule_id == key).count();
+        assert_eq!(run("<?php echo $a[key];"), 1);
+        assert_eq!(run("<?php namespace Demo; echo $a[key];"), 0);
+        let constants = constant_names("<?php namespace Demo; const key = 1;");
+        let fix = |src: &str| fix_legacy_syntax_with(src, &constants, PhpVersion::new(8, 5), None).is_some();
+        assert!(fix("<?php echo $a[key];"));
+        assert!(!fix("<?php namespace Demo; echo $a[key];"));
+    }
+
+    #[test]
+    fn names_that_only_look_like_constants() {
+        let removed = "removed.builtin_constant";
+        for src in [
+            "<?php enum Mode { case MYSQL_ASSOC; }",
+            "<?php enum Mode: string { case MYSQL_ASSOC = 'a'; }",
+            "<?php class K { const A = 1, MYSQL_ASSOC = 2; }",
+            "<?php const A = 1, MYSQL_ASSOC = 2;",
+            "<?php goto MYSQL_ASSOC; echo 1; MYSQL_ASSOC: echo 2;",
+            "<?php use const Foo\\MYSQL_ASSOC; echo MYSQL_ASSOC;",
+        ] {
+            assert_eq!(count85(src, removed), 0, "{src}");
+        }
+        assert_eq!(count85("<?php switch ($a) { case MYSQL_ASSOC: break; }", removed), 1);
+        assert_eq!(count85("<?php $f = ['x' => MYSQL_ASSOC]; $g = $a ? MYSQL_ASSOC : 1;", removed), 2);
+    }
+
+    #[test]
+    fn magic_variables_the_code_fills_itself() {
+        let id = "removed.magic_variable";
+        assert_eq!(count85("<?php function f() { $php_errormsg = 'x'; return $php_errormsg; }", id), 0);
+        assert_eq!(count85("<?php function f($php_errormsg) { return $php_errormsg; }", id), 0);
+        assert_eq!(count85("<?php if (!isset($HTTP_RAW_POST_DATA)) { $HTTP_RAW_POST_DATA = file_get_contents('php://input'); } echo $HTTP_RAW_POST_DATA;", id), 0);
+        assert_eq!(count85("<?php $m = isset($php_errormsg) ? $php_errormsg : '';", id), 0);
+        assert_eq!(count85("<?php function f() { global $php_errormsg; $php_errormsg = ''; @g(); return $php_errormsg; }", id), 1);
+        assert_eq!(count85("<?php function f() { $x = $php_errormsg; } function g() { $php_errormsg = 'y'; }", id), 1);
+    }
+
+    #[test]
+    fn receivers_stay_in_their_class_and_function() {
+        let wakeup = "<?php class A { function a() { $s = new SplFixedArray(1); } } class B { function b($s) { $s->__wakeup(); } }";
+        assert_eq!(count85(wakeup, "deprecated.builtin_method"), 0);
+        let csv = "<?php function p() { $f = new SplFileObject('x'); } function r($f) { $f->fgetcsv(); }";
+        assert_eq!(count85(csv, "deprecated.csv_escape"), 0);
+        let same = "<?php class A { function a() { $f = new SplFileObject('x'); } function r($f) { $f->fgetcsv(); } }";
+        assert_eq!(count85(same, "deprecated.csv_escape"), 1);
+        let property = "<?php class A { public $d; function a() { $this->d = new SplFileObject('x'); } } class B { function b() { $this->d->fgetcsv(); } }";
+        assert_eq!(count85(property, "deprecated.csv_escape"), 0);
+    }
+
+    #[test]
+    fn dom_lists_need_a_dom_object() {
+        let id = "removed.uncloneable_object";
+        assert_eq!(count85("<?php function f($x) { return clone $x->attributes; }", id), 0);
+        assert_eq!(count85("<?php function f(DOMElement $x) { return clone $x->attributes; }", id), 1);
+        assert_eq!(count85("<?php function f($x) { return clone $x->childNodes; }", id), 1);
+    }
+
+    #[test]
+    fn deprecated_settings_given_their_default_stay_quiet() {
+        let id = "deprecated.ini_setting";
+        for src in [
+            "<?php ini_set('session.use_only_cookies', 1);",
+            "<?php ini_set('session.use_only_cookies', '1');",
+            "<?php ini_set('session.use_only_cookies', true);",
+            "<?php ini_set(\"session.use_trans_sid\", 0);",
+            "<?php ini_set('session.sid_length', 32);",
+            "<?php ini_set('assert.active', 'on');",
+            "<?php ini_set('intl.error_level', 0);",
+            "<?php ini_set('session.referer_check', '');",
+        ] {
+            assert_eq!(count85(src, id), 0, "{src}");
+        }
+        for src in [
+            "<?php ini_set('session.use_only_cookies', 0);",
+            "<?php ini_set('session.use_only_cookies', $on);",
+            "<?php ini_set('session.use_trans_sid', 1);",
+            "<?php ini_set('session.sid_length', 64);",
+            "<?php ini_set('session.trans_sid_tags', 'a=href');",
+        ] {
+            assert_eq!(count85(src, id), 1, "{src}");
+        }
+    }
+
+    #[test]
+    fn optional_before_required_follows_each_php() {
+        let id = "deprecated.optional_before_required";
+        let count = |src: &str, target: (u32, u32)| at(src, target).iter().filter(|(rule, _)| rule == id).count();
+        assert_eq!(count("<?php function a(int $x = null, $y) {}", (8, 5)), 0);
+        assert_eq!(count("<?php function a(int $x = \\NULL, $y) {}", (8, 5)), 0);
+        assert_eq!(count("<?php function b(?int $x = null, $y) {}", (8, 0)), 0);
+        assert_eq!(count("<?php function b(?int $x = null, $y) {}", (8, 1)), 1);
+        assert_eq!(count("<?php function c(int|null $x = null, $y) {}", (8, 2)), 0);
+        assert_eq!(count("<?php function c(int|null $x = null, $y) {}", (8, 3)), 1);
+        assert_eq!(count("<?php function d(mixed $x = null, $y) {}", (8, 2)), 0);
+        assert_eq!(count("<?php function d(mixed $x = null, $y) {}", (8, 3)), 1);
+        assert_eq!(count("<?php function e(int $x = 1, $y) {}", (8, 0)), 1);
+        assert_eq!(count("<?php function g($x = null, $y) {}", (8, 0)), 1);
+    }
+
+    #[test]
+    fn double_quoted_text_counts_as_text() {
+        assert_eq!(count85("<?php function f() { return compact(\"nope\"); }", "behavior.compact_undefined_variable"), 1);
+        assert_eq!(count85("<?php function f($n) { return compact(\"a$n\"); }", "behavior.compact_undefined_variable"), 0);
+    }
+
+    #[test]
+    fn newly_covered_compile_errors() {
+        assert_eq!(count85("<?php function s() { static $a; static $b, $a; }", "removed.repeated_static"), 1);
+        assert_eq!(count85("<?php function s() { static $a; } function t() { static $a; }", "removed.repeated_static"), 0);
+        assert_eq!(
+            count85(
+                "<?php class A { function f() { static::$a = 1; static::$a = 2; static::x($b); static::x($b); } }",
+                "removed.repeated_static"
+            ),
+            0
+        );
+        assert_eq!(
+            count85("<?php class A { public static $a; static $b; function f() { static $a; static $b; } }", "removed.repeated_static"),
+            0
+        );
+        assert_eq!(at("<?php function s() { static $a; static $a; }", (8, 2)).len(), 0);
+        assert_eq!(count85("<?php function t() { $this = 1; }", "removed.assign_this"), 1);
+        assert_eq!(count85("<?php class A { function f() { $this->a = 1; $this['b'] = 2; } }", "removed.assign_this"), 0);
+        let id = "removed.override_without_parent";
+        assert_eq!(count85("<?php class Z { #[\\Override] function a() {} }", id), 1);
+        assert_eq!(count85("<?php class Z extends Y { #[\\Override] function a() {} }", id), 0);
+        assert_eq!(count85("<?php class Z implements Y { #[\\Override] function a() {} }", id), 0);
+        assert_eq!(count85("<?php class Z { use T; #[\\Override] function a() {} }", id), 0);
+        assert_eq!(count85("<?php namespace N; class Z { #[Override] function a() {} }", id), 0);
+        assert_eq!(count85("<?php array_pop($GLOBALS); $a = array_pop($GLOBALS['x']); count($GLOBALS);", "removed.globals_write"), 1);
+        assert_eq!(count85("<?php $s = 'abc'; $s--;", "deprecated.string_decrement"), 1);
+        assert_eq!(count85("<?php $s = '5'; $s--;", "deprecated.string_decrement"), 0);
+        assert_eq!(count85("<?php echo 'a' . 1 << 2;", "behavior.concat_precedence"), 1);
+        assert_eq!(
+            count85(
+                "<?php preg_match('/[a-\\d]/', $x); preg_match('/[-\\d]/', $x); preg_match('/[a\\-\\d]/', $x);",
+                "removed.regex_class_range"
+            ),
+            1
+        );
+    }
+
+    #[test]
+    fn overrides_follow_the_php_being_targeted() {
+        let child = "<?php class H extends DateTime { public function setMicrosecond() {} }";
+        let count = |target: (u32, u32)| at(child, target).iter().filter(|(rule, _)| rule == "removed.incompatible_override").count();
+        assert_eq!(count((8, 3)), 0);
+        assert_eq!(count((8, 4)), 1);
+        let soap = "<?php class S extends SoapClient { public function __doRequest($a) { return ''; } }";
+        assert_eq!(at(soap, (8, 5)).iter().filter(|(rule, _)| rule == "removed.incompatible_override").count(), 1);
+    }
+
+    #[test]
+    fn too_many_arguments_depend_on_the_target() {
+        let id = "removed.builtin_arity";
+        let count = |src: &str, target: (u32, u32)| at(src, target).iter().filter(|(rule, _)| rule == id).count();
+        assert_eq!(count("<?php strrchr('a', 'b', true);", (8, 2)), 1);
+        assert_eq!(count("<?php strrchr('a', 'b', true);", (8, 3)), 0);
+        assert_eq!(count("<?php imagerotate($i, 1, 0, 1);", (8, 2)), 0);
+        assert_eq!(count("<?php imagerotate($i, 1, 0, 1);", (8, 3)), 1);
+    }
+
+    #[test]
     fn more_call_and_constant_rules() {
         assert_eq!(count85("<?php implode($items, ', '); implode(', ', $items); join($a, '-'); implode($a);", "removed.implode_order"), 2);
         assert_eq!(count85("<?php mb_check_encoding(); mb_check_encoding($s); readdir(); readdir($h);", "deprecated.implicit_argument"), 2);
@@ -4734,7 +5345,7 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
         );
         assert_eq!(
             count85(
-                "<?php ini_set('session.sid_length', 32); ini_get('mbstring.func_overload'); ini_set('mbstring.func_overload', 0);",
+                "<?php ini_set('session.sid_length', 64); ini_get('mbstring.func_overload'); ini_set('mbstring.func_overload', 0);",
                 "deprecated.ini_setting"
             ),
             2

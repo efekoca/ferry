@@ -211,13 +211,14 @@ impl ProjectIndex {
         self.types.contains_key(short) || self.interfaces.contains_key(short)
     }
 
-    pub fn defines_constant(&self, name: &str) -> bool {
-        self.constants.contains(name)
+    /// A plain name in a namespace reaches that namespace's constant first, then the global one.
+    pub(crate) fn defines_constant_in(&self, space: &str, name: &str) -> bool {
+        crate::analyzer::constant_visible(&self.constants, space, name)
     }
 
     fn add(&mut self, tokens: &[Token]) -> Vec<String> {
         let mut added = Vec::new();
-        self.constants.extend(crate::analyzer::defined_constants(tokens));
+        self.constants.extend(crate::analyzer::declared_constants(tokens));
         self.mysqli_report |= tokens.iter().any(|t| t.is_ident_ci("mysqli_report") || t.is_ident_ci("report_mode"));
         let methods = crate::analyzer::method_tokens(tokens);
         let spaces = namespaces(tokens);

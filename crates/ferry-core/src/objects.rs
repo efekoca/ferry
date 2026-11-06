@@ -119,9 +119,10 @@ pub(crate) fn check(tokens: &[Token], is_user_type: impl Fn(&str) -> bool) -> Ve
                 if member.is_none() && classes.contains("domxpath") && !is_user_type("domxpath") {
                     out.push(issue(k, &CLONE_XPATH));
                 }
+                let dom = classes.iter().any(|c| c.starts_with("dom"));
                 let list = member.is_some_and(|m| {
                     let after = tokens.get(k + 4).is_some_and(|n| n.is_punct("("));
-                    (m.is_ident_ci("childNodes") || m.is_ident_ci("attributes")) && !after
+                    (m.is_ident_ci("childNodes") || m.is_ident_ci("attributes") && dom) && !after
                         || (m.is_ident_ci("getElementsByTagName") || m.is_ident_ci("getElementsByTagNameNS")) && after
                 });
                 if list {

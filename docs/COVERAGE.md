@@ -23,10 +23,10 @@ The data lives in `docs/coverage.json`; this page is generated from it with
 | [8.0](#php-80) | 124 | 1 | 0 | 48 | 11 | 184 |
 | [8.1](#php-81) | 52 | 0 | 2 | 6 | 2 | 62 |
 | [8.2](#php-82) | 11 | 0 | 0 | 7 | 0 | 18 |
-| [8.3](#php-83) | 23 | 0 | 0 | 10 | 2 | 35 |
+| [8.3](#php-83) | 23 | 1 | 0 | 9 | 2 | 35 |
 | [8.4](#php-84) | 72 | 0 | 0 | 22 | 5 | 99 |
 | [8.5](#php-85) | 52 | 0 | 0 | 22 | 5 | 79 |
-| **All** | **468** | **3** | **3** | **184** | **62** | **720** |
+| **All** | **468** | **4** | **3** | **183** | **62** | **720** |
 
 ## PHP 7.0
 
@@ -439,7 +439,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.0/UPGRADING)
 | Standard | The string.strip_tags filter has been removed. | Covered | `removed.strip_tags_filter` | stream_filter_append($fp, 'string.strip_tags') is reported. |
 | Standard | The needle argument of strpos(), strrpos(), stripos(), strripos(), strstr(), strchr(), strrchr(), and stristr() will now always be interpreted as a string. | Covered | `behavior.int_as_char_code` | strstr($s, 10) is reported. |
 | Standard | The needle argument for strpos(), strrpos(), stripos(), strripos(), strstr(), stristr() and strrchr() can now be empty. | Runtime only |  | Return value for an empty needle changes; the needle is normally a variable. |
-| Standard | The length argument for substr(), substr_count(), substr_compare(), and iconv_substr() can now be null. | Covered | `behavior.null_length` | substr($s, 2, null) is reported. |
+| Standard | The length argument for substr(), substr_count(), substr_compare(), and iconv_substr() can now be null. | Covered | `behavior.null_length` | substr($s, 2, null) is reported. substr_compare() already treated null as omitted, so its result does not change. |
 | Standard | The length argument for array_splice() can now be null. | Covered | `behavior.null_length` | array_splice($a, 1, null) is reported. |
 | Standard | The args argument of vsprintf(), vfprintf(), and vprintf() must now be an array. | Runtime only |  | The args argument of vsprintf() is normally a variable whose type is known only at runtime. |
 | Standard | The 'salt' option of password_hash() is no longer supported. | Covered | `behavior.password_hash_salt` | password_hash($p, PASSWORD_DEFAULT, ['salt' => $salt]) is reported. |
@@ -617,7 +617,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.3/UPGRADING)
 | Standard | The file() flags error check now catches all invalid flags. | Covered | `removed.file_append_flag` | file('x', FILE_APPEND) is reported. |
 | SNMP | The type of SNMP class constants are now declared. | Covered | `removed.typed_constant_override` | Redeclaring an SNMP constant without its int type is reported. |
 | Deprecated Functionality | Using the ++ operator on empty, non-numeric, or non-alphanumeric strings is now deprecated. | Runtime only |  | Whether the incremented string is empty or non-alphanumeric depends on runtime values. |
-| Deprecated Functionality | Using the -- operator on empty or non-numeric strings is now deprecated. | Runtime only |  | Whether the decremented string is empty or non-numeric depends on runtime values. |
+| Deprecated Functionality | Using the -- operator on empty or non-numeric strings is now deprecated. | Partial | `deprecated.string_decrement` | A literal non-numeric string decremented right after it is assigned is reported; other values depend on runtime. |
 | Deprecated Functionality | Calling get_class() and get_parent_class() without arguments is now deprecated. | Covered | `deprecated.get_class_no_args` | get_class() and get_parent_class() without arguments are reported. |
 | Deprecated Functionality | Calling dba_fetch() with $dba as the 3rd argument is now deprecated. | Covered | `deprecated.dba_fetch_order` | dba_fetch('k', 0, $dba) is reported. |
 | Deprecated Functionality | Calling FFI::cast(), FFI::new(), and FFI::type() statically is now deprecated. | Covered | `deprecated.ffi_static_call` | Static FFI::cast(), FFI::new() and FFI::type() calls are reported. |

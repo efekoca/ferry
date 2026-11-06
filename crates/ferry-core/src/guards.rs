@@ -4,6 +4,8 @@ use crate::version::PhpVersion;
 
 pub type Span = ((usize, usize), (usize, usize));
 
+const REMOVED_EXTENSIONS: [(&str, (u32, u32)); 4] = [("ereg", (7, 0)), ("mssql", (7, 0)), ("mysql", (7, 0)), ("sybase_ct", (7, 0))];
+
 const PECL: [&str; 6] = ["removed.mcrypt", "removed.imap", "removed.pspell", "removed.oci8", "removed.xmlrpc", "removed.interbase"];
 
 /// Nothing written by hand nests this deep, and walking such a file for every `if` takes minutes.
@@ -19,11 +21,54 @@ fn too_deep(tokens: &[Token]) -> bool {
     })
 }
 
+const VERSION_NAMES: [&str; 3] = ["PHP_VERSION_ID", "PHP_MAJOR_VERSION", "PHP_VERSION"];
+const CHECK_FUNCTIONS: [&str; 8] =
+    ["version_compare", "phpversion", "function_exists", "class_exists", "interface_exists", "defined", "is_callable", "extension_loaded"];
+
+/// A namespace can declare its own `PHP_VERSION_ID` or `function_exists()`, and then the checks
+/// below no longer ask what they seem to.
+fn shadowed(tokens: &[Token]) -> bool {
+    tokens.windows(2).any(|w| {
+        w[0].is_ident_ci("const") && VERSION_NAMES.iter().any(|n| w[1].is_ident_ci(n))
+            || w[0].is_ident_ci("function") && CHECK_FUNCTIONS.iter().any(|n| w[1].is_ident_ci(n))
+    })
+}
+
+/// Where each `if (...):` block ends, from its colon to the keyword that closes it.
+fn alternative_blocks(tokens: &[Token]) -> std::collections::HashMap<usize, usize> {
+    let mut ends = std::collections::HashMap::new();
+    let mut open: Vec<usize> = Vec::new();
+    for (k, t) in tokens.iter().enumerate() {
+        if t.is_ident_ci("if") || t.is_ident_ci("elseif") {
+            let colon = tokens.get(k + 1).filter(|n| n.is_punct("(")).and_then(|_| matching(tokens, k + 1)).map(|c| c + 1);
+            if let Some(colon) = colon.filter(|&c| tokens.get(c).is_some_and(|n| n.is_punct(":"))) {
+                if t.is_ident_ci("elseif") {
+                    if let Some(from) = open.pop() {
+                        ends.insert(from, k);
+                    }
+                }
+                open.push(colon);
+            }
+        } else if t.is_ident_ci("else") && tokens.get(k + 1).is_some_and(|n| n.is_punct(":")) {
+            if let Some(from) = open.pop() {
+                ends.insert(from, k);
+            }
+            open.push(k + 1);
+        } else if t.is_ident_ci("endif") {
+            if let Some(from) = open.pop() {
+                ends.insert(from, k);
+            }
+        }
+    }
+    ends
+}
+
 pub fn dead_spans(tokens: &[Token], target: PhpVersion) -> Vec<Span> {
     let mut out = Vec::new();
-    if too_deep(tokens) {
+    if too_deep(tokens) || shadowed(tokens) {
         return out;
     }
+    let blocks = alternative_blocks(tokens);
     let mut in_chain = std::collections::HashSet::new();
     for i in 0..tokens.len() {
         if !(tokens[i].is_ident_ci("if") || tokens[i].is_ident_ci("elseif")) || in_chain.contains(&i) {
@@ -34,7 +79,7 @@ pub fn dead_spans(tokens: &[Token], target: PhpVersion) -> Vec<Span> {
         }
         let mut k = i;
         let mut taken = false;
-        while let Some((cond, body_start, body_end)) = branch(tokens, k) {
+        while let Some((cond, body_start, body_end)) = branch(tokens, k, &blocks) {
             let value = if taken { Some(false) } else { evaluate(&tokens[cond.0..cond.1], target) };
             if value == Some(false) {
                 out.push(span(tokens, body_start, body_end));
@@ -56,7 +101,7 @@ pub fn dead_spans(tokens: &[Token], target: PhpVersion) -> Vec<Span> {
                 Some(t) if t.is_ident_ci("else") && tokens.get(next + 1).is_some_and(|n| n.is_ident_ci("if")) => k = next + 1,
                 Some(t) if t.is_ident_ci("else") => {
                     if taken {
-                        if let Some(end) = statement_end(tokens, next + 1) {
+                        if let Some(end) = statement_end(tokens, next + 1, &blocks) {
                             out.push(span(tokens, next + 1, end));
                         }
                     }
@@ -71,7 +116,7 @@ pub fn dead_spans(tokens: &[Token], target: PhpVersion) -> Vec<Span> {
 
 pub fn dead_expressions(tokens: &[Token], target: PhpVersion) -> Vec<Span> {
     let mut out = Vec::new();
-    if too_deep(tokens) {
+    if too_deep(tokens) || shadowed(tokens) {
         return out;
     }
     for (k, t) in tokens.iter().enumerate() {
@@ -247,14 +292,14 @@ fn span(tokens: &[Token], a: usize, b: usize) -> Span {
     ((tokens[a].line, tokens[a].column), (tokens[b].line, tokens[b].column))
 }
 
-fn branch(tokens: &[Token], kw: usize) -> Option<((usize, usize), usize, usize)> {
+fn branch(tokens: &[Token], kw: usize, blocks: &std::collections::HashMap<usize, usize>) -> Option<((usize, usize), usize, usize)> {
     let open = kw + 1;
     if !tokens.get(open)?.is_punct("(") {
         return None;
     }
     let close = matching(tokens, open)?;
     let body = close + 1;
-    let end = statement_end(tokens, body)?;
+    let end = statement_end(tokens, body, blocks)?;
     Some(((open + 1, close), body, end))
 }
 
@@ -273,13 +318,13 @@ pub(crate) fn matching(tokens: &[Token], open: usize) -> Option<usize> {
     None
 }
 
-fn statement_end(tokens: &[Token], start: usize) -> Option<usize> {
+fn statement_end(tokens: &[Token], start: usize, blocks: &std::collections::HashMap<usize, usize>) -> Option<usize> {
     let first = tokens.get(start)?;
     if first.is_punct("{") {
         return matching(tokens, start);
     }
     if first.is_punct(":") {
-        return None;
+        return blocks.get(&start).map(|end| end - 1);
     }
     let mut depth = 0usize;
     for (k, t) in tokens.iter().enumerate().skip(start) {
@@ -359,6 +404,14 @@ fn atom(cond: &[Token], target: PhpVersion, nesting: usize) -> Option<bool> {
     if first.is_punct("!") {
         return atom(&cond[1..], target, nesting + 1).map(|v| !v);
     }
+    if let [only] = cond {
+        if name(only).eq_ignore_ascii_case("false") || only.text == "0" {
+            return Some(false);
+        }
+        if name(only).eq_ignore_ascii_case("true") || only.text == "1" {
+            return Some(true);
+        }
+    }
     if first.is_punct("(") && matching(cond, 0) == Some(cond.len() - 1) {
         return value_of(&cond[1..cond.len() - 1], target, nesting + 1);
     }
@@ -385,7 +438,28 @@ fn atom(cond: &[Token], target: PhpVersion, nesting: usize) -> Option<bool> {
     if let Some((id, Some(op))) = version_compare_call(cond) {
         return compare_id(target, op, id);
     }
-    function_exists(cond, target)
+    function_exists(cond, target).or_else(|| removed_feature(cond, target))
+}
+
+/// `defined('MYSQL_ASSOC')` and `extension_loaded('mysql')` for what the target no longer has.
+fn removed_feature(cond: &[Token], target: PhpVersion) -> Option<bool> {
+    let head = cond.first()?;
+    let check = name(head).to_ascii_lowercase();
+    if !matches!(check.as_str(), "defined" | "extension_loaded") || !cond.get(1)?.is_punct("(") {
+        return None;
+    }
+    let a = args(cond)?;
+    let symbol = match a.as_slice() {
+        [[t]] => strip_quotes(t)?.trim_start_matches('\\'),
+        _ => return None,
+    };
+    let since = if check == "defined" {
+        let row = crate::symbols::REMOVED_CONSTANTS.binary_search_by(|r| r.0.cmp(symbol)).ok();
+        row.map(|k| crate::symbols::REMOVED_CONSTANTS[k].1).or(crate::analyzer::MYSQL_CONSTANTS.contains(&symbol).then_some((7, 0)))?
+    } else {
+        REMOVED_EXTENSIONS.iter().find(|(e, _)| e.eq_ignore_ascii_case(symbol))?.1
+    };
+    (PhpVersion::new(since.0, since.1) <= target).then_some(false)
 }
 
 fn flip(op: &str) -> &str {
@@ -487,7 +561,7 @@ fn version_compare_call(cond: &[Token]) -> Option<(u32, Option<&str>)> {
 fn function_exists(cond: &[Token], target: PhpVersion) -> Option<bool> {
     let head = cond.first()?;
     let check = name(head).to_ascii_lowercase();
-    if !matches!(check.as_str(), "function_exists" | "class_exists" | "interface_exists") || !cond.get(1)?.is_punct("(") {
+    if !matches!(check.as_str(), "function_exists" | "is_callable" | "class_exists" | "interface_exists") || !cond.get(1)?.is_punct("(") {
         return None;
     }
     let a = args(cond)?;
@@ -495,12 +569,13 @@ fn function_exists(cond: &[Token], target: PhpVersion) -> Option<bool> {
         Some([t]) => strip_quotes(t)?.trim_start_matches('\\').to_ascii_lowercase(),
         _ => return None,
     };
-    let added = if check == "function_exists" { crate::rules::added_function(&symbol) } else { crate::rules::added_class(&symbol) };
+    let is_function = check == "function_exists" || check == "is_callable";
+    let added = if is_function { crate::rules::added_function(&symbol) } else { crate::rules::added_class(&symbol) };
     let optional_extension = ["mb_", "bc", "curl_", "openssl_", "mysqli_", "libxml_"].iter().any(|p| symbol.starts_with(p));
     if added.is_some_and(|v| v <= target) && !optional_extension {
         return Some(true);
     }
-    if check != "function_exists" || a.len() != 1 {
+    if !is_function || a.len() != 1 {
         return None;
     }
     let func = symbol;

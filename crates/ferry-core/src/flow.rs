@@ -20,7 +20,7 @@ fn called(tokens: &[Token], k: usize) -> bool {
 }
 
 fn string_value(t: &Token) -> Option<&str> {
-    matches!(t.kind, TokenKind::Str { interpolates: false, .. }).then(|| t.text.trim_matches(|c| c == '\'' || c == '"'))
+    t.literal()
 }
 
 fn modifies(tokens: &[Token], k: usize) -> bool {
@@ -53,6 +53,10 @@ fn statement_start(tokens: &[Token], k: usize) -> bool {
 
 /// The first mention after `$k = 'text';` when it increments that string.
 fn incremented_string(tokens: &[Token], k: usize) -> Option<usize> {
+    stepped_string(tokens, k, "++")
+}
+
+fn stepped_string(tokens: &[Token], k: usize, op: &str) -> Option<usize> {
     let literal = tokens[k].kind == TokenKind::Variable
         && statement_start(tokens, k)
         && tokens.get(k + 1).is_some_and(|n| n.is_punct("="))
@@ -62,7 +66,7 @@ fn incremented_string(tokens: &[Token], k: usize) -> Option<usize> {
         return None;
     }
     let m = next_mention(tokens, k, &tokens[k].text)?;
-    (tokens.get(m + 1).is_some_and(|n| n.is_punct("++")) || tokens[m - 1].is_punct("++")).then_some(m)
+    (tokens.get(m + 1).is_some_and(|n| n.is_punct(op)) || tokens[m - 1].is_punct(op)).then_some(m)
 }
 
 /// The tokens of `$s++;` or `++$s;` when that is the whole statement.
@@ -224,6 +228,9 @@ pub(crate) fn check(tokens: &[Token]) -> Vec<(usize, &'static PatternRule)> {
             if let Some(m) = incremented_string(tokens, k) {
                 out.push((m, if increment_statement(tokens, m).is_some() { &STRING_INCREMENT } else { &STRING_INCREMENT_EXPRESSION }));
             }
+            if let Some(m) = stepped_string(tokens, k, "--") {
+                out.push((m, &STRING_DECREMENT));
+            }
             if single && string_value(value).is_some_and(|s| RESTRICTED.contains(&s.to_ascii_lowercase().as_str())) {
                 if let Some(m) = mention.filter(|&m| tokens.get(m + 1).is_some_and(|n| n.is_punct("("))) {
                     out.push((m, &DYNAMIC_CALL));
@@ -326,6 +333,18 @@ const FALSE_TO_ARRAY: PatternRule = rule(
     Text::new(
         "false değerini yazarken otomatik olarak diziye çevirmek PHP 8.1'de kullanımdan kalktı.",
         "Automatically converting false to an array on write is deprecated since PHP 8.1.",
+    ),
+);
+
+const STRING_DECREMENT: PatternRule = rule(
+    "deprecated.string_decrement",
+    Text::new("Sayı olmayan metni azaltma", "Decrementing a non-numeric string"),
+    Severity::Deprecated,
+    (8, 3),
+    Some(Text::new("str_decrement($s)", "str_decrement($s)")),
+    Text::new(
+        "Sayı olmayan bir metni -- ile azaltmak hiçbir şey yapmaz ve PHP 8.3'te kullanımdan kalktı; str_decrement() kullanın.",
+        "Decrementing a non-numeric string with -- does nothing and is deprecated since PHP 8.3; use str_decrement().",
     ),
 );
 
