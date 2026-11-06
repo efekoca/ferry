@@ -633,16 +633,59 @@ fn line_spans(line: &str, kind: Kind) -> Vec<Span> {
     }
 }
 
-fn pin_lines(text: &str, kind: Kind) -> Vec<(usize, Vec<Span>)> {
+/// The line up to a YAML comment. A `#` inside quotes or a word stays.
+fn without_comment(line: &str) -> &str {
+    let mut quote = None;
+    for (at, c) in line.char_indices() {
+        match (quote, c) {
+            (Some(open), _) if open == c => quote = None,
+            (None, '"' | '\'') => quote = Some(c),
+            (None, '#') if at == 0 || line[..at].ends_with(char::is_whitespace) => return &line[..at],
+            _ => {}
+        }
+    }
+    line
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Matrix {
+    Include,
+    Exclude,
+}
+
+/// Each line with its versions, and whether it sits under a CI matrix's `include:`. Those lines
+/// adjust jobs the matrix already has, and `exclude:` lines remove jobs, so neither is a pin.
+fn pin_lines(text: &str, kind: Kind) -> Vec<(usize, Vec<Span>, bool)> {
     let mut out = Vec::new();
     let mut list = None;
-    for (i, raw) in text.lines().enumerate().filter(|(_, raw)| !raw.trim_start().starts_with('#')) {
+    let mut matrix: Option<(usize, Matrix)> = None;
+    for (i, raw) in text.lines().enumerate().filter(|(_, raw)| !raw.trim().is_empty() && !raw.trim_start().starts_with('#')) {
+        let raw = without_comment(raw);
         let indent = raw.len() - raw.trim_start().len();
         let item = raw.trim_start().starts_with("- ");
+        if matrix.is_some_and(|(open, _)| indent < open || (indent == open && !item)) {
+            matrix = None;
+        }
+        if kind == Kind::Ci && matrix.is_none() {
+            let (key, value) = yaml_key(raw);
+            matrix = match key.to_ascii_lowercase().as_str() {
+                _ if !raw[value..].trim().is_empty() => None,
+                "include" => Some((indent, Matrix::Include)),
+                "exclude" => Some((indent, Matrix::Exclude)),
+                _ => None,
+            };
+            if matrix.is_some() {
+                continue;
+            }
+        }
+        if matrix.is_some_and(|(_, m)| m == Matrix::Exclude) {
+            continue;
+        }
+        let included = matrix.is_some();
         if list.is_some_and(|open: usize| item && indent >= open) {
             let spans = listed_versions(raw, 0);
             if !spans.is_empty() {
-                out.push((i + 1, spans));
+                out.push((i + 1, spans, included));
             }
             continue;
         }
@@ -657,7 +700,7 @@ fn pin_lines(text: &str, kind: Kind) -> Vec<(usize, Vec<Span>)> {
         }
         let spans = line_spans(raw, kind);
         if !spans.is_empty() {
-            out.push((i + 1, spans));
+            out.push((i + 1, spans, included));
         }
     }
     out
@@ -670,9 +713,13 @@ fn newest(spans: &[Span]) -> PhpVersion {
 /// A CI file passes as long as one job reaches the target, so only its newest pins count as stale.
 fn stale_lines(text: &str, kind: Kind, target: PhpVersion) -> Vec<(usize, Vec<Span>)> {
     let lines = pin_lines(text, kind);
+    let tested = lines.iter().map(|(_, spans, _)| newest(spans)).max();
+    let has_own = lines.iter().any(|(_, _, included)| !included);
+    let lines: Vec<(usize, Vec<Span>)> =
+        lines.into_iter().filter(|(_, _, included)| !has_own || !included).map(|(line, spans, _)| (line, spans)).collect();
     let best = lines.iter().map(|(_, spans)| newest(spans)).max();
     match kind {
-        Kind::Ci if best.is_some_and(|b| b >= target) => Vec::new(),
+        Kind::Ci if tested.is_some_and(|b| b >= target) => Vec::new(),
         Kind::Ci => lines.into_iter().filter(|(_, spans)| Some(newest(spans)) == best).collect(),
         _ => lines.into_iter().filter(|(_, spans)| newest(spans) < target).collect(),
     }
@@ -821,6 +868,21 @@ fn composer_lock(text: &str, target: PhpVersion) -> Vec<Hit> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn matrix_extras_and_comments_are_not_pins() {
+        let target = PhpVersion::new(8, 4);
+        let yaml = "jobs:\n  t:\n    strategy:\n      matrix:\n        php: ['8.1', '8.2'] # 8.5 soon\n        include:\n          - php: '8.2'\n            coverage: true\n        exclude:\n          - php: '8.1'\n    steps:\n      - run: x\n";
+        let lines: Vec<usize> = stale_lines(yaml, Kind::Ci, target).into_iter().map(|(line, _)| line).collect();
+        assert_eq!(lines, [5]);
+        let spans = &stale_lines(yaml, Kind::Ci, target)[0].1;
+        assert_eq!(spans.len(), 2, "the 8.5 in the comment isn't a version");
+        let only_include = "matrix:\n  include:\n    - php: 7.4\n";
+        assert_eq!(stale_lines(only_include, Kind::Ci, target).len(), 1);
+        let job_on_target = "matrix:\n  php: ['8.1']\n  include:\n    - php: '8.5'\n";
+        assert!(stale_lines(job_on_target, Kind::Ci, target).is_empty());
+        assert_eq!(without_comment("php: '8.1#x' # note"), "php: '8.1#x' ");
+    }
 
     fn ids(found: &[Finding]) -> Vec<(String, usize, String)> {
         let mut v: Vec<_> = found.iter().map(|f| (f.file.replace('\\', "/"), f.line, f.rule_id.clone())).collect();

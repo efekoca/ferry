@@ -201,10 +201,17 @@ fn project_excludes(root: &Path, framework: Framework) -> Vec<String> {
 /// Changes when the code or the files that decide how it runs change. Size and modification time
 /// are enough: this answers "is that result still about these files", not "are they identical".
 pub fn stamp(root: &Path, files: &[PathBuf]) -> String {
+    stamp_without(root, files, &[])
+}
+
+/// The stamp of everything but these files, for telling whether anything else changed.
+pub fn stamp_without(root: &Path, files: &[PathBuf], left_out: &[String]) -> String {
     let extra = ["composer.json", "composer.lock", ".ferry/config.json"].map(|f| root.join(f));
+    let left_out: Vec<PathBuf> = left_out.iter().map(|f| root.join(f)).collect();
     let mut parts: Vec<String> = files
         .iter()
         .chain(&extra)
+        .filter(|path| !left_out.contains(path))
         .filter_map(|path| {
             let meta = std::fs::metadata(path).ok()?;
             let changed = meta.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_nanos();
@@ -213,6 +220,10 @@ pub fn stamp(root: &Path, files: &[PathBuf]) -> String {
         .collect();
     parts.sort();
     format!("{:016x}", crate::snapshot::fnv1a(parts.join("\n").as_bytes()))
+}
+
+pub fn scanned_files(root: &Path) -> Vec<PathBuf> {
+    inspect(root).map(|i| collect_php_files(root, &i.excluded_dirs)).unwrap_or_default()
 }
 
 pub fn is_php_file(path: &Path) -> bool {

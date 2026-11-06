@@ -362,9 +362,10 @@ pub fn outcome(before: &Comparison, after: &Comparison) -> Outcome {
     let tests_checked = after.target.tests.as_ref().is_some_and(|t| !t.timed_out && (t.passed || !after.target.failed_tests.is_empty()));
     let tests = if tests_checked { after.new_failures.as_slice() } else { before.new_failures.as_slice() };
     let tables = |c: &Comparison| -> Vec<String> { c.data_changes.iter().map(|d| d.table.clone()).collect() };
-    let finished = !after.target.lint_stopped && !after.target.pages_stopped;
+    let finished = after.dependencies_installed && !after.target.lint_stopped && !after.target.pages_stopped && !after.target.pages_limited;
     let messages = if finished { after.new_on_target.as_slice() } else { before.new_on_target.as_slice() };
-    let tables_after = if finished { tables(after) } else { tables(before) };
+    let data_read = !before.database_used || !after.target.data.is_empty();
+    let tables_after = if finished && data_read { tables(after) } else { tables(before) };
     Outcome {
         messages: delta(&before.new_on_target, messages, event_key),
         tests: delta(&before.new_failures, tests, Clone::clone),
@@ -876,6 +877,8 @@ pub fn compare(
     step: impl Fn(Step),
 ) -> Result<Comparison, String> {
     let docker = available()?;
+    let php_files = crate::project::scanned_files(root);
+    let stamp = crate::project::stamp(root, &php_files);
     let work = tempfile::Builder::new().prefix("ferry-docker-").tempdir().map_err(|e| e.to_string())?;
     let copy = |name: &str| {
         let dest = work.path().join(name);
@@ -980,7 +983,6 @@ pub fn compare(
     let new_failures = target_run.failed_tests.iter().filter(|t| !source_run.failed_tests.contains(t)).cloned().collect();
     let (new_on_target, gone_on_target) = changed_events(&source_run.events, &target_run.events, !options.fixes.is_empty());
     let origins = crate::origin::group(root, &new_on_target, target);
-    let php_files = crate::project::inspect(root).map(|i| crate::project::collect_php_files(root, &i.excluded_dirs)).unwrap_or_default();
     let mut comparison = Comparison {
         source: source_run,
         target: target_run,
@@ -995,7 +997,7 @@ pub fn compare(
         origins,
         verdict: Verdict::Clean,
         gaps: Vec::new(),
-        stamp: crate::project::stamp(root, &php_files),
+        stamp,
     };
     comparison.gaps = comparison.gaps(php_files.len());
     comparison.verdict = match (comparison.regressed(), comparison.gaps.is_empty()) {
@@ -1099,6 +1101,21 @@ mod tests {
             gaps: Vec::new(),
             stamp: String::new(),
         }
+    }
+
+    #[test]
+    fn a_step_that_gave_no_data_does_not_count_as_fixed() {
+        let mut before = comparison(&[], vec![event("/app/a.php", 1, "still here")]);
+        before.database_used = true;
+        before.data_changes = vec![crate::database::DataChange { table: "orders".into(), source_rows: Some(1), target_rows: Some(2) }];
+        let mut after = comparison(&[], Vec::new());
+        after.database_used = true;
+        let measured = outcome(&before, &after);
+        assert_eq!(measured.tables.remaining, ["orders"], "no table data came back");
+        after.target.data.insert("orders".into(), (1, "x".into()));
+        assert!(outcome(&before, &after).tables.remaining.is_empty());
+        after.dependencies_installed = false;
+        assert_eq!(outcome(&before, &after).messages.remaining.len(), 1, "the site never ran");
     }
 
     fn page(path: &str, change: crate::web::PageChange) -> crate::web::PageDiff {

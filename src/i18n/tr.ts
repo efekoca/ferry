@@ -190,7 +190,7 @@ export const tr = {
     uncleanText: "Proje ayarları temiz çalışma ağacı istiyor. Önce bunları commit edin.",
     ownBranch: "Ayrı dal aç ve seçilen dosyaları commit et",
     committed: (branch: string, hash: string) => `${branch} dalına commit edildi (${hash})`,
-    commitFailed: (branch: string) => `Dosyalar güncellendi ama ${branch} dalına commit edilemedi`,
+    commitFailed: "Dosyalar güncellendi ama commit yapılmadı",
   },
   compare: {
     title: "Hedefleri karşılaştır",
@@ -671,6 +671,8 @@ export const tr = {
     rectorInstalledText: "Otomatik düzeltmeler artık hazır.",
     rectorFailed: "Rector kurulamadı",
     previewFailed: "Değişiklikler hesaplanamadı",
+    interruptedChecked: "Dosyaları kontrol ettim",
+    trialNotKept: "Deneme sonucu kaydedilmedi",
     interruptedWrite: "Önceki yazma yarım kalmış",
     interruptedWriteText: (label: string) => `"${label}" sırasında uygulama durmuş, bazı dosyalar değişmiş olabilir. Geçmiş'ten bu kaydı geri yükleyebilirsiniz.`,
     applied: (n: number) => `${n} dosya güncellendi`,

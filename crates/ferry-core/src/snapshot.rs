@@ -275,7 +275,7 @@ impl SnapshotStore {
 
     pub fn prune(&self, project_root: &Path, keep: usize) -> Result<Vec<String>, SnapshotError> {
         let mut removed = Vec::new();
-        for old in self.list(project_root)?.into_iter().skip(keep) {
+        for old in self.list(project_root)?.into_iter().skip(keep).filter(|s| !self.was_interrupted(project_root, &s.id)) {
             self.delete(project_root, &old.id)?;
             removed.push(old.id);
         }
@@ -301,16 +301,15 @@ impl SnapshotStore {
         }
     }
 
-    /// The backups of writes that never finished. Each is reported once.
-    pub fn take_interrupted(&self, project_root: &Path) -> Vec<Snapshot> {
-        let found: Vec<Snapshot> = self
-            .list(project_root)
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|s| self.load(project_root, &s.id).is_ok_and(|(_, dir)| dir.join(WRITING_MARKER).is_file()))
-            .collect();
-        found.iter().for_each(|s| self.clear_writing(project_root, &s.id));
-        found
+    fn was_interrupted(&self, project_root: &Path, id: &str) -> bool {
+        self.load(project_root, id).is_ok_and(|(_, dir)| dir.join(WRITING_MARKER).is_file())
+    }
+
+    /// Backups whose write never finished. The mark stays until the backup is restored or the
+    /// user says the files are fine, so a warning that went unseen comes back.
+    pub fn interrupted(&self, project_root: &Path) -> Vec<Snapshot> {
+        let found = self.list(project_root).unwrap_or_default();
+        found.into_iter().filter(|s| self.was_interrupted(project_root, &s.id)).collect()
     }
 
     pub fn restore(&self, project_root: &Path, id: &str) -> Result<Vec<String>, SnapshotError> {
@@ -615,9 +614,15 @@ mod tests {
         let finished = store.create(&root, &["a.php".to_string()], "one").unwrap();
         store.mark_writing(&root, &finished.id).unwrap();
         store.clear_writing(&root, &finished.id);
-        assert!(store.take_interrupted(&root).is_empty());
+        assert!(store.interrupted(&root).is_empty());
         store.mark_writing(&root, &finished.id).unwrap();
-        assert_eq!(store.take_interrupted(&root).iter().map(|s| s.label.as_str()).collect::<Vec<_>>(), ["one"]);
-        assert!(store.take_interrupted(&root).is_empty());
+        for _ in 0..2 {
+            assert_eq!(store.interrupted(&root).iter().map(|s| s.label.as_str()).collect::<Vec<_>>(), ["one"]);
+        }
+        store.create(&root, &["a.txt".to_string()], "two").unwrap();
+        store.prune(&root, 1).unwrap();
+        assert_eq!(store.interrupted(&root).len(), 1, "an unresolved backup outlives the limit");
+        store.clear_writing(&root, &finished.id);
+        assert!(store.interrupted(&root).is_empty());
     }
 }

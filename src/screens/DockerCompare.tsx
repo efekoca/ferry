@@ -9,7 +9,7 @@ import { useI18n } from "../i18n";
 import { containerPath as shortPath, touches } from "../lib/fixes";
 import { errorMessage } from "../lib/api";
 import { useStore } from "../lib/store";
-import { KNOWN_SOURCES, type DatabaseChoice, type DatabasePlan, type DockerComparison, type DockerDelta, type DockerEvent, type DockerOrigin, type DockerOutcome, type DockerPage, type DockerRun, type Target, type VersionSuggestion } from "../lib/types";
+import { KNOWN_SOURCES, type DatabaseChoice, type DatabasePlan, type DockerComparison, type DockerDelta, type DockerEvent, type DockerOrigin, type DockerPage, type DockerRun, type DockerTrial, type Target, type VersionSuggestion } from "../lib/types";
 
 const choice = (source: string, file: string | null, root: string): DatabaseChoice | null => {
   if (source === "live" || source === "seed") return { kind: source };
@@ -158,7 +158,8 @@ function EventList({ events, label, tone }: { events: DockerEvent[]; label: stri
   );
 }
 
-function TrialResult({ outcome, version, files, onEdit }: { outcome: DockerOutcome; version: string; files: string[]; onEdit: () => void }) {
+function TrialResult({ trial, version, onEdit }: { trial: DockerTrial; version: string; onEdit: () => void }) {
+  const { outcome, files, skipped } = trial;
   const { t } = useI18n();
   const { applyChanges, applying } = useStore();
   const [confirming, setConfirming] = useState(false);
@@ -173,7 +174,7 @@ function TrialResult({ outcome, version, files, onEdit }: { outcome: DockerOutco
   const named = [...outcome.tests.introduced, ...outcome.pages.introduced, ...outcome.tables.introduced];
   const open = [...outcome.tests.remaining, ...outcome.pages.remaining, ...outcome.tables.remaining];
   const write = async () => {
-    await applyChanges(files, undefined, true);
+    await applyChanges(files, skipped, true);
     setConfirming(false);
   };
   return (
@@ -265,7 +266,7 @@ function FixLoop({ result, onTry }: { result: DockerComparison; onTry: (files: s
   return (
     <Card title={t.docker.fixTitle}>
       {known && !editing ? (
-        <TrialResult outcome={known.outcome} version={result.target.version} files={known.files} onEdit={() => setEditing(true)} />
+        <TrialResult trial={known} version={result.target.version} onEdit={() => setEditing(true)} />
       ) : !ready ? (
         <>
           <p>{t.docker.fixIntro}</p>

@@ -490,6 +490,7 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
       return withIgnores(lastScan);
     },
     interruptedWrites: async () => [],
+    dismissInterrupted: async () => {},
     checkHistory: async () => checkRuns,
     getSettings: async () => settings,
     saveSettings: async (s) => {

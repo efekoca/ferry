@@ -11,7 +11,7 @@ import { stepsBetween, type FileChange, type RectorMode } from "../lib/types";
 
 export function Changes() {
   const { t, loc } = useI18n();
-  const { toolchain, installRector, installingRector, preview, previewMode, previewing, loadPreview, cancelPreview, applyChanges, applying, target, setView, api, project } =
+  const { toolchain, installRector, installingRector, preview, previewMode, previewing, loadPreview, cancelPreview, skippedHunks: skipped, skipHunks, applyChanges, applying, target, setView, api, project } =
     useStore();
   const [dirty, setDirty] = useState<string[]>([]);
   const [unclean, setUnclean] = useState<string[]>([]);
@@ -82,8 +82,6 @@ export function Changes() {
     setViewed({ previewId: preview.id, files: new Set([...(seen ?? []), current.file]) });
   }, [preview, current, seen]);
   const chosen = useMemo(() => changes.filter((c) => selected.has(c.file)), [changes, selected]);
-  const [skips, setSkips] = useState<{ previewId: number | null; files: Record<string, number[]> }>({ previewId: null, files: {} });
-  const skipped = useMemo(() => (preview && skips.previewId === preview.id ? skips.files : {}), [preview, skips]);
   const totals = chosen.reduce(
     (sum, c) => {
       const lines = c.diff.hunks.filter((_, h) => !skipped[c.file]?.includes(h)).flatMap((h) => h.lines);
@@ -95,7 +93,6 @@ export function Changes() {
   const reviewChosen = chosen.filter((c) => c.fix !== "auto");
   const unseen = reviewChosen.filter((c) => !seen?.has(c.file)).length;
 
-  const saveSkips = (file: string, hunks: number[]) => setSkips({ previewId: preview?.id ?? null, files: { ...skipped, [file]: hunks } });
   const hunkChoice = (change: FileChange): HunkChoice => ({
     isOn: (h) => selected.has(change.file) && !skipped[change.file]?.includes(h),
     toggle: (h) => {
@@ -104,14 +101,14 @@ export function Changes() {
       const current = skipped[change.file] ?? [];
       if (!selected.has(change.file)) {
         setSelected(new Set([...selected, change.file]));
-        saveSkips(change.file, others);
+        skipHunks(change.file, others);
       } else if (current.includes(h)) {
-        saveSkips(change.file, current.filter((i) => i !== h));
+        skipHunks(change.file, current.filter((i) => i !== h));
       } else if (current.length + 1 === count) {
         setSelected(new Set([...selected].filter((f) => f !== change.file)));
-        saveSkips(change.file, []);
+        skipHunks(change.file, []);
       } else {
-        saveSkips(change.file, [...current, h]);
+        skipHunks(change.file, [...current, h]);
       }
     },
   });

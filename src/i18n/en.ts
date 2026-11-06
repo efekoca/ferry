@@ -189,7 +189,7 @@ export const en: Dict = {
     uncleanText: "The project's settings require a clean working tree. Commit these first.",
     ownBranch: "Create a separate branch and commit the selected files",
     committed: (branch, hash) => `Committed to ${branch} (${hash})`,
-    commitFailed: (branch) => `Files updated, but the commit to ${branch} failed`,
+    commitFailed: "Files updated, but no commit was made",
   },
   compare: {
     title: "Compare targets",
@@ -674,6 +674,8 @@ export const en: Dict = {
     rectorInstalledText: "Automatic fixes are ready.",
     rectorFailed: "Couldn't install Rector",
     previewFailed: "Couldn't calculate changes",
+    interruptedChecked: "I've checked the files",
+    trialNotKept: "The trial result wasn't kept",
     interruptedWrite: "An earlier write didn't finish",
     interruptedWriteText: (label) => `The app stopped during "${label}", so some files may have changed. You can restore this entry from History.`,
     applied: (n) => (n === 1 ? "1 file updated" : `${n} files updated`),
