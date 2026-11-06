@@ -147,7 +147,7 @@ Ferry her uygulamadan önce değiştireceği dosyaları yedekler. **Geçmiş** s
 - Proje klasörünü pencereye **sürükleyip bırakın** ya da başlangıç ekranından son projelerinizi yeniden açın.
 - **Yeniden boyutlandırılabilir paneller:** **Bulgular** ve **Düzeltmeler** sayfalarında liste ile ayrıntı arasındaki çizgiyi sürükleyin ya da çizgiye odaklanıp ok tuşlarını kullanın. Boyut hatırlanır; sıfırlamak için çizgiye çift tıklayın.
 - **Klavye kısayolları:** **⌘O** proje açar, **⌘1**–**⌘5** sayfalar arasında geçiş yapar, **⌘,** **Ayarlar**'ı açar, **⌘+** / **⌘−** arayüzü yakınlaştırır ya da uzaklaştırır. Windows ve Linux'ta **⌘** yerine **Ctrl** kullanın.
-- **Erişilebilir:** Her şey klavyeyle yapılabilir ve odak her zaman görünür. Testlerde her ekran ve pencere axe ile kontrol edilir, native e2e de gerçek uygulama penceresinde iki temada metin kontrastını WCAG 2.1 AA ölçütüne göre ölçer. Ekran okuyucu davranışı otomatik olarak test edilmez. Yüksek yakınlaştırmada paneller alt alta dizilir, kenar çubuğu simgelere iner.
+- **Erişilebilir:** Her şey klavyeyle yapılabilir ve odak her zaman görünür. Testlerde ana ekranlar ve pencereler axe ile kontrol edilir, native e2e de gerçek uygulama penceresinde iki temada metin kontrastını WCAG 2.1 AA ölçütüne göre ölçer. Ekran okuyucu davranışı otomatik olarak test edilmez. Yüksek yakınlaştırmada paneller alt alta dizilir, kenar çubuğu simgelere iner.
 
 ### CI için komut satırı
 
@@ -158,7 +158,7 @@ cargo build --release -p ferry-cli
 target/release/ferry-cli scan . --target 8.4 --format github
 ```
 
-- `--format text|json|sarif|github|junit|checkstyle|csv`: düz metin, özet ve yok sayılan bulgularla birlikte JSON, GitHub code scanning ve benzeri araçlar için SARIF 2.1.0, değişen satırlarda GitHub Actions uyarıları, Jenkins ve GitLab test raporları için JUnit XML, Checkstyle XML ya da tablolar için CSV. `--blame` CSV'ye her satırın `git blame` yazarını ekler; böylece iş ekip içinde paylaştırılabilir.
+- `--format text|json|sarif|github|junit|checkstyle|csv`: düz metin, özet ve yok sayılan bulgularla birlikte JSON, GitHub code scanning ve benzeri araçlar için SARIF 2.1.0, ilgili satırlarda GitHub Actions uyarıları, Jenkins ve GitLab test raporları için JUnit XML, Checkstyle XML ya da tablolar için CSV. `--blame` CSV'ye her satırın `git blame` yazarını ekler; böylece iş ekip içinde paylaştırılabilir.
 - `--fail-on breaking|deprecated|any|none`: komutun 1 koduyla çıkması için gereken en düşük önem derecesi (varsayılanı `breaking`). Klasörün bulunamaması gibi hatalarda çıkış kodu 2'dir.
 - `--allow-incomplete`: Bazı dosyaları okuyamayan bir tarama (örneğin 2 MB'ı aşan bir dosya) varsayılan olarak 3 koduyla çıkar, bu dosyaları stderr'e yazar ve her formatta bildirir (JSON'da `complete`, `filesFound` ve `errors`, SARIF'te `executionSuccessful`). Bu seçenek böyle bir taramanın geçmesine izin verir; action'daki karşılığı `allow-incomplete` girdisidir.
 - `--output <dosya>` raporu bir dosyaya yazar, `--lang tr` mesajları Türkçe yapar.
@@ -293,13 +293,19 @@ Eksik bir şey olduğunda **Düzeltmeler** sayfası neyin eksik olduğunu söyle
 
 ## Gizlilik
 
-> **Kodunuz bilgisayarınızdan çıkmaz.** Ferry yalnızca açtığınız klasördeki dosyaları okur ve değiştirir; hiçbir kullanım verisi toplamaz.
+> **Ferry kullanım verisi toplamaz, hesap istemez ve kodunuz hiçbir Ferry hizmetine gönderilmez.** Sizin başlattığınız birkaç özellik ağı kullanır ya da kod çalıştırır; hepsi burada yazıyor.
 
-- **Okunanlar:** seçtiğiniz proje klasöründeki PHP dosyaları; ayrıca `composer.json`, `composer.lock` ve hangi PHP'nin çalışacağını belirleyen dosyalar: `.htaccess`, `.user.ini`, `php.ini`, Dockerfile'lar, Docker Compose, CI ve barındırma yapılandırması, web sunucusu `.conf` dosyaları.
-- **Yazılanlar:** yalnızca değişiklik uyguladığınız dosyalar ve bir bulguyu yok saydığınızda `.ferry/ignore.json`. Diğer dosyalara dokunulmaz.
-- **Saklananlar:** her uygulamadan önceki dosya yedekleri (hepsi ya da bir sınır koyduysanız yalnızca en yenileri), neyin uygulandığının kaydı, her hedef için son 30 taramanın özeti, Rector'ın önbelleği ve ayarlarınız. Hepsi uygulamanın veri klasöründe durur: macOS'ta `~/Library/Application Support/io.github.efekoca.ferry`, Windows'ta `%APPDATA%\io.github.efekoca.ferry`, Linux'ta `~/.local/share/io.github.efekoca.ferry`.
+- **Okunanlar:** seçtiğiniz proje klasöründeki PHP dosyaları; ayrıca `composer.json`, `composer.lock` ve hangi PHP'nin çalışacağını belirleyen dosyalar: `.htaccess`, `.user.ini`, `php.ini`, Dockerfile'lar, Docker Compose, CI ve barındırma yapılandırması, web sunucusu `.conf` dosyaları. **Gerçek test** ekranı veritabanı ayarları için projenin `.env` ve `wp-config.php` dosyalarını (parola dahil), SSH sunucu listesi için de `~/.ssh/config` dosyasını okur. Ferry SSH anahtarlarını okumaz.
+- **Yazılanlar:** yalnızca değişiklik uyguladığınız dosyalar, bir bulguyu yok saydığınızda `.ferry/ignore.json` ve proje ayarlarını kaydettiğinizde `.ferry/config.json`. Commit etmeyi seçerseniz Ferry projede Git commit'i oluşturur; isterseniz ayrı dalda. Gerçek test geçici kopyalarda çalışır, projeye dokunmaz.
+- **Saklananlar:** her uygulamadan önceki dosya yedekleri (hepsi ya da bir sınır koyduysanız yalnızca en yenileri), neyin uygulandığının kaydı, her hedef için son 30 taramanın özeti, geçmiş kontrollerin ve Gerçek testlerin özetleri, Rector'ın önbelleği ve ayarlarınız (`config.json`; belirlediyseniz PHP dosyasının yolu dahil). Hepsi uygulamanın veri klasöründe durur: macOS'ta `~/Library/Application Support/io.github.efekoca.ferry`, Windows'ta `%APPDATA%\io.github.efekoca.ferry`, Linux'ta `~/.local/share/io.github.efekoca.ferry`.
 - **Proje kodu:** Tarama kodunuzu hiçbir zaman çalıştırmaz. Düzeltmeleri hesaplarken Rector proje klasöründe çalışır ve projenin `vendor/autoload.php` dosyasını yükler; bu yüzden Composer'ın `autoload.files` listesindeki dosyalar çalıştırılır. `vendor/autoload.php` içindeki her şey, Gerçek test ekranı dahil, bu bilgisayarda çalışır, çünkü Rector konteynerde çalışmaz. Düzeltmeleri yalnızca güvendiğiniz projeler için hesaplayın.
-- **Ağ:** Ferry kendiliğinden hiçbir ağ isteği yapmaz. **Rector'ı kur**'u seçtiğinizde Composer, Rector'ı Packagist'ten indirir. **Uyumlu sürümleri bul**'u seçtiğinizde Ferry, engelleyen paketlerin adlarını ve sürümlerini `repo.packagist.org`'a; **En son sürümleri bul**'u seçtiğinizde WordPress eklenti ve tema adlarını `api.wordpress.org`'a gönderir.
+- **Ağ:** Şunlardan birini başlatmadığınız sürece Ferry ağa çıkmaz:
+  - **Rector'ı kur:** Composer, Rector'ı Packagist'ten indirir.
+  - **Uyumlu sürümleri bul:** engelleyen paketlerin adları ve sürümleri `repo.packagist.org`'a gider.
+  - **En son sürümleri bul:** WordPress eklenti ve tema adları `api.wordpress.org`'a gider.
+  - **Gerçek test:** Docker; PHP, Composer ve veritabanı kalıplarını indirir, Composer ve paket yöneticisi de bağımlılıkları ve PHP eklentilerini indirir. Projenin kendi kodu ağsız çalışır; kendiniz eklediğiniz hazırlık komutu bunun dışındadır.
+  - **Sunucudan kopyala:** kendi `ssh` komutunuz belirttiğiniz sunucuya bağlanır. Döküm kişisel veri içerebilir; çalışmanın geçici klasöründe durur ve onunla birlikte silinir.
+- **Gerçek test verisi:** Sayfa metinleri ve loglar sonuç ekranı için bellekte tutulur, yalnızca özet kaydedilir. E-posta adresleri, URL'deki parolalar, bearer token'lar ve bilinen gizli alanlar önce maskelenir. Maskeleme kalıplara dayanır; ad, telefon ve serbest metin olduğu gibi kalır.
 
 ## Nasıl çalışır
 
@@ -355,7 +361,7 @@ Testleri gerçek Rector'la çalıştırmak için `FERRY_TEST_TOOLS` değişkenin
 
 Bu README'deki ekran görüntüleri, `pnpm dev` çalışırken `node scripts/readme-shots.mjs` ile alınır: Betik örnek verili arayüzü headless Chrome'da gezer, her sayfayı bir pencere çerçevesine yerleştirip PNG olarak `assets/readme/`'ye yazar; bunlar sonra `cwebp` ile WebP'ye çevrilir.
 
-**Demo projeleri.** `demo/` klasöründe üç örnek proje var: her kuralı tetikleyen düz PHP bir mağaza, WordPress bir blog ve neredeyse hazır bir Laravel API'si. `pnpm demo` bunları `.demo/` klasörüne sıfırdan kopyalar; böylece asıllarına dokunmadan değişiklik uygulayabilirsiniz. Ayrıntılar için [demo/README.md](demo/README.md).
+**Demo projeleri.** `demo/` klasöründe üç örnek proje var: birçok kuralı tetikleyen düz PHP bir mağaza, WordPress bir blog ve neredeyse hazır bir Laravel API'si. `pnpm demo` bunları `.demo/` klasörüne sıfırdan kopyalar; böylece asıllarına dokunmadan değişiklik uygulayabilirsiniz. Ayrıntılar için [demo/README.md](demo/README.md).
 
 | Klasör | İçerik |
 |---|---|

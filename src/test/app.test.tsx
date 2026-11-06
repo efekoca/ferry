@@ -899,7 +899,7 @@ describe("Ferry app", () => {
     await user.click(await screen.findByRole("checkbox", { name: "Tümünü seç" }));
     await user.click(await screen.findByRole("button", { name: "Tümünü uygula" }));
     await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Uygula" }));
-    const alert = await screen.findByText("4 dosya güncellendi, 1 dosyada yeni sözdizimi hatası var");
+    const alert = await screen.findByText("4 dosya güncellendi, 1 dosyada sözdizimi hatası var");
     expect(alert.closest("[role=alert]")).toHaveTextContent("includes/helpers.php — Parse error on line 3");
   });
 

@@ -14,7 +14,7 @@ inputs:
     description: breaking, deprecated, any, new or none
     default: breaking
   baseline:
-    description: Baseline file written by ferry-cli --write-baseline; with it only new findings fail the job
+    description: Baseline file written by ferry-cli --write-baseline, from the repository root; with it only new findings fail the job
     default: ""
   sarif:
     description: Also write ferry.sarif for upload to GitHub code scanning
@@ -32,7 +32,7 @@ runs:
         key=$(cd "$GITHUB_ACTION_PATH" && find Cargo.toml Cargo.lock crates -type f -not -path '*/target/*' | LC_ALL=C sort | while read -r f; do printf '%s\n' "$f"; cat "$f"; done | digest | cut -c1-20)
         echo "key=$key" >> "$GITHUB_OUTPUT"
         echo "dir=$HOME/.ferry-action/$key" >> "$GITHUB_OUTPUT"
-    - uses: actions/cache@v4
+    - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
       with:
         path: ${{ steps.source.outputs.dir }}
         key: ferry-cli-${{ runner.os }}-${{ steps.source.outputs.key }}
@@ -52,6 +52,7 @@ runs:
         ALLOW_INCOMPLETE: ${{ inputs.allow-incomplete }}
       run: |
         args=(scan "$PROJECT" --target "$TARGET" --fail-on "$FAIL_ON")
+        args+=(--path-prefix "$PROJECT")
         if [ -n "$BASELINE" ]; then args+=(--baseline "$BASELINE"); fi
         if [ "$ALLOW_INCOMPLETE" = "true" ]; then args+=(--allow-incomplete); fi
         if [ "$SARIF" = "true" ]; then "$FERRY" "${args[@]}" --format sarif --output ferry.sarif --fail-on none --allow-incomplete; fi

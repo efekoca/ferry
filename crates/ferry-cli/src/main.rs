@@ -23,6 +23,7 @@ Options:
                                      with --baseline only findings missing from the baseline count
   --baseline <file>                  Compare with a baseline written by --write-baseline
   --write-baseline <file>            Save the current findings as a baseline
+  --path-prefix <dir>                Add this folder to file paths in github and sarif output
   --runtime-log <file>               Merge a PHP error log or PHPUnit deprecation output into the results
   --runtime-root <path>              Project root in the log's paths; only paths under it count (repeatable)
   --allow-incomplete                 Don't fail when some files couldn't be scanned
@@ -81,6 +82,7 @@ struct Options {
     lang: Lang,
     baseline: Option<PathBuf>,
     write_baseline: Option<PathBuf>,
+    path_prefix: Option<String>,
     runtime_log: Option<PathBuf>,
     runtime_roots: Vec<String>,
     blame: bool,
@@ -105,6 +107,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
         (None, None, Format::Text, None, FailOn::Breaking, Lang::En);
     let (mut baseline, mut write_baseline, mut runtime_log, mut blame, mut allow_incomplete) = (None, None, None, false, false);
     let mut runtime_roots = Vec::new();
+    let mut path_prefix = None;
     while let Some(arg) = it.next() {
         let mut value = |name: &str| it.next().cloned().ok_or_else(|| format!("{name} needs a value"));
         match arg.as_str() {
@@ -139,6 +142,9 @@ fn parse(args: &[String]) -> Result<Options, String> {
             "--runtime-root" => runtime_roots.extend(ferry_core::runtime::parse_roots(&value("--runtime-root")?)),
             "--blame" => blame = true,
             "--allow-incomplete" => allow_incomplete = true,
+            "--path-prefix" => {
+                path_prefix = Some(value("--path-prefix")?.trim_matches('/').to_string()).filter(|p| !p.is_empty() && p != ".")
+            }
             "--lang" => {
                 lang = match value("--lang")?.as_str() {
                     "en" => Lang::En,
@@ -155,13 +161,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
     let config = ferry_core::config::load(&root)?;
     let baseline = baseline.or_else(|| config.baseline.as_ref().map(|b| root.join(b)).filter(|b| b.is_file()));
     let target: PhpVersion = target.or(config.target).ok_or("missing --target")?.parse()?;
-    if target == PhpVersion::new(8, 1) {
-        return Err("PHP 8.1 is end of life and won't be patched for CVE-2026-109618 and CVE-2026-109619; pick 8.2 or newer".into());
-    }
-    if !PhpVersion::TARGETS.contains(&target) {
-        let list: Vec<String> = PhpVersion::TARGETS.iter().filter(|v| **v != PhpVersion::new(8, 1)).map(ToString::to_string).collect();
-        return Err(format!("unsupported target {target}; use one of {}", list.join(", ")));
-    }
+    check_target(target)?;
     if fail_on == FailOn::New && baseline.is_none() {
         return Err("--fail-on new needs --baseline".into());
     }
@@ -174,6 +174,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
         lang,
         baseline,
         write_baseline,
+        path_prefix,
         runtime_log,
         runtime_roots,
         blame,
@@ -351,7 +352,7 @@ fn render_sarif(findings: &[Finding], errors: &[FileError], o: &Options) -> Stri
                 "message": { "text": message },
                 "locations": [{
                     "physicalLocation": {
-                        "artifactLocation": { "uri": uri(&f.file) },
+                        "artifactLocation": { "uri": uri(&from_repo(o, &f.file)) },
                         "region": { "startLine": f.line, "startColumn": f.column },
                     }
                 }],
@@ -375,12 +376,28 @@ fn render_sarif(findings: &[Finding], errors: &[FileError], o: &Options) -> Stri
                 "toolExecutionNotifications": errors.iter().map(|e| json!({
                     "level": "error",
                     "message": { "text": e.message },
-                    "locations": [{ "physicalLocation": { "artifactLocation": { "uri": uri(&e.file) } } }],
+                    "locations": [{ "physicalLocation": { "artifactLocation": { "uri": uri(&from_repo(o, &e.file)) } } }],
                 })).collect::<Vec<_>>(),
             }],
         }],
     });
     serde_json::to_string_pretty(&value).unwrap() + "\n"
+}
+
+/// Code scanning and annotations want paths from the repository root, not the scanned folder.
+fn from_repo(o: &Options, file: &str) -> String {
+    o.path_prefix.as_ref().map_or_else(|| file.to_string(), |prefix| format!("{prefix}/{file}"))
+}
+
+fn check_target(target: PhpVersion) -> Result<(), String> {
+    if target == PhpVersion::new(8, 1) {
+        return Err("PHP 8.1 is end of life and won't be patched for CVE-2026-109618 and CVE-2026-109619; pick 8.2 or newer".into());
+    }
+    if !PhpVersion::TARGETS.contains(&target) {
+        let list: Vec<String> = PhpVersion::TARGETS.iter().filter(|v| **v != PhpVersion::new(8, 1)).map(ToString::to_string).collect();
+        return Err(format!("unsupported target {target}; use one of {}", list.join(", ")));
+    }
+    Ok(())
 }
 
 fn escape_data(s: &str) -> String {
@@ -391,7 +408,9 @@ fn escape_property(s: &str) -> String {
     escape_data(s).replace(':', "%3A").replace(',', "%2C")
 }
 
+/// XML 1.0 has no way to write most control characters, not even as a reference.
 fn xml(s: &str) -> String {
+    let s: String = s.chars().filter(|c| !c.is_control() || matches!(c, '\t' | '\n' | '\r')).collect();
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&apos;")
 }
 
@@ -551,7 +570,13 @@ fn render_csv(root: &std::path::Path, findings: &[Finding], o: &Options) -> Stri
 fn render_github(findings: &[Finding], errors: &[FileError], o: &Options) -> String {
     let unscanned: String = errors
         .iter()
-        .map(|e| format!("::error file={},title=Ferry::{}\n", escape_property(&e.file.replace('\\', "/")), escape_data(&e.message)))
+        .map(|e| {
+            format!(
+                "::error file={},title=Ferry::{}\n",
+                escape_property(&from_repo(o, &e.file).replace('\\', "/")),
+                escape_data(&e.message)
+            )
+        })
         .collect();
     unscanned
         + &findings
@@ -564,7 +589,7 @@ fn render_github(findings: &[Finding], errors: &[FileError], o: &Options) -> Str
                 };
                 format!(
                     "::{level} file={},line={},col={},title={}::{}\n",
-                    escape_property(&f.file.replace('\\', "/")),
+                    escape_property(&from_repo(o, &f.file).replace('\\', "/")),
                     f.line,
                     f.column,
                     escape_property(&format!("{} (PHP {})", text(&f.title, o.lang), f.since)),
@@ -739,11 +764,15 @@ fn run_pins(args: &[String]) -> Result<(), String> {
             other => return Err(format!("unknown argument: {other}")),
         }
     }
-    let root = root.ok_or("pins needs a project path")?;
+    let root: PathBuf = root.ok_or("pins needs a project path")?;
+    if !root.is_dir() {
+        return Err(format!("{} isn't a folder", root.display()));
+    }
     let target = match target {
         Some(target) => target,
         None => ferry_core::config::load(&root)?.target.ok_or("pins needs --target")?.parse::<PhpVersion>().map_err(|e| e.to_string())?,
     };
+    check_target(target)?;
     let preview = ferry_core::server::bump(&root, target);
     for error in &preview.errors {
         eprintln!("{error}");
@@ -943,6 +972,12 @@ fn run_compare(args: &[String]) -> Result<u8, String> {
 }
 
 fn main() -> ExitCode {
+    // A reader such as `head` may close the pipe early; that isn't an error worth a panic.
+    #[cfg(unix)]
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
+    ferry_core::i18n::set_lang(Lang::En);
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().skip(1).any(|a| a == "-h" || a == "--help") && matches!(args[0].as_str(), "clean-images" | "compare" | "pins") {
         println!("{USAGE}");
@@ -1008,6 +1043,30 @@ fn main() -> ExitCode {
 mod tests {
     use super::*;
 
+    #[test]
+    fn xml_leaves_out_characters_it_cannot_hold() {
+        assert_eq!(xml("a\u{1}b<\n"), "ab&lt;\n");
+    }
+
+    #[test]
+    fn pins_refuses_a_missing_folder_and_a_closed_target() {
+        let run = |text: &str| run_pins(&args(text));
+        assert!(run("/no/such/folder --target 8.4").unwrap_err().contains("isn't a folder"));
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().display().to_string();
+        assert!(run(&format!("{path} --target 8.1")).unwrap_err().contains("end of life"));
+        assert!(run(&format!("{path} --target 8.4")).is_ok());
+    }
+
+    #[test]
+    fn annotations_start_at_the_repository_root() {
+        let mut options = parse(&args("scan ./site --target 8.4 --path-prefix site/")).unwrap();
+        assert_eq!(from_repo(&options, "a.php"), "site/a.php");
+        options.path_prefix = None;
+        assert_eq!(from_repo(&options, "a.php"), "a.php");
+        assert_eq!(parse(&args("scan . --target 8.4 --path-prefix .")).unwrap().path_prefix, None);
+    }
+
     fn args(s: &str) -> Vec<String> {
         s.split_whitespace().map(String::from).collect()
     }
@@ -1038,6 +1097,7 @@ mod tests {
             lang: Lang::En,
             baseline: None,
             write_baseline: None,
+            path_prefix: None,
             runtime_log: None,
             runtime_roots: Vec::new(),
             blame: false,
@@ -1072,6 +1132,7 @@ mod tests {
             lang: Lang::En,
             baseline,
             write_baseline: write,
+            path_prefix: None,
             runtime_log: None,
             runtime_roots: Vec::new(),
             blame: false,
@@ -1104,6 +1165,7 @@ mod tests {
                 lang: Lang::En,
                 baseline: None,
                 write_baseline: None,
+                path_prefix: None,
                 runtime_log: None,
                 runtime_roots: Vec::new(),
                 blame,

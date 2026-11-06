@@ -33,10 +33,13 @@
   };
 
   const seen = [];
+  const errorToasts = new Set();
+  let scenarioSkipped = () => {};
   new MutationObserver(() => {
     for (const el of $$(".toast__title")) {
       if (!el.dataset.e2e) {
         el.dataset.e2e = "1";
+        if (el.closest(".toast--error")) errorToasts.add(seen.length);
         seen.push(el.textContent);
         emit(`  toast: ${el.textContent} | ${el.parentElement.querySelector(".toast__desc")?.textContent ?? ""}`);
       }
@@ -53,8 +56,8 @@
     emit(`  CONSOLE ${a.map(String).join(" ").slice(0, 300)}`);
     origError(...a);
   };
-  const noErrorToast = (since) =>
-    check(!seen.slice(since).some((t) => /amadı|amadı|failed|Could not|wrong|ters/i.test(t)), `error toast: ${seen.slice(since)}`);
+  const noErrorToast = (since, expected) =>
+    check(![...errorToasts].some((at) => at >= since && !expected?.test(seen[at])), `error toast: ${seen.slice(since)}`);
 
   const P = JSON.parse(window.__FERRY_E2E_ROOT__);
   const FX = P.fixtures;
@@ -112,12 +115,12 @@
     }
     return files;
   };
-  const applyAndConfirm = async () => {
+  const applyAndConfirm = async (expected) => {
     const before = seen.length;
     await click("uygula", $(".apply-bar"));
     await click("Uygula", await dialog());
     await until(() => seen.slice(before).some((t) => /güncellendi|amadı/.test(t)), "apply toast", 180000);
-    noErrorToast(before);
+    noErrorToast(before, expected);
   };
 
   const scenarios = [
@@ -185,7 +188,7 @@
       check(files.length >= 2, "kuzey preview should change several files");
       $$(".change-item input[type=checkbox]")[0].click();
       check(await settles(() => text().includes(`${files.length - 1} / ${files.length} dosya seçili`)), "unchecking one file updates count");
-      await applyAndConfirm();
+      await applyAndConfirm(/sözdizimi hatası/);
       const left = $$(".change-item__file").map((e) => e.textContent);
       check(left.length === 1 && left[0] === files[0], `unapplied file stays listed: ${left}`);
 
@@ -385,7 +388,7 @@
     },
 
     async function dockerCompare() {
-      if (!P.docker) return emit("  skipped: FERRY_TEST_DOCKER isn't set");
+      if (!P.docker) return scenarioSkipped();
       const before = seen.length;
       await openRecent(projects.unicode);
       await scan();
@@ -417,7 +420,7 @@
     },
 
     async function dockerStopAndClean() {
-      if (!P.docker) return emit("  skipped: FERRY_TEST_DOCKER isn't set");
+      if (!P.docker) return scenarioSkipped();
       const before = seen.length;
       const images = (await invoke("docker_image_usage")).images;
       await openRecent(projects.unicode);
@@ -439,7 +442,7 @@
     },
 
     async function dockerDatabase() {
-      if (!P.docker) return emit("  skipped: FERRY_TEST_DOCKER isn't set");
+      if (!P.docker) return scenarioSkipped();
       const before = seen.length;
       await openRecent(projects.unicode);
       await scan();
@@ -531,9 +534,11 @@
   await sleep(800);
   const s = scenarios[stage];
   await emit(`STEP ${s.name}`);
+  let skipped = false;
+  scenarioSkipped = () => (skipped = true);
   try {
     await s();
-    await emit(`PASS ${s.name}`);
+    await emit(`${skipped ? "SKIP" : "PASS"} ${s.name}`);
   } catch (e) {
     await emit(`FAIL ${s.name}: ${e && e.message ? e.message : e}`);
     await emit(`  screen: ${document.body.innerText.replace(/\n+/g, " / ").slice(0, 600)}`);

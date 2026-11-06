@@ -684,7 +684,7 @@ export const tr = {
     applied: (n: number) => `${n} dosya güncellendi`,
     appliedText: "Önceki hâlleri Geçmiş'te, isterseniz geri alabilirsiniz.",
     applyFailed: "Değişiklikler uygulanamadı",
-    appliedWithErrors: (n: number, broken: number) => `${n} dosya güncellendi, ${broken} dosyada yeni sözdizimi hatası var`,
+    appliedWithErrors: (n: number, broken: number) => `${n} dosya güncellendi, ${broken} dosyada sözdizimi hatası var`,
     lintFailedText: "php -l bu hataları değişiklikten sonra buldu. Geçmiş'ten önceki hâllerine dönebilirsiniz.",
     lintSkippedText: "Sözdizimi kontrol edilemedi: Bu bilgisayarda hedef sürümde ya da daha yeni bir PHP bulunamadı.",
     restored: "Geri yüklendi",

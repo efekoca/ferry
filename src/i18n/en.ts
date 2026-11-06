@@ -689,7 +689,7 @@ export const en: Dict = {
     applied: (n) => (n === 1 ? "1 file updated" : `${n} files updated`),
     appliedText: "Previous versions are in History if you want to undo.",
     appliedWithErrors: (n, broken) =>
-      `${n === 1 ? "1 file" : `${n} files`} updated; ${broken === 1 ? "1 now has a syntax error" : `${broken} now have syntax errors`}`,
+      `${n === 1 ? "1 file" : `${n} files`} updated; ${broken === 1 ? "1 has a syntax error" : `${broken} have syntax errors`}`,
     lintFailedText: "php -l found these after the change. You can roll the files back from History.",
     lintSkippedText: "The syntax wasn't checked: no PHP at or above the target version was found on this computer.",
     applyFailed: "Couldn't apply changes",
