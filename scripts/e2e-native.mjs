@@ -91,7 +91,8 @@ const app = spawn(exe, [], {
   stdio: ["ignore", "pipe", "inherit"],
 });
 
-const results = { pass: [], fail: [], errors: [] };
+const results = { pass: [], skip: [], fail: [], errors: [], done: false };
+const allowSkips = !!process.env.FERRY_E2E_ALLOW_SKIP;
 let buffer = "";
 const stopDev = () => {
   if (!dev) return;
@@ -103,6 +104,7 @@ const finish = (code) => {
   app.kill();
   stopDev();
   console.log(`\nPASS ${results.pass.length}: ${results.pass.join(", ")}`);
+  if (results.skip.length) console.log(`SKIP ${results.skip.length}: ${results.skip.join(", ")}`);
   if (results.fail.length) console.log(`FAIL ${results.fail.length}:\n  ${results.fail.join("\n  ")}`);
   if (results.errors.length) console.log(`JS errors:\n  ${results.errors.join("\n  ")}`);
   console.log(`Fixtures: ${work}`);
@@ -128,16 +130,18 @@ app.stdout.on("data", (chunk) => {
     if (msg.startsWith("MODIFY ")) appendFileSync(msg.slice(7), "\n// edited outside Ferry\n");
     else if (msg.startsWith("DUMP ")) console.log(readFileSync(msg.slice(5), "utf8"));
     else if (msg.startsWith("PASS ")) results.pass.push(msg.slice(5));
+    else if (msg.startsWith("SKIP ")) results.skip.push(msg.slice(5));
     else if (msg.startsWith("FAIL ")) results.fail.push(msg.slice(5));
     else if (/^\s*(JSERROR|REJECTION|CONSOLE)/.test(msg)) results.errors.push(msg.trim());
     else if (msg === "DONE" || msg.startsWith("STEP done")) {
       clearTimeout(timer);
-      finish(results.fail.length || results.errors.length ? 1 : 0);
+      results.done = true;
+      finish(results.fail.length || results.errors.length || (results.skip.length && !allowSkips) ? 1 : 0);
     }
   }
 });
 app.on("exit", (code) => {
   clearTimeout(timer);
   console.log(`App exited (${code})`);
-  finish(results.fail.length ? 1 : code ?? 1);
+  finish(results.fail.length || !results.done ? 1 : code ?? 1);
 });

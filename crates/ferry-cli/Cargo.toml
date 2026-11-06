@@ -8,6 +8,7 @@ description = "Command-line PHP upgrade scanner for CI, built on ferry-core."
 [dependencies]
 ferry-core = { path = "../ferry-core" }
 serde_json.workspace = true
+libc = "0.2"
 ctrlc = { version = "3", features = ["termination"] }
 
 [dev-dependencies]

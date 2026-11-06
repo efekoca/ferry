@@ -33,7 +33,7 @@ A desktop app for macOS, Windows and Linux that scans your PHP code, shows what 
 
 Pick the version you are moving to (PHP 8.2 to 8.5) and Ferry scans every PHP file in seconds. The **Overview** shows:
 
-- the project's platform (one of the ten listed under [Supported projects](#supported-projects), or plain PHP), its number of PHP files, and its current PHP version from `composer.json`
+- the project's platform (one of the fourteen listed under [Supported projects](#supported-projects), or plain PHP), its number of PHP files, and its current PHP version from `composer.json`
 - a readiness score from 0 to 100, and how many issues fall into each fix type; the score is an estimate of the work left, not a guarantee the app runs
 - next to the score, what still stands in the way: issues that block the upgrade, files the scan couldn't cover, dependencies that block it or couldn't be confirmed, and whether lint or tests ran on the target. The headline only says the project is ready when all of these are clear
 - how many findings are **Breaking** (the code won't run), **Deprecated** (it warns now and will be removed later), or **Risky** (it may behave differently at runtime)
@@ -147,7 +147,7 @@ Before every apply, Ferry backs up the files it is about to change. The **Histor
 - **Drag and drop** a project folder onto the window, or reopen a recent project from the start screen.
 - **Resizable panels:** drag the line between a list and its details on **Findings** and **Fixes**, or focus it and use the arrow keys. The size is remembered; double-click the line to reset it.
 - **Keyboard shortcuts:** **⌘O** opens a project, **⌘1** to **⌘5** switch between pages, **⌘,** opens **Settings**, and **⌘+** / **⌘−** zoom the interface. On Windows and Linux, use **Ctrl** instead of **⌘**.
-- **Accessible:** everything works from the keyboard and focus is always visible. Every screen and dialog is checked with axe in the tests, and the native e2e measures WCAG 2.1 AA text contrast in the real app window in both themes. Screen reader behavior isn't tested automatically. At high zoom levels the layout stacks its panes and narrows the sidebar to icons.
+- **Accessible:** everything works from the keyboard and focus is always visible. The main screens and dialogs are checked with axe in the tests, and the native e2e measures WCAG 2.1 AA text contrast in the real app window in both themes. Screen reader behavior isn't tested automatically. At high zoom levels the layout stacks its panes and narrows the sidebar to icons.
 
 ### Command line for CI
 
@@ -158,7 +158,7 @@ cargo build --release -p ferry-cli
 target/release/ferry-cli scan . --target 8.4 --format github
 ```
 
-- `--format text|json|sarif|github|junit|checkstyle|csv`: plain text, JSON with the summary and ignored findings, SARIF 2.1.0 for GitHub code scanning and other viewers, GitHub Actions annotations on the changed lines, JUnit XML for Jenkins and GitLab test reports, Checkstyle XML, or CSV for spreadsheets. `--blame` adds the `git blame` author of each line to the CSV, so the work can be split across a team.
+- `--format text|json|sarif|github|junit|checkstyle|csv`: plain text, JSON with the summary and ignored findings, SARIF 2.1.0 for GitHub code scanning and other viewers, GitHub Actions annotations on the affected lines, JUnit XML for Jenkins and GitLab test reports, Checkstyle XML, or CSV for spreadsheets. `--blame` adds the `git blame` author of each line to the CSV, so the work can be split across a team.
 - `--fail-on breaking|deprecated|any|none`: the lowest severity that makes the command exit with code 1 (default `breaking`). Errors such as a missing folder exit with code 2.
 - `--allow-incomplete`: by default a scan that couldn't read some files (for example one over 2 MB) exits with code 3, lists them on stderr and reports them in every format (`complete`, `filesFound` and `errors` in JSON, `executionSuccessful` in SARIF). This flag lets such a scan pass; the action has a matching `allow-incomplete` input.
 - `--output <file>` writes the report to a file, and `--lang tr` switches the messages to Turkish.
@@ -293,13 +293,19 @@ When something is missing, the **Fixes** page says what and offers **Install Rec
 
 ## Privacy
 
-> **Your code never leaves your computer.** Ferry reads and changes files only in the folder you open, and has no telemetry.
+> **Ferry has no telemetry and no account, and your code is never sent to a Ferry service.** A few features you start yourself do use the network or run code; they're all listed here.
 
-- **Read:** the PHP files in the project folder you choose, plus `composer.json`, `composer.lock`, and the files that decide which PHP runs: `.htaccess`, `.user.ini`, `php.ini`, Dockerfiles, Docker Compose, CI and hosting configuration, and web server `.conf` files.
-- **Written:** only the files you apply changes to, and `.ferry/ignore.json` when you ignore a finding. Every other file stays untouched.
-- **Stored:** backups of the files before each apply (all of them, or only the newest if you set a limit), a record of what was applied, the last 30 scan summaries per target, Rector's cache, and your settings, in the app's data folder: `~/Library/Application Support/io.github.efekoca.ferry` on macOS, `%APPDATA%\io.github.efekoca.ferry` on Windows, and `~/.local/share/io.github.efekoca.ferry` on Linux.
+- **Read:** the PHP files in the project folder you choose, plus `composer.json`, `composer.lock`, and the files that decide which PHP runs: `.htaccess`, `.user.ini`, `php.ini`, Dockerfiles, Docker Compose, CI and hosting configuration, and web server `.conf` files. The **Real test** screen also reads the project's `.env` and `wp-config.php` for its database settings, password included, and `~/.ssh/config` for the list of SSH hosts. Ferry doesn't read SSH keys.
+- **Written:** only the files you apply changes to, `.ferry/ignore.json` when you ignore a finding, and `.ferry/config.json` when you save project settings. If you choose to commit, Ferry creates Git commits in the project, on a separate branch if you ask for one. Real test works on temporary copies and leaves the project as it is.
+- **Stored:** backups of the files before each apply (all of them, or only the newest if you set a limit), a record of what was applied, the last 30 scan summaries per target, summaries of past checks and Real tests, Rector's cache, and your settings (`config.json`, including the path to a PHP binary if you set one), in the app's data folder: `~/Library/Application Support/io.github.efekoca.ferry` on macOS, `%APPDATA%\io.github.efekoca.ferry` on Windows, and `~/.local/share/io.github.efekoca.ferry` on Linux.
 - **Project code:** scanning never runs your code. Calculating fixes runs Rector in the project folder, and Rector loads the project's `vendor/autoload.php`, so files listed under Composer's `autoload.files` are executed. Everything in `vendor/autoload.php` runs on this computer, including on the Real test screen, because Rector isn't containerized. Only calculate fixes for projects you trust.
-- **Network:** Ferry makes no network requests on its own. When you choose **Install Rector**, Composer downloads Rector from Packagist. When you choose **Find compatible versions**, Ferry sends the names and versions of the blocking packages to `repo.packagist.org`, and **Find latest versions** sends WordPress plugin and theme names to `api.wordpress.org`.
+- **Network:** Ferry makes no network requests until you start one of these:
+  - **Install Rector:** Composer downloads Rector from Packagist.
+  - **Find compatible versions:** the names and versions of the blocking packages go to `repo.packagist.org`.
+  - **Find latest versions:** WordPress plugin and theme names go to `api.wordpress.org`.
+  - **Real test:** Docker downloads PHP, Composer and database images, and Composer and the package manager download dependencies and extensions. The project's own code runs with no network, except a prepare command you add yourself.
+  - **Copy from a server:** your own `ssh` connects to the server you name. The dump may hold personal data; it stays in the run's temporary folder and is deleted with it.
+- **Real test data:** page text and logs are kept in memory for the results screen, and only a summary is saved. Email addresses, URL credentials, bearer tokens and common secret fields are masked first. That masking follows patterns, so names, phone numbers and free text stay as they are.
 
 ## How it works
 
@@ -355,7 +361,7 @@ To run the tests against real Rector, point `FERRY_TEST_TOOLS` to a folder where
 
 The screenshots in this README come from `node scripts/readme-shots.mjs` while `pnpm dev` is running: it drives the sample-data interface in headless Chrome, frames each page and writes PNG files to `assets/readme/`, which are then converted to WebP with `cwebp`.
 
-**Demo projects.** The `demo/` folder holds three sample projects: a plain PHP shop that triggers every rule, a WordPress blog, and a Laravel API that is nearly ready. `pnpm demo` copies them fresh into `.demo/`, so you can apply changes without touching the originals. See [demo/README.md](demo/README.md).
+**Demo projects.** The `demo/` folder holds three sample projects: a plain PHP shop that triggers many rules, a WordPress blog, and a Laravel API that is nearly ready. `pnpm demo` copies them fresh into `.demo/`, so you can apply changes without touching the originals. See [demo/README.md](demo/README.md).
 
 | Path | Contents |
 |---|---|

@@ -16,6 +16,9 @@ on:
         type: boolean
         default: false
 
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -27,7 +30,7 @@ jobs:
     outputs:
       code: ${{ steps.diff.outputs.code }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 2
       - id: diff
@@ -40,8 +43,10 @@ jobs:
           fi
           code=true
           if [ "$GITHUB_EVENT_NAME" = "pull_request" ] || { [ "$GITHUB_EVENT_NAME" = "push" ] && [ "$GITHUB_REF_TYPE" = "branch" ]; }; then
-            if files=$(git diff --name-only "$base" HEAD); then
-              [ -n "$files" ] && echo "$files" | grep -qvE '(\.md$|^docs/|^assets/|^LICENSE$)' || code=false
+            if files=$(git diff --name-only --no-renames "$base" HEAD); then
+              [ -n "$files" ] && echo "$files" | grep -qE '^docs/coverage\.json$|^docs/COVERAGE\.md$' && code=true || {
+                [ -n "$files" ] && echo "$files" | grep -qvE '(\.md$|^docs/|^assets/|^LICENSE$)' || code=false
+              }
             fi
           fi
           echo "code=$code" >> "$GITHUB_OUTPUT"
@@ -52,18 +57,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           components: clippy, rustfmt
       - run: cargo fmt --all --check
-      - uses: Swatinem/rust-cache@v2
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 22
           cache: pnpm
-      - uses: shivammathur/setup-php@v2
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2
         with:
           php-version: "8.4"
           tools: composer
@@ -76,12 +81,32 @@ jobs:
       - name: Install Rector
         run: |
           mkdir -p "$RUNNER_TEMP/tools"
-          composer require rector/rector --working-dir "$RUNNER_TEMP/tools" --no-interaction --no-progress
+          composer require rector/rector:2.8.4 phpstan/phpstan:2.3.5 --working-dir "$RUNNER_TEMP/tools" --no-interaction --no-progress
           echo "FERRY_TEST_TOOLS=$RUNNER_TEMP/tools" >> "$GITHUB_ENV"
       - name: Core
         run: |
           cargo clippy -p ferry-core -p ferry-cli --all-targets -- -D warnings
           cargo test -p ferry-core -p ferry-cli
+
+  action:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - id: scan
+        uses: ./
+        with:
+          target: "8.4"
+          path: demo/kuzey-magaza
+          fail-on: none
+          sarif: "true"
+          allow-incomplete: "true"
+      - name: Paths start at the repository root
+        run: |
+          grep -q '"uri": "demo/kuzey-magaza/' ferry.sarif
 
   docker:
     needs: changes
@@ -89,9 +114,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - name: Real Docker comparison
         env:
           FERRY_TEST_DOCKER: "1"
@@ -103,17 +128,17 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           components: clippy
-      - uses: Swatinem/rust-cache@v2
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 22
           cache: pnpm
-      - uses: shivammathur/setup-php@v2
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2
         with:
           php-version: "8.4"
           tools: composer
@@ -123,7 +148,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p "$RUNNER_TEMP/tools"
-          composer require rector/rector --working-dir "$RUNNER_TEMP/tools" --no-interaction --no-progress
+          composer require rector/rector:2.8.4 phpstan/phpstan:2.3.5 --working-dir "$RUNNER_TEMP/tools" --no-interaction --no-progress
           echo "FERRY_TEST_TOOLS=$RUNNER_TEMP/tools" >> "$GITHUB_ENV"
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace --no-fail-fast
@@ -131,6 +156,8 @@ jobs:
         shell: bash
         run: docker version --format 'Docker server runs {{.Server.Os}} containers' || echo 'Docker server is unavailable'
       - name: Native e2e
+        env:
+          FERRY_E2E_ALLOW_SKIP: "1"
         run: pnpm e2e:native
 
   linux:
@@ -139,21 +166,21 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Install WebKitGTK
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev libfuse2 xvfb
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           components: clippy
-      - uses: Swatinem/rust-cache@v2
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 22
           cache: pnpm
-      - uses: shivammathur/setup-php@v2
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2
         with:
           php-version: "8.4"
           tools: composer
@@ -162,11 +189,17 @@ jobs:
       - name: Install Rector
         run: |
           mkdir -p "$RUNNER_TEMP/tools"
-          composer require rector/rector --working-dir "$RUNNER_TEMP/tools" --no-interaction --no-progress
+          composer require rector/rector:2.8.4 phpstan/phpstan:2.3.5 --working-dir "$RUNNER_TEMP/tools" --no-interaction --no-progress
           echo "FERRY_TEST_TOOLS=$RUNNER_TEMP/tools" >> "$GITHUB_ENV"
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace --no-fail-fast
+      - name: Docker through the app's commands
+        env:
+          FERRY_TEST_DOCKER: "1"
+        run: cargo test -p ferry docker_comparison_feeds_the_findings
       - name: Native e2e
+        env:
+          FERRY_E2E_ALLOW_SKIP: "1"
         run: xvfb-run -a pnpm e2e:native
 
   macos:
@@ -175,17 +208,17 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           components: clippy
-      - uses: Swatinem/rust-cache@v2
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 22
           cache: pnpm
-      - uses: shivammathur/setup-php@v2
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2
         with:
           php-version: "8.4"
           tools: composer
@@ -194,11 +227,13 @@ jobs:
       - name: Install Rector
         run: |
           mkdir -p "$RUNNER_TEMP/tools"
-          composer require rector/rector --working-dir "$RUNNER_TEMP/tools" --no-interaction --no-progress
+          composer require rector/rector:2.8.4 phpstan/phpstan:2.3.5 --working-dir "$RUNNER_TEMP/tools" --no-interaction --no-progress
           echo "FERRY_TEST_TOOLS=$RUNNER_TEMP/tools" >> "$GITHUB_ENV"
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace --no-fail-fast
       - name: Native e2e
+        env:
+          FERRY_E2E_ALLOW_SKIP: "1"
         run: pnpm e2e:native
 
   bundle:
@@ -217,13 +252,13 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
-      - uses: Swatinem/rust-cache@v2
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 22
           cache: pnpm
@@ -238,7 +273,7 @@ jobs:
         shell: bash
         run: test "${GITHUB_REF_NAME#v}" = "$(node -p "require('./src-tauri/tauri.conf.json').version")"
       - run: pnpm tauri build ${{ matrix.args }}
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: ferry-${{ matrix.os }}
           path: |
@@ -254,7 +289,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           path: dist
           merge-multiple: true

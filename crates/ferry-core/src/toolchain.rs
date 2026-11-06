@@ -554,7 +554,7 @@ pub fn install_rector(tools_dir: &Path, php_override: Option<&Path>, cancel: &st
     let json = r#"{
     "name": "ferry/tools",
     "description": "Managed by Ferry.",
-    "require": { "rector/rector": "^2.0" },
+    "require": { "rector/rector": "2.8.4", "phpstan/phpstan": "2.3.5" },
     "config": { "platform-check": false }
 }
 "#;
