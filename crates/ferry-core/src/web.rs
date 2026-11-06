@@ -25,8 +25,9 @@ require 'index.php';
 "#;
 
 const CRAWLER: &str = r#"<?php
-$queue = array_slice($argv, 2);
+$queue = array_slice($argv, 3);
 $limit = (int) $argv[1];
+$follow = $argv[2] === '1';
 $seen = array();
 $context = stream_context_create(array('http' => array('ignore_errors' => true, 'follow_location' => 0, 'timeout' => 20)));
 $fetch = function ($path) use ($context) {
@@ -58,6 +59,7 @@ while ($queue && count($seen) < $limit) {
         'errors' => array_values(array_unique(array_map('utf8_clean', $errors[0]))),
         'text' => utf8_clean(substr($raw, 0, 60000)),
     )) . "\n";
+    if (!$follow) { continue; }
     preg_match_all('/href=["\']([^"\'#]+)/i', $body, $links);
     foreach (array_merge($location === '' ? array() : array($location), $links[1]) as $link) {
         $next = same_site($path, $link);
@@ -66,7 +68,7 @@ while ($queue && count($seen) < $limit) {
         if (!$unsafe) { $queue[] = $next; }
     }
 }
-if ($queue) { echo "FERRYLIMIT\n"; }
+if ($queue && $follow) { echo "FERRYLIMIT\n"; }
 function same_site($base, $link) {
     $link = preg_replace('#^https?://127\.0\.0\.1:8080#', '', trim($link));
     if ($link === '' || preg_match('#^(//|[a-z][a-z0-9+.-]*:)#i', $link)) { return null; }
@@ -129,7 +131,9 @@ impl PageDiff {
     pub fn broke(&self) -> bool {
         let lost_success = self.source_status < 300 && self.target_status >= 300;
         let lost_redirect = self.source_status < 400 && self.target_status >= 400;
-        !failed(self.source_status) && (failed(self.target_status) || fatal(&self.new_errors) || lost_success || lost_redirect)
+        self.change != PageChange::Missing
+            && !failed(self.source_status)
+            && (failed(self.target_status) || fatal(&self.new_errors) || lost_success || lost_redirect)
     }
 }
 
@@ -154,16 +158,19 @@ fn quoted(text: &str) -> String {
     format!("'{}'", text.replace('\'', "'\\''"))
 }
 
-/// Serves the project inside the container and requests its pages with GET only.
-pub fn script(project: &Path, paths: &[String]) -> String {
+/// Serves the project inside the container and requests its pages with GET only. With `follow` it
+/// goes on through the links it finds; without, it asks for exactly `paths`, so the second version
+/// sees the pages the first one saw and its own links can't use up the page limit.
+pub fn script(project: &Path, paths: &[String], follow: bool) -> String {
     let root = document_root(project);
     let list: Vec<String> = paths.iter().map(|p| quoted(p)).collect();
+    let follow = u8::from(follow);
     format!(
         "cat > /tmp/crawl.php <<'FERRYEOF'\n{CRAWLER}\nFERRYEOF\n\
          cat > /tmp/router.php <<'FERRYEOF'\n{ROUTER}\nFERRYEOF\n\
          export APP_ENV=prod APP_DEBUG=0\n\
          php -d display_errors=0 -d log_errors=1 -d error_reporting=-1 -S 127.0.0.1:{PORT} -t {root} /tmp/router.php > /tmp/server.log 2>&1 &\n\
-         sleep 1\nphp /tmp/crawl.php {PAGE_LIMIT} {}\necho {LOG_MARKER}\ncat /tmp/server.log\n",
+         sleep 1\nphp /tmp/crawl.php {PAGE_LIMIT} {follow} {}\necho {LOG_MARKER}\ncat /tmp/server.log\n",
         list.join(" ")
     )
 }
@@ -225,9 +232,9 @@ pub fn compare(source: &Crawl, target: &Crawl) -> Vec<PageDiff> {
                     change: classify(s, t, &new_errors),
                     source_status: s.status,
                     target_status: t.status,
-                    new_errors,
-                    source_text,
-                    target_text,
+                    new_errors: new_errors.iter().map(|e| crate::redact::text(e)).collect(),
+                    source_text: crate::redact::text(&source_text),
+                    target_text: crate::redact::text(&target_text),
                 }
             }
             None => PageDiff {
@@ -236,7 +243,7 @@ pub fn compare(source: &Crawl, target: &Crawl) -> Vec<PageDiff> {
                 source_status: s.status,
                 target_status: 0,
                 new_errors: Vec::new(),
-                source_text: s.text.clone(),
+                source_text: crate::redact::text(&s.text),
                 target_text: String::new(),
             },
         })
@@ -287,9 +294,17 @@ mod tests {
     }
 
     #[test]
-    fn a_page_missing_on_the_target_is_reported() {
+    fn a_page_missing_on_the_target_is_reported_as_unchecked() {
         let diffs = compare(&Crawl { pages: vec![page("/a", 200, "a", &[])], limited: false }, &Crawl::default());
         assert_eq!(diffs[0].change, PageChange::Missing);
+        assert!(!diffs[0].broke());
+    }
+
+    #[test]
+    fn only_the_first_version_follows_links() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(script(dir.path(), &["/".into()], true).contains("crawl.php 60 1 '/'"));
+        assert!(script(dir.path(), &["/".into()], false).contains("crawl.php 60 0 '/'"));
     }
 
     #[test]

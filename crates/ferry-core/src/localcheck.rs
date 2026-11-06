@@ -106,9 +106,7 @@ pub fn run_tests(php: &Path, root: &Path, timeout: Duration, cancel: &std::sync:
     let mut probe = crate::toolchain::command(php);
     probe.arg(&phpunit).arg("--version").current_dir(root);
     let version = crate::toolchain::run_process(probe, php, cancel, STEP_TIMEOUT).ok();
-    let modern = version.is_some_and(|v| {
-        !String::from_utf8_lossy(&v.stdout).contains("PHPUnit 9") && !String::from_utf8_lossy(&v.stdout).contains("PHPUnit 8")
-    });
+    let modern = version.is_some_and(|v| phpunit_major(&String::from_utf8_lossy(&v.stdout)).is_none_or(|major| major >= 10));
     let extra: &[&str] = if modern { &["--display-deprecations", "--display-warnings", "--no-progress"] } else { &[] };
     let mut cmd = crate::toolchain::command(php);
     cmd.args(["-d", "error_reporting=-1", "-d", "display_errors=1", "-d", "memory_limit=1G"]).arg(&phpunit).args(extra).current_dir(root);
@@ -127,6 +125,21 @@ pub fn run_tests(php: &Path, root: &Path, timeout: Duration, cancel: &std::sync:
         output,
         ..CheckRun::default()
     })
+}
+
+fn phpunit_major(version: &str) -> Option<u32> {
+    let (_, rest) = version.split_once("PHPUnit ")?;
+    rest.split('.').next()?.parse().ok()
+}
+
+#[cfg(test)]
+mod version_tests {
+    #[test]
+    fn the_phpunit_major_version_is_read() {
+        assert_eq!(super::phpunit_major("PHPUnit 7.5.20 by Sebastian Bergmann"), Some(7));
+        assert_eq!(super::phpunit_major("PHPUnit 11.0.1 by Sebastian Bergmann"), Some(11));
+        assert_eq!(super::phpunit_major("Pest 2.0"), None);
+    }
 }
 
 pub(crate) fn ran_tests(output: &str) -> bool {

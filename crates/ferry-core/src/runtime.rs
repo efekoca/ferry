@@ -85,6 +85,44 @@ fn monolog_record(text: &str) -> Option<(String, usize, Level, String)> {
     })
 }
 
+/// What servers add after the PHP message: nginx's request details, Apache's referer and its
+/// `\\n` for the stack trace PHP wrote on the same line.
+fn without_server_tail(text: &str) -> &str {
+    let end = ["\" while ", "\", client: ", ", client: ", ", referer: ", "\\nStack trace:"].iter().filter_map(|m| text.find(m)).min();
+    text[..end.unwrap_or(text.len())].trim_end_matches(['"', ' '])
+}
+
+fn php_line(text: &str) -> Option<(String, usize, Level, String)> {
+    let text = without_server_tail(text);
+    let body = text.find("PHP ").map_or(text, |i| &text[i + 4..]);
+    let colon = body.find(':')?;
+    let level = level_of(&body[..colon])?;
+    let (message, path, line) = split_location(&body[colon + 1..])?;
+    Some((path, line, level, message))
+}
+
+/// `[2024-01-02 10:00:00] production.ERROR: message {"exception":"[object] (Class(code: 0): text at /a.php:3)`.
+fn laravel_line(text: &str) -> Option<(String, usize, Level, String)> {
+    let rest = text.strip_prefix('[')?.split_once("] ")?.1;
+    let (channel, rest) = rest.split_once(": ")?;
+    let (_, severity) = channel.split_once('.')?;
+    if !["DEBUG", "INFO", "NOTICE", "WARNING", "ERROR", "CRITICAL", "ALERT", "EMERGENCY"].contains(&severity) {
+        return None;
+    }
+    let Some((_, object)) = rest.split_once("[object] (") else {
+        let level = level_of(rest)?;
+        let (message, path, line) = split_location(rest)?;
+        return Some((path, line, level, message));
+    };
+    let (class, after) = object.split_once("(code: ")?;
+    let inner = after.split_once("): ")?.1;
+    let at = inner.find(".php:").and_then(|dot| inner[..dot].rfind(" at "))?;
+    let (message, location) = (&inner[..at], &inner[at + 4..]);
+    let (path, line) = location.split_once(')')?.0.rsplit_once(':')?;
+    let level = if class == "ErrorException" { Level::Warning } else { level_of(&format!("{class}: {message}"))? };
+    Some((path.to_string(), line.parse().ok()?, level, message.to_string()))
+}
+
 /// True on a heading of the Symfony PHPUnit bridge's summary that lists deprecations in the
 /// project's own reach. Indirect and legacy ones come from packages or are silenced on purpose.
 fn bridge_heading(text: &str) -> Option<bool> {
@@ -102,7 +140,7 @@ fn bridge_notice(text: &str) -> Option<(usize, &str)> {
 pub fn parse(log: &str) -> Vec<Event> {
     let mut found: BTreeMap<(String, usize, String), (Level, usize)> = BTreeMap::new();
     let mut add_many = |path: String, line: usize, level: Level, message: String, count: usize| {
-        found.entry((path, line, message)).and_modify(|e| e.1 += count).or_insert((level, count));
+        found.entry((path, line, crate::redact::text(&message))).and_modify(|e| e.1 += count).or_insert((level, count));
     };
     let lines: Vec<&str> = log.lines().collect();
     let mut section = Level::Deprecated;
@@ -112,6 +150,17 @@ pub fn parse(log: &str) -> Vec<Event> {
         if text.starts_with('{') {
             if let Some((path, line, level, message)) = monolog_record(text) {
                 add_many(path, line, level, message, 1);
+                continue;
+            }
+        }
+        if let Some((path, line, level, message)) = laravel_line(text) {
+            add_many(path, line, level, message, 1);
+            continue;
+        }
+        if text.contains("PHP message: ") {
+            let parts: Vec<_> = text.split("PHP message: ").skip(1).filter_map(php_line).collect();
+            if !parts.is_empty() {
+                parts.into_iter().for_each(|(path, line, level, message)| add_many(path, line, level, message, 1));
                 continue;
             }
         }
@@ -130,15 +179,9 @@ pub fn parse(log: &str) -> Vec<Event> {
             section = level_of(text).unwrap_or(Level::Warning);
             continue;
         }
-        let text_after_prefix = text.split_once("PHP message: ").map_or(text, |(_, rest)| rest);
-        let body = text_after_prefix.find("PHP ").map_or(text_after_prefix, |i| &text_after_prefix[i + 4..]);
-        if let Some(colon) = body.find(':') {
-            if let Some(level) = level_of(&body[..colon]) {
-                if let Some((message, path, line)) = split_location(&body[colon + 1..]) {
-                    add(path, line, level, message);
-                    continue;
-                }
-            }
+        if let Some((path, line, level, message)) = php_line(text) {
+            add(path, line, level, message);
+            continue;
         }
         if let Some(location) = text.strip_prefix("Location:") {
             let message = k.checked_sub(1).and_then(|p| lines[p].trim().strip_prefix("Message:")).map(str::trim);
@@ -369,6 +412,46 @@ pub fn merge_from(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn server_log_formats_keep_every_message() {
+        let nginx = r#"2024/01/02 10:00:00 [error] 12#12: *1 FastCGI sent in stderr: "PHP message: PHP Warning:  Undefined variable $x in /app/a.php on line 3PHP message: PHP Fatal error:  Uncaught Error: nope in /app/b.php:9" while reading response header from upstream, client: 10.0.0.1, server: in x, request: "GET / HTTP/1.1""#;
+        let events = parse(nginx);
+        let places: Vec<_> = events.iter().map(|e| (e.path.as_str(), e.line, e.level)).collect();
+        assert_eq!(places, [("/app/a.php", 3, Level::Warning), ("/app/b.php", 9, Level::Fatal)]);
+
+        let fpm = r#"[02-Jan-2024 10:00:00] WARNING: [pool www] child 12 said into stderr: "NOTICE: PHP message: PHP Deprecated:  old() is deprecated in /app/a.php on line 4""#;
+        assert_eq!(parse(fpm)[0].line, 4);
+
+        let apache = "[Tue Jan 02 10:00:00.1 2024] [php:warn] [pid 1] [client 10.0.0.1:5] PHP Warning:  Undefined variable $x in /app/a.php:5, referer: http://x.test/in in/";
+        assert_eq!(parse(apache)[0].line, 5);
+        let trace = r"[php:error] [client 1.1.1.1:5] PHP Fatal error:  Uncaught Exception: boom in /app/a.php:6\nStack trace:\n#0 {main}\n  thrown in /app/a.php on line 6, referer: http://x.test/";
+        let event = &parse(trace)[0];
+        assert_eq!((event.line, event.message.as_str()), (6, "Uncaught Exception: boom"));
+    }
+
+    #[test]
+    fn laravel_logs_are_read() {
+        let warning = r#"[2024-01-02 10:00:00] production.ERROR: Undefined variable $x {"userId":1,"exception":"[object] (ErrorException(code: 0): Undefined variable $x at /app/Foo.php:12)
+[stacktrace]
+#0 /app/vendor/x.php(1): y()"}"#;
+        let events = parse(warning);
+        assert_eq!(events.len(), 1);
+        assert_eq!((events[0].path.as_str(), events[0].line, events[0].level), ("/app/Foo.php", 12, Level::Warning));
+
+        let fatal = r#"[2024-01-02 10:00:00] local.ERROR: Bad {"exception":"[object] (TypeError(code: 0): strlen(): Argument #1 must be string at /app/Bar.php:7)"#;
+        assert_eq!(parse(fatal)[0].level, Level::Fatal);
+        let app =
+            r#"[2024-01-02 10:00:00] local.ERROR: Nope {"exception":"[object] (App\\Exceptions\\Denied(code: 0): Nope at /app/Baz.php:7)"#;
+        assert!(parse(app).is_empty());
+        assert_eq!(parse("[2024-01-02 10:00:00] local.WARNING: old() is deprecated in /app/a.php on line 2")[0].level, Level::Deprecated);
+    }
+
+    #[test]
+    fn messages_lose_personal_details() {
+        let events = parse("PHP Warning:  Mail to ada@example.com failed in /app/a.php on line 3");
+        assert_eq!(events[0].message, "Mail to [redacted] failed");
+    }
     use crate::analyzer::analyze_source;
 
     const LOG: &str = "[01-Nov-2026 10:00:00 UTC] PHP Deprecated:  Creation of dynamic property Cart::$total is deprecated in /var/www/site/src/Cart.php on line 3

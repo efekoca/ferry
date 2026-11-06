@@ -380,13 +380,34 @@ fn keep_output(kept: &mut Vec<u8>, chunk: &[u8], limit: usize) {
 }
 
 pub fn run_process(
-    mut cmd: Command,
+    cmd: Command,
     program: &Path,
     cancel: &std::sync::atomic::AtomicBool,
     timeout: std::time::Duration,
 ) -> Result<Finished, ToolError> {
+    run_with_output(cmd, program, cancel, timeout, std::process::Stdio::piped())
+}
+
+/// The same, for output too large to hold in memory.
+pub fn run_process_to(
+    cmd: Command,
+    program: &Path,
+    cancel: &std::sync::atomic::AtomicBool,
+    timeout: std::time::Duration,
+    file: std::fs::File,
+) -> Result<Finished, ToolError> {
+    run_with_output(cmd, program, cancel, timeout, file.into())
+}
+
+fn run_with_output(
+    mut cmd: Command,
+    program: &Path,
+    cancel: &std::sync::atomic::AtomicBool,
+    timeout: std::time::Duration,
+    output: std::process::Stdio,
+) -> Result<Finished, ToolError> {
     use std::process::Stdio;
-    cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    cmd.stdin(Stdio::null()).stdout(output).stderr(Stdio::piped());
     #[cfg(unix)]
     std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
     let mut child = cmd.spawn().map_err(|source| ToolError::Spawn { program: program.display().to_string(), source })?;
