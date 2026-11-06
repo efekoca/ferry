@@ -89,7 +89,7 @@ describe("labels", () => {
 
   it("score ring exposes an accessible label", () => {
     render(<ScoreRing score={73} />);
-    expect(screen.getByRole("img", { name: "Hazırlık skoru: 73/100" })).toHaveAttribute("data-tone", "manual");
+    expect(screen.getByRole("img", { name: "Hazırlık puanı: 73/100" })).toHaveAttribute("data-tone", "manual");
   });
 
   it("groups function families", () => {

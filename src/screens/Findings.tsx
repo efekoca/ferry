@@ -1,5 +1,5 @@
 import { useDeferredValue, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Activity, ArrowRight, CircleCheck, FileCheck2, FlaskConical, ClipboardList, EyeOff, FileCode2, FolderSearch, Info, Lightbulb, Search, Sparkles, SquareArrowOutUpRight, Undo2, X } from "lucide-react";
+import { Activity, ArrowRight, CircleCheck, CircleStop, FileCheck2, FlaskConical, ClipboardList, EyeOff, FileCode2, FolderSearch, Info, Lightbulb, Search, Sparkles, SquareArrowOutUpRight, Undo2, X } from "lucide-react";
 import { ConfirmDialog } from "../components/Modal";
 import { PageHeader } from "../components/Shell";
 import { Splitter } from "../components/Splitter";
@@ -45,20 +45,13 @@ export function prioritizeFindings(findings: Finding[]): Finding[] {
 
 export function Findings() {
   const { t, loc } = useI18n();
-  const { scan, setView, project, api, runScan, scanning, findingsFilter: filter, setFindingsFilter, ignoreFinding, unignoreFinding, pruneIgnores, importRuntimeLog, setRuntimeRoots, clearRuntimeLog, runLocalCheck, target } = useStore();
+  const { scan, setView, project, api, runScan, scanning, findingsFilter: filter, setFindingsFilter, ignoreFinding, unignoreFinding, pruneIgnores, importRuntimeLog, setRuntimeRoots, clearRuntimeLog, runLocalCheck, checking, cancelLocalCheck, target } = useStore();
   const [localPhp, setLocalPhp] = useState<LocalPhp[]>([]);
-  const [checking, setChecking] = useState<"lint" | "tests" | null>(null);
   const [confirmTests, setConfirmTests] = useState(false);
   useEffect(() => {
     api?.localPhpVersions().then(setLocalPhp).catch(() => {});
   }, [api]);
   const local = localPhp.find((p) => p.line === target);
-  const check = async (kind: "lint" | "tests") => {
-    setChecking(kind);
-    await runLocalCheck(kind);
-    setChecking(null);
-    setConfirmTests(false);
-  };
   const [onlyRuntime, setOnlyRuntime] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showIgnored, setShowIgnored] = useState(false);
@@ -81,10 +74,13 @@ export function Findings() {
     () => prioritizeFindings(filterFindings(findings, deferredFilter).filter((f) => !runtimeFilter || f.runtimeHits > 0)),
     [findings, deferredFilter, runtimeFilter],
   );
-  const [limit, setLimit] = useState({ for: visible, count: PAGE });
+  const [limit, setLimit] = useState({ for: visible, first: 0, count: PAGE });
   const selectedAt = selectedId ? visible.findIndex((f) => f.id === selectedId) : -1;
-  const shown = Math.max(limit.for === visible ? limit.count : PAGE, selectedAt + 1);
-  const showMore = (count: number) => setLimit({ for: visible, count });
+  const saved = limit.for === visible ? limit : { first: 0, count: PAGE };
+  const outside = selectedAt >= 0 && (selectedAt < saved.first || selectedAt >= saved.count);
+  const first = outside ? Math.max(0, selectedAt - PAGE / 2) : saved.first;
+  const shown = outside ? Math.min(visible.length, first + PAGE) : saved.count;
+  const showRange = (from: number, count: number) => setLimit({ for: visible, first: from, count });
   const update = (patch: Partial<FindingsFilter>) => setFindingsFilter({ ...filter, ...patch });
   const filtered = filter.fix || filter.severity || filter.rule || filter.query || runtimeFilter;
   const clearFilters = () => {
@@ -97,13 +93,13 @@ export function Findings() {
   }, [findings, filter.rule, loc]);
   const groups = useMemo(() => {
     const map = new Map<string, Finding[]>();
-    for (const f of visible.slice(0, shown)) {
+    for (const f of visible.slice(first, shown)) {
       const list = map.get(f.file);
       if (list) list.push(f);
       else map.set(f.file, [f]);
     }
     return [...map.entries()];
-  }, [visible, shown]);
+  }, [visible, first, shown]);
   const selected = visible.find((f) => f.id === selectedId) ?? visible[0] ?? null;
 
   useEffect(() => {
@@ -119,7 +115,10 @@ export function Findings() {
       const i = selected ? visible.indexOf(selected) : -1;
       const j = Math.max(0, Math.min(visible.length - 1, jump ?? i + step));
       const next = visible[j];
-      if (j >= shown) showMore(Math.max(shown + PAGE, j + 1));
+      if (j < first || j >= shown) {
+        const from = Math.max(0, Math.min(j - PAGE / 2, visible.length - PAGE));
+        showRange(from, Math.min(visible.length, from + PAGE));
+      }
       setSelectedId(next.id);
       requestAnimationFrame(() => {
         const el = document.getElementById(`finding-${next.id}`);
@@ -227,12 +226,17 @@ export function Findings() {
       <Button variant="ghost" size="sm" icon={<Activity size={13} />} onClick={() => void importRuntimeLog()}>
         {t.findings.importLog}
       </Button>
+      {checking === "tests" && (
+        <Button variant="ghost" size="sm" icon={<CircleStop size={13} />} onClick={cancelLocalCheck}>
+          {t.findings.stopTests}
+        </Button>
+      )}
       {local && (
         <>
-          <Button variant="ghost" size="sm" icon={<FileCheck2 size={13} />} loading={checking === "lint"} disabled={!!checking} title={local.path} onClick={() => void check("lint")}>
+          <Button variant="ghost" size="sm" icon={<FileCheck2 size={13} />} loading={checking === "lint"} disabled={!!checking} title={local.path} onClick={() => void runLocalCheck("lint")}>
             {t.findings.lintWith(local.version)}
           </Button>
-          <Button variant="ghost" size="sm" icon={<FlaskConical size={13} />} disabled={!!checking} title={local.path} onClick={() => setConfirmTests(true)}>
+          <Button variant="ghost" size="sm" icon={<FlaskConical size={13} />} loading={checking === "tests"} disabled={!!checking} title={local.path} onClick={() => setConfirmTests(true)}>
             {t.findings.testWith(local.version)}
           </Button>
         </>
@@ -330,6 +334,13 @@ export function Findings() {
               </EmptyState>
             ) : (
               <>
+                {first > 0 && (
+                  <div className="finding-more">
+                    <Button variant="secondary" onClick={() => showRange(Math.max(0, first - PAGE), shown)}>
+                      {t.findings.showEarlier(Math.min(PAGE, first), first)}
+                    </Button>
+                  </div>
+                )}
                 <div role="listbox" aria-label={t.findings.list} className="finding-list">
                   {groups.map(([file, items]) => (
                     <section key={file} className="file-group" role="group" aria-label={file}>
@@ -369,7 +380,7 @@ export function Findings() {
                 </div>
                 {visible.length > shown && (
                   <div className="finding-more">
-                    <Button variant="secondary" onClick={() => showMore(shown + PAGE)}>
+                    <Button variant="secondary" onClick={() => showRange(first, shown + PAGE)}>
                       {t.findings.showMore(Math.min(PAGE, visible.length - shown), visible.length - shown)}
                     </Button>
                   </div>
@@ -473,8 +484,10 @@ export function Findings() {
         icon={<FlaskConical size={20} />}
         title={t.findings.testTitle}
         confirmLabel={t.findings.testRun}
-        loading={checking === "tests"}
-        onConfirm={() => void check("tests")}
+        onConfirm={() => {
+          setConfirmTests(false);
+          void runLocalCheck("tests");
+        }}
         onCancel={() => setConfirmTests(false)}
       >
         {t.findings.testText(local?.version ?? target)}

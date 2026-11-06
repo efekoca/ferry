@@ -153,7 +153,9 @@ interface AppStore {
   importRuntimeLog(): Promise<boolean>;
   setRuntimeRoots(roots: string): Promise<boolean>;
   clearRuntimeLog(): Promise<boolean>;
+  checking: "lint" | "tests" | null;
   runLocalCheck(kind: "lint" | "tests"): Promise<boolean>;
+  cancelLocalCheck(): void;
 }
 
 const StoreContext = createContext<AppStore | null>(null);
@@ -192,11 +194,13 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
   const [previewing, setPreviewing] = useState(false);
   const [applying, setApplying] = useState(false);
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
+  const [checking, setChecking] = useState<"lint" | "tests" | null>(null);
   const generation = useRef(0);
   const previewSeq = useRef(0);
   const openSeq = useRef(0);
   const cancelledSeq = useRef(0);
-  const dockerStopped = useRef(false);
+  const dockerRun = useRef<{ root: string; stopped: boolean } | null>(null);
+  const checkRun = useRef<{ root: string; stopped: boolean } | null>(null);
   const rootRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -242,6 +246,26 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
     refreshToolchain();
   }, [refreshToolchain]);
 
+  /** A long run belongs to its project, so leaving that project ends it. */
+  const leaveRuns = useCallback(
+    (next: string | null) => {
+      const docker = dockerRun.current;
+      if (docker && docker.root !== next) {
+        docker.stopped = true;
+        setDockerStep(null);
+        api?.cancelDockerCompare(docker.root).catch(() => {});
+        toast.push({ tone: "info", title: t.docker.stoppedByLeaving });
+      }
+      const check = checkRun.current;
+      if (check && check.root !== next) {
+        check.stopped = true;
+        setChecking(null);
+        api?.cancelLocalCheck(check.root).catch(() => {});
+      }
+    },
+    [api, toast, t],
+  );
+
   const resetResults = useCallback(() => {
     api?.cancelPreview().catch(() => {});
     generation.current++;
@@ -276,7 +300,6 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
   const openProject = useCallback(
     async (path?: string) => {
       if (!api) return;
-      const seq = ++openSeq.current;
       let chosen: string | null | undefined = path;
       try {
         chosen ??= await api.pickProjectFolder(t.dialogs.pickProject);
@@ -285,10 +308,12 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
         return;
       }
       if (!chosen) return;
+      const seq = ++openSeq.current;
       setOpening(true);
       try {
         const info = await api.inspectProject(chosen);
         if (seq !== openSeq.current) return;
+        leaveRuns(info.root);
         if (rootRef.current) void api.closeProject(rootRef.current).catch(() => {});
         rootRef.current = info.root;
         resetResults();
@@ -325,7 +350,7 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
         if (seq === openSeq.current) setOpening(false);
       }
     },
-    [api, resetResults, fail, t, toast],
+    [api, resetResults, leaveRuns, fail, t, toast],
   );
 
   const forgetRecent = useCallback((path: string) => {
@@ -337,12 +362,13 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
   }, []);
 
   const closeProject = useCallback(() => {
+    leaveRuns(null);
     if (rootRef.current) void api?.closeProject(rootRef.current).catch(() => {});
     rootRef.current = null;
     resetResults();
     setProject(null);
     setView("overview");
-  }, [api, resetResults]);
+  }, [api, resetResults, leaveRuns]);
 
   const showFindings = useCallback((f: Partial<FindingsFilter> = {}) => {
     setFindingsFilter({ ...NO_FILTER, ...f });
@@ -411,6 +437,7 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
 
   const setTarget = useCallback(
     (next: Target) => {
+      if (dockerRun.current) return;
       const rescan = !!scan;
       setTargetState(next);
       writeStorage(TARGET_KEY, next);
@@ -463,19 +490,25 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
   }, [api, project]);
 
   const withDockerSteps = useCallback(
-    async (source: string, work: () => Promise<boolean>) => {
+    async (root: string, source: string, work: () => Promise<boolean>) => {
       if (!api) return false;
-      const stop = await api.onDockerStep(setDockerStep);
+      const run = { root, stopped: false };
+      dockerRun.current = run;
+      const stop = await api.onDockerStep((step) => {
+        if (dockerRun.current === run && !run.stopped) setDockerStep(step);
+      });
       setDockerStep({ step: "lint", version: source });
       try {
         return await work();
       } catch (e) {
-        if (!dockerStopped.current) fail(t.docker.failed, e);
+        if (!run.stopped) fail(t.docker.failed, e);
         return false;
       } finally {
-        dockerStopped.current = false;
         stop();
-        setDockerStep(null);
+        if (dockerRun.current === run) {
+          dockerRun.current = null;
+          setDockerStep(null);
+        }
       }
     },
     [api, fail, t],
@@ -485,7 +518,7 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
     async (source: string, extensions: boolean, cleanImages: boolean, pages: string[], database: DatabaseChoice | null, prepare: string | null, test: string | null) => {
       if (!api || !project) return false;
       const root = project.root;
-      return withDockerSteps(source, async () => {
+      return withDockerSteps(root, source, async () => {
         const result = await api.dockerCompare(root, source, target, extensions, cleanImages, pages, database, prepare, test);
         if (rootRef.current !== root) return false;
         setDocker(result.comparison);
@@ -506,7 +539,7 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
       const previewId = preview.id;
       const { source, extensions, cleanImages, pages, database, prepare, test } = dockerArgs;
       const skipped = Object.fromEntries(Object.entries(skippedHunks).filter(([file]) => files.includes(file)));
-      return withDockerSteps(source, async () => {
+      return withDockerSteps(root, source, async () => {
         const choice = { previewId, files, skipped };
         const result = await api.dockerCompare(root, source, target, extensions, cleanImages, pages, database, prepare, test, choice);
         if (rootRef.current !== root || !result.outcome) return false;
@@ -518,9 +551,11 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
   );
 
   const cancelDocker = useCallback(() => {
-    dockerStopped.current = true;
-    if (project) api?.cancelDockerCompare(project.root).catch(() => {});
-  }, [api, project]);
+    const run = dockerRun.current;
+    if (!run) return;
+    run.stopped = true;
+    api?.cancelDockerCompare(run.root).catch(() => {});
+  }, [api]);
 
   const applyChanges = useCallback(
     async (files: string[], skipped?: Record<string, number[]>, keepTrial = false, commitMessage?: string) => {
@@ -679,27 +714,50 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
   );
 
   const runLocalCheck = useCallback(
-    (kind: "lint" | "tests") =>
-      api
-        ? updateIgnores((root) => api.runLocalCheck(root, target, kind), t.toast.localCheckFailed).finally(() => {
-            if (rootRef.current) void api.checkHistory(rootRef.current).then(setCheckHistory).catch(() => {});
-          })
-        : Promise.resolve(false),
-    [api, updateIgnores, target, t],
+    async (kind: "lint" | "tests") => {
+      if (!api || !project || checkRun.current) return false;
+      const root = project.root;
+      const gen = generation.current;
+      const run = { root, stopped: false };
+      checkRun.current = run;
+      setChecking(kind);
+      try {
+        const result = await api.runLocalCheck(root, target, kind);
+        if (gen === generation.current) setScan((prev) => ({ ...result, progress: result.progress ?? prev?.progress ?? null }));
+        return true;
+      } catch (e) {
+        if (!run.stopped) fail(t.toast.localCheckFailed, e);
+        return false;
+      } finally {
+        if (checkRun.current === run) {
+          checkRun.current = null;
+          setChecking(null);
+        }
+        if (rootRef.current) void api.checkHistory(rootRef.current).then(setCheckHistory).catch(() => {});
+      }
+    },
+    [api, project, target, fail, t],
   );
+
+  const cancelLocalCheck = useCallback(() => {
+    const run = checkRun.current;
+    if (!run) return;
+    run.stopped = true;
+    api?.cancelLocalCheck(run.root).catch(() => {});
+  }, [api]);
 
   const value = useMemo<AppStore>(
     () => ({
       api, view, setView, findingsFilter, setFindingsFilter, showFindings, theme, setTheme, recent, forgetRecent, project, opening, openProject, closeProject,
       target, setTarget, scan, scanning, progress, runScan, cancelScan, deps, toolchain, refreshToolchain, installingRector,
       installRector, preview, previewMode, previewing, loadPreview, cancelPreview, skippedHunks, skipHunks, docker, dockerHistory, checkHistory, dockerStep, runDocker, cancelDocker, saveConfig, dockerArgs, dockerTrial, tryFixes, applying, applyChanges, snapshots,
-      refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport, ignoreFinding, unignoreFinding, pruneIgnores, importRuntimeLog, setRuntimeRoots, clearRuntimeLog, runLocalCheck,
+      refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport, ignoreFinding, unignoreFinding, pruneIgnores, importRuntimeLog, setRuntimeRoots, clearRuntimeLog, runLocalCheck, checking, cancelLocalCheck,
     }),
     [
       api, view, findingsFilter, showFindings, theme, setTheme, recent, forgetRecent, project, opening, openProject, closeProject, target,
       setTarget, scan, scanning, progress, runScan, cancelScan, deps, toolchain, refreshToolchain, installingRector,
       installRector, preview, previewMode, previewing, loadPreview, cancelPreview, skippedHunks, skipHunks, docker, dockerHistory, checkHistory, dockerStep, runDocker, cancelDocker, saveConfig, dockerArgs, dockerTrial, tryFixes, applying, applyChanges, snapshots,
-      refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport, ignoreFinding, unignoreFinding, pruneIgnores, importRuntimeLog, setRuntimeRoots, clearRuntimeLog, runLocalCheck,
+      refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport, ignoreFinding, unignoreFinding, pruneIgnores, importRuntimeLog, setRuntimeRoots, clearRuntimeLog, runLocalCheck, checking, cancelLocalCheck,
     ],
   );
 

@@ -50,7 +50,7 @@ function topRules(findings: Finding[], loc: (f: Finding) => string) {
 
 export function Overview() {
   const { t, loc } = useI18n();
-  const { project, target, setTarget, scan, scanning, progress, runScan, cancelScan, deps, setView, showFindings, toolchain, exportReport, preview, dockerHistory } =
+  const { dockerStep, project, target, setTarget, scan, scanning, progress, runScan, cancelScan, deps, setView, showFindings, toolchain, exportReport, preview, dockerHistory } =
     useStore();
   const [pendingTarget, setPendingTarget] = useState<Target | null>(null);
   if (!project) return null;
@@ -117,7 +117,7 @@ export function Overview() {
                 size="lg"
                 value={target}
                 onChange={chooseTarget}
-                disabled={scanning}
+                disabled={scanning || !!dockerStep}
                 options={TARGETS.map((v) =>
                   isBlockedTarget(v) ? { value: v, label: v, disabled: true, describedBy: "target-blocked" } : { value: v, label: v },
                 )}

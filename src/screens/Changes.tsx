@@ -23,7 +23,7 @@ export function Changes() {
   const [appliedAll, setAppliedAll] = useState(false);
 
   const steps = useMemo(() => stepsBetween(project?.currentVersion ?? null, target), [project, target]);
-  const [pickedStep, setPickedStep] = useState("");
+  const [pickedStep, setPickedStep] = useState(() => (preview && preview.target !== target ? preview.target : ""));
   const step = mode !== "pins" && steps.includes(pickedStep) ? pickedStep : undefined;
   const nextStep = step ? (steps[steps.indexOf(step) + 1] ?? target) : null;
   const goToStep = (value: string) => {
@@ -70,7 +70,9 @@ export function Changes() {
   const changes = useMemo(() => preview?.changes ?? [], [preview]);
   const off = useMemo(
     () =>
-      preview && excluded.previewId === preview.id ? excluded.files : new Set(changes.filter((c) => c.fix !== "auto").map((c) => c.file)),
+      preview && excluded.previewId === preview.id
+        ? excluded.files
+        : new Set(preview?.mode === "pins" ? [] : changes.filter((c) => c.fix !== "auto").map((c) => c.file)),
     [preview, excluded, changes],
   );
   const [viewed, setViewed] = useState<{ previewId: number | null; files: Set<string> }>({ previewId: null, files: new Set() });

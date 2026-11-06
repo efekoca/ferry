@@ -44,7 +44,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={api}>
       {children}
-      <div className="toasts">
+      <div className="toasts" aria-live="polite">
         {toasts.map((item) => (
           <div key={item.id} className={`toast toast--${item.tone}`} role={item.tone === "error" ? "alert" : "status"}>
             {ICON[item.tone]}

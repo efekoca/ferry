@@ -29,7 +29,7 @@ describe("accessibility", { timeout: 30_000 }, () => {
     await screen.findByRole("heading", { name: "Genel bakış" });
     await check("overview before scan");
     await user.click(screen.getByRole("button", { name: /Taramayı başlat/ }));
-    await screen.findByRole("img", { name: /Hazırlık skoru/ });
+    await screen.findByRole("img", { name: /Hazırlık puanı/ });
     await check("overview");
     await user.click(nav(/Bulgular/));
     await screen.findByRole("listbox", { name: "Bulgu listesi" });
@@ -73,7 +73,7 @@ describe("accessibility", { timeout: 30_000 }, () => {
     };
     await user.click(await screen.findByRole("button", { name: "Proje klasörü seçin" }));
     await user.click(await screen.findByRole("button", { name: /Taramayı başlat/ }));
-    await screen.findByRole("img", { name: /Hazırlık skoru/ });
+    await screen.findByRole("img", { name: /Hazırlık puanı/ });
     await user.click(nav(/Bulgular/));
     const detail = await screen.findByRole("complementary", { name: "Bulgu ayrıntısı" });
     await user.click(within(detail).getByRole("button", { name: "Yok say" }));
@@ -103,7 +103,7 @@ describe("accessibility", { timeout: 30_000 }, () => {
     render(<App api={api} />);
     await user.click(await screen.findByRole("button", { name: "Proje klasörü seçin" }));
     await user.click(await screen.findByRole("button", { name: /Taramayı başlat/ }));
-    await screen.findByRole("img", { name: /Hazırlık skoru/ });
+    await screen.findByRole("img", { name: /Hazırlık puanı/ });
     await user.click(nav(/Bulgular/));
     await screen.findByText("Sorun yok");
     expect(await violations()).toEqual([]);
@@ -125,7 +125,7 @@ describe("accessibility", { timeout: 30_000 }, () => {
     render(<App api={mockApi({ delay: 0 })} />);
     await user.click(await screen.findByRole("button", { name: "Proje klasörü seçin" }));
     await user.click(await screen.findByRole("button", { name: /Taramayı başlat/ }));
-    await screen.findByRole("img", { name: /Hazırlık skoru/ });
+    await screen.findByRole("img", { name: /Hazırlık puanı/ });
     await user.click(nav(/Bulgular/));
     const options = within(await screen.findByRole("listbox", { name: "Bulgu listesi" })).getAllByRole("option");
     expect(options.filter((o) => o.tabIndex === 0)).toHaveLength(1);
@@ -146,7 +146,7 @@ describe("accessibility", { timeout: 30_000 }, () => {
     render(<App api={mockApi({ delay: 0 })} />);
     await user.click(await screen.findByRole("button", { name: "Proje klasörü seçin" }));
     await user.click(await screen.findByRole("button", { name: /Taramayı başlat/ }));
-    await screen.findByRole("img", { name: /Hazırlık skoru/ });
+    await screen.findByRole("img", { name: /Hazırlık puanı/ });
     await user.click(nav(/Düzeltmeler/));
     await user.click(await screen.findByRole("button", { name: /Değişiklikleri hesapla/ }));
     await user.click(await screen.findByRole("checkbox", { name: "Tümünü seç" }));
