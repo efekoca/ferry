@@ -73,9 +73,13 @@ pub fn replace(path: &Path, bytes: &[u8]) -> Result<()> {
     let readonly = meta.as_ref().is_some_and(|m| m.permissions().readonly());
     if let Some(meta) = &meta {
         let mut perms = meta.permissions();
-        #[allow(clippy::permissions_set_readonly_false)]
-        perms.set_readonly(false);
+        if cfg!(windows) {
+            #[allow(clippy::permissions_set_readonly_false)]
+            perms.set_readonly(false);
+        }
         let _ = tmp.as_file().set_permissions(perms);
+    } else {
+        set_new_file_mode(tmp.as_file());
     }
     if readonly && cfg!(windows) {
         set_readonly(path, false)?;
@@ -91,6 +95,16 @@ pub fn replace(path: &Path, bytes: &[u8]) -> Result<()> {
     }
     Ok(())
 }
+
+/// A temporary file starts private. A file that's being restored must be readable like any other.
+#[cfg(unix)]
+fn set_new_file_mode(file: &std::fs::File) {
+    use std::os::unix::fs::PermissionsExt;
+    let _ = file.set_permissions(std::fs::Permissions::from_mode(0o644));
+}
+
+#[cfg(not(unix))]
+fn set_new_file_mode(_: &std::fs::File) {}
 
 pub fn set_readonly(path: &Path, readonly: bool) -> Result<()> {
     let mut perms = std::fs::metadata(path)?.permissions();
@@ -143,5 +157,22 @@ mod tests {
         assert!(resolve(project.path(), "c.php").is_err());
         assert!(replace(&project.path().join("c.php"), b"new").is_err());
         assert_eq!(fs::read_to_string(outside.path().join("alias.php")).unwrap(), "x");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_replaced_file_keeps_its_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("a.php");
+        for mode in [0o644, 0o600, 0o640, 0o755, 0o444] {
+            std::fs::write(&file, "old").unwrap();
+            std::fs::set_permissions(&file, std::fs::Permissions::from_mode(mode)).unwrap();
+            replace(&file, b"new").unwrap();
+            assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, mode);
+            std::fs::remove_file(&file).unwrap();
+        }
+        replace(&file, b"restored").unwrap();
+        assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o644);
     }
 }

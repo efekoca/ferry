@@ -43,13 +43,20 @@ fn level_of(text: &str) -> Option<Level> {
     }
 }
 
+/// PHP 8 messages can name other places first, as in `called in a.php on line 3 and defined in
+/// a.php:2`, so the location that counts is the one that ends the line.
 fn split_location(rest: &str) -> Option<(String, String, usize)> {
-    let Some(at) = rest.rfind(" on line ") else {
-        let at_in = rest.rfind(" in ")?;
-        let (path, line) = rest[at_in + 4..].trim().rsplit_once(':')?;
-        return Some((rest[..at_in].trim().to_string(), path.to_string(), line.trim().parse().ok()?));
-    };
-    let line: usize = rest[at + 9..].trim().trim_end_matches(|c: char| !c.is_ascii_digit()).parse().ok()?;
+    let rest = rest.trim();
+    if let Some(at) = rest.rfind(" in ") {
+        if let Some((path, line)) = rest[at + 4..].trim().rsplit_once(':') {
+            if let (Ok(line), false) = (line.parse(), path.contains(" on line ")) {
+                return Some((rest[..at].trim().to_string(), path.to_string(), line));
+            }
+        }
+    }
+    let at = rest.rfind(" on line ")?;
+    let digits: String = rest[at + 9..].trim_start().chars().take_while(char::is_ascii_digit).collect();
+    let line = digits.parse().ok()?;
     let head = &rest[..at];
     let at_in = head.rfind(" in ")?;
     Some((head[..at_in].trim().to_string(), head[at_in + 4..].trim().to_string(), line))
@@ -123,7 +130,8 @@ pub fn parse(log: &str) -> Vec<Event> {
             section = level_of(text).unwrap_or(Level::Warning);
             continue;
         }
-        let body = text.find("PHP ").map_or(text, |i| &text[i + 4..]);
+        let text_after_prefix = text.split_once("PHP message: ").map_or(text, |(_, rest)| rest);
+        let body = text_after_prefix.find("PHP ").map_or(text_after_prefix, |i| &text_after_prefix[i + 4..]);
         if let Some(colon) = body.find(':') {
             if let Some(level) = level_of(&body[..colon]) {
                 if let Some((message, path, line)) = split_location(&body[colon + 1..]) {
@@ -445,6 +453,25 @@ PHP Deprecated:  Function utf8_encode() is deprecated in /srv/app/a.php on line 
         let fatal = findings.iter().find(|f| f.rule_id == "runtime.fatal").expect("a fatal is never folded into a deprecation");
         assert_eq!((fatal.line, fatal.severity), (1, Severity::Breaking));
         assert!(findings.iter().any(|f| f.rule_id == "runtime.deprecated" && f.line == 1));
+    }
+
+    #[test]
+    fn php_8_messages_that_name_two_places() {
+        let log = "PHP Fatal error:  Uncaught TypeError: f(): Argument #1 ($a) must be of type int, string given, called in /srv/app/a.php on line 3 and defined in /srv/app/a.php:2\n\
+            PHP Fatal error:  Uncaught ArgumentCountError: Too few arguments to function g(), 1 passed in /srv/app/b.php on line 5 and exactly 2 expected in /srv/app/b.php:7\n\
+            2026/11/06 10:00:00 [error] 1#1: *1 FastCGI sent in stderr: \"PHP message: PHP Warning:  Undefined variable $x in /srv/app/c.php on line 4\" while reading response\n\
+            [Fri Nov 06 10:00:00 2026] [php:error] PHP Warning:  Undefined array key 1 in /srv/app/d.php on line 9, referer: http://example.com/page/2\n";
+        let mut found: Vec<_> = parse(log).into_iter().map(|e| (e.path, e.line, e.level)).collect();
+        found.sort();
+        assert_eq!(
+            found,
+            [
+                ("/srv/app/a.php".to_string(), 2, Level::Fatal),
+                ("/srv/app/b.php".to_string(), 7, Level::Fatal),
+                ("/srv/app/c.php".to_string(), 4, Level::Warning),
+                ("/srv/app/d.php".to_string(), 9, Level::Warning),
+            ]
+        );
     }
 
     #[test]

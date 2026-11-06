@@ -700,6 +700,30 @@ fn print_outcome(outcome: &ferry_core::docker::Outcome) {
     println!("The fixed copy is {verdict}.");
 }
 
+/// Puts back only the files that were reached, through the same safe writer, and says so plainly
+/// when a file couldn't be put back.
+fn write_pins(root: &Path, changes: &[&ferry_core::rector::FileChange]) -> Result<(), String> {
+    let mut before = Vec::new();
+    for change in changes {
+        let path = root.join(&change.file);
+        let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        before.push((change.file.clone(), path, bytes));
+    }
+    let mut written = Vec::new();
+    let Err(error) = ferry_core::rector::write_changes(root, changes, &mut written) else { return Ok(()) };
+    let failed: Vec<String> = before
+        .iter()
+        .filter(|(file, ..)| written.contains(file))
+        .filter(|(_, path, bytes)| std::fs::read(path).is_ok_and(|now| now != *bytes) && ferry_core::safefs::replace(path, bytes).is_err())
+        .map(|(file, ..)| file.clone())
+        .collect();
+    if failed.is_empty() {
+        Err(format!("{error}\nNo file changed: the ones already written were put back."))
+    } else {
+        Err(format!("{error}\nThese files stayed changed: {}", failed.join(", ")))
+    }
+}
+
 fn run_pins(args: &[String]) -> Result<(), String> {
     let (mut root, mut target, mut write) = (None, None, false);
     let mut it = args.iter();
@@ -737,17 +761,7 @@ fn run_pins(args: &[String]) -> Result<(), String> {
         println!("Nothing to update for PHP {target}.");
     } else if write {
         let refs: Vec<_> = preview.changes.iter().collect();
-        let before: Vec<(PathBuf, Vec<u8>)> = refs
-            .iter()
-            .map(|c| root.join(&c.file))
-            .map(|p| std::fs::read(&p).map(|b| (p.clone(), b)).map_err(|e| format!("{}: {e}", p.display())))
-            .collect::<Result<_, _>>()?;
-        if let Err(e) = ferry_core::rector::write_changes(&root, &refs, &mut Vec::new()) {
-            for (path, bytes) in &before {
-                let _ = std::fs::write(path, bytes);
-            }
-            return Err(format!("{e}\nThe files were put back."));
-        }
+        write_pins(&root, &refs)?;
         println!("Updated {} files.", refs.len());
     } else {
         println!("{} files would change. Run again with --write to update them.", preview.changes.len());
@@ -903,7 +917,15 @@ fn run_compare(args: &[String]) -> Result<bool, String> {
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.iter().skip(1).any(|a| a == "-h" || a == "--help") && matches!(args[0].as_str(), "clean-images" | "compare" | "pins") {
+        println!("{USAGE}");
+        return ExitCode::SUCCESS;
+    }
     if args.first().is_some_and(|a| a == "clean-images") {
+        if let Some(extra) = args.get(1) {
+            eprintln!("ferry-cli: unknown argument: {extra}");
+            return ExitCode::from(2);
+        }
         return match ferry_core::docker::remove_images() {
             Ok(count) => {
                 println!("Removed {count} images");

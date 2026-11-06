@@ -53,20 +53,50 @@ fn check(config: &Config) -> Result<(), String> {
 /// A missing file is an empty config. A broken one is an error, so settings are never dropped silently.
 pub fn load(root: &Path) -> Result<Config, String> {
     let file = path(root);
-    let Ok(bytes) = std::fs::read(&file) else { return Ok(Config::default()) };
+    let bytes = match std::fs::read(&file) {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Config::default()),
+        Err(e) => return Err(crate::t!(".ferry/config.json okunamadı: {e}", "Couldn't read .ferry/config.json: {e}")),
+    };
     let config: Config = serde_json::from_slice(&bytes)
         .map_err(|e| crate::t!(".ferry/config.json okunamadı: {e}", "Couldn't read .ferry/config.json: {e}"))?;
     check(&config).map_err(|e| format!(".ferry/config.json: {e}"))?;
     Ok(config)
 }
 
+/// Keeps settings this version doesn't know, such as ones written by a newer Ferry.
+fn merge(existing: &mut serde_json::Value, new: serde_json::Value) {
+    match (existing, new) {
+        (serde_json::Value::Object(old), serde_json::Value::Object(new)) => {
+            for (key, value) in new {
+                match old.get_mut(&key) {
+                    Some(slot) => merge(slot, value),
+                    None => {
+                        old.insert(key, value);
+                    }
+                }
+            }
+        }
+        (slot, value) => *slot = value,
+    }
+}
+
+/// Refuses to touch a file it can't read, so a typo doesn't cost the team its settings.
 pub fn save(root: &Path, config: &Config) -> Result<(), String> {
     check(config)?;
     let file = path(root);
     let dir = file.parent().unwrap();
+    let mut merged = match std::fs::read(&file) {
+        Ok(bytes) => serde_json::from_slice::<serde_json::Value>(&bytes)
+            .ok()
+            .filter(serde_json::Value::is_object)
+            .ok_or_else(|| crate::t!(".ferry/config.json bozuk, önce düzeltin.", ".ferry/config.json is broken, fix it first."))?,
+        Err(_) => serde_json::json!({}),
+    };
+    merge(&mut merged, serde_json::to_value(config).map_err(|e| e.to_string())?);
     let write = || -> std::io::Result<()> {
         std::fs::create_dir_all(dir)?;
-        let mut json = serde_json::to_vec_pretty(config).map_err(std::io::Error::other)?;
+        let mut json = serde_json::to_vec_pretty(&merged).map_err(std::io::Error::other)?;
         json.push(b'\n');
         let mut tmp = tempfile::NamedTempFile::new_in(dir)?;
         std::io::Write::write_all(&mut tmp, &json)?;
@@ -113,5 +143,22 @@ mod tests {
             let config = Config { docker: DockerConfig { dump: Some(bad.into()), ..DockerConfig::default() }, ..Config::default() };
             assert!(save(dir.path(), &config).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn saving_keeps_unknown_settings_and_refuses_a_broken_file() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join(".ferry")).unwrap();
+        std::fs::write(path(dir.path()), r#"{"target":"8.3","later":{"x":1},"docker":{"new":true}}"#).unwrap();
+        save(dir.path(), &Config { target: Some("8.4".into()), ..Default::default() }).unwrap();
+        let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(path(dir.path())).unwrap()).unwrap();
+        assert_eq!(
+            (saved["target"].as_str(), saved["later"]["x"].as_i64(), saved["docker"]["new"].as_bool()),
+            (Some("8.4"), Some(1), Some(true))
+        );
+
+        std::fs::write(path(dir.path()), "{ broken").unwrap();
+        assert!(save(dir.path(), &Config::default()).is_err());
+        assert_eq!(std::fs::read_to_string(path(dir.path())).unwrap(), "{ broken");
     }
 }

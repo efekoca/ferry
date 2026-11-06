@@ -563,7 +563,7 @@ fn decl_trait_names(tokens: &[Token], open: usize, close: usize) -> Vec<(usize, 
         if t.is_punct("{") || t.is_punct("(") {
             depth += 1;
         } else if t.is_punct("}") || t.is_punct(")") {
-            depth -= 1;
+            depth = depth.saturating_sub(1);
         } else if depth == 1 && t.is_ident_ci("use") {
             while let Some(n) = tokens.get(k + 1).filter(|n| !n.is_punct(";") && !n.is_punct("{")) {
                 if n.kind == TokenKind::Ident {

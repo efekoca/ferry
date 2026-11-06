@@ -196,11 +196,8 @@ impl BumpNote {
 
 fn bumped(text: &str, kind: Kind, target: PhpVersion) -> Option<(String, BumpNote)> {
     if kind == Kind::Composer {
-        let (line, found) = composer_platform(text)?;
-        return (found < target).then(|| {
-            let after = edit_lines(text, |k, raw| (k + 1 == line).then(|| replace_platform(raw, target)).flatten());
-            (after, BumpNote::Composer)
-        });
+        let (_, found) = composer_platform(text)?;
+        return (found < target).then(|| bumped_composer(text, target)).flatten().map(|after| (after, BumpNote::Composer));
     }
     if !matches!(kind, Kind::Pin | Kind::Docker | Kind::Ci | Kind::Hosting | Kind::Socket) {
         return None;
@@ -220,13 +217,106 @@ fn edit_lines(text: &str, mut edit: impl FnMut(usize, &str) -> Option<String>) -
     text.split_inclusive('\n').enumerate().map(|(k, raw)| edit(k, raw).unwrap_or_else(|| raw.to_string())).collect()
 }
 
-fn replace_platform(raw: &str, target: PhpVersion) -> Option<String> {
-    let start = raw.find(':')? + 1;
-    let value = start + raw[start..].find(|c: char| c.is_ascii_digit())?;
-    let end = value + version_len(&raw[value..]);
-    let full = raw[value..end].matches('.').count() == 2;
+/// The byte range of a string value at a JSON path, found by walking the document so that a key
+/// of the same name elsewhere can't be mistaken for it.
+fn json_string_span(text: &str, path: &[&str]) -> Option<std::ops::Range<usize>> {
+    struct Reader<'a> {
+        bytes: &'a [u8],
+        at: usize,
+    }
+    impl Reader<'_> {
+        fn skip_space(&mut self) {
+            while self.bytes.get(self.at).is_some_and(u8::is_ascii_whitespace) {
+                self.at += 1;
+            }
+        }
+        fn string(&mut self) -> Option<std::ops::Range<usize>> {
+            self.at += 1;
+            let start = self.at;
+            while *self.bytes.get(self.at)? != b'"' {
+                self.at += if self.bytes[self.at] == b'\\' { 2 } else { 1 };
+            }
+            self.at += 1;
+            Some(start..self.at - 1)
+        }
+        fn skip_value(&mut self) -> Option<()> {
+            self.skip_space();
+            match *self.bytes.get(self.at)? {
+                b'"' => self.string().map(|_| ()),
+                b'{' | b'[' => {
+                    let mut depth = 0usize;
+                    loop {
+                        match *self.bytes.get(self.at)? {
+                            b'"' => {
+                                self.string()?;
+                                continue;
+                            }
+                            b'{' | b'[' => depth += 1,
+                            b'}' | b']' => depth -= 1,
+                            _ => {}
+                        }
+                        self.at += 1;
+                        if depth == 0 {
+                            return Some(());
+                        }
+                    }
+                }
+                _ => {
+                    while !matches!(*self.bytes.get(self.at)?, b',' | b'}' | b']') {
+                        self.at += 1;
+                    }
+                    Some(())
+                }
+            }
+        }
+        fn find(&mut self, path: &[&str], text: &str) -> Option<std::ops::Range<usize>> {
+            self.skip_space();
+            let Some((first, rest)) = path.split_first() else {
+                return (*self.bytes.get(self.at)? == b'"').then(|| self.string()).flatten();
+            };
+            if *self.bytes.get(self.at)? != b'{' {
+                return None;
+            }
+            self.at += 1;
+            let mut found = None;
+            loop {
+                self.skip_space();
+                match *self.bytes.get(self.at)? {
+                    b'}' => return found,
+                    b',' => self.at += 1,
+                    b'"' => {
+                        let key = self.string()?;
+                        self.skip_space();
+                        self.at += 1;
+                        if text[key] == **first {
+                            found = self.find(rest, text).or(found);
+                        } else {
+                            self.skip_value()?;
+                        }
+                    }
+                    _ => return None,
+                }
+            }
+        }
+    }
+    Reader { bytes: text.as_bytes(), at: 0 }.find(path, text)
+}
+
+const PLATFORM_PHP: [&str; 3] = ["config", "platform", "php"];
+
+/// Edits the value itself, then checks that nothing else in the document moved.
+fn bumped_composer(text: &str, target: PhpVersion) -> Option<String> {
+    let span = json_string_span(text, &PLATFORM_PHP)?;
+    let value = &text[span.clone()];
+    let start = span.start + value.find(|c: char| c.is_ascii_digit())?;
+    let end = start + version_len(&text[start..]);
+    let full = text[start..end].matches('.').count() == 2;
     let version = if full { format!("{target}.0") } else { target.to_string() };
-    Some(format!("{}{version}{}", &raw[..value], &raw[end..]))
+    let after = format!("{}{version}{}", &text[..start], &text[end..]);
+    let mut wanted: serde_json::Value = serde_json::from_str(text).ok()?;
+    let edited = format!("{}{version}{}", &text[span.start..start], &text[end..span.end]);
+    *wanted.pointer_mut("/config/platform/php")? = serde_json::Value::String(edited);
+    (serde_json::from_str::<serde_json::Value>(&after).ok()? == wanted).then_some(after)
 }
 
 /// Returns the edited line and whether an exact release was written. Images pinned by digest stay
@@ -679,9 +769,8 @@ fn composer_platform(text: &str) -> Option<(usize, PhpVersion)> {
     let json = serde_json::from_str::<serde_json::Value>(text).ok()?;
     let pinned = json.pointer("/config/platform/php")?.as_str()?;
     let found = version_at(pinned.trim_start_matches(['^', '~', '>', '=', ' ']))?;
-    let lines: Vec<&str> = text.lines().collect();
-    let platform = lines.iter().position(|l| l.contains("\"platform\"")).unwrap_or(0);
-    let line = (platform..lines.len()).find(|&k| lines[k].contains("\"php\"")).map_or(platform + 1, |k| k + 1);
+    let span = json_string_span(text, &PLATFORM_PHP)?;
+    let line = text[..span.start].matches('\n').count() + 1;
     Some((line, found))
 }
 
@@ -818,6 +907,34 @@ mod tests {
             ("composer.lock", 18, "server.composer_plugin_api"),
         ];
         assert_eq!(found, expected.map(|(f, l, r)| (f.to_string(), l, r.to_string())));
+    }
+
+    #[test]
+    fn composer_pins_change_only_the_platform_value() {
+        let target = PhpVersion::new(8, 4);
+        for (before, after) in [
+            (
+                r#"{"name":"acme2/x","require":{"php":"^7.4"},"config":{"platform":{"php":"7.4.33"}}}"#,
+                r#"{"name":"acme2/x","require":{"php":"^7.4"},"config":{"platform":{"php":"8.4.0"}}}"#,
+            ),
+            (
+                r#"{"keywords":["platform"],"require":{"php":">=7.4"},"config":{"platform":{"ext-redis2":"5.3","php":"7.4"}}}"#,
+                r#"{"keywords":["platform"],"require":{"php":">=7.4"},"config":{"platform":{"ext-redis2":"5.3","php":"8.4"}}}"#,
+            ),
+            (
+                "{\n  \"config\": {\n    \"platform\": {\n      \"php\": \"7.4.33\"\n    }\n  }\n}\n",
+                "{\n  \"config\": {\n    \"platform\": {\n      \"php\": \"8.4.0\"\n    }\n  }\n}\n",
+            ),
+        ] {
+            assert_eq!(bumped_composer(before, target).as_deref(), Some(after));
+        }
+        assert_eq!(composer_platform(r#"{"keywords":["platform","php"]}"#), None);
+        let line = composer_platform(
+            "{\n  \"keywords\": [\"platform\"],\n  \"config\": {\n    \"platform\": {\n      \"php\": \"7.4\"\n    }\n  }\n}",
+        )
+        .unwrap()
+        .0;
+        assert_eq!(line, 5);
     }
 
     #[test]

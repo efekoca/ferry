@@ -35,6 +35,15 @@ pub fn load(root: &Path) -> Vec<Ignore> {
     std::fs::read(path(root)).ok().and_then(|b| serde_json::from_slice::<IgnoreFile>(&b).ok()).map(|f| f.ignores).unwrap_or_default()
 }
 
+/// For anything that's about to rewrite the file: a broken file must not turn into an empty list,
+/// or the next save would wipe what the team shares in it.
+pub fn load_for_update(root: &Path) -> Result<Vec<Ignore>, String> {
+    let Ok(bytes) = std::fs::read(path(root)) else { return Ok(Vec::new()) };
+    serde_json::from_slice::<IgnoreFile>(&bytes)
+        .map(|f| f.ignores)
+        .map_err(|e| crate::t!(".ferry/ignore.json okunamadı, önce düzeltin: {e}", "Couldn't read .ferry/ignore.json, fix it first: {e}"))
+}
+
 pub fn save(root: &Path, ignores: &[Ignore]) -> std::io::Result<()> {
     let file = path(root);
     std::fs::create_dir_all(file.parent().unwrap())?;
@@ -223,6 +232,15 @@ mod tests {
         let ignores = [Ignore::for_finding(&findings[0], "old", 1)];
         let applied = apply(dir.path(), findings, &ignores);
         assert_eq!((applied.ignored.len(), applied.stale.len()), (1, 0));
+    }
+
+    #[test]
+    fn a_broken_file_is_not_treated_as_empty_when_saving() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(load_for_update(dir.path()).unwrap().is_empty());
+        std::fs::create_dir(dir.path().join(".ferry")).unwrap();
+        std::fs::write(path(dir.path()), "<<<<<<< HEAD\n{}").unwrap();
+        assert!(load_for_update(dir.path()).is_err());
     }
 
     #[test]
