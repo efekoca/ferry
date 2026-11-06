@@ -361,7 +361,10 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
       });
       const [result, depReport] = await Promise.all([
         api.scanProject(project.root, scanTarget, gen),
-        api.checkDependencies(project.root, scanTarget).catch(() => null),
+        api.checkDependencies(project.root, scanTarget).catch((e) => {
+          fail(t.toast.depsFailed, e);
+          return null;
+        }),
       ]);
       if (gen !== generation.current) return;
       setScan(result);

@@ -94,34 +94,48 @@ pub fn detect_framework(root: &Path) -> Framework {
     if root.join("lib/Cake/VERSION.txt").is_file() {
         return Framework::CakePhp;
     }
-    let composer = std::fs::read_to_string(root.join("composer.json")).unwrap_or_default();
-    if composer.contains("\"codeigniter4/framework\"") {
+    let required = required_packages(root);
+    let requires = |wanted: &[&str]| required.iter().any(|name| wanted.contains(&name.as_str()));
+    let requires_prefix = |prefix: &str| required.iter().any(|name| name.starts_with(prefix));
+    if requires(&["roots/wordpress", "johnpbloch/wordpress"]) || root.join("web/wp/wp-includes").is_dir() {
+        return Framework::WordPress;
+    }
+    if requires(&["codeigniter4/framework"]) {
         return Framework::CodeIgniter;
     }
-    if composer.contains("\"yiisoft/yii2\"") || composer.contains("\"yiisoft/yii\"") {
+    if requires(&["yiisoft/yii2", "yiisoft/yii"]) {
         return Framework::Yii;
     }
-    if composer.contains("\"cakephp/cakephp\"") {
+    if requires(&["cakephp/cakephp"]) {
         return Framework::CakePhp;
     }
-    if composer.contains("\"laravel/framework\"") {
+    if requires(&["laravel/framework"]) {
         return Framework::Laravel;
     }
-    if composer.contains("\"magento/product-") || composer.contains("\"magento/magento2-base\"") {
+    if requires_prefix("magento/product-") || requires(&["magento/magento2-base"]) {
         return Framework::Magento;
     }
-    if composer.contains("\"drupal/core") || drupal_core_dirs(root).next().is_some() || drupal7_root(root) {
+    if requires_prefix("drupal/core") || drupal_core_dirs(root).next().is_some() || drupal7_root(root) {
         return Framework::Drupal;
     }
-    if composer.contains("\"symfony/framework-bundle\"") || root.join("bin/console").is_file() {
+    if requires(&["symfony/framework-bundle"]) || root.join("bin/console").is_file() {
         return Framework::Symfony;
     }
     Framework::Generic
 }
 
+/// `require` says what the project runs on, and `name` that it's the framework's own repository.
+/// `suggest`, `conflict` and `require-dev` say neither.
+fn required_packages(root: &Path) -> Vec<String> {
+    let text = std::fs::read_to_string(root.join("composer.json")).unwrap_or_default();
+    let manifest: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
+    let required = manifest.get("require").and_then(|r| r.as_object()).into_iter().flat_map(|r| r.keys().map(String::as_str));
+    required.chain(manifest.get("name").and_then(|n| n.as_str())).map(str::to_ascii_lowercase).collect()
+}
+
 pub fn framework_excludes(framework: Framework) -> Vec<String> {
     let dirs: &[&str] = match framework {
-        Framework::WordPress => &["wp-admin", "wp-includes"],
+        Framework::WordPress => &["wp-admin", "wp-includes", "web/wp"],
         Framework::Laravel => &["storage", "bootstrap/cache"],
         Framework::Symfony => &["var"],
         Framework::Drupal => &["core", "sites/default/files"],
@@ -147,7 +161,7 @@ pub fn framework_excludes(framework: Framework) -> Vec<String> {
             "phpBB/vendor",
         ],
         Framework::CodeIgniter => &["system", "writable"],
-        Framework::Yii => &["framework", "runtime", "web/assets", "protected/runtime", "assets"],
+        Framework::Yii => &["framework", "runtime", "web/assets", "protected/runtime"],
         Framework::CakePhp => &["lib/Cake", "tmp", "logs", "app/tmp"],
         Framework::OpenCart => &["system", "image", "install", "upload/system", "upload/image", "upload/install"],
         Framework::Generic => &[],
@@ -230,6 +244,23 @@ pub fn is_php_file(path: &Path) -> bool {
     path.extension().and_then(|e| e.to_str()).is_some_and(|e| PHP_EXTENSIONS.iter().any(|x| x.eq_ignore_ascii_case(e)))
 }
 
+/// A folder that merely has this name, like `src/vendor`, can hold the project's own code.
+fn composer_vendor(dir: &Path) -> bool {
+    dir.join("autoload.php").is_file() || dir.join("composer").is_dir() || dir.parent().is_some_and(|p| p.join("composer.json").is_file())
+}
+
+pub(crate) fn nested_composer_vendors(root: &Path) -> Vec<String> {
+    let keep = |e: &DirEntry| {
+        let name = e.file_name().to_string_lossy();
+        e.depth() == 0 || (e.file_type().is_dir() && !name.starts_with('.') && !ALWAYS_SKIP.iter().any(|s| *s == name && name != "vendor"))
+    };
+    let walk = WalkDir::new(root).follow_links(false).into_iter().filter_entry(keep).flatten();
+    let found = walk.filter(|e| e.depth() > 1 && e.file_name() == "vendor" && composer_vendor(e.path()));
+    let mut dirs: Vec<String> = found.map(|e| crate::analyzer::relative_path(root, e.path())).collect();
+    dirs.retain(|d| !d.starts_with("vendor/"));
+    dirs
+}
+
 pub fn collect_php_files(root: &Path, excluded: &[String]) -> Vec<PathBuf> {
     let excluded: Vec<PathBuf> = excluded.iter().map(|d| root.join(d)).collect();
     let keep = |e: &DirEntry| {
@@ -238,7 +269,8 @@ pub fn collect_php_files(root: &Path, excluded: &[String]) -> Vec<PathBuf> {
         }
         if e.file_type().is_dir() {
             let name = e.file_name().to_string_lossy();
-            if name.starts_with('.') || ALWAYS_SKIP.iter().any(|s| *s == name) {
+            let bundled = name == "vendor" && e.depth() > 1 && !composer_vendor(e.path());
+            if name.starts_with('.') || (ALWAYS_SKIP.iter().any(|s| *s == name) && !bundled) {
                 return false;
             }
             return !excluded.iter().any(|x| x == e.path());
@@ -332,6 +364,50 @@ mod config_tests {
         fs::create_dir(dir.path().join(".ferry")).unwrap();
         fs::write(crate::config::path(dir.path()), "{").unwrap();
         assert!(inspect(dir.path()).unwrap().config_error.is_some());
+    }
+}
+
+#[cfg(test)]
+mod detection_tests {
+    use super::*;
+    use std::fs;
+
+    fn with_composer(json: &str) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("composer.json"), json).unwrap();
+        dir
+    }
+
+    #[test]
+    fn only_required_packages_name_the_framework() {
+        let dir = with_composer(
+            r#"{"suggest": {"laravel/framework": "x"}, "conflict": {"cakephp/cakephp": "*"}, "require-dev": {"yiisoft/yii2": "*"}}"#,
+        );
+        assert_eq!(detect_framework(dir.path()), Framework::Generic);
+        let dir = with_composer(r#"{"require": {"laravel/framework": "^11"}}"#);
+        assert_eq!(detect_framework(dir.path()), Framework::Laravel);
+    }
+
+    #[test]
+    fn bedrock_is_wordpress_and_its_core_is_left_out() {
+        let dir = with_composer(r#"{"require": {"roots/wordpress": "^6"}}"#);
+        assert_eq!(detect_framework(dir.path()), Framework::WordPress);
+        assert!(framework_excludes(Framework::WordPress).contains(&"web/wp".to_string()));
+    }
+
+    #[test]
+    fn a_folder_called_vendor_is_only_skipped_when_composer_made_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        for (folder, file) in
+            [("vendor/a", "a.php"), ("src/vendor", "mine.php"), ("pkg/vendor/b", "b.php"), ("mod/vendor/composer", "c.php")]
+        {
+            fs::create_dir_all(root.join(folder)).unwrap();
+            fs::write(root.join(folder).join(file), "<?php\n").unwrap();
+        }
+        fs::write(root.join("pkg/composer.json"), "{}").unwrap();
+        let found: Vec<String> = collect_php_files(root, &[]).iter().map(|p| crate::analyzer::relative_path(root, p)).collect();
+        assert_eq!(found, ["src/vendor/mine.php"]);
     }
 }
 

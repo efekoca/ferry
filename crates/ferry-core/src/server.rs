@@ -18,12 +18,20 @@ struct Hit {
     replacement: Option<Localized>,
 }
 
-const MAX_ENTRIES: usize = MAX_FILES * 20;
+const MAX_ENTRIES: usize = 2_000_000;
 const HIDDEN_DIRS: [&str; 4] = [".github", ".ddev", ".upsun", ".platform"];
 
 fn visit_files(root: &Path, mut visit: impl FnMut(String, Kind, String)) -> Vec<FileError> {
+    let exclude = crate::config::load(root).unwrap_or_default().exclude;
+    let excluded: Vec<std::path::PathBuf> = exclude.iter().map(|d| root.join(d.trim_end_matches('/'))).collect();
     let keep = |e: &walkdir::DirEntry| {
-        if e.depth() == 0 || !e.file_type().is_dir() {
+        if e.depth() == 0 {
+            return true;
+        }
+        if excluded.iter().any(|x| x == e.path()) {
+            return false;
+        }
+        if !e.file_type().is_dir() {
             return true;
         }
         let name = e.file_name().to_string_lossy();
@@ -868,6 +876,19 @@ fn composer_lock(text: &str, target: PhpVersion) -> Vec<Hit> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn excluded_folders_are_left_out_of_server_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("old/.ferry")).unwrap();
+        std::fs::create_dir_all(root.join(".ferry")).unwrap();
+        std::fs::write(root.join("old/Dockerfile"), "FROM php:7.4\n").unwrap();
+        std::fs::write(root.join("Dockerfile"), "FROM php:7.4\n").unwrap();
+        let before = scan(root, PhpVersion::new(8, 4)).0.len();
+        std::fs::write(root.join(".ferry/config.json"), r#"{"exclude": ["old/"]}"#).unwrap();
+        assert_eq!(scan(root, PhpVersion::new(8, 4)).0.len(), before - 1);
+    }
 
     #[test]
     fn matrix_extras_and_comments_are_not_pins() {

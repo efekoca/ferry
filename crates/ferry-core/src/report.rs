@@ -257,6 +257,12 @@ pub fn to_markdown(
                 }
             });
         }
+        if deps.manifest_unreadable {
+            md.push_str(l(Text::new(
+                "composer.json okunamadı; projenin PHP kısıtı kontrol edilmedi.\n\n",
+                "composer.json couldn't be read, so the project's PHP constraint wasn't checked.\n\n",
+            )));
+        }
         if deps.lock_unreadable {
             md.push_str(l(Text::new(
                 "composer.lock okunamadı; paketler kontrol edilmedi.\n\n",

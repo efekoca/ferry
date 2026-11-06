@@ -35,6 +35,7 @@ pub struct DependencyReport {
     pub packages: Vec<Dependency>,
     pub has_lock_file: bool,
     pub lock_unreadable: bool,
+    pub manifest_unreadable: bool,
     pub extensions: Vec<crate::extensions::ExtensionUse>,
     pub wordpress: Vec<crate::wordpress::Component>,
 }
@@ -137,6 +138,24 @@ pub fn check_packages(root: &Path, target: PhpVersion) -> DependencyReport {
             }
         }
     }
+    let mut shared = crate::version::php_patches(root_constraint.as_deref(), root_conflict.as_deref(), target);
+    for package in packages.iter_mut().filter(|p| !p.dev) {
+        let Some(own) = crate::version::php_patches(package.php_constraint.as_deref(), package.php_conflict.as_deref(), target) else {
+            continue;
+        };
+        let Some(before) = shared.as_ref().filter(|before| !before.is_empty() && !own.is_empty()) else { continue };
+        let left = crate::version::shared_patches(before, &own);
+        if left.is_empty() {
+            let t = target.to_string();
+            package.status = DependencyStatus::Incompatible;
+            package.note = Some(Localized {
+                tr: format!("Bu paket, diğer paketlerin izin verdiği hiçbir PHP {t} yama sürümünde kurulamıyor."),
+                en: format!("This package can't be installed on any PHP {t} patch release the other packages allow."),
+            });
+            continue;
+        }
+        shared = Some(left);
+    }
     packages.sort_by(|a, b| {
         let rank = |s: DependencyStatus| match s {
             DependencyStatus::Incompatible => 0,
@@ -153,6 +172,7 @@ pub fn check_packages(root: &Path, target: PhpVersion) -> DependencyReport {
         packages,
         has_lock_file: lock.is_some(),
         lock_unreadable: root.join("composer.lock").is_file() && lock.as_ref().is_none_or(|l| !l["packages"].is_array()),
+        manifest_unreadable: root.join("composer.json").is_file() && manifest.is_none(),
         extensions: Vec::new(),
         wordpress: Vec::new(),
     }
@@ -162,6 +182,30 @@ pub fn check_packages(root: &Path, target: PhpVersion) -> DependencyReport {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn packages_with_no_shared_patch_release_are_flagged() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("composer.json"), "{}").unwrap();
+        let lock = r#"{"packages": [
+            {"name": "a/old", "version": "1.0", "require": {"php": "~8.4.0, <8.4.3"}},
+            {"name": "b/new", "version": "1.0", "require": {"php": ">=8.4.5"}},
+            {"name": "c/any", "version": "1.0", "require": {"php": ">=8.0"}}
+        ]}"#;
+        fs::write(dir.path().join("composer.lock"), lock).unwrap();
+        let report = check_packages(dir.path(), "8.4".parse().unwrap());
+        let flagged: Vec<&str> =
+            report.packages.iter().filter(|p| p.status == DependencyStatus::Incompatible).map(|p| p.name.as_str()).collect();
+        assert_eq!(flagged, ["b/new"]);
+    }
+
+    #[test]
+    fn a_broken_manifest_is_not_the_same_as_no_constraint() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!check_packages(dir.path(), "8.4".parse().unwrap()).manifest_unreadable);
+        fs::write(dir.path().join("composer.json"), "{broken").unwrap();
+        assert!(check_packages(dir.path(), "8.4".parse().unwrap()).manifest_unreadable);
+    }
 
     #[test]
     fn conflict_fields_block_the_target() {

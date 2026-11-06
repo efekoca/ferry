@@ -368,6 +368,7 @@ export interface DependencyReport {
   packages: Dependency[];
   hasLockFile: boolean;
   lockUnreadable?: boolean;
+  manifestUnreadable?: boolean;
   rootConflict?: string | null;
   extensions: ExtensionUse[];
   wordpress: WpComponent[];

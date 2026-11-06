@@ -406,12 +406,13 @@ pub fn build_config(
     }
     let mut bases: Vec<String> = bases.iter().map(|b| glob_literal(b.replace('\\', "/").trim_end_matches('/'))).collect();
     bases.dedup();
+    let bundled = crate::project::nested_composer_vendors(root);
     let mut skip: Vec<String> = bases
         .iter()
         .flat_map(|base| {
-            ["vendor", "node_modules"]
-                .iter()
-                .flat_map(move |d| [format!("{base}/{d}/*"), format!("{base}/*/{d}/*")])
+            [format!("{base}/vendor/*"), format!("{base}/node_modules/*"), format!("{base}/*/node_modules/*")]
+                .into_iter()
+                .chain(bundled.iter().map(move |d| format!("{base}/{}/*", glob_literal(d))))
                 .chain(excluded_dirs.iter().map(move |d| format!("{base}/{}/*", d.replace('\\', "/").trim_matches('/'))))
         })
         .map(|p| php_str(&p))
@@ -750,7 +751,9 @@ mod tests {
         assert!(cfg.contains("StrContainsRector"));
         assert!(cfg.contains("FunctionFirstClassCallableRector"), "modernizations outside PhpXY namespaces are skipped too");
         assert!(cfg.contains("'/p/it\\'s/storage/*'"));
-        assert!(cfg.contains("'/p/it\\'s/*/vendor/*'"));
+        assert!(cfg.contains("'/p/it\\'s/vendor/*'"));
+        assert!(cfg.contains("'/p/it\\'s/*/node_modules/*'"));
+        assert!(!cfg.contains("/*/vendor/*"), "a folder called vendor can be the project's own code");
         assert!(!cfg.contains("'*/vendor/*'"));
         assert!(cfg.contains("withFileExtensions(['php', 'phtml', 'inc'"));
         assert!(!cfg.contains("Php84"), "rules newer than the target must not be skipped");

@@ -154,6 +154,11 @@ export function Dependencies() {
                   : t.deps.rootBlockedText(deps.rootConstraint ?? "", deps.target)}
             </Callout>
           )}
+          {deps.manifestUnreadable && (
+            <Callout tone="warn" icon={<CircleAlert size={16} />}>
+              {t.deps.manifestUnreadable}
+            </Callout>
+          )}
           {deps.lockUnreadable ? (
             <Callout tone="warn" icon={<CircleAlert size={16} />}>
               {t.deps.lockUnreadable}

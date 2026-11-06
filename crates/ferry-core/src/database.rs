@@ -514,7 +514,7 @@ impl Running<'_> {
                 self.client()
             ),
         };
-        parse_snapshot(&self.exec(&script).unwrap_or_default())
+        self.exec(&script).map_or_else(unreadable_snapshot, |text| parse_snapshot(&text))
     }
 
     fn dump_to(&self, file: &Path) -> Result<(), String> {
@@ -538,12 +538,24 @@ impl Running<'_> {
     }
 }
 
+const UNREADABLE: &str = "unreadable";
+
+fn unreadable_snapshot() -> Snapshot {
+    Snapshot::from([("*".to_string(), (0, UNREADABLE.to_string()))])
+}
+
+/// A table that couldn't be read stays in the result: two empty answers would look like no change.
 fn parse_snapshot(text: &str) -> Snapshot {
     text.lines()
         .filter_map(|line| {
             let mut parts = line.splitn(3, '|');
             let (table, rows, sum) = (parts.next()?, parts.next()?, parts.next()?);
-            Some((table.to_string(), (rows.trim().parse().ok()?, sum.trim().to_string())))
+            let (rows, sum) = (rows.trim().parse().ok(), sum.trim());
+            let entry = match rows {
+                Some(rows) if !sum.is_empty() => (rows, sum.to_string()),
+                _ => (rows.unwrap_or(0), UNREADABLE.to_string()),
+            };
+            Some((table.to_string(), entry))
         })
         .collect()
 }
@@ -554,7 +566,7 @@ pub fn data_changes(source: &Snapshot, target: &Snapshot) -> Vec<DataChange> {
     tables.dedup();
     tables
         .into_iter()
-        .filter(|t| source.get(*t) != target.get(*t))
+        .filter(|t| source.get(*t) != target.get(*t) || [source, target].iter().any(|s| s.get(*t).is_some_and(|r| r.1 == UNREADABLE)))
         .map(|t| DataChange { table: t.clone(), source_rows: source.get(t).map(|r| r.0), target_rows: target.get(t).map(|r| r.0) })
         .collect()
 }
@@ -668,12 +680,33 @@ pub fn engine_for(root: &Path, source: &Source) -> Engine {
     }
 }
 
+/// A database in WAL mode keeps recent rows in a file next to it.
+fn copy_sqlite(original: &Path, copy: &Path) -> std::io::Result<()> {
+    std::fs::copy(original, copy)?;
+    let beside = |path: &Path| PathBuf::from(format!("{}-wal", path.display()));
+    match std::fs::copy(beside(original), beside(copy)) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+        _ => Ok(()),
+    }
+}
+
 const SQLITE_SNAPSHOT: &str = r#"<?php
 $db = new PDO('sqlite:' . $argv[1]);
-foreach ($db->query("select name from sqlite_master where type = 'table' and name not like 'sqlite_%'")->fetchAll(PDO::FETCH_NUM) as $table) {
-    $rows = $db->query('select * from "' . $table[0] . '"')->fetchAll(PDO::FETCH_NUM);
-    sort($rows);
-    echo $table[0], '|', count($rows), '|', md5(serialize($rows)), "\n";
+$db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+foreach ($db->query("select name from sqlite_master where type = 'table' and substr(name, 1, 7) != 'sqlite_'")->fetchAll(PDO::FETCH_NUM) as $table) {
+    try {
+        $lines = array();
+        foreach ($db->query('select * from "' . str_replace('"', '""', $table[0]) . '"', PDO::FETCH_NUM) as $row) {
+            foreach ($row as $i => $value) {
+                $row[$i] = $value === null ? "\0" : (string) $value;
+            }
+            $lines[] = implode("\x1f", $row);
+        }
+        sort($lines, SORT_STRING);
+        echo $table[0], '|', count($lines), '|', md5(implode("\x1e", $lines)), "\n";
+    } catch (PDOException $e) {
+        echo $table[0], "||unreadable\n";
+    }
 }
 "#;
 
@@ -698,7 +731,7 @@ pub(crate) fn sqlite_snapshot(
     let script = sqlite_script(SQLITE_SNAPSHOT, &connection.sqlite_path());
     let name = format!("data-{}", version.compact());
     let run = container.run(&name, project, image, false, &script, Duration::from_secs(120));
-    run.map(|done| parse_snapshot(&crate::docker::output(&done))).unwrap_or_default()
+    run.map_or_else(|_| unreadable_snapshot(), |done| parse_snapshot(&crate::docker::output(&done)))
 }
 
 pub(crate) struct Prepared {
@@ -765,7 +798,7 @@ pub(crate) fn prepare(
                 ));
             }
             std::fs::create_dir_all(copy.parent().unwrap_or(project)).map_err(failed)?;
-            std::fs::copy(original, &copy).map_err(failed)?;
+            copy_sqlite(&original, &copy).map_err(failed)?;
             point_copy_at(project, &connection).map_err(failed)?;
             Ok(Prepared { connection, dump: None })
         }
@@ -824,6 +857,34 @@ pub(crate) fn prepare(
             database.dump_to(&dir.join("dump.sql"))?;
             Ok(Prepared { connection, dump: Some(dir.to_path_buf()) })
         }
+    }
+}
+
+#[cfg(test)]
+mod snapshot_tests {
+    use super::*;
+
+    #[test]
+    fn a_table_that_could_not_be_read_always_counts_as_a_difference() {
+        let same = parse_snapshot("users|2|abc\norders||unreadable\nitems|x|\n");
+        assert_eq!(same["users"], (2, "abc".to_string()));
+        assert_eq!(same["orders"].1, UNREADABLE);
+        assert_eq!(same["items"].1, UNREADABLE);
+        let changed: Vec<String> = data_changes(&same, &same).into_iter().map(|c| c.table).collect();
+        assert_eq!(changed, ["items", "orders"]);
+        assert_eq!(data_changes(&unreadable_snapshot(), &unreadable_snapshot()).len(), 1);
+    }
+
+    #[test]
+    fn the_wal_file_travels_with_the_database() {
+        let dir = tempfile::tempdir().unwrap();
+        let (original, copy) = (dir.path().join("a.sqlite"), dir.path().join("b.sqlite"));
+        std::fs::write(&original, "db").unwrap();
+        copy_sqlite(&original, &copy).unwrap();
+        assert!(!dir.path().join("b.sqlite-wal").exists());
+        std::fs::write(dir.path().join("a.sqlite-wal"), "recent").unwrap();
+        copy_sqlite(&original, &copy).unwrap();
+        assert_eq!(std::fs::read_to_string(dir.path().join("b.sqlite-wal")).unwrap(), "recent");
     }
 }
 

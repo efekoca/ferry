@@ -196,6 +196,11 @@ fn subtract(allowed: &[(u64, u64)], excluded: &[(u64, u64)]) -> Vec<(u64, u64)> 
 }
 
 pub fn php_allows(require: Option<&str>, conflict: Option<&str>, target: PhpVersion) -> Option<bool> {
+    php_patches(require, conflict, target).map(|patches| !patches.is_empty())
+}
+
+/// The patch releases of the target's line that these fields allow, as inclusive ranges.
+pub(crate) fn php_patches(require: Option<&str>, conflict: Option<&str>, target: PhpVersion) -> Option<Vec<(u64, u64)>> {
     let allowed = match require {
         Some(r) => Constraint::parse(r)?.line_patches(target),
         None => vec![(0, u64::MAX)],
@@ -204,7 +209,12 @@ pub fn php_allows(require: Option<&str>, conflict: Option<&str>, target: PhpVers
         Some(c) => Constraint::parse(c)?.line_patches(target),
         None => Vec::new(),
     };
-    Some(!subtract(&allowed, &blocked).is_empty())
+    Some(subtract(&allowed, &blocked))
+}
+
+pub(crate) fn shared_patches(a: &[(u64, u64)], b: &[(u64, u64)]) -> Vec<(u64, u64)> {
+    let pairs = a.iter().flat_map(|x| b.iter().map(move |y| (x.0.max(y.0), x.1.min(y.1))));
+    pairs.filter(|(lo, hi)| lo <= hi).collect()
 }
 
 pub fn constraint_allows(constraint: &str, target: PhpVersion) -> Option<bool> {
@@ -255,6 +265,9 @@ fn parse_atom(token: &str) -> Option<Vec<Bound>> {
         return None;
     }
     if let Some(branch) = token.strip_suffix("-dev") {
+        if token.starts_with(['>', '<', '^', '~', '!']) {
+            return parse_atom(branch.trim_end_matches(['x', 'X', '*']).trim_end_matches('.'));
+        }
         let digits = branch.trim_start_matches(['v', 'V', '^', '~', '=', '>', '<', '!']).trim_end_matches(['.', 'x', 'X', '*']);
         return parse_version(digits).map(|_| vec![Bound::Lt((0, 0, 0))]);
     }
@@ -345,6 +358,21 @@ fn bump(v: Triple, parts: usize) -> Triple {
         1 => (v.0.saturating_add(1), 0, 0),
         2 => (v.0, v.1.saturating_add(1), 0),
         _ => (v.0, v.1, v.2.saturating_add(1)),
+    }
+}
+
+#[cfg(test)]
+mod dev_range_tests {
+    use super::*;
+
+    #[test]
+    fn a_dev_suffix_in_a_range_keeps_the_range() {
+        let t = |c: &str, v: (u32, u32)| php_allows(Some(c), None, PhpVersion::new(v.0, v.1));
+        assert_eq!(t(">=8.1 <8.5-dev", (8, 4)), Some(true));
+        assert_eq!(t(">=8.1 <8.5-dev", (8, 5)), Some(false));
+        assert_eq!(t("^8.1-dev", (8, 4)), Some(true));
+        assert_eq!(t(">=8.2.x-dev", (8, 1)), Some(false));
+        assert_eq!(t("8.4.x-dev", (8, 4)), Some(false), "a branch isn't a release");
     }
 }
 
