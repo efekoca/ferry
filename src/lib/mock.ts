@@ -1,6 +1,6 @@
 import type { Api } from "./api";
 import type { Localized } from "../i18n";
-import type { CheckSummary, DockerComparison, DockerSummary, ProjectConfig,
+import type { CheckSummary, DockerComparison, DockerStep, DockerSummary, ProjectConfig,
   CheckRun,
   DependencyReport,
   DiffLine,
@@ -181,6 +181,7 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
   let runtimeRoots: string[] = [];
   let dockerImages = 0;
   let dockerRuns: DockerSummary[] = [];
+  let dockerListener: ((step: DockerStep) => void) | null = null;
   const checkRuns: CheckSummary[] = [];
   let config: ProjectConfig = opts.config ?? { target: null, exclude: [], baseline: null, docker: { source: null, extensions: null, pages: null, dump: null, prepare: null, test: null }, git: { requireClean: false, branchPerBatch: false } };
   const info = async (path: string): Promise<ProjectInfo> => {
@@ -305,7 +306,10 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
         log,
       });
       const event = { path: "/app/includes/class-cart.php", line: 118, level: "fatal" as const, message: "Error: Call to undefined function each()", count: 1 };
-      await new Promise((r) => setTimeout(r, opts.delay ?? 0));
+      for (const [step, version] of [["lint", source], ["pages", source], ["tests", source], ["lint", target], ["pages", target], ["tests", target]] as const) {
+        dockerListener?.({ step, version });
+        await new Promise((r) => setTimeout(r, delay));
+      }
       if (fix) {
         const comparison = { verdict: "clean" as const, gaps: [], stamp: "mock", source: run(source, 0, true, "OK (12 tests)"), target: run(target, 0, true, "OK (12 tests)"), dependenciesInstalled: true, installLog: "", newFailures: [], dataChanges: [], databaseUsed: !!database, pages: [], newOnTarget: [], goneOnTarget: [event], origins: [] };
         const none = { fixed: [], remaining: [], introduced: [] };
@@ -327,7 +331,12 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
       return { comparison: dockerTrial, scan: null, outcome: null };
     },
     cancelDockerCompare: async () => {},
-    onDockerStep: async () => () => {},
+    onDockerStep: async (listener) => {
+      dockerListener = listener;
+      return () => {
+        dockerListener = null;
+      };
+    },
     localPhpVersions: async () => [
       { line: "8.4", version: "8.4.27", path: "/opt/homebrew/opt/php@8.4/bin/php" },
       { line: "8.5", version: "8.5.12", path: "/opt/homebrew/bin/php" },
