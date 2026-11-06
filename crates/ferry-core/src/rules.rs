@@ -245,6 +245,46 @@ pub const COMPILE_TIME: &[&str] = &[
     "deprecated.backtick",
 ];
 
+#[derive(Clone, Copy)]
+enum IniDefault {
+    On,
+    Off,
+    Exactly(&'static str),
+}
+
+/// PHP stays quiet when a deprecated setting is given the value it already has by default.
+const INI_DEFAULTS: [(&str, IniDefault); 13] = [
+    ("assert.active", IniDefault::On),
+    ("assert.bail", IniDefault::Off),
+    ("assert.callback", IniDefault::Exactly("")),
+    ("assert.exception", IniDefault::On),
+    ("assert.warning", IniDefault::On),
+    ("auto_detect_line_endings", IniDefault::Off),
+    ("intl.error_level", IniDefault::Off),
+    ("report_memleaks", IniDefault::On),
+    ("session.referer_check", IniDefault::Exactly("")),
+    ("session.sid_bits_per_character", IniDefault::Exactly("4")),
+    ("session.sid_length", IniDefault::Exactly("32")),
+    ("session.use_only_cookies", IniDefault::On),
+    ("session.use_trans_sid", IniDefault::Off),
+];
+
+pub(crate) fn ini_default(name: &str, value: &crate::lexer::Token) -> bool {
+    let Some(&(_, default)) = INI_DEFAULTS.iter().find(|(k, _)| *k == name) else { return false };
+    let literal = matches!(value.kind, crate::lexer::TokenKind::Str { .. } | crate::lexer::TokenKind::Number)
+        || value.is_ident_ci("true")
+        || value.is_ident_ci("false");
+    if !literal || value.literal().is_none() && matches!(value.kind, crate::lexer::TokenKind::Str { .. }) {
+        return false;
+    }
+    let text = value.literal().unwrap_or(&value.text).to_ascii_lowercase();
+    match default {
+        IniDefault::On => matches!(text.as_str(), "1" | "on" | "yes" | "true"),
+        IniDefault::Off => matches!(text.as_str(), "" | "0" | "off" | "no" | "false"),
+        IniDefault::Exactly(v) => text == v,
+    }
+}
+
 pub const NULL_STRING_ARGS: &[(&str, &[usize])] = &[
     ("strlen", &[0]),
     ("trim", &[0]),
@@ -1182,8 +1222,24 @@ pub fn added_function(name: &str) -> Option<PhpVersion> {
         .map(|i| PhpVersion::new(ADDED_FUNCTIONS[i].1 .0, ADDED_FUNCTIONS[i].1 .1))
 }
 
+/// Built-in classes that exist on every PHP of that version, whatever extensions it has.
+const ALWAYS_THERE: [&str; 8] = ["core", "date", "hash", "json", "pcre", "random", "reflection", "spl"];
+
+fn generated_class(name: &str) -> Option<&'static (&'static str, (u32, u32), &'static str)> {
+    let rows = crate::symbols::ADDED_CLASSES;
+    rows.binary_search_by(|(n, _, _)| (*n).cmp(name)).ok().map(|i| &rows[i])
+}
+
 pub fn added_class(name: &str) -> Option<PhpVersion> {
-    ADDED_CLASSES.binary_search_by(|(n, _)| (*n).cmp(name)).ok().map(|i| PhpVersion::new(ADDED_CLASSES[i].1 .0, ADDED_CLASSES[i].1 .1))
+    let hand = ADDED_CLASSES.binary_search_by(|(n, _)| (*n).cmp(name)).ok().map(|i| ADDED_CLASSES[i].1);
+    let generated = || generated_class(name).filter(|(_, _, ext)| ALWAYS_THERE.contains(ext) || *ext == "standard").map(|r| r.1);
+    hand.or_else(generated).map(|(a, b)| PhpVersion::new(a, b))
+}
+
+/// Any class a PHP of that version may declare, extensions included: a user class of that name
+/// collides as soon as the extension is loaded.
+pub fn added_class_any(name: &str) -> Option<PhpVersion> {
+    added_class(name).or_else(|| generated_class(name).map(|r| PhpVersion::new(r.1 .0, r.1 .1)))
 }
 
 pub mod patterns {
@@ -1558,11 +1614,11 @@ pub mod patterns {
         title: Text::new("escape parametresiz CSV fonksiyonu", "CSV function without an escape argument"),
         severity: Severity::Deprecated,
         since: (8, 4),
-        replacement: code("fputcsv($f, $row, escape: '')"),
+        replacement: code("fputcsv($f, $row, escape: '\\\\')"),
         fix: FixKind::Auto,
         note: Text::new(
-            "fputcsv(), fgetcsv() ve str_getcsv() escape parametresi verilmeden çağrılınca 8.4'te uyarı veriyor.",
-            "fputcsv(), fgetcsv() and str_getcsv() raise a deprecation in 8.4 when the escape argument isn't given.",
+            "fputcsv(), fgetcsv() ve str_getcsv() escape parametresi verilmeden çağrılınca 8.4'te uyarı veriyor. Bugünkü varsayılan olan '\\\\' değerini açıkça yazmak dosyaların okunup yazılma biçimini değiştirmez; '' ise değiştirebilir.",
+            "fputcsv(), fgetcsv() and str_getcsv() raise a deprecation in 8.4 when the escape argument isn't given. Writing today's default '\\\\' keeps files read and written the same way; '' can change them.",
         ),
     };
     pub const MB_ENCODING: PatternRule = PatternRule {
@@ -1626,6 +1682,42 @@ pub mod patterns {
         note: Text::new(
             "PHP 8.1'den itibaren $GLOBALS dizisinin tamamına değer atamak, onu unset etmek, referansını almak ya da sonuna eleman eklemek derleme hatası verir ve dosya hiç çalışmaz. Tek tek değişkenleri $GLOBALS['ad'] = $deger biçiminde değiştirin ya da $GLOBALS'ın bir kopyasıyla çalışın.",
             "Since PHP 8.1, assigning to the whole $GLOBALS array, unsetting it, taking a reference to it or appending to it is a compile-time error and the file never runs. Change single variables with $GLOBALS['name'] = $value, or work on a copy of $GLOBALS.",
+        ),
+    };
+    pub const REPEATED_STATIC: PatternRule = PatternRule {
+        id: "removed.repeated_static",
+        title: Text::new("Aynı static değişken iki kez tanımlanmış", "The same static variable declared twice"),
+        severity: Severity::Breaking,
+        since: (8, 3),
+        replacement: tx("ikinci tanımı kaldırın", "remove the second declaration"),
+        fix: FixKind::Manual,
+        note: Text::new(
+            "PHP 8.3'ten beri bir fonksiyonda aynı static değişkeni ikinci kez tanımlamak derleme hatası verir ve dosya hiç çalışmaz.",
+            "Since PHP 8.3, declaring the same static variable twice in a function is a compile-time error and the file never runs.",
+        ),
+    };
+    pub const ASSIGN_THIS: PatternRule = PatternRule {
+        id: "removed.assign_this",
+        title: Text::new("$this değişkenine atama", "Assigning to $this"),
+        severity: Severity::Breaking,
+        since: (7, 1),
+        replacement: tx("başka bir değişken adı kullanın", "use another variable name"),
+        fix: FixKind::Manual,
+        note: Text::new(
+            "PHP 7.1'den beri $this değişkenine atama yapmak derleme hatası verir ve dosya hiç çalışmaz.",
+            "Since PHP 7.1, assigning to $this is a compile-time error and the file never runs.",
+        ),
+    };
+    pub const OVERRIDE_WITHOUT_PARENT: PatternRule = PatternRule {
+        id: "removed.override_without_parent",
+        title: Text::new("Üst metodu olmayan #[\\Override]", "#[\\Override] with no parent method"),
+        severity: Severity::Breaking,
+        since: (8, 3),
+        replacement: tx("özniteliği kaldırın ya da doğru üst sınıfı ekleyin", "remove the attribute or add the right parent"),
+        fix: FixKind::Manual,
+        note: Text::new(
+            "PHP 8.3'ten beri #[\\Override] taşıyan bir metodun üst sınıfta ya da arayüzde karşılığı yoksa dosya derlenmez. Bu sınıf hiçbir şeyden türemiyor.",
+            "Since PHP 8.3, a method marked #[\\Override] with no match in a parent or interface stops the file from compiling. This class inherits nothing.",
         ),
     };
     pub const BUILTIN_RESULT_BY_REF: PatternRule = PatternRule {
@@ -1799,13 +1891,13 @@ pub mod patterns {
     pub const REMOVED_VARIABLE: PatternRule = PatternRule {
         id: "removed.magic_variable",
         title: Text::new("Kaldırılan otomatik değişken", "Removed magic variable"),
-        severity: Severity::Breaking,
+        severity: Severity::Behavior,
         since: (7, 0),
         replacement: tx("error_get_last() ya da file_get_contents('php://input')", "error_get_last() or file_get_contents('php://input')"),
         fix: FixKind::Manual,
         note: Text::new(
-            "$HTTP_RAW_POST_DATA ve $php_errormsg artık oluşturulmuyor.",
-            "$HTTP_RAW_POST_DATA and $php_errormsg are no longer created.",
+            "$HTTP_RAW_POST_DATA ve $php_errormsg artık oluşturulmuyor; kod çalışır ama bu değişken boş kalır.",
+            "$HTTP_RAW_POST_DATA and $php_errormsg are no longer created; the code still runs but the variable stays empty.",
         ),
     };
     pub const DYNAMIC_PROPERTY: PatternRule = PatternRule {

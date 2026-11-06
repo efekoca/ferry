@@ -3624,7 +3624,7 @@
   "ext": "Standard",
   "change": "The length argument for substr(), substr_count(), substr_compare(), and iconv_substr() can now be null.",
   "status": "covered",
-  "note": "substr($s, 2, null) is reported.",
+  "note": "substr($s, 2, null) is reported. substr_compare() already treated null as omitted, so its result does not change.",
   "rules": [
    "behavior.null_length"
   ]
@@ -5225,8 +5225,11 @@
   "version": "8.3",
   "section": "Deprecated Functionality",
   "change": "Using the -- operator on empty or non-numeric strings is now deprecated.",
-  "status": "runtime",
-  "note": "Whether the decremented string is empty or non-numeric depends on runtime values."
+  "status": "partial",
+  "note": "A literal non-numeric string decremented right after it is assigned is reported; other values depend on runtime.",
+  "rules": [
+   "deprecated.string_decrement"
+  ]
  },
  {
   "version": "8.3",

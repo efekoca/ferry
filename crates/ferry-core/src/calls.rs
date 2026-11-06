@@ -227,6 +227,7 @@ pub(crate) fn check(tokens: &[Token], index: &ProjectIndex) -> Vec<(usize, &'sta
     let mut out: Vec<(usize, &'static PatternRule)> = unchecked_pdo(tokens).into_iter().map(|k| (k, &PDO_EXCEPTIONS)).collect();
     out.extend(inherited_statics(tokens, index).into_iter().map(|k| (k, &INHERITED_STATIC)));
     let names = crate::index::Names::new(tokens);
+    let spaces = crate::index::namespaces(tokens);
     let mut closures: Vec<(&str, bool, bool)> = Vec::new();
     for k in 0..tokens.len().saturating_sub(2) {
         if tokens[k].kind == TokenKind::Variable && tokens[k + 1].is_punct("=") {
@@ -263,7 +264,7 @@ pub(crate) fn check(tokens: &[Token], index: &ProjectIndex) -> Vec<(usize, &'sta
 
         if t.kind == TokenKind::Ident && !member && !declared && !open_call && !next.is_some_and(|n| n.is_punct("::")) {
             let word = !prev.is_some_and(|p| p.is_ident_ci("const") || p.is_ident_ci("class") || p.is_ident_ci("function"));
-            if (t.text == "SID" || t.text == "NIL") && word && !index.defines_constant(&t.text) {
+            if (t.text == "SID" || t.text == "NIL") && word && !index.defines_constant_in(crate::index::namespace_at(&spaces, k), &t.text) {
                 out.push((k, if t.text == "SID" { &SID_CONSTANT } else { &NIL_CONSTANT }));
             }
         }
@@ -381,10 +382,7 @@ pub(crate) fn check(tokens: &[Token], index: &ProjectIndex) -> Vec<(usize, &'sta
         }
         if name == "is_callable" {
             let first = args.first().copied().unwrap_or(close);
-            let quoted = |t: &Token| match t.kind {
-                TokenKind::Str { interpolates: false, .. } => Some(t.text.trim_matches(|q| q == '\'' || q == '"').to_string()),
-                _ => None,
-            };
+            let quoted = |t: &Token| t.literal().map(str::to_string);
             let at = if tokens[first].is_ident_ci("array") { first + 1 } else { first };
             let pair = (tokens[at].is_punct("[") || tokens[at].is_punct("("))
                 .then(|| starts(tokens, at))
@@ -405,10 +403,7 @@ pub(crate) fn check(tokens: &[Token], index: &ProjectIndex) -> Vec<(usize, &'sta
             }
         }
         if XML_HANDLERS.contains(&name.as_str()) {
-            let text = |a: &usize| match tokens[*a].kind {
-                TokenKind::Str { interpolates: false, .. } => Some(tokens[*a].text.trim_matches(|q| q == '\'' || q == '"')),
-                _ => None,
-            };
+            let text = |a: &usize| tokens[*a].literal();
             let stale = args.iter().skip(1).filter_map(text).any(|s| s.is_empty() || xml_object && !index.declares_function("", s, true));
             if stale {
                 out.push((k, &XML_HANDLER_STRING));
@@ -442,9 +437,8 @@ pub(crate) fn check(tokens: &[Token], index: &ProjectIndex) -> Vec<(usize, &'sta
             let class = args.get(1).and_then(|&a| {
                 let c = &tokens[a];
                 match c.kind {
-                    TokenKind::Str { interpolates: false, .. } => Some(c.text.trim_matches(|q| q == '\'' || q == '"').to_string()),
                     TokenKind::Ident if tokens.get(a + 1).is_some_and(|n| n.is_punct("::")) => Some(c.text.clone()),
-                    _ => None,
+                    _ => c.literal().map(str::to_string),
                 }
             });
             let short = class.map(|c| c.rsplit('\\').next().unwrap_or_default().to_ascii_lowercase());

@@ -78,7 +78,7 @@ fn literal(arg: &[Token]) -> Lit {
     match arg {
         [t] if t.kind == TokenKind::Number => number(&t.text).map_or(Lit::Other, |(v, int)| Lit::Num(v, int)),
         [m, t] if m.is_punct("-") && t.kind == TokenKind::Number => number(&t.text).map_or(Lit::Other, |(v, int)| Lit::Num(-v, int)),
-        [t] if matches!(t.kind, TokenKind::Str { interpolates: false, backtick: false }) => Lit::Str(string_literal(&t.text)),
+        [t] if t.literal().is_some() => Lit::Str(string_literal(&t.text)),
         [t] if t.is_ident_ci("null") => Lit::Null,
         [t] if t.is_ident_ci("true") => Lit::Bool(true),
         [t] if t.is_ident_ci("false") => Lit::Bool(false),

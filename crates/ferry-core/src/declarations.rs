@@ -231,8 +231,7 @@ fn constants(tokens: &[Token], body: &TypeBody) -> Vec<Const> {
 const SUPERGLOBALS: &[&str] = &["this", "GLOBALS", "_SERVER", "_GET", "_POST", "_FILES", "_COOKIE", "_SESSION", "_REQUEST", "_ENV"];
 
 fn literal(t: &Token) -> bool {
-    matches!(t.kind, TokenKind::Number | TokenKind::Str { interpolates: false, .. })
-        || ["true", "false", "null"].iter().any(|w| t.is_ident_ci(w))
+    t.kind == TokenKind::Number || t.literal().is_some() || ["true", "false", "null"].iter().any(|w| t.is_ident_ci(w))
 }
 
 fn statement_start(tokens: &[Token], k: usize) -> bool {
@@ -240,7 +239,7 @@ fn statement_start(tokens: &[Token], k: usize) -> bool {
 }
 
 fn string_value(t: &Token) -> Option<&str> {
-    matches!(t.kind, TokenKind::Str { interpolates: false, .. }).then(|| t.text.trim_matches(|c| c == '\'' || c == '"'))
+    t.literal()
 }
 
 /// Global and namespaced constants declared with `const` or `define()` outside any block, in order.

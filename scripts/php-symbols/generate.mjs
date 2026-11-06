@@ -27,6 +27,8 @@ const typedConstants = new Map();
 const removedClassConstants = new Map();
 const deprecatedClassConstants = new Map();
 const finalClasses = new Map();
+const addedClasses = new Map();
+const mixedCaseConstants = new Set(dumps.flatMap((d) => Object.keys(d.constants).filter((k) => /[a-z]/.test(k) && !k.includes("\\"))));
 const first = (map, key, value) => map.has(key) || map.set(key, value);
 const latest = dumps[dumps.length - 1];
 // Functions that only exist when the build host supports them, so their absence isn't a removal.
@@ -101,8 +103,32 @@ for (let i = 1; i < dumps.length; i++) {
   for (const [name, c] of Object.entries(next.classes)) {
     if (c.final && prev.classes[name] && !prev.classes[name].final && latest.classes[name]?.final) first(finalClasses, name, [since, c.name]);
   }
+  for (const [name, c] of Object.entries(next.classes)) {
+    if (!prev.classes[name] && prev.extensions.includes(c.ext) && !name.includes("\\")) first(addedClasses, name, [since, c.ext]);
+  }
   for (const [name, ext] of Object.entries(prev.ini)) {
     if (!(name in next.ini) && !(name in latest.ini) && kept.has(ext)) first(removedIni, name, [since, ext]);
+  }
+}
+
+// What a function took on each older line, for the lines where that differs from the newest one.
+const arity = (f) => [f.required, f.variadic ? 255 : f.total];
+const arityBefore = new Map();
+for (const [name, f] of Object.entries(latest.functions)) {
+  const newest = arity(f).join();
+  const ranges = [];
+  for (const d of dumps.filter((d) => line(d.version)[0] === 8)) {
+    const old = d.functions[name];
+    if (!old) continue;
+    const shape = arity(old);
+    const last = ranges[ranges.length - 1];
+    if (last && last[1].join() === shape.join()) last[0] = line(d.version);
+    else ranges.push([line(d.version), shape]);
+  }
+  if (ranges.length > 1 || (ranges.length === 1 && ranges[0][1].join() !== newest)) {
+    ranges
+      .filter(([, shape]) => shape.join() !== newest)
+      .forEach(([until, shape]) => arityBefore.set(`${name}\0${until.join(".")}`, [name, until, shape]));
   }
 }
 
@@ -160,6 +186,18 @@ const out = [
   table("FINAL_CLASSES", "(class lowercase, final since, class name)", finalClasses, {
     type: "(&str, (u32, u32), &str)",
     fmt: (k, [s, n]) => `(${str(k)}, ${ver(s)}, ${str(n)})`,
+  }),
+  table("ADDED_CLASSES", "(class lowercase, added in, extension), for extensions older PHP versions also had", addedClasses, {
+    type: "(&str, (u32, u32), &str)",
+    fmt: (k, [s, e]) => `(${str(k)}, ${ver(s)}, ${str(e)})`,
+  }),
+  table("MIXED_CASE_CONSTANTS", "Built-in constants with lowercase letters in their names", new Map([...mixedCaseConstants].map((k) => [k, k])), {
+    type: "&str",
+    fmt: (k) => str(k),
+  }),
+  table("ARITY_BEFORE", "(function, last PHP with this shape, required, max); newer lines use crate::arity::ARITY", arityBefore, {
+    type: "(&str, (u32, u32), u8, u8)",
+    fmt: (_, [n, u, [r, m]]) => `(${str(n)}, ${ver(u)}, ${r}, ${m})`,
   }),
   table("REMOVED_INI", "(ini setting, removed in, extension)", removedIni, {
     type: "(&str, (u32, u32), &str)",
