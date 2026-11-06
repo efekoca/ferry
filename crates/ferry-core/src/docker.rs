@@ -250,7 +250,8 @@ impl Comparison {
         note(!self.dependencies_installed, Gap::Dependencies);
         note(expected_files > 0 && runs.iter().any(|r| r.lint_files == 0 && !r.lint_stopped), Gap::NoFiles);
         note(runs.iter().any(|r| r.lint_stopped), Gap::LintStopped);
-        note(runs.iter().any(|r| r.pages_stopped), Gap::PagesStopped);
+        let missing = self.pages.iter().any(|p| p.change == crate::web::PageChange::Missing);
+        note(missing || runs.iter().any(|r| r.pages_stopped), Gap::PagesStopped);
         note(runs.iter().any(|r| r.pages_limited), Gap::PagesLimited);
         note(tests().any(|t| t.timed_out), Gap::TestsStopped);
         note(tests().any(|t| !t.ran && !t.timed_out), Gap::TestsDidNotRun);
@@ -657,7 +658,7 @@ struct Setup<'a> {
     drivers: &'a [String],
     images: &'a Path,
     database: Option<&'a crate::database::Prepared>,
-    built: RefCell<Vec<String>>,
+    built: &'a RefCell<Vec<String>>,
 }
 
 struct PreparedImage {
@@ -722,7 +723,9 @@ fn run_version(
         }
         Some(prepared) => {
             step(Step::Database);
-            let running = crate::database::start(container, &version.compact(), &prepared.connection, prepared.dump.as_deref())?;
+            let old_client = version < PhpVersion::new(7, 4);
+            let running =
+                crate::database::start(container, &version.compact(), &prepared.connection, prepared.dump.as_deref(), old_client)?;
             let socket = crate::database::socket_mount(&running, &prepared.connection);
             container.attach(Some(&running.name), socket, crate::database::environment(&prepared.connection));
             Some(running)
@@ -734,7 +737,7 @@ fn run_version(
     let mut pages_stopped = false;
     if !setup.pages.is_empty() {
         step(Step::Pages(version));
-        let script = crate::web::script(project, if visit.is_empty() { setup.pages } else { visit });
+        let script = crate::web::script(project, if visit.is_empty() { setup.pages } else { visit }, visit.is_empty());
         let run = container.run(&format!("pages-{}", version.compact()), project, &image, false, &script, PAGE_TIMEOUT)?;
         let text = output(&run);
         crawl = crate::web::parse(&text);
@@ -817,8 +820,22 @@ fn run_version(
         installed_extensions,
         image_failed,
         events,
-        log: tail(&log),
+        log: crate::redact::text(&tail(&log)),
     })
+}
+
+struct BuiltImages<'a> {
+    docker: &'a Path,
+    built: &'a RefCell<Vec<String>>,
+    remove: bool,
+}
+
+impl Drop for BuiltImages<'_> {
+    fn drop(&mut self) {
+        if self.remove {
+            let _ = remove(self.docker, &self.built.borrow());
+        }
+    }
 }
 
 /// Symfony's bridge exits with 1 over deprecations even though every test passed.
@@ -917,7 +934,7 @@ pub fn compare(
         drop_outside_links(&base).map_err(|e| e.to_string())?;
         dependencies_installed = done.status.is_some_and(|s| s.success());
         if !dependencies_installed {
-            install_log = tail(&output(&done));
+            install_log = crate::redact::text(&tail(&output(&done)));
         }
     }
     let lint = lint_script(&crate::config::load(root).unwrap_or_default().exclude);
@@ -929,6 +946,8 @@ pub fn compare(
     used.sort();
     used.dedup();
     let images = work.path().join("images");
+    let built = RefCell::new(Vec::new());
+    let _cleanup = BuiltImages { docker: &docker, built: &built, remove: options.clean_images };
     let mut setup = Setup {
         used: &used,
         lint: &lint,
@@ -938,7 +957,7 @@ pub fn compare(
         drivers: &drivers,
         images: &images,
         database: None,
-        built: RefCell::new(Vec::new()),
+        built: &built,
     };
     if options.database == Some(crate::database::Source::Seed) && !dependencies_installed {
         let reason = install_log.trim();
@@ -974,10 +993,10 @@ pub fn compare(
     }
     let runs = run_version(&container, source, &base, &setup, &[], &step)
         .and_then(|first| run_version(&container, target, &target_dir, &setup, &first.crawl.paths(), &step).map(|second| (first, second)));
-    if options.clean_images {
-        let _ = remove(&docker, &setup.built.borrow());
-    }
     let (source_run, target_run) = runs?;
+    if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+        return Err(crate::t!("Karşılaştırma durduruldu.", "The comparison was stopped."));
+    }
     let pages = crate::web::compare(&source_run.crawl, &target_run.crawl);
     let data_changes = crate::database::data_changes(&source_run.data, &target_run.data);
     let new_failures = target_run.failed_tests.iter().filter(|t| !source_run.failed_tests.contains(t)).cloned().collect();

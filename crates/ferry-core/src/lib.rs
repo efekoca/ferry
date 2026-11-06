@@ -33,6 +33,7 @@ pub mod packagist;
 pub mod probe;
 pub mod project;
 pub mod rector;
+pub mod redact;
 pub mod report;
 pub mod rules;
 pub mod runtime;

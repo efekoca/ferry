@@ -857,7 +857,14 @@ fn run_compare(args: &[String]) -> Result<u8, String> {
     }
     let prepare = prepare.or(config.docker.prepare);
     let test = test.or(config.docker.test);
-    let cancel = std::sync::atomic::AtomicBool::new(false);
+    static CANCEL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    let cancel = &CANCEL;
+    let _ = ctrlc::set_handler(|| {
+        if CANCEL.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            std::process::exit(130);
+        }
+        eprintln!("ferry-cli: stopping and cleaning up; press Ctrl-C again to quit at once");
+    });
     let options =
         ferry_core::docker::Options { install_extensions: extensions, clean_images, pages, database, prepare, test, fixes: Vec::new() };
     let step = |step: ferry_core::docker::Step| match step {
@@ -869,11 +876,11 @@ fn run_compare(args: &[String]) -> Result<u8, String> {
         ferry_core::docker::Step::Pages(v) => eprintln!("ferry-cli: requesting pages on PHP {v}"),
         ferry_core::docker::Step::Tests(v) => eprintln!("ferry-cli: running tests on PHP {v}"),
     };
-    let result = ferry_core::docker::compare(&root, source, target, options.clone(), &cancel, step)?;
+    let result = ferry_core::docker::compare(&root, source, target, options.clone(), cancel, step)?;
     if let Some(rector) = rector {
         let fixes = safe_fixes(&root, &rector, target)?;
         eprintln!("ferry-cli: comparing again with {} fixed files in a copy", fixes.len());
-        let after = ferry_core::docker::compare(&root, source, target, ferry_core::docker::Options { fixes, ..options }, &cancel, step)?;
+        let after = ferry_core::docker::compare(&root, source, target, ferry_core::docker::Options { fixes, ..options }, cancel, step)?;
         let outcome = ferry_core::docker::outcome(&result, &after);
         if json_output {
             println!("{}", serde_json::to_string_pretty(&outcome).map_err(|e| e.to_string())?);

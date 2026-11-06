@@ -287,6 +287,15 @@ impl AppState {
     }
 }
 
+/// Roots someone typed for a log carry over to the next one. A check's come from its container.
+fn typed_roots(log: &RuntimeLog) -> Vec<String> {
+    if log.stamp.is_some() {
+        Vec::new()
+    } else {
+        log.roots.clone()
+    }
+}
+
 #[tauri::command]
 async fn import_runtime_log(state: State<'_, AppState>, path: String, log: String) -> CmdResult<ScanResponse> {
     let path = normalize_path(path);
@@ -317,7 +326,7 @@ async fn import_runtime_log(state: State<'_, AppState>, path: String, log: Strin
     let mut entry = entry;
     let key = root.to_string_lossy().to_string();
     let mut logs = state.runtime.lock().unwrap();
-    entry.roots = logs.get(&key).map(|l| l.roots.clone()).unwrap_or_default();
+    entry.roots = logs.get(&key).map(typed_roots).unwrap_or_default();
     logs.insert(key, entry.clone());
     drop(logs);
     Ok(respond(&root, scan, Some(&entry)))
@@ -353,9 +362,9 @@ async fn run_local_check(state: State<'_, AppState>, path: String, target: Strin
     let scan = state.scans.lock().unwrap().get(&path).cloned().ok_or_else(|| t!("Önce projeyi tarayın.", "Scan the project first."))?;
     let shutdown = state.shutdown.clone();
     let chosen = state.php_override();
-    let stamp = scan.stamp.clone();
     let (root, entry) = blocking(move || {
         let root = project_root(&path)?;
+        let stamp = project::stamp(&root, &project::scanned_files(&root));
         let local = toolchain::local_php_with(&[target.to_string()], chosen.as_deref()).into_iter().next().ok_or_else(|| {
             t!(
                 "Bu bilgisayarda PHP {target} bulunamadı. Homebrew, Herd ya da paket yöneticinizle kurun.",
@@ -1661,6 +1670,9 @@ pub fn run() {
                 std::thread::sleep(Duration::from_millis(50));
             }
             while state.writes.try_lock().is_err() && started.elapsed() < Duration::from_secs(10) {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            while !state.docker_cancel.lock().unwrap().is_empty() && started.elapsed() < Duration::from_secs(10) {
                 std::thread::sleep(Duration::from_millis(50));
             }
         }

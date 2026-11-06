@@ -962,3 +962,18 @@ fn lints_with_a_local_php_of_the_target() {
     let err = h.invoke("run_local_check", json!({ "path": root, "target": line, "kind": "tests" })).unwrap_err();
     assert_eq!(err, json!("Projede vendor/bin/phpunit yok."));
 }
+
+#[test]
+fn a_real_test_does_not_pass_its_container_root_to_the_next_log() {
+    let log = |stamp: Option<String>| RuntimeLog {
+        file: String::new(),
+        php: None,
+        events: Vec::new(),
+        check: None,
+        roots: vec!["/app".to_string()],
+        target: None,
+        stamp,
+    };
+    assert_eq!(typed_roots(&log(None)), ["/app"]);
+    assert!(typed_roots(&log(Some("s".to_string()))).is_empty());
+}

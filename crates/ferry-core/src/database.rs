@@ -12,6 +12,10 @@ use walkdir::WalkDir;
 const READY_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const SSH_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 const SEED_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+const START_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+const PROBE_TIMEOUT: Duration = Duration::from_secs(30);
+const QUERY_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+const DUMP_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const LOCAL_ADDRESS: &str = "127.0.0.1";
 const ROOT_PASSWORD: &str = "ferry";
 const SOCKET_DIR: &str = "/var/run/mysqld";
@@ -254,6 +258,24 @@ fn sqlite_at(path: &str) -> Connection {
     Connection { engine: Engine::Sqlite, host: String::new(), port: 0, name, user: String::new(), password: String::new() }
 }
 
+fn percent_decode(text: &str) -> String {
+    let b = text.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut k = 0;
+    while k < b.len() {
+        let hex = (b[k] == b'%').then(|| text.get(k + 1..k + 3).and_then(|h| u8::from_str_radix(h, 16).ok())).flatten();
+        out.push(hex.unwrap_or(b[k]));
+        k += if hex.is_some() { 3 } else { 1 };
+    }
+    String::from_utf8(out).unwrap_or_else(|_| text.to_string())
+}
+
+fn percent_encode(text: &str) -> String {
+    text.bytes()
+        .map(|c| if c.is_ascii_alphanumeric() || b"-._~".contains(&c) { (c as char).to_string() } else { format!("%{c:02X}") })
+        .collect()
+}
+
 fn from_url(url: &str) -> Option<Connection> {
     let (scheme, rest) = url.split_once("://")?;
     let engine = engine_named(scheme)?;
@@ -269,8 +291,8 @@ fn from_url(url: &str) -> Option<Connection> {
         host: host.to_string(),
         port: port.parse().unwrap_or(engine.port()),
         name: name.split('?').next().unwrap_or_default().to_string(),
-        user: user.to_string(),
-        password: password.to_string(),
+        user: percent_decode(user),
+        password: percent_decode(password),
     })
 }
 
@@ -398,7 +420,8 @@ fn point_copy_at(project: &Path, connection: &Connection) -> std::io::Result<()>
             Engine::Sqlite => format!("sqlite:///{}", connection.sqlite_path()),
             engine => {
                 let scheme = if engine == Engine::Mysql { "mysql" } else { "postgresql" };
-                format!("{scheme}://{}:{}@{LOCAL_ADDRESS}:{}/{}", connection.user, connection.password, connection.port, connection.name)
+                let (user, password) = (percent_encode(&connection.user), percent_encode(&connection.password));
+                format!("{scheme}://{user}:{password}@{LOCAL_ADDRESS}:{}/{}", connection.port, connection.name)
             }
         };
         let mut values = match connection.engine {
@@ -440,6 +463,7 @@ pub(crate) fn environment(connection: &Connection) -> Vec<(String, String)> {
 
 pub(crate) struct Running<'a> {
     docker: &'a Path,
+    cancel: &'a std::sync::atomic::AtomicBool,
     pub name: String,
     pub socket: String,
     connection: Connection,
@@ -454,9 +478,11 @@ impl Drop for Running<'_> {
 }
 
 impl Running<'_> {
-    fn exec(&self, script: &str) -> Option<String> {
-        let done = toolchain::command(self.docker).args(["exec", &self.name, "sh", "-c", script]).output().ok()?;
-        done.status.success().then(|| String::from_utf8_lossy(&done.stdout).to_string())
+    fn exec(&self, script: &str, timeout: Duration) -> Option<String> {
+        let mut cmd = toolchain::command(self.docker);
+        cmd.args(["exec", &self.name, "sh", "-c", script]);
+        let done = toolchain::run_process(cmd, self.docker, self.cancel, timeout).ok()?;
+        (done.stopped.is_none() && done.status.is_some_and(|s| s.success())).then(|| String::from_utf8_lossy(&done.stdout).to_string())
     }
 
     fn client(&self) -> String {
@@ -482,7 +508,7 @@ impl Running<'_> {
             if cancel.load(Ordering::Relaxed) {
                 return Err(crate::t!("Karşılaştırma durduruldu.", "The comparison was stopped."));
             }
-            if self.exec(&check).is_some() {
+            if self.exec(&check, PROBE_TIMEOUT).is_some() {
                 return Ok(());
             }
             let state = toolchain::command(self.docker).args(["inspect", "-f", "{{.State.Running}}", &self.name]).output();
@@ -514,7 +540,7 @@ impl Running<'_> {
                 self.client()
             ),
         };
-        self.exec(&script).map_or_else(unreadable_snapshot, |text| parse_snapshot(&text))
+        self.exec(&script, QUERY_TIMEOUT).map_or_else(unreadable_snapshot, |text| parse_snapshot(&text))
     }
 
     fn dump_to(&self, file: &Path) -> Result<(), String> {
@@ -524,13 +550,17 @@ impl Running<'_> {
                 self.connection.port, self.connection.name
             ),
             Engine::Postgres | Engine::Sqlite => {
-                format!("export PGPASSWORD=\"$POSTGRES_PASSWORD\"; pg_dump -h 127.0.0.1 -p {} -U {} {}", self.connection.port, self.connection.user, self.connection.name)
+                format!("export PGPASSWORD=\"$POSTGRES_PASSWORD\"; pg_dump --no-owner --no-privileges -h 127.0.0.1 -p {} -U {} {}", self.connection.port, self.connection.user, self.connection.name)
             }
         };
         let out = std::fs::File::create(file).map_err(|e| e.to_string())?;
-        let done =
-            toolchain::command(self.docker).args(["exec", &self.name, "sh", "-c", &script]).stdout(out).stderr(Stdio::null()).status();
-        if done.is_ok_and(|s| s.success()) {
+        let mut cmd = toolchain::command(self.docker);
+        cmd.args(["exec", &self.name, "sh", "-c", &script]);
+        let done = toolchain::run_process_to(cmd, self.docker, self.cancel, DUMP_TIMEOUT, out).map_err(|e| e.to_string())?;
+        if done.stopped == Some(toolchain::Stop::Cancelled) {
+            return Err(crate::t!("Karşılaştırma durduruldu.", "The comparison was stopped."));
+        }
+        if done.status.is_some_and(|s| s.success()) {
             Ok(())
         } else {
             Err(crate::t!("Test verisi dışa aktarılamadı.", "The test data couldn't be exported."))
@@ -576,6 +606,7 @@ pub(crate) fn start<'a>(
     suffix: &str,
     connection: &Connection,
     dump: Option<&Path>,
+    old_client: bool,
 ) -> Result<Running<'a>, String> {
     let name = format!("{}-db-{suffix}", container.prefix);
     let socket = format!("{name}-socket");
@@ -602,32 +633,71 @@ pub(crate) fn start<'a>(
         Engine::Postgres | Engine::Sqlite => {
             pass("POSTGRES_USER", &connection.user);
             pass("POSTGRES_PASSWORD", &connection.password);
+            if connection.password.is_empty() {
+                pass("POSTGRES_HOST_AUTH_METHOD", "trust");
+            }
             pass("POSTGRES_DB", &connection.name);
             pass("PGPORT", &connection.port.to_string());
             cmd.args(["--tmpfs", "/var/lib/postgresql/data:uid=999,gid=999"]);
         }
     }
     if let Some(dir) = dump {
-        cmd.arg("-v").arg(format!("{}:/docker-entrypoint-initdb.d:ro", dir.display()));
+        let folder = if engine == Engine::Mysql { "/ferry-data" } else { "/docker-entrypoint-initdb.d" };
+        cmd.arg("-v").arg(format!("{}:{folder}:ro", dir.display()));
     }
-    cmd.arg(engine.image());
+    if engine == Engine::Mysql && dump.is_some() {
+        cmd.args(["--entrypoint", "sh", engine.image(), "-c", MYSQL_IMPORT, "sh", "mysqld"]);
+    } else {
+        cmd.arg(engine.image());
+    }
     if engine == Engine::Mysql {
         cmd.args(["--default-authentication-plugin=mysql_native_password", "--character-set-server=utf8mb4", "--mysqlx=OFF"]);
+        if old_client {
+            cmd.arg("--collation-server=utf8mb4_general_ci");
+        }
     }
-    let done = cmd.output().map_err(|e| e.to_string())?;
-    let running = Running { docker: container.docker, name, socket, connection: connection.clone() };
-    if !done.status.success() {
+    let running = Running { docker: container.docker, cancel: container.cancel, name, socket, connection: connection.clone() };
+    let done = toolchain::run_process(cmd, container.docker, container.cancel, START_TIMEOUT).map_err(|e| e.to_string())?;
+    if done.stopped == Some(toolchain::Stop::Cancelled) {
+        return Err(crate::t!("Karşılaştırma durduruldu.", "The comparison was stopped."));
+    }
+    if !done.status.is_some_and(|s| s.success()) {
         let reason = String::from_utf8_lossy(&done.stderr).trim().to_string();
         return Err(crate::t!("Veritabanı başlatılamadı: {reason}", "The database couldn't start: {reason}"));
     }
     running.ready(container.cancel)?;
     if engine == Engine::Mysql {
-        running.exec(&format!("printf 'mysqli.default_socket={SOCKET_DIR}/mysqld.sock\\npdo_mysql.default_socket={SOCKET_DIR}/mysqld.sock\\nmysql.default_socket={SOCKET_DIR}/mysqld.sock\\n' > {SOCKET_DIR}/ferry.ini; chmod 755 {SOCKET_DIR}"));
+        let plain = |text: &str| text.chars().all(|c| c.is_ascii_alphanumeric() || "_-.".contains(c));
+        let (user, base) = (&connection.user, &connection.name);
+        if user != "root" && connection.password.is_empty() && plain(user) && plain(base) {
+            running.exec(
+                &format!(
+                    "{}$c -e \"create user if not exists '{user}'@'%' identified by ''; grant all on \\`{base}\\`.* to '{user}'@'%'\"",
+                    running.client()
+                ),
+                PROBE_TIMEOUT,
+            );
+        }
+        running.exec(&format!("printf 'mysqli.default_socket={SOCKET_DIR}/mysqld.sock\\npdo_mysql.default_socket={SOCKET_DIR}/mysqld.sock\\nmysql.default_socket={SOCKET_DIR}/mysqld.sock\\n' > {SOCKET_DIR}/ferry.ini; chmod 755 {SOCKET_DIR}"), PROBE_TIMEOUT);
     }
     Ok(running)
 }
 
-fn dump_live(docker: &Path, connection: &Connection, file: &Path) -> Result<(), String> {
+/// MariaDB and old mysqldump write things MySQL 8.0 refuses. Lines with row data stay as they are.
+/// This runs before the image's own start-up, so it works whatever a bind mount does to file modes.
+const MYSQL_IMPORT: &str = r#"for f in /ferry-data/dump.*; do
+  case "$f" in *.gz) gunzip -c "$f" ;; *) cat "$f" ;; esac | {
+    echo "SET SESSION sql_mode='';"
+    LC_ALL=C sed -E -e '/^\/\*M!999999/d' -e '/^INSERT /b' \
+      -e 's/utf8mb4_uca1400_[a-z0-9_]*/utf8mb4_unicode_ci/g' -e 's/utf8mb3_uca1400_[a-z0-9_]*/utf8mb3_unicode_ci/g' \
+      -e 's/,?NO_AUTO_CREATE_USER//g' -e 's/ENGINE=Aria/ENGINE=InnoDB/g' -e 's/ PAGE_CHECKSUM=[01]//g' -e 's/ TRANSACTIONAL=[01]//g' \
+      -e 's/^\) TYPE=/) ENGINE=/'
+  } > /docker-entrypoint-initdb.d/dump.sql
+done
+exec docker-entrypoint.sh "$@"
+"#;
+
+fn dump_live(container: &Container, connection: &Connection, file: &Path) -> Result<(), String> {
     if !connection.is_local() {
         let host = &connection.host;
         return Err(crate::t!(
@@ -636,22 +706,28 @@ fn dump_live(docker: &Path, connection: &Connection, file: &Path) -> Result<(), 
         ));
     }
     let out = std::fs::File::create(file).map_err(|e| e.to_string())?;
+    let name = format!("{}-dump", container.prefix);
+    let docker = container.docker;
     let mut cmd = toolchain::command(docker);
-    cmd.args(["run", "--rm", "--add-host=host.docker.internal:host-gateway"]);
-    let (port, user, name) = (connection.port.to_string(), &connection.user, &connection.name);
+    cmd.args(["run", "--rm", "--name", &name, "--add-host=host.docker.internal:host-gateway"]);
+    let (port, user, base) = (connection.port.to_string(), &connection.user, &connection.name);
     match connection.engine {
         Engine::Mysql => {
             cmd.args(["-e", "MYSQL_PWD"]).env("MYSQL_PWD", &connection.password).arg(Engine::Mysql.image());
             cmd.args(["mysqldump", "-hhost.docker.internal", &format!("-P{port}"), &format!("-u{user}")]);
-            cmd.args(["--single-transaction", "--no-tablespaces", "--column-statistics=0", "--set-gtid-purged=OFF", name]);
+            cmd.args(["--single-transaction", "--no-tablespaces", "--column-statistics=0", "--set-gtid-purged=OFF", base]);
         }
         Engine::Postgres | Engine::Sqlite => {
             cmd.args(["-e", "PGPASSWORD"]).env("PGPASSWORD", &connection.password).arg(Engine::Postgres.image());
-            cmd.args(["pg_dump", "-h", "host.docker.internal", "-p", &port, "-U", user, name]);
+            cmd.args(["pg_dump", "--no-owner", "--no-privileges", "-h", "host.docker.internal", "-p", &port, "-U", user, base]);
         }
     }
-    let done = cmd.stdout(out).stderr(Stdio::piped()).output().map_err(|e| e.to_string())?;
-    if done.status.success() {
+    let done = toolchain::run_process_to(cmd, docker, container.cancel, DUMP_TIMEOUT, out).map_err(|e| e.to_string())?;
+    if done.stopped.is_some() {
+        let _ = toolchain::command(docker).args(["rm", "-f", &name]).output();
+        return Err(crate::t!("Veritabanı kopyalama durduruldu.", "Copying the database was stopped."));
+    }
+    if done.status.is_some_and(|s| s.success()) {
         Ok(())
     } else {
         let reason = String::from_utf8_lossy(&done.stderr).trim().to_string();
@@ -660,7 +736,10 @@ fn dump_live(docker: &Path, connection: &Connection, file: &Path) -> Result<(), 
 }
 
 fn dump_engine(file: &Path) -> Engine {
-    let head = std::fs::read(file).map(|b| String::from_utf8_lossy(&b[..b.len().min(8192)]).to_string()).unwrap_or_default();
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    let read = std::fs::File::open(file).and_then(|f| f.take(8192).read_to_end(&mut bytes));
+    let head = if read.is_ok() { String::from_utf8_lossy(&bytes).to_string() } else { String::new() };
     if head.contains("PostgreSQL") || head.contains("pg_dump") {
         Engine::Postgres
     } else if head.contains("sqlite_sequence") || head.contains("PRAGMA foreign_keys") {
@@ -718,7 +797,7 @@ $db->exec(substr($text, 0, 2) === "\x1f\x8b" ? gzdecode($text) : $text);
 "#;
 
 fn sqlite_script(php: &str, args: &str) -> String {
-    format!("cat > /tmp/ferry.php <<'FERRYEOF'\n{php}\nFERRYEOF\nphp /tmp/ferry.php {args}\n")
+    format!("cat > /tmp/ferry.php <<'FERRYEOF'\n{php}\nFERRYEOF\nphp -d memory_limit=-1 /tmp/ferry.php {args}\n")
 }
 
 pub(crate) fn sqlite_snapshot(
@@ -806,7 +885,7 @@ pub(crate) fn prepare(
             let connection = detected
                 .ok_or_else(|| crate::t!("Projede veritabanı ayarı bulunamadı.", "No database settings were found in the project."))?;
             step(Step::Database);
-            dump_live(container.docker, &connection, &dir.join("dump.sql"))?;
+            dump_live(container, &connection, &dir.join("dump.sql"))?;
             point_copy_at(project, &connection).map_err(failed)?;
             Ok(Prepared { connection, dump: Some(dir.to_path_buf()) })
         }
@@ -845,7 +924,7 @@ pub(crate) fn prepare(
                 }
                 return Ok(Prepared { connection, dump: None });
             }
-            let database = start(container, "seed", &connection, None)?;
+            let database = start(container, "seed", &connection, None, version < PhpVersion::new(7, 4))?;
             container.attach(Some(&database.name), socket_mount(&database, &connection), environment(&connection));
             let run = container.run(&format!("seed-{}", version.compact()), project, &image, false, command, SEED_TIMEOUT);
             container.detach();
@@ -863,6 +942,23 @@ pub(crate) fn prepare(
 #[cfg(test)]
 mod snapshot_tests {
     use super::*;
+
+    #[test]
+    fn url_passwords_are_decoded_and_written_back_encoded() {
+        let found = from_url("mysql://app%40x:p%40ss%2Fw@db:3306/shop").unwrap();
+        assert_eq!((found.user.as_str(), found.password.as_str()), ("app@x", "p@ss/w"));
+        assert_eq!(percent_encode(&found.password), "p%40ss%2Fw");
+        assert_eq!(percent_decode("100%"), "100%");
+        assert_eq!(percent_decode("%zz"), "%zz");
+    }
+
+    #[test]
+    fn only_the_start_of_a_dump_is_read_to_find_its_engine() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("a.sql");
+        std::fs::write(&file, "-- PostgreSQL database dump\n").unwrap();
+        assert_eq!(dump_engine(&file), Engine::Postgres);
+    }
 
     #[test]
     fn a_table_that_could_not_be_read_always_counts_as_a_difference() {
