@@ -247,10 +247,22 @@ fn a_check_only_counts_for_its_target_and_the_files_it_ran_on() {
         roots: Vec::new(),
         target: Some(PhpVersion::new(8, 4)),
         php: None,
+        stamp: Some("a".into()),
     };
-    assert!(log.applies_to(PhpVersion::new(8, 4)));
-    assert!(!log.applies_to(PhpVersion::new(8, 5)));
-    assert!(RuntimeLog { target: None, ..log }.applies_to(PhpVersion::new(8, 5)));
+    let scan = |target, stamp: &str| ScanResult {
+        target,
+        files_found: 0,
+        files_scanned: 0,
+        lines_scanned: 0,
+        findings: Vec::new(),
+        errors: Vec::new(),
+        duration_ms: 0,
+        stamp: stamp.into(),
+    };
+    assert!(log.applies_to(&scan(PhpVersion::new(8, 4), "a")));
+    assert!(!log.applies_to(&scan(PhpVersion::new(8, 5), "a")));
+    assert!(!log.applies_to(&scan(PhpVersion::new(8, 4), "b")), "the files changed");
+    assert!(RuntimeLog { target: None, stamp: None, ..log }.applies_to(&scan(PhpVersion::new(8, 5), "b")));
 }
 
 #[test]

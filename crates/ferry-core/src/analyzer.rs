@@ -34,6 +34,7 @@ pub struct ScanResult {
     pub findings: Vec<Finding>,
     pub errors: Vec<FileError>,
     pub duration_ms: u64,
+    pub stamp: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -122,6 +123,7 @@ pub fn analyze_files(root: &Path, files: &[PathBuf], target: PhpVersion, mut pro
         findings,
         errors,
         duration_ms: started.elapsed().as_millis() as u64,
+        stamp: crate::project::stamp(root, files),
     }
 }
 

@@ -121,6 +121,7 @@ export interface ScanResult {
   findings: Finding[];
   errors: { file: string; message: string }[];
   durationMs: number;
+  stamp: string;
   summary: Summary;
   ignored: IgnoredFinding[];
   staleIgnores: IgnoreEntry[];
@@ -173,7 +174,11 @@ export interface DockerRun {
   version: string;
   image: string;
   lintErrors: number;
-  tests: { exitCode: number | null; timedOut: boolean; passed: boolean; byFile: boolean } | null;
+  lintFiles: number;
+  lintStopped: boolean;
+  pagesStopped: boolean;
+  pagesLimited: boolean;
+  tests: { exitCode: number | null; timedOut: boolean; passed: boolean; byFile: boolean; ran: boolean; total: number | null } | null;
   failedTests: string[];
   missingExtensions: string[];
   installedExtensions: string[];
@@ -235,7 +240,12 @@ export interface DockerComparison {
   newOnTarget: DockerEvent[];
   goneOnTarget: DockerEvent[];
   origins: DockerOrigin[];
+  verdict: "clean" | "regressed" | "incomplete";
+  gaps: DockerGap[];
+  stamp: string;
 }
+
+export type DockerGap = "dependencies" | "noFiles" | "lintStopped" | "pagesStopped" | "pagesLimited" | "testsStopped" | "testsDidNotRun" | "fewerTests" | "extensionImage" | "differences";
 
 export interface DockerSummary {
   at: number;
@@ -250,6 +260,8 @@ export interface DockerSummary {
   newFailures: number;
   newMessages: number;
   dataChanges: number;
+  incomplete: boolean;
+  stamp: string;
 }
 
 export interface DockerImageUsage {

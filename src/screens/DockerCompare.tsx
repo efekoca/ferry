@@ -318,17 +318,22 @@ function FixLoop({ result, onTry }: { result: DockerComparison; onTry: (files: s
 function Result({ result, onTry }: { result: DockerComparison; onTry: (files: string[]) => void }) {
   const { t } = useI18n();
   const { showFindings } = useStore();
-  const fatal = result.newOnTarget.filter((e) => e.level === "fatal").length;
-  const regressed = result.newFailures.length > 0 || (!!result.target.tests && !result.target.tests.passed && !!result.source.tests?.passed);
+  const bad = result.verdict === "regressed";
+  const incomplete = result.verdict === "incomplete";
   const tested = !!result.source.tests?.passed && !!result.target.tests;
   const missing = [...new Set([...result.source.missingExtensions, ...result.target.missingExtensions])];
-  const brokenPages = result.pages.some((p) => p.change === "status" || p.change === "errors" || p.change === "missing");
-  const bad = fatal > 0 || regressed || brokenPages || result.target.lintErrors > result.source.lintErrors;
   const fixable = bad || result.newOnTarget.length > 0 || result.pages.some((p) => p.change !== "same");
   return (
     <>
-      <Callout tone={bad ? "danger" : tested ? "success" : "warn"} icon={bad ? <CircleAlert size={15} /> : <CircleCheck size={15} />}>
-        {bad ? t.docker.worse(result.target.version) : tested ? t.docker.same(result.target.version) : t.docker.notTested}
+      <Callout tone={bad ? "danger" : tested && !incomplete ? "success" : "warn"} icon={bad || incomplete ? <CircleAlert size={15} /> : <CircleCheck size={15} />}>
+        {bad ? t.docker.worse(result.target.version) : incomplete ? t.docker.incomplete : tested ? t.docker.same(result.target.version) : t.docker.notTested}
+        {result.gaps.length > 0 && (
+          <ul className="docker-gaps">
+            {result.gaps.map((gap) => (
+              <li key={gap}>{t.docker.gap[gap]}</li>
+            ))}
+          </ul>
+        )}
       </Callout>
       {result.origins.some((o) => o.kind !== "project") && (
         <Card>

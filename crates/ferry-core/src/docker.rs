@@ -87,19 +87,27 @@ const INSTALLABLE: &[&str] = &[
     "zip",
 ];
 
-/// Each file's output is written in one go: with several workers, `php -l`'s own writes can land
-/// in the middle of another file's message and the line can no longer be read.
-const LINT_COMMAND: &str = "-print0 | xargs -0 -P 4 -I{} sh -c \
-    'out=$(php -n -d error_reporting=-1 -d display_errors=stderr -d log_errors=0 -l \"$1\" 2>&1); printf \"%s\\n\" \"$out\"' _ {} \
-    | grep -v '^No syntax errors'";
-const TEST_SCRIPT: &str = "flags='--display-deprecations --display-warnings --no-progress'; \
-    php vendor/bin/phpunit --version | grep -qE 'PHPUnit [0-9]\\.' && flags=''; \
-    exec php -d error_reporting=-1 -d display_errors=1 -d memory_limit=1G vendor/bin/phpunit $flags";
-/// For suites that stop the whole process, such as tests that end it on purpose.
-const TEST_BY_FILE_SCRIPT: &str = "flags='--display-deprecations --display-warnings --no-progress'; \
-    php vendor/bin/phpunit --version | grep -qE 'PHPUnit [0-9]\\.' && flags=''; \
-    bad=0; for f in $(find . -name '*Test.php' -not -path './vendor/*' | sort); do \
-    timeout 120 php -d error_reporting=-1 -d display_errors=1 -d memory_limit=1G vendor/bin/phpunit $flags \"$f\" 2>&1 || bad=1; done; exit $bad";
+/// Each worker writes to its own file, so messages from several files can't mix in one pipe.
+const LINT_COMMAND: &str = "-print0 > /tmp/files; tr -cd '\\0' < /tmp/files | wc -c | sed 's/^ */FERRY-FILES /'; mkdir /tmp/lint; \
+    xargs -0 -P 4 -I{} sh -c \
+    'php -n -d error_reporting=-1 -d display_errors=stderr -d log_errors=0 -l \"$1\" > /tmp/lint/$$ 2>&1' _ {} < /tmp/files; \
+    cat /tmp/lint/* 2>/dev/null | grep -v '^No syntax errors'";
+const SELECT_TESTS: &str = "bin=vendor/bin/phpunit; [ -f vendor/bin/pest ] && bin=vendor/bin/pest; \
+    flags='--display-deprecations --display-warnings --no-progress'; \
+    php $bin --version | grep -qE 'PHPUnit [0-9]\\.' && flags=''";
+/// For suites that stop the whole process, such as tests that end it on purpose. A folder with no
+/// test files fails, or a suite that couldn't start would look like one that passed.
+const BY_FILE: &str = "find . -name '*Test.php' -not -path './vendor/*' | sort > /tmp/tests; [ -s /tmp/tests ] || exit 1; \
+    while IFS= read -r f; do timeout 120 php -d error_reporting=-1 -d display_errors=1 -d memory_limit=1G $bin $flags \"$f\" 2>&1 \
+    || touch /tmp/failed; done < /tmp/tests; [ ! -e /tmp/failed ]";
+
+fn test_script() -> String {
+    format!("{SELECT_TESTS}; exec php -d error_reporting=-1 -d display_errors=1 -d memory_limit=1G $bin $flags")
+}
+
+fn test_by_file_script() -> String {
+    format!("{SELECT_TESTS}; {BY_FILE}")
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -108,6 +116,9 @@ pub struct TestRun {
     pub timed_out: bool,
     pub passed: bool,
     pub by_file: bool,
+    /// Whether the run reached a test at all. An empty suite exits with 0 too.
+    pub ran: bool,
+    pub total: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -116,6 +127,10 @@ pub struct VersionRun {
     pub version: PhpVersion,
     pub image: String,
     pub lint_errors: usize,
+    pub lint_files: usize,
+    pub lint_stopped: bool,
+    pub pages_stopped: bool,
+    pub pages_limited: bool,
     pub tests: Option<TestRun>,
     pub failed_tests: Vec<String>,
     #[serde(skip)]
@@ -143,6 +158,35 @@ pub struct Comparison {
     pub new_on_target: Vec<Event>,
     pub gone_on_target: Vec<Event>,
     pub origins: Vec<crate::origin::Origin>,
+    pub verdict: Verdict,
+    pub gaps: Vec<Gap>,
+    pub stamp: String,
+}
+
+/// The one answer every surface shows. No regression and a finished run are different things:
+/// `Incomplete` means nothing bad was seen, but a step that should have run didn't finish.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Verdict {
+    Clean,
+    Regressed,
+    Incomplete,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Gap {
+    Dependencies,
+    NoFiles,
+    LintStopped,
+    PagesStopped,
+    PagesLimited,
+    TestsStopped,
+    TestsDidNotRun,
+    FewerTests,
+    ExtensionImage,
+    /// Pages or tables differ with no error to explain why, so someone has to look.
+    Differences,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize)]
@@ -186,14 +230,47 @@ pub struct Summary {
     pub new_failures: usize,
     pub new_messages: usize,
     pub data_changes: usize,
+    #[serde(default)]
+    pub incomplete: bool,
+    #[serde(default)]
+    pub stamp: String,
 }
 
 impl Comparison {
+    /// What should have been checked and wasn't.
+    fn gaps(&self, expected_files: usize) -> Vec<Gap> {
+        let runs = [&self.source, &self.target];
+        let tests = || runs.iter().filter_map(|r| r.tests.as_ref());
+        let mut gaps = Vec::new();
+        let mut note = |seen: bool, gap: Gap| {
+            if seen {
+                gaps.push(gap);
+            }
+        };
+        note(!self.dependencies_installed, Gap::Dependencies);
+        note(expected_files > 0 && runs.iter().any(|r| r.lint_files == 0 && !r.lint_stopped), Gap::NoFiles);
+        note(runs.iter().any(|r| r.lint_stopped), Gap::LintStopped);
+        note(runs.iter().any(|r| r.pages_stopped), Gap::PagesStopped);
+        note(runs.iter().any(|r| r.pages_limited), Gap::PagesLimited);
+        note(tests().any(|t| t.timed_out), Gap::TestsStopped);
+        note(tests().any(|t| !t.ran && !t.timed_out), Gap::TestsDidNotRun);
+        let totals = (self.source.tests.as_ref().and_then(|t| t.total), self.target.tests.as_ref().and_then(|t| t.total));
+        note(matches!(totals, (Some(source), Some(target)) if target < source), Gap::FewerTests);
+        note(runs.iter().any(|r| r.image_failed), Gap::ExtensionImage);
+        use crate::web::PageChange;
+        let differs = self.pages.iter().any(|p| matches!(p.change, PageChange::Body | PageChange::Redirect | PageChange::Errors));
+        note(differs || !self.data_changes.is_empty(), Gap::Differences);
+        gaps
+    }
+
     pub fn regressed(&self) -> bool {
         let fatal = self.new_on_target.iter().any(|e| e.level == runtime::Level::Fatal);
-        let tests = self.source.tests.as_ref().is_some_and(|t| t.passed) && self.target.tests.as_ref().is_some_and(|t| !t.passed);
+        let (source, target) = (self.source.tests.as_ref(), self.target.tests.as_ref());
+        let tests = source.is_some_and(|t| t.passed) && target.is_some_and(|t| !t.passed);
+        let died = source.is_some_and(|t| t.ran) && target.is_some_and(|t| !t.ran && !t.timed_out);
         fatal
             || tests
+            || died
             || !self.new_failures.is_empty()
             || self.pages.iter().any(crate::web::PageDiff::broke)
             || self.target.lint_errors > self.source.lint_errors
@@ -215,6 +292,8 @@ impl Comparison {
             new_failures: self.new_failures.len(),
             new_messages: self.new_on_target.len(),
             data_changes: self.data_changes.len(),
+            incomplete: self.verdict == Verdict::Incomplete,
+            stamp: self.stamp.clone(),
         }
     }
 }
@@ -283,11 +362,14 @@ pub fn outcome(before: &Comparison, after: &Comparison) -> Outcome {
     let tests_checked = after.target.tests.as_ref().is_some_and(|t| !t.timed_out && (t.passed || !after.target.failed_tests.is_empty()));
     let tests = if tests_checked { after.new_failures.as_slice() } else { before.new_failures.as_slice() };
     let tables = |c: &Comparison| -> Vec<String> { c.data_changes.iter().map(|d| d.table.clone()).collect() };
+    let finished = !after.target.lint_stopped && !after.target.pages_stopped;
+    let messages = if finished { after.new_on_target.as_slice() } else { before.new_on_target.as_slice() };
+    let tables_after = if finished { tables(after) } else { tables(before) };
     Outcome {
-        messages: delta(&before.new_on_target, &after.new_on_target, event_key),
+        messages: delta(&before.new_on_target, messages, event_key),
         tests: delta(&before.new_failures, tests, Clone::clone),
         pages: delta(&pages_before, &pages_after, Clone::clone),
-        tables: delta(&tables(before), &tables(after), Clone::clone),
+        tables: delta(&tables(before), &tables_after, Clone::clone),
         lint_before: before.target.lint_errors,
         lint_after: after.target.lint_errors,
         regressed_before: before.regressed(),
@@ -549,7 +631,8 @@ fn extended_image(
 
 /// Paths the project's config leaves out of the scan stay out of the syntax check too.
 fn lint_script(excluded: &[String]) -> String {
-    let mut script = "find /app -type f -name '*.php' -not -path '/app/vendor/*'".to_string();
+    let names: Vec<String> = crate::project::PHP_EXTENSIONS.iter().map(|e| format!("-iname '*.{e}'")).collect();
+    let mut script = format!("find /app -type f \\( {} \\) -not -path '/app/vendor/*'", names.join(" -o "));
     for path in excluded {
         let path = path.replace('\\', "/");
         let path = path.trim_start_matches("./").trim_end_matches('/');
@@ -616,6 +699,7 @@ fn run_version(
     version: PhpVersion,
     project: &Path,
     setup: &Setup,
+    visit: &[String],
     step: &dyn Fn(Step),
 ) -> Result<VersionRun, String> {
     let used = setup.used;
@@ -625,6 +709,8 @@ fn run_version(
     let lint = container.run(&format!("lint-{}", version.compact()), project, &image, false, setup.lint, LINT_TIMEOUT)?;
     let lint_output = output(&lint);
     let lint_errors = lint_lines(&lint_output).count();
+    let lint_files = lint_output.lines().find_map(|l| l.trim().strip_prefix("FERRY-FILES ")?.trim().parse().ok()).unwrap_or(0);
+    let lint_stopped = lint.stopped.is_some();
     let missing_extensions = used.iter().filter(|e| !modules.contains(*e)).cloned().collect();
     let mut log = lint_output;
     let sqlite = setup.database.filter(|p| p.connection.engine == crate::database::Engine::Sqlite);
@@ -644,12 +730,14 @@ fn run_version(
     };
     let mut data = crate::database::Snapshot::new();
     let mut crawl = crate::web::Crawl::default();
+    let mut pages_stopped = false;
     if !setup.pages.is_empty() {
         step(Step::Pages(version));
-        let script = crate::web::script(project, setup.pages);
+        let script = crate::web::script(project, if visit.is_empty() { setup.pages } else { visit });
         let run = container.run(&format!("pages-{}", version.compact()), project, &image, false, &script, PAGE_TIMEOUT)?;
         let text = output(&run);
         crawl = crate::web::parse(&text);
+        pages_stopped = run.stopped.is_some() || !text.contains(crate::web::LOG_MARKER);
         log.push_str(crate::web::server_log(&text));
     }
     if let Some(running) = &database {
@@ -658,7 +746,8 @@ fn run_version(
     if let Some(prepared) = sqlite {
         data = crate::database::sqlite_snapshot(container, version, project, &image, &prepared.connection);
     }
-    let has_tests = project.join("vendor/bin/phpunit").exists() && project.join("vendor/autoload.php").is_file();
+    let runner = project.join("vendor/bin/phpunit").exists() || project.join("vendor/bin/pest").exists();
+    let has_tests = runner && project.join("vendor/autoload.php").is_file();
     let mut failed = Vec::new();
     let tests = if let Some(command) = setup.test {
         step(Step::Tests(version));
@@ -671,24 +760,38 @@ fn run_version(
             timed_out: run.stopped == Some(Stop::TimedOut),
             passed: run.stopped.is_none() && exit_code == Some(0),
             by_file: false,
+            ran: run.stopped.is_none(),
+            total: None,
         })
     } else if has_tests {
         step(Step::Tests(version));
-        let run = container.run(&format!("tests-{}", version.compact()), project, &image, false, TEST_SCRIPT, TEST_TIMEOUT)?;
+        let run = container.run(&format!("tests-{}", version.compact()), project, &image, false, &test_script(), TEST_TIMEOUT)?;
         let mut run = run;
         let crashed = run.stopped.is_none() && !matches!(run.status.and_then(|s| s.code()), Some(0..=2));
         if crashed {
-            run =
-                container.run(&format!("tests-files-{}", version.compact()), project, &image, false, TEST_BY_FILE_SCRIPT, TEST_TIMEOUT)?;
+            log.push_str(&output(&run));
+            run = container.run(
+                &format!("tests-files-{}", version.compact()),
+                project,
+                &image,
+                false,
+                &test_by_file_script(),
+                TEST_TIMEOUT,
+            )?;
         }
-        log.push_str(&output(&run));
-        failed = failed_tests(&output(&run));
+        let text = output(&run);
+        log.push_str(&text);
+        failed = failed_tests(&text);
         let exit_code = run.status.and_then(|s| s.code());
+        let total = test_total(&text);
+        let ran = run.stopped.is_none() && crate::localcheck::ran_tests(&text) && total.is_some_and(|n| n > 0);
         Some(TestRun {
             exit_code,
             timed_out: run.stopped == Some(Stop::TimedOut),
-            passed: run.stopped.is_none() && (exit_code == Some(0) || failed.is_empty() && !crashed && tests_passed(&output(&run))),
+            passed: ran && (exit_code == Some(0) || failed.is_empty() && !crashed && tests_passed(&text)),
             by_file: crashed,
+            ran,
+            total,
         })
     } else {
         None
@@ -701,6 +804,10 @@ fn run_version(
         version,
         image,
         lint_errors,
+        lint_files,
+        lint_stopped,
+        pages_stopped,
+        pages_limited: crawl.limited,
         tests,
         failed_tests: failed,
         crawl,
@@ -862,8 +969,8 @@ pub fn compare(
             .and_then(|path| crate::safefs::replace(&path, content.as_bytes()))
             .map_err(|e| crate::t!("Düzeltme kopyaya yazılamadı ({file}): {e}", "Couldn't write the fix to the copy ({file}): {e}"))?;
     }
-    let runs = run_version(&container, source, &base, &setup, &step)
-        .and_then(|first| run_version(&container, target, &target_dir, &setup, &step).map(|second| (first, second)));
+    let runs = run_version(&container, source, &base, &setup, &[], &step)
+        .and_then(|first| run_version(&container, target, &target_dir, &setup, &first.crawl.paths(), &step).map(|second| (first, second)));
     if options.clean_images {
         let _ = remove(&docker, &setup.built.borrow());
     }
@@ -871,10 +978,10 @@ pub fn compare(
     let pages = crate::web::compare(&source_run.crawl, &target_run.crawl);
     let data_changes = crate::database::data_changes(&source_run.data, &target_run.data);
     let new_failures = target_run.failed_tests.iter().filter(|t| !source_run.failed_tests.contains(t)).cloned().collect();
-    let new_on_target = differs(&target_run.events, &source_run.events);
-    let gone_on_target = differs(&source_run.events, &target_run.events);
+    let (new_on_target, gone_on_target) = changed_events(&source_run.events, &target_run.events, !options.fixes.is_empty());
     let origins = crate::origin::group(root, &new_on_target, target);
-    Ok(Comparison {
+    let php_files = crate::project::inspect(root).map(|i| crate::project::collect_php_files(root, &i.excluded_dirs)).unwrap_or_default();
+    let mut comparison = Comparison {
         source: source_run,
         target: target_run,
         dependencies_installed,
@@ -886,6 +993,50 @@ pub fn compare(
         new_on_target,
         gone_on_target,
         origins,
+        verdict: Verdict::Clean,
+        gaps: Vec::new(),
+        stamp: crate::project::stamp(root, &php_files),
+    };
+    comparison.gaps = comparison.gaps(php_files.len());
+    comparison.verdict = match (comparison.regressed(), comparison.gaps.is_empty()) {
+        (true, _) => Verdict::Regressed,
+        (false, true) => Verdict::Clean,
+        (false, false) => Verdict::Incomplete,
+    };
+    Ok(comparison)
+}
+
+/// New and gone messages. The same crash at the same place isn't new just because PHP words it
+/// differently, and when fixes moved lines, messages are matched without them.
+fn changed_events(source: &[Event], target: &[Event], fixed: bool) -> (Vec<Event>, Vec<Event>) {
+    let new = differs(target, source);
+    let gone = differs(source, target);
+    let same = |a: &Event, b: &Event| {
+        a.level == b.level
+            && if fixed { event_key(a) == event_key(b) } else { a.path == b.path && a.line == b.line && a.level == runtime::Level::Fatal }
+    };
+    let keep = |events: &[Event], other: &[Event]| events.iter().filter(|e| !other.iter().any(|o| same(e, o))).cloned().collect::<Vec<_>>();
+    (keep(&new, &gone), keep(&gone, &new))
+}
+
+/// The test count from PHPUnit's or Pest's last line.
+fn test_total(output: &str) -> Option<usize> {
+    output.lines().rev().find_map(|line| {
+        if let Some(rest) = line.trim().strip_prefix("OK (") {
+            return rest.split_whitespace().next()?.parse().ok();
+        }
+        let rest = line.trim().strip_prefix("Tests:")?.trim();
+        if let Some((first, _)) = rest.split_once(',').filter(|(n, _)| n.bytes().all(|b| b.is_ascii_digit())) {
+            return first.parse().ok();
+        }
+        let words: Vec<&str> = rest.split([' ', ',']).filter(|w| !w.is_empty()).collect();
+        let counted = |pair: &[&str]| {
+            matches!(pair[1], "passed" | "failed" | "skipped" | "todos" | "risky" | "incomplete")
+                .then(|| pair[0].parse::<usize>().ok())
+                .flatten()
+        };
+        let sum: usize = words.windows(2).filter_map(counted).sum();
+        (sum > 0).then_some(sum)
     })
 }
 
@@ -911,7 +1062,18 @@ mod tests {
             version,
             image: String::new(),
             lint_errors: 0,
-            tests: Some(TestRun { exit_code: Some(1), timed_out: false, passed: new_failures.is_empty(), by_file: false }),
+            lint_files: 1,
+            lint_stopped: false,
+            pages_stopped: false,
+            pages_limited: false,
+            tests: Some(TestRun {
+                exit_code: Some(1),
+                timed_out: false,
+                passed: new_failures.is_empty(),
+                by_file: false,
+                ran: true,
+                total: Some(1),
+            }),
             failed_tests: new_failures.iter().map(|t| t.to_string()).collect(),
             crawl: Default::default(),
             data: Default::default(),
@@ -933,6 +1095,9 @@ mod tests {
             new_on_target: events,
             gone_on_target: Vec::new(),
             origins: Vec::new(),
+            verdict: Verdict::Clean,
+            gaps: Vec::new(),
+            stamp: String::new(),
         }
     }
 
@@ -1210,6 +1375,8 @@ mod tests {
             new_failures: 0,
             new_messages: 0,
             data_changes: 0,
+            incomplete: false,
+            stamp: String::new(),
         };
         for at in 0..25 {
             record(&file, entry(at)).unwrap();
@@ -1229,6 +1396,48 @@ mod tests {
     fn only_real_failures_count_as_failed_tests() {
         let out = "There were 2 errors:\n\n1) A::one\nError: x\n\n/app/a.php:1\n\n2) A::two with data set #1\nboom\n\n--\n\nThere was 1 failure:\n\n1) B::three\nnope\n\nThere were 3 skipped tests:\n\n1) C::four\nskip\n\nThere was 1 error:\n\n1) D::five\nx\n\n2 tests triggered 2 PHP deprecations:\n\n1) /app/src/Logger.php:331\nold\n\n2) E::six\nold\n";
         assert_eq!(failed_tests(out), ["A::one", "A::two with data set #1", "B::three", "D::five"]);
+    }
+
+    #[test]
+    fn test_counts_come_from_the_last_summary() {
+        assert_eq!(test_total("OK (12 tests, 30 assertions)\n"), Some(12));
+        assert_eq!(test_total("Tests: 5, Assertions: 7, Failures: 1.\n"), Some(5));
+        assert_eq!(test_total("  Tests:    1 failed, 2 passed (3 assertions)\n"), Some(3));
+        assert_eq!(test_total("Fatal error: boom\n"), None);
+    }
+
+    #[test]
+    fn a_verdict_separates_problems_from_missing_evidence() {
+        let mut clean = comparison(&[], Vec::new());
+        assert!(clean.gaps(1).is_empty());
+        clean.target.lint_stopped = true;
+        assert_eq!(clean.gaps(1), [Gap::LintStopped]);
+        let mut empty = comparison(&[], Vec::new());
+        empty.target.tests.as_mut().unwrap().ran = false;
+        assert!(empty.regressed(), "a target that stops running tests is a regression");
+        empty.source.tests.as_mut().unwrap().ran = false;
+        assert!(!empty.regressed());
+        assert_eq!(empty.gaps(1), [Gap::TestsDidNotRun]);
+        let mut fewer = comparison(&[], Vec::new());
+        fewer.target.tests.as_mut().unwrap().total = Some(0);
+        assert_eq!(fewer.gaps(1), [Gap::FewerTests]);
+        let mut unmounted = comparison(&[], Vec::new());
+        unmounted.source.lint_files = 0;
+        assert_eq!(unmounted.gaps(3), [Gap::NoFiles]);
+    }
+
+    #[test]
+    fn the_same_crash_worded_differently_is_not_new() {
+        let event = |path: &str, line, level, message: &str| Event { path: path.into(), line, level, message: message.into(), count: 1 };
+        let old = event("/app/a.php", 3, runtime::Level::Fatal, "strlen() expects parameter 1");
+        let reworded = event("/app/a.php", 3, runtime::Level::Fatal, "strlen(): Argument #1 must be");
+        let (new, gone) = changed_events(std::slice::from_ref(&old), std::slice::from_ref(&reworded), false);
+        assert!(new.is_empty() && gone.is_empty());
+
+        let warning = event("/app/b.php", 3, runtime::Level::Warning, "old");
+        let moved = event("/app/b.php", 4, runtime::Level::Warning, "old");
+        assert_eq!(changed_events(std::slice::from_ref(&warning), std::slice::from_ref(&moved), false).0.len(), 1);
+        assert!(changed_events(&[warning], &[moved], true).0.is_empty());
     }
 
     #[test]
@@ -1298,5 +1507,26 @@ mod tests {
         let result =
             compare(dir.path(), PhpVersion::new(7, 4), PhpVersion::new(8, 4), Options::default(), &AtomicBool::new(false), |_| {}).unwrap();
         assert_eq!(result.target.lint_errors, 0, "{}", result.target.log);
+    }
+
+    #[test]
+    fn pages_behind_links_redirects_and_folders_are_reached() {
+        if std::env::var_os("FERRY_TEST_DOCKER").is_none() {
+            eprintln!("FERRY_TEST_DOCKER ayarlı değil; Docker testi atlandı");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir(root.join("admin")).unwrap();
+        std::fs::write(root.join("index.php"), "<?php header('Location: /home.php');").unwrap();
+        std::fs::write(root.join("home.php"), "<a href=\"about.php?x=1\">a</a><a href=\"/admin/\">b</a>").unwrap();
+        let broken = "<?php if (PHP_VERSION_ID >= 80000) { each($a); } echo 'ok';";
+        std::fs::write(root.join("about.php"), broken).unwrap();
+        std::fs::write(root.join("admin/index.php"), broken).unwrap();
+        let options = Options { pages: vec!["/".into()], ..Options::default() };
+        let result = compare(root, PhpVersion::new(7, 4), PhpVersion::new(8, 4), options, &AtomicBool::new(false), |_| {}).unwrap();
+        let broke: Vec<&str> = result.pages.iter().filter(|p| p.broke()).map(|p| p.path.as_str()).collect();
+        assert_eq!(result.verdict, Verdict::Regressed);
+        assert!(broke.contains(&"/about.php?x=1") && broke.contains(&"/admin/"), "{broke:?}");
     }
 }
