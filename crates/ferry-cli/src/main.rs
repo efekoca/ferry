@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 const USAGE: &str = "Usage: ferry-cli scan <project> [--target <8.2|8.3|8.4|8.5>] [options]
-       ferry-cli compare <project> --target <version> [--source <version>] [--no-extensions] [--clean-images] [--page <path>] [--no-pages] [--db-dump <file>] [--db-live] [--db-seed] [--db-ssh <host:database:user>] [--prepare <command>] [--test <command>] [--try-fixes <rector>] [--format <text|json>]
+       ferry-cli compare <project> --target <version> [--source <version>] [--no-extensions] [--clean-images] [--page <path>] [--no-pages] [--db-dump <file>] [--db-live] [--db-seed] [--db-ssh <host:database:user>] [--prepare <command>] [--test <command>] [--try-fixes <rector>] [--allow-config-commands] [--format <text|json>]
        ferry-cli pins <project> --target <version> [--write]
        ferry-cli clean-images
 
@@ -38,7 +38,10 @@ Pages are served inside the containers and compared, starting at / and following
 Each version can get its own copy of the database: --db-dump imports a .sql or .sql.gz file,
 --db-live copies a database on this computer, and --db-seed runs the project's migrations and seeders.
 --db-ssh reads a dump through your own ssh, read-only. Add --db-engine postgres for PostgreSQL.
+--db-ssh-password also sends the project's database password to that server. Use it only when
+the password belongs to that server.
 --prepare runs a command once in the project copy with network access, for example to build assets.
+Commands from .ferry/config.json come from the project, so they need --allow-config-commands.
 
 pins lists the PHP versions pinned below the target in Dockerfiles, Compose, CI and hosting files.
 --write updates them. There is no backup, so commit first.
@@ -770,6 +773,7 @@ fn run_pins(args: &[String]) -> Result<(), String> {
 }
 
 fn run_compare(args: &[String]) -> Result<bool, String> {
+    let (mut send_password, mut allow_config_commands) = (false, false);
     let (mut root, mut source, mut target, mut json_output) = (None, None, None, false);
     let extensions = true;
     let mut clean_images = false;
@@ -797,6 +801,8 @@ fn run_compare(args: &[String]) -> Result<bool, String> {
             "--db-live" => database = Some(ferry_core::database::Source::Live),
             "--db-seed" => database = Some(ferry_core::database::Source::Seed),
             "--db-ssh" => remote = Some(value("--db-ssh")?),
+            "--db-ssh-password" => send_password = true,
+            "--allow-config-commands" => allow_config_commands = true,
             "--db-engine" => postgres = value("--db-engine")? == "postgres",
             "--page" => pages.push(value("--page")?),
             "--format" => {
@@ -814,7 +820,7 @@ fn run_compare(args: &[String]) -> Result<bool, String> {
         let mut parts = text.splitn(3, ':');
         let (host, name, user) = (parts.next().unwrap_or_default(), parts.next().unwrap_or_default(), parts.next().unwrap_or_default());
         let engine = if postgres { ferry_core::database::Engine::Postgres } else { ferry_core::database::Engine::Mysql };
-        let remote = ferry_core::database::Remote { host: host.into(), engine, name: name.into(), user: user.into() };
+        let remote = ferry_core::database::Remote { host: host.into(), engine, name: name.into(), user: user.into(), send_password };
         database = Some(ferry_core::database::Source::Ssh(remote));
     }
     let root = std::fs::canonicalize(root.ok_or("compare needs a project folder")?).map_err(|e| e.to_string())?;
@@ -832,8 +838,11 @@ fn run_compare(args: &[String]) -> Result<bool, String> {
         pages.clear();
     }
     let database = database.or(config.docker.dump.map(|d| ferry_core::database::Source::Dump(root.join(d))));
-    if let (None, Some(command)) = (&prepare, &config.docker.prepare) {
-        eprintln!("ferry-cli: prepare command from .ferry/config.json: {command}");
+    let from_config = [(prepare.is_none(), &config.docker.prepare), (test.is_none(), &config.docker.test)];
+    if let Some(command) = from_config.iter().find_map(|(unset, command)| command.as_ref().filter(|_| *unset)) {
+        if !allow_config_commands {
+            return Err(format!("the project's .ferry/config.json asks to run: {command}\nReview it, then add --allow-config-commands"));
+        }
     }
     let prepare = prepare.or(config.docker.prepare);
     let test = test.or(config.docker.test);

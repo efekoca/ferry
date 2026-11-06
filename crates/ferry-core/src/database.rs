@@ -75,8 +75,10 @@ impl Connection {
     }
 
     /// Where the file sits inside the containers.
+    /// The name comes from the project, so a path that leaves the copy falls back to the default.
     fn sqlite_path(&self) -> String {
-        if self.name.starts_with('/') {
+        let plain = Path::new(&self.name).components().all(|c| matches!(c, std::path::Component::Normal(_) | std::path::Component::CurDir));
+        if !plain || self.name.contains('\\') {
             format!("{}/{DEFAULT_SQLITE}", crate::docker::CONTAINER_ROOT)
         } else {
             format!("{}/{}", crate::docker::CONTAINER_ROOT, self.name)
@@ -108,6 +110,8 @@ pub struct Remote {
     pub engine: Engine,
     pub name: String,
     pub user: String,
+    /// Off by default: nothing proves the project's password belongs to that server.
+    pub send_password: bool,
 }
 
 impl Remote {
@@ -752,6 +756,14 @@ pub(crate) fn prepare(
                 let shown = original.display().to_string();
                 return Err(crate::t!("SQLite dosyası bulunamadı: {shown}", "The SQLite file wasn't found: {shown}"));
             }
+            let inside = |path: &Path| std::fs::canonicalize(path).ok();
+            if inside(&original).zip(inside(root)).is_none_or(|(file, root)| !file.starts_with(root)) {
+                let shown = original.display().to_string();
+                return Err(crate::t!(
+                    "SQLite dosyası proje dışında ({shown}). Dosyayı projeye kopyalayın ya da döküm kullanın.",
+                    "The SQLite file is outside the project ({shown}). Copy it into the project or use a dump."
+                ));
+            }
             std::fs::create_dir_all(copy.parent().unwrap_or(project)).map_err(failed)?;
             std::fs::copy(original, &copy).map_err(failed)?;
             point_copy_at(project, &connection).map_err(failed)?;
@@ -767,7 +779,8 @@ pub(crate) fn prepare(
         }
         Source::Ssh(remote) => {
             let known = detected.filter(|c| c.engine == remote.engine);
-            let password = known.as_ref().filter(|c| c.user == remote.user).map_or(String::new(), |c| c.password.clone());
+            let password =
+                known.as_ref().filter(|c| remote.send_password && c.user == remote.user).map_or(String::new(), |c| c.password.clone());
             let connection = known.unwrap_or_else(|| Connection {
                 name: remote.name.clone(),
                 user: remote.user.clone(),
@@ -817,6 +830,15 @@ pub(crate) fn prepare(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_sqlite_name_cannot_leave_the_copy() {
+        for name in ["../../etc/passwd", "a/../../b", "/etc/passwd", "..\\..\\x"] {
+            let connection = sqlite_at(name);
+            assert_eq!(connection.sqlite_path(), format!("{}/{DEFAULT_SQLITE}", crate::docker::CONTAINER_ROOT), "{name}");
+        }
+        assert_eq!(sqlite_at("database/app.sqlite").sqlite_path(), format!("{}/database/app.sqlite", crate::docker::CONTAINER_ROOT));
+    }
 
     #[test]
     fn laravel_settings_are_read_from_the_env_file() {
@@ -878,8 +900,13 @@ mod tests {
 
     #[test]
     fn remote_names_cannot_inject_commands() {
-        let remote =
-            |host: &str, name: &str, user: &str| Remote { host: host.into(), engine: Engine::Mysql, name: name.into(), user: user.into() };
+        let remote = |host: &str, name: &str, user: &str| Remote {
+            host: host.into(),
+            engine: Engine::Mysql,
+            name: name.into(),
+            user: user.into(),
+            send_password: false,
+        };
         assert!(remote("prod", "shop_db", "app").check().is_ok());
         assert!(remote("deploy@prod.example.com", "shop", "app").check().is_ok());
         assert!(remote("-oProxyCommand=x", "shop", "app").check().is_err());

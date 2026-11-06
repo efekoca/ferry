@@ -568,6 +568,11 @@ export const en: Dict = {
     sshName: "Database name",
     sshUser: "Database user",
     sshNote: "Your own ssh settings and ssh-agent are used, and Ferry stores no key or password. Only a read-only mysqldump or pg_dump runs on the server.",
+    sshSendPassword: "Send the project's database password to this server",
+    sshPasswordWarning: (host) => `The project's database password will be sent to ${host}. Confirm only if the password belongs to that server.`,
+    commandsConfirmTitle: "The project wants to run commands",
+    commandsConfirm: "Run and test",
+    commandsConfirmText: "These commands come from the project's .ferry/config.json and run in the temporary copy. The prepare command has network access. Confirm only for projects you trust.",
     sshConfirmTitle: "Copy the data on this server?",
     sshConfirm: "Copy and test",
     sshConfirmText: (host, name, user) =>

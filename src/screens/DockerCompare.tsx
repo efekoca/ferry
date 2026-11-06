@@ -4,7 +4,7 @@ import { DiffViewer } from "../components/DiffViewer";
 import { ConfirmDialog } from "../components/Modal";
 import { PageHeader } from "../components/Shell";
 import { useToast } from "../components/Toast";
-import { Badge, Button, Callout, Card, EmptyState, RiskBadge } from "../components/ui";
+import { Badge, Button, Callout, Card, CommandLine, EmptyState, RiskBadge } from "../components/ui";
 import { useI18n } from "../i18n";
 import { containerPath as shortPath, touches } from "../lib/fixes";
 import { errorMessage } from "../lib/api";
@@ -269,6 +269,7 @@ function FixLoop({ result, onTry }: { result: DockerComparison; onTry: (files: s
       ) : !ready ? (
         <>
           <p>{t.docker.fixIntro}</p>
+          <p className="hint">{t.changes.introTrust}</p>
           {toolchain && !toolchain.rector ? (
             <>
               <p className="subtle">{t.docker.fixNeedsRector}</p>
@@ -287,6 +288,7 @@ function FixLoop({ result, onTry }: { result: DockerComparison; onTry: (files: s
       ) : (
         <>
           <p>{t.docker.fixIntro}</p>
+          <p className="hint">{t.changes.introTrust}</p>
           {result.newOnTarget.length > 0 && <p className="subtle">{t.docker.fixMatched(matched, result.newOnTarget.length)}</p>}
           <div className="docker-fixes">
             {changes.map((c) => (
@@ -418,7 +420,7 @@ export function DockerCompare() {
   const [dataSource, setDataSource] = useState(saved?.dump ? `dump:${saved.dump}` : "none");
   const [dumpFile, setDumpFile] = useState<string | null>(null);
   const [hosts, setHosts] = useState<string[]>([]);
-  const [remote, setRemote] = useState({ host: "", engine: "mysql" as "mysql" | "postgres", name: "", user: "" });
+  const [remote, setRemote] = useState({ host: "", engine: "mysql" as "mysql" | "postgres", name: "", user: "", sendPassword: false });
   const [confirming, setConfirming] = useState(false);
   const root = project?.root;
   useEffect(() => {
@@ -440,6 +442,8 @@ export function DockerCompare() {
   const lastRemote = lastDatabase?.kind === "ssh" ? lastDatabase : null;
   const shown = trying && lastRemote ? lastRemote : remote;
   const attempt = (files: string[]) => (lastRemote ? setTrying(files) : void tryFixes(files));
+  const projectCommands = [prepare.trim(), test.trim()].filter((c) => c && (c === project.config.docker.prepare || c === project.config.docker.test));
+  const asksServer = dataSource === "ssh" || !!trying;
   const start = () => {
     setConfirming(false);
     if (trying) {
@@ -488,7 +492,7 @@ export function DockerCompare() {
                     {t.docker.stop}
                   </Button>
                 ) : (
-                  <Button variant="primary" icon={<Play size={14} />} disabled={!source || (dataSource === "file" && !dumpFile) || (dataSource === "ssh" && !(remote.host && remote.name && remote.user))} onClick={() => (dataSource === "ssh" ? setConfirming(true) : start())}>
+                  <Button variant="primary" icon={<Play size={14} />} disabled={!source || (dataSource === "file" && !dumpFile) || (dataSource === "ssh" && !(remote.host && remote.name && remote.user))} onClick={() => (dataSource === "ssh" || projectCommands.length > 0 ? setConfirming(true) : start())}>
                     {docker ? t.docker.again : t.docker.start}
                   </Button>
                 )}
@@ -549,6 +553,10 @@ export function DockerCompare() {
                   </select>
                   <input className="input" aria-label={t.docker.sshName} placeholder={plan?.name ?? t.docker.sshName} value={remote.name} disabled={running} onChange={(e) => setRemote({ ...remote, name: e.target.value })} />
                   <input className="input" aria-label={t.docker.sshUser} placeholder={plan?.user ?? t.docker.sshUser} value={remote.user} disabled={running} onChange={(e) => setRemote({ ...remote, user: e.target.value })} />
+                  <label className="docker-option">
+                    <input type="checkbox" className="checkbox" checked={remote.sendPassword} disabled={running} onChange={(e) => setRemote({ ...remote, sendPassword: e.target.checked })} />
+                    <span>{t.docker.sshSendPassword}</span>
+                  </label>
                   <p className="subtle">{t.docker.sshNote}</p>
                 </div>
               )}
@@ -580,15 +588,24 @@ export function DockerCompare() {
             open={confirming || !!trying}
             tone="danger"
             icon={<ShieldAlert size={20} />}
-            title={t.docker.sshConfirmTitle}
-            confirmLabel={t.docker.sshConfirm}
+            title={asksServer ? t.docker.sshConfirmTitle : t.docker.commandsConfirmTitle}
+            confirmLabel={asksServer ? t.docker.sshConfirm : t.docker.commandsConfirm}
             onCancel={() => {
               setConfirming(false);
               setTrying(null);
             }}
             onConfirm={start}
           >
-            {t.docker.sshConfirmText(shown.host, shown.name, shown.user)}
+            {asksServer && t.docker.sshConfirmText(shown.host, shown.name, shown.user)}
+            {asksServer && shown.sendPassword && <p>{t.docker.sshPasswordWarning(shown.host)}</p>}
+            {projectCommands.length > 0 && !trying && (
+              <>
+                <p>{t.docker.commandsConfirmText}</p>
+                {projectCommands.map((command) => (
+                  <CommandLine key={command} command={command} />
+                ))}
+              </>
+            )}
           </ConfirmDialog>
         </div>
       </div>

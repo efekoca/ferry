@@ -206,7 +206,7 @@ export type DatabaseChoice =
   | { kind: "dump"; path: string }
   | { kind: "live" }
   | { kind: "seed" }
-  | { kind: "ssh"; host: string; engine: "mysql" | "postgres"; name: string; user: string };
+  | { kind: "ssh"; host: string; engine: "mysql" | "postgres"; name: string; user: string; sendPassword: boolean };
 
 export interface DockerDataChange {
   table: string;

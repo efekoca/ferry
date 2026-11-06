@@ -18,6 +18,18 @@ const TEST_TIMEOUT: Duration = Duration::from_secs(20 * 60);
 const PAGE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 /// Symfony's entry points need the file this one plugin generates, so it alone may run.
 const SYMFONY_RUNTIME_ONLY: &str = r#"'$j = json_decode(file_get_contents("composer.json"), true); $j["config"]["allow-plugins"] = ["symfony/runtime" => true, "*" => false]; file_put_contents("composer.json", json_encode($j));'"#;
+const RUNTIME_LOCK: &str = ".ferry-composer.lock";
+
+/// `symfony/runtime` writes `vendor/autoload_runtime.php` from a Composer plugin. Plugins are
+/// project code, so this one runs after the download and with no network.
+fn runtime_script() -> String {
+    format!(
+        "mkdir /tmp/build && cp -a /app/. /tmp/build && cd /tmp/build && cp {RUNTIME_LOCK} composer.lock && php -r {SYMFONY_RUNTIME_ONLY} \
+        && COMPOSER_DISABLE_NETWORK=1 composer install --no-interaction --no-progress --no-scripts --ignore-platform-reqs \
+        && cp vendor/autoload_runtime.php /app/vendor/; status=$?; rm -f /app/{RUNTIME_LOCK}; exit $status"
+    )
+}
+
 /// Keeps container names apart when two projects run at once.
 static RUNS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 const BUILD_TIMEOUT: Duration = Duration::from_secs(20 * 60);
@@ -379,6 +391,20 @@ fn copy_project(root: &Path, dest: &Path) -> std::io::Result<()> {
             if let Ok(link) = std::fs::read_link(entry.path()) {
                 std::os::unix::fs::symlink(link, &to)?;
             }
+        }
+    }
+    drop_outside_links(dest)
+}
+
+/// Ferry writes `.env` and database files into the copy from outside the container, so a link
+/// that leaves the copy would let a project reach files on this computer. Run again after any
+/// step where project code could have added one.
+fn drop_outside_links(dir: &Path) -> std::io::Result<()> {
+    let inside = std::fs::canonicalize(dir)?;
+    for entry in WalkDir::new(dir).follow_links(false).into_iter().flatten().filter(|e| e.path_is_symlink()) {
+        let relative = std::fs::read_link(entry.path()).is_ok_and(|target| target.is_relative());
+        if !relative || !std::fs::canonicalize(entry.path()).is_ok_and(|real| real.starts_with(&inside)) {
+            std::fs::remove_file(entry.path())?;
         }
     }
     Ok(())
@@ -762,11 +788,7 @@ pub fn compare(
     if needs_install {
         step(Step::Installing);
         let runtime = std::fs::read_to_string(base.join("composer.json")).is_ok_and(|t| t.contains("symfony/runtime"));
-        let install = if runtime {
-            format!("php -r {SYMFONY_RUNTIME_ONLY} && composer install --no-interaction --no-progress --no-scripts --no-security-blocking")
-        } else {
-            "composer install --no-interaction --no-progress --no-scripts --no-plugins --no-security-blocking".to_string()
-        };
+        let install = "composer install --no-interaction --no-progress --no-scripts --no-plugins --no-security-blocking";
         let script = if base.join("composer.lock").is_file() {
             format!("{install} --ignore-platform-reqs")
         } else {
@@ -774,9 +796,15 @@ pub fn compare(
             format!("{advisories}; composer config platform.php {source}.0 && {install} '--ignore-platform-req=ext-*'")
         };
         let bridge = phpunit_bridge_version(&base).map_or(String::new(), |v| format!(" && {v}"));
-        let script =
-            format!("mkdir /tmp/build && cp -a /app/. /tmp/build && cd /tmp/build && {{ {script}{bridge}; }} && cp -a vendor /app/");
-        let done = container.run("install", &base, "composer:2", true, &script, INSTALL_TIMEOUT)?;
+        let keep_lock = if runtime { format!(" && cp -a composer.lock /app/{RUNTIME_LOCK}") } else { String::new() };
+        let script = format!(
+            "mkdir /tmp/build && cp -a /app/. /tmp/build && cd /tmp/build && {{ {script}{bridge}; }} && cp -a vendor /app/{keep_lock}"
+        );
+        let mut done = container.run("install", &base, "composer:2", true, &script, INSTALL_TIMEOUT)?;
+        if runtime && done.status.is_some_and(|s| s.success()) {
+            done = container.run("runtime", &base, "composer:2", false, &runtime_script(), INSTALL_TIMEOUT)?;
+        }
+        drop_outside_links(&base).map_err(|e| e.to_string())?;
         dependencies_installed = done.status.is_some_and(|s| s.success());
         if !dependencies_installed {
             install_log = tail(&output(&done));
@@ -825,6 +853,7 @@ pub fn compare(
             let reason = tail(&output(&run));
             return Err(crate::t!("Hazırlık komutu başarısız oldu: {reason}", "The prepare command failed: {reason}"));
         }
+        drop_outside_links(&base).map_err(|e| e.to_string())?;
     }
     let target_dir = work.path().join("target");
     copy_project(&base, &target_dir).map_err(|e| crate::t!("Proje kopyalanamadı: {e}", "Couldn't copy the project: {e}"))?;
@@ -1206,6 +1235,27 @@ mod tests {
     fn lint_output_counts_only_errors() {
         let out = "PHP Parse error:  syntax error in /app/a.php on line 2\nPHP Deprecated:  old in /app/b.php on line 1\nErrors parsing /app/a.php\n";
         assert_eq!(lint_lines(out).count(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn links_that_leave_the_copy_are_dropped() {
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().unwrap();
+        let (project, outside) = (dir.path().join("p"), dir.path().join("secret"));
+        std::fs::create_dir_all(project.join("vendor/bin")).unwrap();
+        std::fs::write(&outside, "secret").unwrap();
+        std::fs::write(project.join("vendor/real.php"), "<?php").unwrap();
+        symlink(&outside, project.join(".env")).unwrap();
+        symlink("../../secret", project.join(".env.example")).unwrap();
+        symlink("/etc/hosts", project.join("abs")).unwrap();
+        symlink("../real.php", project.join("vendor/bin/tool")).unwrap();
+        let copy = dir.path().join("copy");
+        copy_project(&project, &copy).unwrap();
+        assert!(std::fs::symlink_metadata(copy.join(".env")).is_err());
+        assert!(std::fs::symlink_metadata(copy.join(".env.example")).is_err());
+        assert!(std::fs::symlink_metadata(copy.join("abs")).is_err());
+        assert_eq!(std::fs::read_to_string(copy.join("vendor/bin/tool")).unwrap(), "<?php");
     }
 
     #[test]
