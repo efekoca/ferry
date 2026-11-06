@@ -642,7 +642,7 @@ async fn ignore_finding(state: State<'_, AppState>, path: String, id: String, re
             .iter()
             .find(|f| f.id == id)
             .ok_or_else(|| t!("Bulgu bulunamadı; projeyi yeniden tarayın.", "Finding not found; scan the project again."))?;
-        let mut ignores = ignore::load(&root);
+        let mut ignores = ignore::load_for_update(&root)?;
         if !ignores.iter().any(|i| i.matches(finding)) {
             ignores.push(Ignore::for_finding(finding, &reason, now_secs()));
         }
@@ -669,7 +669,7 @@ async fn unignore_finding(state: State<'_, AppState>, path: String, id: String) 
             .iter()
             .find(|f| f.id == id)
             .ok_or_else(|| t!("Bulgu bulunamadı; projeyi yeniden tarayın.", "Finding not found; scan the project again."))?;
-        let mut ignores = ignore::load(&root);
+        let mut ignores = ignore::load_for_update(&root)?;
         if !ignores.iter().any(|i| i.matches(finding)) {
             return Err(t!(
                 "Bu bulgu kaynak koddaki bir ferry-ignore yorumuyla yok sayılıyor; yeniden görmek için yorumu kaldırın.",
@@ -695,7 +695,7 @@ async fn prune_ignores(state: State<'_, AppState>, path: String) -> CmdResult<Sc
     blocking(move || {
         let _guard = writes.lock().unwrap_or_else(|e| e.into_inner());
         let root = project_root(&path)?;
-        let ignores = ignore::load(&root);
+        let ignores = ignore::load_for_update(&root)?;
         let stale = ignore::apply(&root, Vec::new(), &ignores).stale;
         let kept: Vec<Ignore> = ignores.into_iter().filter(|i| !stale.contains(i)).collect();
         ignore::save(&root, &kept).map_err(|e| {

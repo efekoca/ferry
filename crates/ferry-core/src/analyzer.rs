@@ -90,7 +90,17 @@ pub fn analyze_files(root: &Path, files: &[PathBuf], target: PhpVersion, mut pro
             Ok(bytes) => {
                 let src = String::from_utf8_lossy(&bytes);
                 lines += src.lines().count();
-                findings.extend(analyze_source_in(&rel, &src, target, &index));
+                let one = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| analyze_source_in(&rel, &src, target, &index)));
+                match one {
+                    Ok(found) => findings.extend(found),
+                    Err(_) => errors.push(FileError {
+                        file: rel,
+                        message: crate::t!(
+                            "Bu dosya okunurken Ferry durdu; dosya atlandı.",
+                            "Ferry stopped while reading this file, so it was skipped."
+                        ),
+                    }),
+                }
             }
             Err(e) => errors.push(FileError { file: rel, message: e.to_string() }),
         }
@@ -1269,7 +1279,7 @@ impl<'a> Ctx<'a> {
         } else {
             return;
         };
-        let known = class.is_none().then(|| self.receivers.of_receiver(tokens, i - 2));
+        let known = class.is_none().then(|| i.checked_sub(2).map(|k| self.receivers.of_receiver(tokens, k)).unwrap_or_default());
         let is = |c: &str, family: &str| c == family || family == "reflection" && c.starts_with(family);
         if class.is_some() {
             let named = &tokens[i - 2].text;
@@ -1775,7 +1785,7 @@ fn nested_ternaries(tokens: &[Token]) -> Vec<usize> {
         let level = stack.last_mut().unwrap();
         let keyword = t.kind == TokenKind::Ident
             && ["and", "or", "xor", "return", "echo", "print", "case", "yield", "throw"].iter().any(|k| t.is_ident_ci(k));
-        let label = t.is_punct(":") && level.open == 0 && !tokens[k - 1].is_punct("?");
+        let label = t.is_punct(":") && level.open == 0 && !(k > 0 && tokens[k - 1].is_punct("?"));
         if t.is_punct(";") || t.is_punct(",") || t.is_punct("=>") || t.kind == TokenKind::CloseTag || keyword || label {
             *level = TernaryLevel::default();
         } else if t.is_punct("?") && k > 0 && expression_end(&tokens[k - 1]) {
@@ -3659,6 +3669,22 @@ mod tests {
             rule_ids("<?php define(constant_name: 'A', value: 1, case_insensitive: true);"),
             rule_ids("<?php define('A', 1, true);")
         );
+    }
+
+    #[test]
+    fn malformed_files_do_not_stop_the_scan() {
+        for src in [
+            "<?php : echo 1;",
+            "<?php ->foo();",
+            "<?= ?->foo() ?>",
+            "text <?: more",
+            "<?php ::a;",
+            "<?php ?->",
+            "<?php -> -> ->",
+            "<?php }}}",
+        ] {
+            analyze_source("t.php", src, "8.5".parse().unwrap());
+        }
     }
 
     #[test]

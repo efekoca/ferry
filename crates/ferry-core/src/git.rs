@@ -4,7 +4,35 @@ use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 const TIMEOUT: Duration = Duration::from_secs(60);
-const NO_HOOKS: [&str; 2] = ["-c", if cfg!(windows) { "core.hooksPath=NUL" } else { "core.hooksPath=/dev/null" }];
+const NO_PROJECT_CODE: [&str; 6] = [
+    "-c",
+    if cfg!(windows) { "core.hooksPath=NUL" } else { "core.hooksPath=/dev/null" },
+    "-c",
+    "core.fsmonitor=false",
+    "-c",
+    "commit.gpgsign=false",
+];
+
+/// Settings that name a program. A project that arrives as a zip brings its own `.git/config`,
+/// so these would run on this computer as soon as Ferry calls Git.
+fn runs_a_program(key: &str, value: &str) -> bool {
+    let key = key.to_ascii_lowercase();
+    let exact = ["core.fsmonitor", "core.sshcommand", "core.gitproxy", "core.pager", "core.editor", "core.askpass", "sequence.editor"];
+    if key == "core.fsmonitor" && matches!(value.to_ascii_lowercase().as_str(), "" | "false" | "no" | "off" | "0") {
+        return false;
+    }
+    if key.starts_with("filter.lfs.") && (value.is_empty() || value.starts_with("git-lfs ") || matches!(value, "true" | "false")) {
+        return false;
+    }
+    exact.contains(&key.as_str())
+        || key == "diff.external"
+        || key == "credential.helper"
+        || (key.starts_with("gpg.") && key.ends_with("program"))
+        || (key.starts_with("filter.") && [".clean", ".smudge", ".process"].iter().any(|s| key.ends_with(s)))
+        || (key.starts_with("diff.") && [".command", ".textconv"].iter().any(|s| key.ends_with(s)))
+        || (key.starts_with("merge.") && key.ends_with(".driver"))
+        || (key.starts_with("credential.") && key.ends_with(".helper"))
+}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Status {
@@ -28,7 +56,7 @@ impl Git {
     /// project's code or wait for input that can never come.
     fn run(&self, args: &[&str], paths: &[String]) -> Result<Vec<u8>, String> {
         let mut cmd = toolchain::command(&self.program);
-        cmd.arg("-C").arg(&self.root).args(NO_HOOKS).args(args).args(paths).env("GIT_TERMINAL_PROMPT", "0");
+        cmd.arg("-C").arg(&self.root).args(NO_PROJECT_CODE).args(args).args(paths).env("GIT_TERMINAL_PROMPT", "0");
         let done = toolchain::run_process(cmd, &self.program, &AtomicBool::new(false), TIMEOUT).map_err(|e| e.to_string())?;
         if done.status.is_some_and(|s| s.success()) {
             return Ok(done.stdout);
@@ -39,6 +67,26 @@ impl Git {
 
     fn ok(&self, args: &[&str]) -> bool {
         self.run(args, &[]).is_ok()
+    }
+
+    /// Reading the settings runs nothing. `--show-scope` keeps what the user set up themself out of it.
+    fn refuse_project_programs(&self) -> Result<(), String> {
+        let out = self.run(&["config", "--includes", "--show-scope", "--list", "-z"], &[])?;
+        let mut fields = out.split(|b| *b == 0).filter(|f| !f.is_empty());
+        while let (Some(scope), Some(entry)) = (fields.next(), fields.next()) {
+            if !matches!(scope, b"local" | b"worktree") {
+                continue;
+            }
+            let entry = String::from_utf8_lossy(entry);
+            let (key, value) = entry.split_once('\n').unwrap_or((&entry, ""));
+            if runs_a_program(key, value) {
+                return Err(crate::t!(
+                    "Bu projenin Git ayarı ({key}) bir program çalıştırıyor. Güvenlik için Ferry bu depoda Git kullanmıyor; ayarı inceleyip kaldırın.",
+                    "This project's Git setting ({key}) runs a program. For safety, Ferry won't use Git in this repository. Review the setting and remove it."
+                ));
+            }
+        }
+        Ok(())
     }
 
     fn text(&self, args: &[&str]) -> Option<String> {
@@ -63,6 +111,7 @@ pub fn porcelain_paths(out: &[u8], prefix: &str) -> Vec<String> {
 /// With no files, reports everything under the project.
 pub fn status(root: &Path, files: &[String]) -> Result<Status, String> {
     let Some(git) = Git::find(root) else { return Ok(Status::default()) };
+    git.refuse_project_programs()?;
     let prefix = git.text(&["rev-parse", "--show-prefix"]).unwrap_or_default();
     let everything = [".".to_string()];
     let paths = if files.is_empty() { &everything[..] } else { files };
@@ -80,6 +129,7 @@ pub struct Batch {
 /// The working tree stays as it is, so a preview made on the old branch is still valid.
 pub fn start_batch(root: &Path, base: &str) -> Result<Batch, String> {
     let git = Git::find(root).ok_or_else(|| crate::t!("Bu proje bir Git deposu değil.", "This project isn't a Git repository."))?;
+    git.refuse_project_programs()?;
     if !git.ok(&["rev-parse", "--verify", "HEAD"]) {
         return Err(crate::t!(
             "Depoda henüz commit yok, bu yüzden ayrı dal açılamadı.",
@@ -109,6 +159,7 @@ pub fn abort_batch(root: &Path, batch: &Batch) {
 /// Only these files go into the commit, whatever else is staged. Returns the short hash.
 pub fn commit(root: &Path, files: &[String], message: &str) -> Result<String, String> {
     let git = Git::find(root).ok_or_else(|| crate::t!("Git bulunamadı.", "Git wasn't found."))?;
+    git.refuse_project_programs()?;
     git.run(&["add", "--"], files)?;
     git.run(&["commit", "-m", message, "--"], files)?;
     git.text(&["rev-parse", "--short", "HEAD"]).ok_or_else(|| crate::t!("Git yanıt vermedi.", "Git didn't respond."))
@@ -172,6 +223,37 @@ mod tests {
         std::fs::write(root.join("a.txt"), "changed\n").unwrap();
         commit(root, &files(&["a.txt"]), "Batch").unwrap();
         assert!(!root.join("ran").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn programs_named_in_the_project_settings_do_not_run() {
+        for (key, value) in [
+            ("core.fsmonitor", "./evil.sh"),
+            ("filter.x.clean", "./evil.sh"),
+            ("gpg.program", "./evil.sh"),
+            ("diff.x.textconv", "./evil.sh"),
+        ] {
+            let Some((dir, git)) = repo() else { return };
+            let root = dir.path();
+            std::fs::write(root.join("evil.sh"), "#!/bin/sh\ntouch ran\n").unwrap();
+            std::process::Command::new("chmod").arg("755").arg(root.join("evil.sh")).status().unwrap();
+            git.run(&["config", key, value], &[]).unwrap();
+            std::fs::write(root.join(".gitattributes"), "* filter=x diff=x\n").unwrap();
+            let refused = status(root, &[]).unwrap_err();
+            assert!(refused.contains(key), "{refused}");
+            assert!(start_batch(root, "ferry/x").is_err());
+            assert!(commit(root, &files(&["a.txt"]), "x").is_err());
+            assert!(!root.join("ran").exists(), "{key}");
+        }
+    }
+
+    #[test]
+    fn ordinary_settings_are_fine() {
+        assert!(!runs_a_program("core.fsmonitor", "false"));
+        assert!(!runs_a_program("user.name", "x"));
+        assert!(!runs_a_program("filter.lfs.clean", "git-lfs clean -- %f"));
+        assert!(runs_a_program("filter.lfs.clean", "./evil.sh"));
     }
 
     #[test]
