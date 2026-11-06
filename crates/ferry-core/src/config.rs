@@ -61,6 +61,9 @@ pub fn load(root: &Path) -> Result<Config, String> {
     let config: Config = serde_json::from_slice(&bytes)
         .map_err(|e| crate::t!(".ferry/config.json okunamadı: {e}", "Couldn't read .ferry/config.json: {e}"))?;
     check(&config).map_err(|e| format!(".ferry/config.json: {e}"))?;
+    for path in config.baseline.iter().chain(&config.docker.dump) {
+        crate::safefs::resolve(root, path).map_err(|e| format!(".ferry/config.json: {e}"))?;
+    }
     Ok(config)
 }
 
@@ -84,6 +87,7 @@ fn merge(existing: &mut serde_json::Value, new: serde_json::Value) {
 /// Refuses to touch a file it can't read, so a typo doesn't cost the team its settings.
 pub fn save(root: &Path, config: &Config) -> Result<(), String> {
     check(config)?;
+    crate::safefs::resolve(root, ".ferry/config.json").map_err(|e| e.to_string())?;
     let file = path(root);
     let dir = file.parent().unwrap();
     let mut merged = match std::fs::read(&file) {
@@ -160,5 +164,24 @@ mod tests {
         std::fs::write(path(dir.path()), "{ broken").unwrap();
         assert!(save(dir.path(), &Config::default()).is_err());
         assert_eq!(std::fs::read_to_string(path(dir.path())).unwrap(), "{ broken");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn links_cannot_carry_settings_out_of_the_project() {
+        let dir = tempfile::tempdir().unwrap();
+        let (root, outside) = (dir.path().join("p"), dir.path().join("out"));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, root.join(".ferry")).unwrap();
+        assert!(save(&root, &Config::default()).is_err());
+        assert!(!outside.join("config.json").exists());
+
+        std::fs::remove_file(root.join(".ferry")).unwrap();
+        std::fs::create_dir(root.join(".ferry")).unwrap();
+        std::fs::write(outside.join("secret"), "x").unwrap();
+        std::os::unix::fs::symlink(outside.join("secret"), root.join("dump.sql")).unwrap();
+        std::fs::write(path(&root), r#"{"docker":{"dump":"dump.sql"}}"#).unwrap();
+        assert!(load(&root).is_err());
     }
 }

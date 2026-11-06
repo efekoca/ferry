@@ -198,7 +198,7 @@ fn project_excludes(root: &Path, framework: Framework) -> Vec<String> {
     dirs
 }
 
-fn is_php_file(path: &Path) -> bool {
+pub fn is_php_file(path: &Path) -> bool {
     path.extension().and_then(|e| e.to_str()).is_some_and(|e| PHP_EXTENSIONS.iter().any(|x| x.eq_ignore_ascii_case(e)))
 }
 

@@ -45,6 +45,7 @@ pub fn load_for_update(root: &Path) -> Result<Vec<Ignore>, String> {
 }
 
 pub fn save(root: &Path, ignores: &[Ignore]) -> std::io::Result<()> {
+    crate::safefs::resolve(root, ".ferry/ignore.json")?;
     let file = path(root);
     std::fs::create_dir_all(file.parent().unwrap())?;
     let mut json = serde_json::to_vec_pretty(&IgnoreFile { ignores: ignores.to_vec() }).map_err(std::io::Error::other)?;

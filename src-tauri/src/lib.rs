@@ -363,10 +363,19 @@ async fn run_local_check(state: State<'_, AppState>, path: String, target: Strin
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 enum DatabaseChoice {
-    Dump { path: String },
+    Dump {
+        path: String,
+    },
     Live,
     Seed,
-    Ssh { host: String, engine: database::Engine, name: String, user: String },
+    Ssh {
+        host: String,
+        engine: database::Engine,
+        name: String,
+        user: String,
+        #[serde(default, rename = "sendPassword")]
+        send_password: bool,
+    },
 }
 
 impl DatabaseChoice {
@@ -375,7 +384,9 @@ impl DatabaseChoice {
             DatabaseChoice::Dump { path } => database::Source::Dump(PathBuf::from(path)),
             DatabaseChoice::Live => database::Source::Live,
             DatabaseChoice::Seed => database::Source::Seed,
-            DatabaseChoice::Ssh { host, engine, name, user } => database::Source::Ssh(database::Remote { host, engine, name, user }),
+            DatabaseChoice::Ssh { host, engine, name, user, send_password } => {
+                database::Source::Ssh(database::Remote { host, engine, name, user, send_password })
+            }
         }
     }
 }
@@ -816,7 +827,8 @@ async fn open_in_editor<R: Runtime>(app: AppHandle<R>, path: String, file: Strin
     }
     match editor_url(&editor, &full, line, column) {
         Some(url) => app.opener().open_url(url, None::<&str>).map_err(|e| failed(&e)),
-        None => app.opener().open_path(full.to_string_lossy(), None::<&str>).map_err(|e| failed(&e)),
+        None if project::is_php_file(&full) => app.opener().open_path(full.to_string_lossy(), None::<&str>).map_err(|e| failed(&e)),
+        None => app.opener().reveal_item_in_dir(&full).map_err(|e| failed(&e)),
     }
 }
 

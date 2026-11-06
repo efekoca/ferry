@@ -565,6 +565,11 @@ export const tr = {
     sshName: "Veritabanı adı",
     sshUser: "Veritabanı kullanıcısı",
     sshNote: "Kendi ssh ayarınız ve ssh-agent kullanılır; Ferry anahtar ya da parola saklamaz. Sunucuda yalnızca mysqldump ya da pg_dump okuma işlemi çalışır.",
+    sshSendPassword: "Projedeki veritabanı parolasını bu sunucuya gönder",
+    sshPasswordWarning: (host: string) => `Projedeki veritabanı parolası ${host} sunucusuna gönderilecek. Bunu yalnızca parola o sunucuya aitse onaylayın.`,
+    commandsConfirmTitle: "Proje komut çalıştırmak istiyor",
+    commandsConfirm: "Çalıştır ve test et",
+    commandsConfirmText: "Bu komutlar projenin .ferry/config.json dosyasından geliyor ve geçici kopyada çalışacak. Hazırlık komutunun ağ erişimi var. Yalnızca güvendiğiniz projelerde onaylayın.",
     sshConfirmTitle: "Sunucudaki veri kopyalansın mı?",
     sshConfirm: "Kopyala ve test et",
     sshConfirmText: (host: string, name: string, user: string) =>

