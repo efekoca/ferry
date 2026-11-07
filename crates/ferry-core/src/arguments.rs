@@ -569,6 +569,16 @@ pub const ARGUMENTS: &[ArgRule] = &[
         Text::new("null uzunluk", "Null length"),
         B, (8, 0), tx("argümanı silin", "remove the argument"), NULL_LENGTH,
     )),
+    arg(&["substr_compare"], &[Null(3)], rule(
+        "behavior.null_length",
+        Text::new("null uzunluk", "Null length"),
+        B, (8, 0), tx("argümanı silin", "remove the argument"), NULL_LENGTH,
+    )),
+    arg(&["iconv_substr"], &[Null(2)], rule(
+        "behavior.null_length",
+        Text::new("null uzunluk", "Null length"),
+        B, (8, 0), tx("argümanı silin", "remove the argument"), NULL_LENGTH,
+    )),
     arg(&["substr_count"], &[Null(3)], rule(
         "behavior.null_length",
         Text::new("null uzunluk", "Null length"),

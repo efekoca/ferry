@@ -253,7 +253,15 @@ enum IniDefault {
 }
 
 /// PHP stays quiet when a deprecated setting is given the value it already has by default.
-const INI_DEFAULTS: [(&str, IniDefault); 13] = [
+const INI_DEFAULTS: [(&str, IniDefault); 21] = [
+    ("allow_url_include", IniDefault::Off),
+    ("mbstring.func_overload", IniDefault::Off),
+    ("track_errors", IniDefault::Off),
+    ("filter.default", IniDefault::Exactly("unsafe_raw")),
+    ("filter.default_flags", IniDefault::Exactly("")),
+    ("oci8.old_oci_close_semantics", IniDefault::Off),
+    ("session.trans_sid_hosts", IniDefault::Exactly("")),
+    ("session.trans_sid_tags", IniDefault::Exactly("a=href,area=href,frame=src,form=")),
     ("assert.active", IniDefault::On),
     ("assert.bail", IniDefault::Off),
     ("assert.callback", IniDefault::Exactly("")),
@@ -1238,6 +1246,94 @@ pub fn added_class(name: &str) -> Option<PhpVersion> {
 
 /// Any class a PHP of that version may declare, extensions included: a user class of that name
 /// collides as soon as the extension is loaded.
+/// Built-in classes in a namespace, lowercase and sorted, from the `php` images and the
+/// optional extensions those don't load. A project class of the same full name stops working.
+const NAMESPACED_CLASSES: [(&str, (u32, u32)); 76] = [
+    ("bcmath\\number", (8, 4)),
+    ("dom\\adjacentposition", (8, 4)),
+    ("dom\\attr", (8, 4)),
+    ("dom\\cdatasection", (8, 4)),
+    ("dom\\characterdata", (8, 4)),
+    ("dom\\childnode", (8, 4)),
+    ("dom\\comment", (8, 4)),
+    ("dom\\document", (8, 4)),
+    ("dom\\documentfragment", (8, 4)),
+    ("dom\\documenttype", (8, 4)),
+    ("dom\\domexception", (8, 4)),
+    ("dom\\dtdnamednodemap", (8, 4)),
+    ("dom\\element", (8, 4)),
+    ("dom\\entity", (8, 4)),
+    ("dom\\entityreference", (8, 4)),
+    ("dom\\htmlcollection", (8, 4)),
+    ("dom\\htmldocument", (8, 4)),
+    ("dom\\htmlelement", (8, 4)),
+    ("dom\\implementation", (8, 4)),
+    ("dom\\namednodemap", (8, 4)),
+    ("dom\\namespaceinfo", (8, 4)),
+    ("dom\\node", (8, 4)),
+    ("dom\\nodelist", (8, 4)),
+    ("dom\\notation", (8, 4)),
+    ("dom\\parentnode", (8, 4)),
+    ("dom\\processinginstruction", (8, 4)),
+    ("dom\\text", (8, 4)),
+    ("dom\\tokenlist", (8, 4)),
+    ("dom\\xmldocument", (8, 4)),
+    ("dom\\xpath", (8, 4)),
+    ("ffi\\cdata", (7, 4)),
+    ("ffi\\ctype", (7, 4)),
+    ("ffi\\exception", (7, 4)),
+    ("ffi\\parserexception", (7, 4)),
+    ("filter\\filterexception", (8, 5)),
+    ("filter\\filterfailedexception", (8, 5)),
+    ("ftp\\connection", (8, 1)),
+    ("imap\\connection", (8, 1)),
+    ("ldap\\connection", (8, 1)),
+    ("ldap\\result", (8, 1)),
+    ("ldap\\resultentry", (8, 1)),
+    ("odbc\\connection", (8, 4)),
+    ("odbc\\result", (8, 4)),
+    ("pdo\\dblib", (8, 4)),
+    ("pdo\\firebird", (8, 4)),
+    ("pdo\\mysql", (8, 4)),
+    ("pdo\\odbc", (8, 4)),
+    ("pdo\\pgsql", (8, 4)),
+    ("pdo\\sqlite", (8, 4)),
+    ("pgsql\\connection", (8, 1)),
+    ("pgsql\\lob", (8, 1)),
+    ("pgsql\\result", (8, 1)),
+    ("pspell\\config", (8, 1)),
+    ("pspell\\dictionary", (8, 1)),
+    ("random\\brokenrandomengineerror", (8, 2)),
+    ("random\\cryptosafeengine", (8, 2)),
+    ("random\\engine", (8, 2)),
+    ("random\\engine\\mt19937", (8, 2)),
+    ("random\\engine\\pcgoneseq128xslrr64", (8, 2)),
+    ("random\\engine\\secure", (8, 2)),
+    ("random\\engine\\xoshiro256starstar", (8, 2)),
+    ("random\\intervalboundary", (8, 3)),
+    ("random\\randomerror", (8, 2)),
+    ("random\\randomexception", (8, 2)),
+    ("random\\randomizer", (8, 2)),
+    ("soap\\sdl", (8, 4)),
+    ("soap\\url", (8, 4)),
+    ("uri\\invaliduriexception", (8, 5)),
+    ("uri\\rfc3986\\uri", (8, 5)),
+    ("uri\\uricomparisonmode", (8, 5)),
+    ("uri\\urierror", (8, 5)),
+    ("uri\\uriexception", (8, 5)),
+    ("uri\\whatwg\\invalidurlexception", (8, 5)),
+    ("uri\\whatwg\\url", (8, 5)),
+    ("uri\\whatwg\\urlvalidationerror", (8, 5)),
+    ("uri\\whatwg\\urlvalidationerrortype", (8, 5)),
+];
+
+pub fn added_namespaced_class(name: &str) -> Option<PhpVersion> {
+    NAMESPACED_CLASSES
+        .binary_search_by(|(n, _)| (*n).cmp(name))
+        .ok()
+        .map(|i| PhpVersion::new(NAMESPACED_CLASSES[i].1 .0, NAMESPACED_CLASSES[i].1 .1))
+}
+
 pub fn added_class_any(name: &str) -> Option<PhpVersion> {
     added_class(name).or_else(|| generated_class(name).map(|r| PhpVersion::new(r.1 .0, r.1 .1)))
 }

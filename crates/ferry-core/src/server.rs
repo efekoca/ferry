@@ -23,7 +23,7 @@ const HIDDEN_DIRS: [&str; 4] = [".github", ".ddev", ".upsun", ".platform"];
 
 fn visit_files(root: &Path, mut visit: impl FnMut(String, Kind, String)) -> Vec<FileError> {
     let exclude = crate::config::load(root).unwrap_or_default().exclude;
-    let excluded: Vec<std::path::PathBuf> = exclude.iter().map(|d| root.join(d.trim_end_matches('/'))).collect();
+    let excluded: Vec<std::path::PathBuf> = exclude.iter().map(|d| root.join(crate::project::exclude_path(d))).collect();
     let keep = |e: &walkdir::DirEntry| {
         if e.depth() == 0 {
             return true;
@@ -971,6 +971,16 @@ fn composer_lock(text: &str, target: PhpVersion) -> Vec<Hit> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_excluded_folder_written_with_a_wildcard_stays_out() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("old")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".ferry")).unwrap();
+        std::fs::write(dir.path().join("old/Dockerfile"), "FROM php:7.4-cli\n").unwrap();
+        std::fs::write(dir.path().join(".ferry/config.json"), r#"{"exclude":["old/*"]}"#).unwrap();
+        assert!(scan(dir.path(), "8.4".parse().unwrap()).0.is_empty());
+    }
 
     #[test]
     fn excluded_folders_are_left_out_of_server_files() {

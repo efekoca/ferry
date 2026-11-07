@@ -4,7 +4,23 @@ use crate::version::PhpVersion;
 
 pub type Span = ((usize, usize), (usize, usize));
 
-const REMOVED_EXTENSIONS: [(&str, (u32, u32)); 4] = [("ereg", (7, 0)), ("mssql", (7, 0)), ("mysql", (7, 0)), ("sybase_ct", (7, 0))];
+/// Whether an extension loads or not, code it guards can't break: it runs only where the extension
+/// is there, from PECL if not from PHP itself.
+const REMOVED_EXTENSIONS: [(&str, (u32, u32)); 13] = [
+    ("ereg", (7, 0)),
+    ("mssql", (7, 0)),
+    ("mysql", (7, 0)),
+    ("sybase_ct", (7, 0)),
+    ("mcrypt", (7, 2)),
+    ("interbase", (7, 4)),
+    ("recode", (7, 4)),
+    ("wddx", (7, 4)),
+    ("xmlrpc", (8, 0)),
+    ("imap", (8, 4)),
+    ("oci8", (8, 4)),
+    ("pdo_oci", (8, 4)),
+    ("pspell", (8, 4)),
+];
 
 const PECL: [&str; 6] = ["removed.mcrypt", "removed.imap", "removed.pspell", "removed.oci8", "removed.xmlrpc", "removed.interbase"];
 
