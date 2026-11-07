@@ -50,9 +50,11 @@ describe("accessibility", { timeout: 30_000 }, () => {
     await screen.findAllByRole("table");
     await check("dependencies");
     await user.click(nav(/Geçmiş/));
-    const row = (await screen.findAllByRole("row"))[1];
+    const [review] = await screen.findAllByRole("button", { name: /: incele$/ });
     await check("history");
-    await user.click(within(row).getByRole("button", { name: /İncele/ }));
+    await user.click(screen.getByRole("radio", { name: "Tablo" }));
+    await check("history table");
+    await user.click(review);
     await screen.findByRole("dialog", { name: /Uyumluluk/ });
     await check("history review");
     await user.keyboard("{Escape}");

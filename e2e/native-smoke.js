@@ -73,8 +73,8 @@
     await step("applied");
 
     await nav("Geçmiş");
-    await click("Geri yükle", await until(() => document.querySelector("table"), "geçmiş tablosu"));
-    await click("Geri yükle", await until(() => document.querySelector('[role="dialog"]'), "geri yükleme onayı"));
+    await click("Geri al", await until(() => document.querySelector(".history-backup"), "yedek satırı"));
+    await click("Geri al", await until(() => document.querySelector('[role="dialog"]'), "geri alma onayı"));
     await until(() => text().includes("Geri yüklendi"), "geri yükleme bildirimi", 60000);
     await emit("restored");
     await step("history");

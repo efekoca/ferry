@@ -7,6 +7,7 @@ import type {
   DockerImageUsage,
   DockerResponse,
   DockerSummary,
+  HistoryEntry,
   DockerStep,
   SnapshotConflict,
   ApplyResult,
@@ -65,6 +66,7 @@ export interface Api {
   databasePlan(path: string): Promise<DatabasePlan>;
   sshHosts(): Promise<string[]>;
   dockerImageUsage(): Promise<DockerImageUsage>;
+  scanHistory(path: string): Promise<HistoryEntry[]>;
   dockerHistory(path: string): Promise<DockerSummary[]>;
   checkHistory(path: string): Promise<CheckSummary[]>;
   removeDockerImages(): Promise<number>;
@@ -137,6 +139,7 @@ async function tauriApi(): Promise<Api> {
     databasePlan: (path) => invoke("database_plan", { path }),
     sshHosts: () => invoke("ssh_hosts"),
     dockerImageUsage: () => invoke("docker_image_usage"),
+    scanHistory: (path) => invoke("scan_history", { path }),
     dockerHistory: (path) => invoke("docker_history", { path }),
     checkHistory: (path) => invoke("check_history", { path }),
     removeDockerImages: () => invoke("remove_docker_images"),

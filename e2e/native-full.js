@@ -199,8 +199,8 @@
       check(left.length === 1 && left[0] === files[0], `unapplied file stays listed: ${left}`);
 
       await nav("Geçmiş");
-      const row = await until(() => $$("tbody tr")[0], "history row");
-      await click("İncele", row);
+      const row = await until(() => $$(".history-backup")[0], "history row");
+      row.querySelector(".history-row__open").click();
       const review = await dialog();
       await until(() => review.innerText.includes(`${files.length - 1} dosya`), "review meta");
       key("Escape", false);
@@ -209,23 +209,23 @@
 
       await emit(`MODIFY ${projects.kuzey}/${files[1]}`);
       await sleep(3000);
-      await click("Geri yükle", $$("tbody tr")[0]);
+      await click("Geri al", $$(".history-backup")[0]);
       const confirm = await dialog();
       await until(() => confirm.innerText.includes("uygulamadan sonra değiştirilmiş"), "conflict warning", 10000);
       check(confirm.innerText.includes(files[1]), "conflict lists edited file");
       const before = seen.length;
-      await click("Geri yükle", confirm);
+      await click("Geri al", confirm);
       await until(() => seen.slice(before).includes("Geri yüklendi"), "restored toast", 30000);
       await until(() => !$('[role="dialog"]'), "restore dialog closed");
 
-      await until(() => $$("tbody tr").some((r) => r.innerText.includes("Geri yükleme öncesi")), "edited file kept in a backup");
+      await until(() => $$(".history-backup").some((r) => r.innerText.includes("Geri yükleme öncesi")), "edited file kept in a backup");
 
-      for (let n = $$("tbody tr").length; n > 0; n--) {
+      for (let n = $$(".history-backup").length; n > 0; n--) {
         emit("  deleting snapshot");
-        (await until(() => $('tbody tr button[aria-label="Yedeği sil"]'), "delete button")).click();
+        (await until(() => $('.history-backup button[aria-label="Yedeği sil"]'), "delete button")).click();
         emit("  confirming delete");
         await click("Sil", await dialog());
-        await until(() => $$("tbody tr").length < n, "snapshot deleted");
+        await until(() => $$(".history-backup").length < n, "snapshot deleted");
       }
       emit("  waiting for empty history");
       await until(() => text().includes("Henüz bir değişiklik uygulanmadı"), "history empty after delete");
@@ -241,9 +241,9 @@
       await applyAndConfirm();
       await until(() => text().includes("Hepsi uygulandı"), "all applied state");
       await nav("Geçmiş");
-      await click("Geri yükle", await until(() => $$("tbody tr")[0], "history row"));
+      await click("Geri al", await until(() => $$(".history-backup")[0], "history row"));
       const before = seen.length;
-      await click("Geri yükle", await dialog());
+      await click("Geri al", await dialog());
       await until(() => seen.slice(before).includes("Geri yüklendi"), "restored", 30000);
       await until(() => !$('[role="dialog"]'), "restore dialog closed");
     },
@@ -288,11 +288,11 @@
       check(modern.length >= compat.length, "modernize covers at least the compat files");
       await applyAndConfirm();
       await nav("Geçmiş");
-      const row = await until(() => $$("tbody tr")[0], "history row");
+      const row = await until(() => $$(".history-backup")[0], "history row");
       check(row.innerText.includes("Modernleştirme"), "history label says modernize");
-      await click("Geri yükle", row);
+      await click("Geri al", row);
       const before = seen.length;
-      await click("Geri yükle", await dialog());
+      await click("Geri al", await dialog());
       await until(() => seen.slice(before).includes("Geri yüklendi"), "restored", 30000);
       await until(() => !$('[role="dialog"]'), "restore dialog closed");
     },
@@ -321,12 +321,12 @@
       await emit(`DUMP ${projects.unicode}/src/a.php`);
       await sleep(1500);
       await nav("Geçmiş");
-      await click("Geri yükle", await until(() => $$("tbody tr")[0], "history row"));
+      await click("Geri al", await until(() => $$(".history-backup")[0], "history row"));
       const confirm = await dialog();
       await sleep(800);
       check(!confirm.innerText.includes("uygulamadan sonra"), "no conflict warning when untouched");
       const before = seen.length;
-      await click("Geri yükle", confirm);
+      await click("Geri al", confirm);
       await until(() => seen.slice(before).includes("Geri yüklendi"), "restored", 30000);
       await until(() => !$('[role="dialog"]'), "restore dialog closed");
     },
@@ -356,9 +356,9 @@
       if (files.length) {
         await applyAndConfirm();
         await nav("Geçmiş");
-        await click("Geri yükle", await until(() => $$("tbody tr")[0], "history row"));
+        await click("Geri al", await until(() => $$(".history-backup")[0], "history row"));
         const before = seen.length;
-        await click("Geri yükle", await dialog());
+        await click("Geri al", await dialog());
         await until(() => seen.slice(before).includes("Geri yüklendi"), "restored", 30000);
       await until(() => !$('[role="dialog"]'), "restore dialog closed");
       }

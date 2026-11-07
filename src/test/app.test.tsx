@@ -32,6 +32,10 @@ async function compareTargets(user: ReturnType<typeof userEvent.setup>) {
   await user.click(await screen.findByRole("button", { name: "Karşılaştır" }));
 }
 
+async function backups() {
+  return within(await screen.findByRole("list", { name: "Yedekler" })).findAllByRole("listitem");
+}
+
 async function openAndScan(user: ReturnType<typeof userEvent.setup>) {
   await user.click(await screen.findByRole("button", { name: "Proje klasörü seçin" }));
   await screen.findByRole("heading", { name: "Genel bakış" });
@@ -299,17 +303,78 @@ describe("Ferry app", () => {
     await waitFor(() => expect(screen.queryByText(/artık hiçbir kodla eşleşmiyor/)).not.toBeInTheDocument());
   });
 
-  it("shows progress since the previous scan", async () => {
+  it("says what changed since the previous scan", async () => {
+    const user = setup();
+    await openAndScan(user);
+    await user.click(nav(/Düzeltmeler/));
+    await user.click(await screen.findByRole("button", { name: /Önizlemeyi hazırla/ }));
+    await user.click(await screen.findByRole("checkbox", { name: "Tümünü seç" }));
+    await user.click(await screen.findByRole("button", { name: "Tümünü uygula" }));
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Uygula" }));
+    await screen.findByText("4 dosya güncellendi");
+    await user.click(nav(/Geçmiş/));
+    const timeline = await screen.findByRole("region", { name: "Zaman çizelgesi" });
+    expect(await within(timeline).findByText(/\d+ çözüldü/)).toBeInTheDocument();
+  });
+
+  it("charts past scans, shows them as a table and narrows the range", async () => {
     const user = setup();
     await openAndScan(user);
     await user.click(nav(/Geçmiş/));
-    expect(await screen.findByText(/İlk tarama/)).toBeInTheDocument();
-    await user.click(nav(/Genel bakış/));
-    await user.click(screen.getByRole("button", { name: /Tekrar tara/ }));
-    await screen.findByRole("img", { name: /Hazırlık puanı/ });
+    const progress = await screen.findByRole("region", { name: "İlerleme" });
+    expect(within(progress).getByRole("img", { name: /Hazırlık puanının taramalar boyunca değişimi/ })).toBeInTheDocument();
+    await waitFor(() => expect(progress.querySelectorAll(".plot__hit").length).toBeGreaterThan(1));
+    expect(within(progress).getByText("15 azaldı")).toBeInTheDocument();
+    await user.click(within(progress).getByRole("radio", { name: "Tablo" }));
+    const rows = within(progress).getAllByRole("row");
+    expect(rows.length).toBeGreaterThan(2);
+    expect(within(rows[0]).getByRole("columnheader", { name: "Kritik" })).toBeInTheDocument();
+    expect(within(rows[1]).getByText(/^Bugün/)).toBeInTheDocument();
+    await user.click(screen.getByRole("radio", { name: "7 gün" }));
+    expect(within(progress).getAllByRole("row")).toHaveLength(rows.length);
+  });
+
+  it("draws scans saved before severity counts existed", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    const at = Math.floor(Date.now() / 1000);
+    api.scanHistory = async () => [
+      { at: at - 7200, target: "8.4", score: 10, total: 9 },
+      { at: at - 3600, target: "8.4", score: 20, total: 8 },
+    ];
+    render(<App api={api} />);
+    await openAndScan(user);
     await user.click(nav(/Geçmiş/));
-    expect(await screen.findByText("Değişiklik yok")).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: /Hazırlık puanının taramalar boyunca değişimi/ })).toBeInTheDocument();
+    const progress = await screen.findByRole("region", { name: "İlerleme" });
+    expect(progress.querySelectorAll(".plot__seg--unknown")).toHaveLength(2);
+    expect(within(progress).getByText("Kritik", { selector: "dt" }).nextElementSibling).toHaveTextContent("–");
+    expect(within(progress).getByText("1 azaldı")).toBeInTheDocument();
+  });
+
+  it("says what a first scan means instead of drawing one point", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    api.scanHistory = async () => [{ at: Math.floor(Date.now() / 1000), target: "8.4", score: 50, total: 3, counts: { breaking: 1, deprecated: 1, behavior: 1, files: 2 } }];
+    render(<App api={api} />);
+    await openAndScan(user);
+    await user.click(nav(/Geçmiş/));
+    expect(await screen.findByText(/İlk tarama/)).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: /taramalar boyunca/ })).not.toBeInTheDocument();
+  });
+
+  it("lists scans, fixes and checks on one timeline and hides older ones", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    const at = Math.floor(Date.now() / 1000);
+    api.scanHistory = async () => Array.from({ length: 12 }, (_, i) => ({ at: at - i * 3600, target: "8.4", score: 50, total: 3 }));
+    render(<App api={api} />);
+    await openAndScan(user);
+    await user.click(nav(/Geçmiş/));
+    const timeline = await screen.findByRole("region", { name: "Zaman çizelgesi" });
+    await waitFor(() => expect(within(timeline).getAllByText("Tarama")).toHaveLength(8));
+    await user.click(within(timeline).getByRole("button", { name: /kayıt daha/ }));
+    expect(within(timeline).getAllByText("Tarama")).toHaveLength(12);
+    expect(within(timeline).queryByRole("button", { name: /kayıt daha/ })).not.toBeInTheDocument();
   });
 
   it("lets all three kinds of fix be chosen together", async () => {
@@ -600,7 +665,8 @@ describe("Ferry app", () => {
     expect(real).toHaveAttribute("title", "Yeni sorunlar var");
     expect(real.parentElement).toHaveAttribute("data-state", "blocked");
     await user.click(nav(/Geçmiş/));
-    expect(await screen.findByText("Gerçek testler")).toBeInTheDocument();
+    const checks = (await screen.findByText("Son kontroller")).closest(".card") as HTMLElement;
+    expect(within(checks).getByText("Gerçek test")).toBeInTheDocument();
     expect(screen.queryByText("Sunucudaki proje kökü")).not.toBeInTheDocument();
   });
 
@@ -972,14 +1038,13 @@ describe("Ferry app", () => {
     expect(screen.getByText("0 / 1 dosya seçili")).toBeInTheDocument();
 
     await user.click(nav(/Geçmiş/));
-    const row = (await screen.findByText(/Uyumluluk düzeltmeleri · PHP 8.4/)).closest("tr")!;
-    await user.click(within(row).getByRole("button", { name: /İncele/ }));
+    await user.click(await screen.findByRole("button", { name: "Uyumluluk düzeltmeleri · PHP 8.4: incele" }));
     const review = await screen.findByRole("dialog", { name: /Uyumluluk düzeltmeleri/ });
     expect(await within(review).findByText("3 dosya", { exact: false })).toBeInTheDocument();
     expect(within(review).getByRole("region", { name: /değişiklikleri/ })).toBeInTheDocument();
     expect(within(review).queryByRole("button", { name: /helpers\.php/ })).not.toBeInTheDocument();
-    await user.click(within(review).getByRole("button", { name: /Geri yükle/ }));
-    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Geri yükle" }));
+    await user.click(within(review).getByRole("button", { name: /Geri al/ }));
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Geri al" }));
     expect(await screen.findByText("Geri yüklendi")).toBeInTheDocument();
   });
 
@@ -1149,12 +1214,12 @@ describe("Ferry app", () => {
     render(<App api={api} />);
     await openAndScan(user);
     await user.click(nav(/Geçmiş/));
-    const row = (await screen.findAllByRole("row"))[1];
-    await user.click(within(row).getByRole("button", { name: /Geri yükle/ }));
+    const [row] = await backups();
+    await user.click(within(row).getByRole("button", { name: "Geri al" }));
     const dialog = await screen.findByRole("dialog");
     expect(await within(dialog).findByText("Bu dosya uygulamadan sonra değiştirilmiş:")).toBeInTheDocument();
     expect(within(dialog).getByText("includes/helpers.php")).toBeInTheDocument();
-    await user.click(within(dialog).getByRole("button", { name: "Geri yükle" }));
+    await user.click(within(dialog).getByRole("button", { name: "Geri al" }));
     expect(await screen.findByText("Geri yüklendi")).toBeInTheDocument();
     expect(restored).toEqual([[{ file: "includes/helpers.php", hash: "00ab" }]]);
   });
@@ -1168,9 +1233,9 @@ describe("Ferry app", () => {
     render(<App api={api} />);
     await openAndScan(user);
     await user.click(nav(/Geçmiş/));
-    const row = (await screen.findAllByRole("row"))[1];
-    await user.click(within(row).getByRole("button", { name: /Geri yükle/ }));
-    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Geri yükle" }));
+    const [row] = await backups();
+    await user.click(within(row).getByRole("button", { name: "Geri al" }));
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Geri al" }));
     expect(await screen.findByText("Geri yüklendi")).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(scans).toBe(2);
@@ -1215,7 +1280,7 @@ describe("Ferry app", () => {
     const user = setup();
     await openAndScan(user);
     await user.click(nav(/Geçmiş/));
-    const row = (await screen.findAllByRole("row"))[1];
+    const [row] = await backups();
     await user.click(within(row).getByRole("button", { name: /Yedeği sil/ }));
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByRole("button", { name: "Vazgeç" })).toHaveFocus();
@@ -1359,9 +1424,9 @@ describe("Ferry app", () => {
     await user.click(nav(/Bulgular/));
     await more(user, /lint et/);
     await user.click(nav(/Geçmiş/));
-    const card = (await screen.findByText("Lint ve test kontrolleri")).closest(".card") as HTMLElement;
+    const card = (await screen.findByText("Son kontroller")).closest(".card") as HTMLElement;
+    expect(within(card).getByText("Lint")).toBeInTheDocument();
     expect(within(card).getByText("Geçti")).toBeInTheDocument();
-    expect(within(card).getByText(/php -l · PHP/)).toBeInTheDocument();
   });
 
   it("asks before running commands that come from the project", async () => {

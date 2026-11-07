@@ -271,6 +271,10 @@ impl AppState {
         self.data_dir.join("checks").join(format!("{:016x}.json", fnv1a(path.as_bytes())))
     }
 
+    fn scan_history_path(&self, path: &str) -> PathBuf {
+        self.data_dir.join("history").join(format!("{:016x}.json", fnv1a(path.as_bytes())))
+    }
+
     fn docker_history_path(&self, path: &str) -> PathBuf {
         self.data_dir.join("docker").join(format!("{:016x}.json", fnv1a(path.as_bytes())))
     }
@@ -655,6 +659,11 @@ async fn keep_docker_trial(state: State<'_, AppState>, path: String) -> CmdResul
 }
 
 #[tauri::command]
+fn scan_history(state: State<'_, AppState>, path: String) -> Vec<history::Entry> {
+    history::scans(&state.scan_history_path(&normalize_path(path)))
+}
+
+#[tauri::command]
 fn check_history(state: State<'_, AppState>, path: String) -> Vec<ferry_core::localcheck::Summary> {
     ferry_core::localcheck::history(&state.check_history_path(&normalize_path(path)))
 }
@@ -745,7 +754,7 @@ async fn scan_project<R: Runtime>(app: AppHandle<R>, path: String, target: Strin
     }
     let mut response = respond(Path::new(&path), scan, state.runtime_log(&path).as_ref());
     if latest {
-        let file = state.data_dir.join("history").join(format!("{:016x}.json", fnv1a(path.as_bytes())));
+        let file = state.scan_history_path(&path);
         let target = response.scan.target.to_string();
         response.progress = history::record(&file, now_secs(), &target, response.summary.score, &response.scan.findings).ok();
     }
@@ -1649,6 +1658,7 @@ pub fn with_commands<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R
         cancel_local_check,
         docker_image_usage,
         docker_history,
+        scan_history,
         check_history,
         remove_docker_images,
         clear_runtime_log,

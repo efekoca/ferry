@@ -22,6 +22,7 @@ import type {
   DockerRunArgs,
   DockerSummary,
   DockerTrial,
+  HistoryEntry,
 } from "./types";
 import { TARGETS } from "./types";
 import { isPin } from "./fixes";
@@ -128,6 +129,7 @@ interface AppStore {
   clearPreview(): void;
   cancelPreview(): void;
   docker: DockerComparison | null;
+  scanHistory: HistoryEntry[];
   dockerHistory: DockerSummary[];
   checkHistory: CheckSummary[];
   dockerStep: DockerStep | null;
@@ -182,6 +184,7 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
   const [dockerStep, setDockerStep] = useState<DockerStep | null>(null);
   const [dockerArgs, setDockerArgs] = useState<DockerRunArgs | null>(null);
   const [dockerTrial, setDockerTrial] = useState<DockerTrial | null>(null);
+  const [scanHistory, setScanHistory] = useState<HistoryEntry[]>([]);
   const [dockerHistory, setDockerHistory] = useState<DockerSummary[]>([]);
   const [checkHistory, setCheckHistory] = useState<CheckSummary[]>([]);
   const [installingRector, setInstallingRector] = useState(false);
@@ -267,6 +270,23 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
     },
     [api, toast, t],
   );
+
+  const openRoot = project?.root;
+  const scanProgress = scan?.progress;
+  useEffect(() => {
+    if (!api || !openRoot) {
+      setScanHistory([]);
+      return;
+    }
+    let live = true;
+    api
+      .scanHistory(openRoot)
+      .then((entries) => live && setScanHistory(entries))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [api, openRoot, scanProgress]);
 
   const resetResults = useCallback(() => {
     api?.cancelPreview().catch(() => {});
@@ -759,13 +779,13 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
     () => ({
       api, view, setView, findingsFilter, setFindingsFilter, showFindings, theme, setTheme, recent, forgetRecent, project, opening, openProject, closeProject,
       target, setTarget, scan, scanning, progress, runScan, cancelScan, deps, toolchain, refreshToolchain, installingRector,
-      installRector, preview, previewMode, previewing, loadPreview, clearPreview, cancelPreview, skippedHunks, skipHunks, docker, dockerHistory, checkHistory, dockerStep, runDocker, cancelDocker, saveConfig, dockerArgs, dockerTrial, tryFixes, applying, applyChanges, snapshots,
+      installRector, preview, previewMode, previewing, loadPreview, clearPreview, cancelPreview, skippedHunks, skipHunks, docker, scanHistory, dockerHistory, checkHistory, dockerStep, runDocker, cancelDocker, saveConfig, dockerArgs, dockerTrial, tryFixes, applying, applyChanges, snapshots,
       refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport, ignoreFinding, unignoreFinding, pruneIgnores, importRuntimeLog, setRuntimeRoots, clearRuntimeLog, runLocalCheck, checking, cancelLocalCheck,
     }),
     [
       api, view, findingsFilter, showFindings, theme, setTheme, recent, forgetRecent, project, opening, openProject, closeProject, target,
       setTarget, scan, scanning, progress, runScan, cancelScan, deps, toolchain, refreshToolchain, installingRector,
-      installRector, preview, previewMode, previewing, loadPreview, clearPreview, cancelPreview, skippedHunks, skipHunks, docker, dockerHistory, checkHistory, dockerStep, runDocker, cancelDocker, saveConfig, dockerArgs, dockerTrial, tryFixes, applying, applyChanges, snapshots,
+      installRector, preview, previewMode, previewing, loadPreview, clearPreview, cancelPreview, skippedHunks, skipHunks, docker, scanHistory, dockerHistory, checkHistory, dockerStep, runDocker, cancelDocker, saveConfig, dockerArgs, dockerTrial, tryFixes, applying, applyChanges, snapshots,
       refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport, ignoreFinding, unignoreFinding, pruneIgnores, importRuntimeLog, setRuntimeRoots, clearRuntimeLog, runLocalCheck, checking, cancelLocalCheck,
     ],
   );
