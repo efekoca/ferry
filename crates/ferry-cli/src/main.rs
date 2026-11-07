@@ -216,7 +216,7 @@ fn render_errors_text(errors: &[FileError], o: &Options) -> String {
         (Lang::En, n) => format!("{n} files couldn't be scanned, so the results don't cover them:\n"),
     };
     for e in errors {
-        out.push_str(&format!("  {}: {}\n", e.file, e.message));
+        out.push_str(&format!("  {}: {}\n", one_line(&e.file), one_line(&e.message)));
     }
     out
 }
@@ -231,7 +231,7 @@ fn render_text(findings: &[Finding], ignored: &[IgnoredFinding], summary: &repor
         };
         out.push_str(&format!(
             "{}:{}:{}  {} [{}, PHP {}, {}] {}\n    {}\n",
-            f.file,
+            one_line(&f.file),
             f.line,
             f.column,
             text(&f.title, o.lang),
@@ -239,7 +239,7 @@ fn render_text(findings: &[Finding], ignored: &[IgnoredFinding], summary: &repor
             f.since,
             fix,
             f.rule_id,
-            text(&f.message, o.lang)
+            one_line(text(&f.message, o.lang))
         ));
     }
     let summary_line = match o.lang {
@@ -400,6 +400,11 @@ fn check_target(target: PhpVersion) -> Result<(), String> {
     Ok(())
 }
 
+/// CI runners treat a line starting with `::` as a command, so text from the project can't start a line.
+fn one_line(s: &str) -> String {
+    s.chars().map(|c| if c.is_control() { c.escape_default().to_string() } else { c.to_string() }).collect()
+}
+
 fn escape_data(s: &str) -> String {
     s.replace('%', "%25").replace('\r', "%0D").replace('\n', "%0A")
 }
@@ -501,11 +506,14 @@ fn render_checkstyle(findings: &[Finding], errors: &[FileError], o: &Options) ->
     out + "</checkstyle>\n"
 }
 
+/// A spreadsheet runs a cell that starts with one of these, and file names come from the project.
 fn csv_field(s: &str) -> String {
-    if s.contains([',', '"', '\n', '\r']) {
-        format!("\"{}\"", s.replace('"', "\"\""))
+    let inert =
+        if s.trim_start().starts_with(['=', '+', '-', '@']) || s.starts_with(['\t', '\r', '\n']) { format!("'{s}") } else { s.to_string() };
+    if inert.contains([',', '"', '\n', '\r']) {
+        format!("\"{}\"", inert.replace('"', "\"\""))
     } else {
-        s.to_string()
+        inert
     }
 }
 
@@ -627,7 +635,11 @@ fn run(o: &Options) -> Result<Outcome, String> {
     let applied = ignore::apply(&root, std::mem::take(&mut scan.findings), &ignore::load(&root));
     let (findings, ignored) = (applied.kept, applied.ignored);
     for stale in &applied.stale {
-        eprintln!("ferry-cli: .ferry/ignore.json entry for {} in {} no longer matches any code", stale.rule_id, stale.file);
+        eprintln!(
+            "ferry-cli: .ferry/ignore.json entry for {} in {} no longer matches any code",
+            one_line(&stale.rule_id),
+            one_line(&stale.file)
+        );
     }
     let summary = report::summarize(&findings);
     let baseline: Option<Vec<String>> = match &o.baseline {
@@ -683,10 +695,10 @@ fn safe_fixes(root: &Path, rector: &Path, target: PhpVersion) -> Result<Vec<(Str
     use ferry_core::{rector, rules::FixKind, toolchain};
     let php = toolchain::find_php(None).ok_or_else(|| toolchain::ToolError::PhpMissing.to_string())?;
     let excluded = project::inspect(root).map_err(|e| e.to_string())?.excluded_dirs;
-    let work = std::env::temp_dir().join("ferry-cli-rector");
+    let work = tempfile::Builder::new().prefix("ferry-cli-rector").tempdir().map_err(|e| e.to_string())?;
     let cancel = std::sync::atomic::AtomicBool::new(false);
-    let preview =
-        rector::preview(&php, rector, root, target, rector::RectorMode::Compat, &excluded, &work, &cancel).map_err(|e| e.to_string())?;
+    let preview = rector::preview(&php, rector, root, target, rector::RectorMode::Compat, &excluded, work.path(), &cancel)
+        .map_err(|e| e.to_string())?;
     Ok(preview.changes.into_iter().filter(|c| c.fix == FixKind::Auto).map(|c| (c.file, c.new_content)).collect())
 }
 
@@ -1189,6 +1201,24 @@ mod tests {
             assert!(first.ends_with(",Ada Lovelace"), "{first}");
         }
         assert_eq!(csv_field("a,\"b\""), "\"a,\"\"b\"\"\"");
+    }
+
+    #[test]
+    fn spreadsheet_formulas_in_csv_stay_text() {
+        assert_eq!(csv_field("=cmd|'/c calc'!A1.php"), "'=cmd|'/c calc'!A1.php");
+        assert_eq!(csv_field("=HYPERLINK(\"http://x\",\"y\")"), "\"'=HYPERLINK(\"\"http://x\"\",\"\"y\"\")\"");
+        assert_eq!(csv_field("  @SUM(A1)"), "'  @SUM(A1)");
+        assert_eq!(csv_field("+1"), "'+1");
+        assert_eq!(csv_field("-x.php"), "'-x.php");
+        assert_eq!(csv_field("\t=1"), "'\t=1");
+        assert_eq!(csv_field("src/a.php"), "src/a.php");
+        assert_eq!(csv_field("12"), "12");
+    }
+
+    #[test]
+    fn project_text_cannot_start_a_line_in_the_log() {
+        assert_eq!(one_line("x\n::stop-commands::token\r\n"), "x\\n::stop-commands::token\\r\\n");
+        assert_eq!(one_line("src/plain name.php"), "src/plain name.php");
     }
 
     #[test]

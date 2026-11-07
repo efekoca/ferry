@@ -6,10 +6,10 @@ license.workspace = true
 description = "Command-line PHP upgrade scanner for CI, built on ferry-core."
 
 [dependencies]
+tempfile.workspace = true
 ferry-core = { path = "../ferry-core" }
 serde_json.workspace = true
 libc = "0.2"
 ctrlc = { version = "3", features = ["termination"] }
 
 [dev-dependencies]
-tempfile.workspace = true

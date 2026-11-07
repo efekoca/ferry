@@ -158,7 +158,7 @@ cargo build --release -p ferry-cli
 target/release/ferry-cli scan . --target 8.4 --format github
 ```
 
-- `--format text|json|sarif|github|junit|checkstyle|csv`: düz metin, özet ve yok sayılan bulgularla birlikte JSON, GitHub code scanning ve benzeri araçlar için SARIF 2.1.0, ilgili satırlarda GitHub Actions uyarıları, Jenkins ve GitLab test raporları için JUnit XML, Checkstyle XML ya da tablolar için CSV. `--blame` CSV'ye her satırın `git blame` yazarını ekler; böylece iş ekip içinde paylaştırılabilir.
+- `--format text|json|sarif|github|junit|checkstyle|csv`: düz metin, özet ve yok sayılan bulgularla birlikte JSON, GitHub code scanning ve benzeri araçlar için SARIF 2.1.0, ilgili satırlarda GitHub Actions uyarıları, Jenkins ve GitLab test raporları için JUnit XML, Checkstyle XML ya da tablolar için CSV. `--blame` CSV'ye her satırın `git blame` yazarını ekler; böylece iş ekip içinde paylaştırılabilir. CSV çıktısında, tablo programının formül olarak çalıştıracağı hücreler kesme işaretiyle başlar.
 - `--fail-on breaking|deprecated|any|none`: komutun 1 koduyla çıkması için gereken en düşük önem derecesi (varsayılanı `breaking`). Klasörün bulunamaması gibi hatalarda çıkış kodu 2'dir.
 - `--allow-incomplete`: Bazı dosyaları okuyamayan bir tarama (örneğin 2 MB'ı aşan bir dosya) varsayılan olarak 3 koduyla çıkar, bu dosyaları stderr'e yazar ve her formatta bildirir (JSON'da `complete`, `filesFound` ve `errors`, SARIF'te `executionSuccessful`). Bu seçenek böyle bir taramanın geçmesine izin verir; action'daki karşılığı `allow-incomplete` girdisidir.
 - `--output <dosya>` raporu bir dosyaya yazar, `--lang tr` mesajları Türkçe yapar.

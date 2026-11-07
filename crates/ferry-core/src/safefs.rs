@@ -52,6 +52,46 @@ pub fn resolve(root: &Path, rel: &str) -> Result<PathBuf> {
     Ok(path)
 }
 
+/// Larger than any real manifest, lock file or setting file.
+const MAX_PROJECT_FILE: u64 = 64 * 1024 * 1024;
+
+/// Reads a file a project supplied. A link to `/dev/zero`, a pipe or a huge file can't hang the app.
+pub fn read_bytes(path: impl AsRef<Path>) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
+    let file = std::fs::File::open(path)?;
+    let meta = file.metadata()?;
+    if !meta.is_file() || meta.len() > MAX_PROJECT_FILE {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "not a regular file of a sensible size"));
+    }
+    let mut bytes = Vec::with_capacity(meta.len() as usize);
+    file.take(MAX_PROJECT_FILE).read_to_end(&mut bytes)?;
+    Ok(bytes)
+}
+
+pub fn read_text(path: impl AsRef<Path>) -> std::io::Result<String> {
+    String::from_utf8(read_bytes(path)?).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+}
+
+const MAX_SOURCE: u64 = 4 * 1024 * 1024;
+
+pub fn lines_around(root: &Path, rel: &str, line: usize, around: usize) -> Result<Vec<(usize, String)>> {
+    let path = resolve(root, rel)?;
+    if std::fs::metadata(&path)?.len() > MAX_SOURCE {
+        return Err(refuse(crate::t!("{rel}: dosya çok büyük", "{rel}: the file is too large")));
+    }
+    let bytes = std::fs::read(&path)?;
+    let text = String::from_utf8_lossy(&bytes);
+    let first = line.saturating_sub(around).max(1);
+    let last = line.saturating_add(around);
+    Ok(text
+        .lines()
+        .enumerate()
+        .map(|(i, text)| (i + 1, text))
+        .filter(|(n, _)| (first..=last).contains(n))
+        .map(|(n, text)| (n, text.to_string()))
+        .collect())
+}
+
 pub fn replace(path: &Path, bytes: &[u8]) -> Result<()> {
     let meta = std::fs::symlink_metadata(path).ok();
     if meta.as_ref().is_some_and(|m| m.file_type().is_symlink()) {
@@ -117,6 +157,41 @@ pub fn set_readonly(path: &Path, readonly: bool) -> Result<()> {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn project_files_are_read_only_when_they_are_plain_files() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.json"), "{}").unwrap();
+        assert_eq!(read_text(dir.path().join("a.json")).unwrap(), "{}");
+        assert!(read_bytes(dir.path()).is_err(), "a folder");
+        #[cfg(unix)]
+        {
+            let link = dir.path().join("composer.json");
+            std::os::unix::fs::symlink("/dev/zero", &link).unwrap();
+            assert!(read_text(&link).is_err(), "a link to a device");
+        }
+    }
+
+    #[test]
+    fn reads_the_lines_around_a_finding() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.php"), "one\r\ntwo\nthree\nfour\nfive\n").unwrap();
+        let lines = |line| lines_around(dir.path(), "a.php", line, 1).unwrap();
+        assert_eq!(lines(3), vec![(2, "two".to_string()), (3, "three".to_string()), (4, "four".to_string())]);
+        assert_eq!(lines(1), vec![(1, "one".to_string()), (2, "two".to_string())]);
+        assert_eq!(lines(5), vec![(4, "four".to_string()), (5, "five".to_string())]);
+        assert!(lines(9).is_empty());
+    }
+
+    #[test]
+    fn stays_inside_the_project_when_reading_lines() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("project");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(dir.path().join("secret.txt"), "x").unwrap();
+        assert!(lines_around(&root, "../secret.txt", 1, 1).is_err());
+        assert!(lines_around(&root, "/etc/hosts", 1, 1).is_err());
+    }
 
     #[test]
     fn replace_keeps_read_only_files_read_only() {

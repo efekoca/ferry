@@ -22,8 +22,10 @@ import type {
   DockerRunArgs,
   DockerSummary,
   DockerTrial,
+  HistoryEntry,
 } from "./types";
 import { TARGETS } from "./types";
+import { isPin } from "./fixes";
 import { isBlockedTarget } from "./security";
 import { FRAMEWORK_LABEL } from "./labels";
 import { useToast } from "../components/Toast";
@@ -123,9 +125,11 @@ interface AppStore {
   preview: RectorPreview | null;
   previewMode: RectorMode;
   previewing: boolean;
-  loadPreview(mode: RectorMode, step?: string): Promise<boolean>;
+  loadPreview(mode: RectorMode, step?: string, withPins?: boolean): Promise<boolean>;
+  clearPreview(): void;
   cancelPreview(): void;
   docker: DockerComparison | null;
+  scanHistory: HistoryEntry[];
   dockerHistory: DockerSummary[];
   checkHistory: CheckSummary[];
   dockerStep: DockerStep | null;
@@ -180,6 +184,7 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
   const [dockerStep, setDockerStep] = useState<DockerStep | null>(null);
   const [dockerArgs, setDockerArgs] = useState<DockerRunArgs | null>(null);
   const [dockerTrial, setDockerTrial] = useState<DockerTrial | null>(null);
+  const [scanHistory, setScanHistory] = useState<HistoryEntry[]>([]);
   const [dockerHistory, setDockerHistory] = useState<DockerSummary[]>([]);
   const [checkHistory, setCheckHistory] = useState<CheckSummary[]>([]);
   const [installingRector, setInstallingRector] = useState(false);
@@ -265,6 +270,23 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
     },
     [api, toast, t],
   );
+
+  const openRoot = project?.root;
+  const scanProgress = scan?.progress;
+  useEffect(() => {
+    if (!api || !openRoot) {
+      setScanHistory([]);
+      return;
+    }
+    let live = true;
+    api
+      .scanHistory(openRoot)
+      .then((entries) => live && setScanHistory(entries))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [api, openRoot, scanProgress]);
 
   const resetResults = useCallback(() => {
     api?.cancelPreview().catch(() => {});
@@ -461,7 +483,7 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
   }, [api, toast, fail, t]);
 
   const loadPreview = useCallback(
-    async (mode: RectorMode, step?: string) => {
+    async (mode: RectorMode, step?: string, withPins = false) => {
       if (!api || !project) return false;
       const root = project.root;
       const seq = ++previewSeq.current;
@@ -469,7 +491,7 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
       setPreviewMode(mode);
       setPreviewing(true);
       try {
-        const result = await api.rectorPreview(root, step ?? target, mode);
+        const result = await api.rectorPreview(root, step ?? target, mode, withPins);
         if (seq === previewSeq.current) setPreview(result);
         return true;
       } catch (e) {
@@ -483,6 +505,12 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
     },
     [api, project, target, previewMode, fail, t],
   );
+
+  const clearPreview = useCallback(() => {
+    previewSeq.current++;
+    setPreview(null);
+    setPreviewing(false);
+  }, []);
 
   const cancelPreview = useCallback(() => {
     cancelledSeq.current = previewSeq.current;
@@ -563,8 +591,9 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
       setApplying(true);
       const root = project.root;
       try {
-        const label = t.changes.snapshotLabel(previewMode, preview?.target ?? target);
         if (!preview) return false;
+        const pinsOnly = preview.changes.filter((c) => files.includes(c.file)).every(isPin);
+        const label = t.changes.snapshotLabel(pinsOnly ? "pins" : previewMode, preview.target);
         const result = await api.applyChanges(root, preview.id, files, label, skipped, commitMessage);
         if (rootRef.current !== root) return true;
         setPreview((p) => (p ? { ...p, changes: p.changes.filter((c) => !result.written.includes(c.file)) } : p));
@@ -750,13 +779,13 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
     () => ({
       api, view, setView, findingsFilter, setFindingsFilter, showFindings, theme, setTheme, recent, forgetRecent, project, opening, openProject, closeProject,
       target, setTarget, scan, scanning, progress, runScan, cancelScan, deps, toolchain, refreshToolchain, installingRector,
-      installRector, preview, previewMode, previewing, loadPreview, cancelPreview, skippedHunks, skipHunks, docker, dockerHistory, checkHistory, dockerStep, runDocker, cancelDocker, saveConfig, dockerArgs, dockerTrial, tryFixes, applying, applyChanges, snapshots,
+      installRector, preview, previewMode, previewing, loadPreview, clearPreview, cancelPreview, skippedHunks, skipHunks, docker, scanHistory, dockerHistory, checkHistory, dockerStep, runDocker, cancelDocker, saveConfig, dockerArgs, dockerTrial, tryFixes, applying, applyChanges, snapshots,
       refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport, ignoreFinding, unignoreFinding, pruneIgnores, importRuntimeLog, setRuntimeRoots, clearRuntimeLog, runLocalCheck, checking, cancelLocalCheck,
     }),
     [
       api, view, findingsFilter, showFindings, theme, setTheme, recent, forgetRecent, project, opening, openProject, closeProject, target,
       setTarget, scan, scanning, progress, runScan, cancelScan, deps, toolchain, refreshToolchain, installingRector,
-      installRector, preview, previewMode, previewing, loadPreview, cancelPreview, skippedHunks, skipHunks, docker, dockerHistory, checkHistory, dockerStep, runDocker, cancelDocker, saveConfig, dockerArgs, dockerTrial, tryFixes, applying, applyChanges, snapshots,
+      installRector, preview, previewMode, previewing, loadPreview, clearPreview, cancelPreview, skippedHunks, skipHunks, docker, scanHistory, dockerHistory, checkHistory, dockerStep, runDocker, cancelDocker, saveConfig, dockerArgs, dockerTrial, tryFixes, applying, applyChanges, snapshots,
       refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport, ignoreFinding, unignoreFinding, pruneIgnores, importRuntimeLog, setRuntimeRoots, clearRuntimeLog, runLocalCheck, checking, cancelLocalCheck,
     ],
   );

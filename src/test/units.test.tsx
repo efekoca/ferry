@@ -1,13 +1,21 @@
 import { touches } from "../lib/fixes";
-import type { DockerEvent, FileChange } from "../lib/types";
+import type { CheckSummary, DockerEvent, DockerSummary, FileChange, HistoryEntry, Snapshot } from "../lib/types";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { DiffViewer, wordHighlight } from "../components/DiffViewer";
-import { ScoreRing } from "../components/ScoreRing";
-import { DICTS } from "../i18n";
-import { commonTitle, dependencyBlockers, formatBytes, formatDuration, formatRelative, joinPath, scoreHeadline, scoreTone } from "../lib/labels";
+import { DiffViewer, splitRows, wordDiff } from "../components/DiffViewer";
+import { ComboField, Select, TagInput } from "../components/ui";
+import { DICTS, I18nProvider } from "../i18n";
+import { highlight } from "../lib/code";
+import { columnOf, dayLabels, historyEvents, niceMax, rangeStart, smoothPath, spreadOut } from "../lib/history";
+import { squarify } from "../lib/treemap";
+import { filesHoldingHalf, fileStats } from "../screens/Overview";
+import { commonTitle, dependencyBlockers, formatBytes, formatDuration, formatRelative, joinPath, relativeTo, scoreHeadline, scoreTone } from "../lib/labels";
 import { NO_FILTER, type FindingsFilter } from "../lib/store";
 import { filterFindings, prioritizeFindings } from "../screens/Findings";
+import { relatedFindings } from "../screens/FindingDetail";
+import { RULE_NOTES } from "../i18n/rules";
 import { isVulnerable, patchedFor } from "../lib/security";
 import type { ExtensionUse, FileDiff, Finding } from "../lib/types";
 import { compareProbe, parseProbe } from "../lib/probe";
@@ -26,12 +34,26 @@ describe("dictionaries", () => {
   });
 });
 
-describe("wordHighlight", () => {
+const changed = (text: string, marks: boolean[]) => [...text].filter((_, i) => marks[i]).join("");
+
+describe("wordDiff", () => {
   it("isolates the changed span", () => {
-    expect(wordHighlight("f(Foo $a = null)", "f(?Foo $a = null)")).toEqual(["f(", "", "Foo $a = null)"]);
-    expect(wordHighlight("f(?Foo $a = null)", "f(Foo $a = null)")).toEqual(["f(", "?", "Foo $a = null)"]);
-    expect(wordHighlight("same", "same")).toEqual(["same", "", ""]);
-    expect(wordHighlight("abc", "xyz")).toEqual(["", "abc", ""]);
+    const [before, after] = wordDiff("f(Foo $a = null)", "f(?Foo $a = null)");
+    expect(changed("f(Foo $a = null)", before)).toBe("");
+    expect(changed("f(?Foo $a = null)", after)).toBe("?");
+    expect(wordDiff("same", "same")[0].some(Boolean)).toBe(false);
+    expect(changed("abc", wordDiff("abc", "xyz")[0])).toBe("abc");
+  });
+
+  it("keeps an inserted word in one piece without its trailing space", () => {
+    const text = "    public function label($row)";
+    expect(changed(text, wordDiff("    function label($row)", text)[1])).toBe("public");
+  });
+
+  it("marks only the tokens that changed in a long line", () => {
+    const before = "return $row[status] == 'paid' ? 'yes' : $row[status];";
+    const after = "return $row['status'] == 'paid' ? 'yes' : $row['status'];";
+    expect(changed(after, wordDiff(before, after)[1])).toBe("''''");
   });
 });
 
@@ -57,9 +79,9 @@ describe("DiffViewer", () => {
     expect(screen.getByRole("region", { name: "a.php değişiklikleri" })).toBeInTheDocument();
     const rows = container.querySelectorAll("tr[data-kind]");
     expect([...rows].map((r) => r.getAttribute("data-kind"))).toEqual(["context", "del", "add"]);
-    expect(container.querySelector("tr.del mark")?.textContent).toBe("utf8_encode($s");
-    expect(container.querySelector("tr.add mark")?.textContent).toBe("mb_convert_encoding($s, 'UTF-8', 'ISO-8859-1'");
-    expect(container.querySelector(".diff__hunk")?.textContent).toContain("−3 +3");
+    expect(container.querySelector("tr.del mark")?.textContent).toBe("utf8_encode");
+    expect(container.querySelector("tr.add mark")?.textContent).toBe("mb_convert_encoding");
+    expect(container.querySelector(".diff__hunk")?.textContent).toContain("Satır 3");
   });
 });
 
@@ -87,10 +109,6 @@ describe("labels", () => {
     expect(formatDuration(1500, "en-US")).toBe("1.5 s");
   });
 
-  it("score ring exposes an accessible label", () => {
-    render(<ScoreRing score={73} />);
-    expect(screen.getByRole("img", { name: "Hazırlık puanı: 73/100" })).toHaveAttribute("data-tone", "manual");
-  });
 
   it("groups function families", () => {
     expect(commonTitle(["mysql_connect()", "mysql_query()"])).toBe("mysql_*()");
@@ -230,5 +248,334 @@ describe("touches", () => {
     expect(touches(at("/app/a.php", 9), change)).toBe(true);
     expect(touches(at("/app/a.php", 11), change)).toBe(false);
     expect(touches(at("/app/b.php", 9), change)).toBe(false);
+  });
+});
+
+describe("Select", () => {
+  const options = [
+    { value: "a", label: "Alfa" },
+    { value: "b", label: "Beta", disabled: true },
+    { value: "c", label: "Gama" },
+  ];
+
+  function Picker({ onChange }: { onChange: (value: string) => void }) {
+    const [value, setValue] = useState("a");
+    return (
+      <Select
+        label="Seçim"
+        value={value}
+        options={options}
+        onChange={(v) => {
+          setValue(v);
+          onChange(v);
+        }}
+      />
+    );
+  }
+
+  it("moves past disabled options with the keyboard and picks with Enter", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<I18nProvider><Picker onChange={onChange} /></I18nProvider>);
+    const box = screen.getByRole("combobox", { name: "Seçim" });
+    box.focus();
+    await user.keyboard("{ArrowDown}");
+    expect(box).toHaveAttribute("aria-expanded", "true");
+    await user.keyboard("{ArrowDown}{Enter}");
+    expect(onChange).toHaveBeenCalledWith("c");
+    expect(box).toHaveAttribute("aria-expanded", "false");
+    expect(box).toHaveFocus();
+    expect(box).toHaveTextContent("Gama");
+  });
+
+  it("closes on Escape without changing the value and ignores a disabled click", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<I18nProvider><Picker onChange={onChange} /></I18nProvider>);
+    const box = screen.getByRole("combobox", { name: "Seçim" });
+    await user.click(box);
+    await user.click(screen.getByRole("option", { name: "Beta" }));
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("jumps to an option by typing and closes on an outside click", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<I18nProvider><Picker onChange={onChange} /><button>dış</button></I18nProvider>);
+    const box = screen.getByRole("combobox", { name: "Seçim" });
+    box.focus();
+    await user.keyboard("{Enter}g{Enter}");
+    expect(onChange).toHaveBeenCalledWith("c");
+    await user.click(box);
+    await user.click(screen.getByRole("button", { name: "dış" }));
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  });
+});
+
+describe("TagInput", () => {
+  function Tags({ onChange }: { onChange: (values: string[]) => void }) {
+    const [values, setValues] = useState(["legacy"]);
+    return (
+      <TagInput
+        label="Klasörler"
+        values={values}
+        removeLabel={(v) => `${v} çıkar`}
+        onChange={(next) => {
+          setValues(next);
+          onChange(next);
+        }}
+      />
+    );
+  }
+
+  it("adds on Enter, ignores duplicates and removes with Backspace or the button", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<Tags onChange={onChange} />);
+    const field = screen.getByRole("textbox", { name: "Klasörler" });
+    await user.type(field, "tools{Enter}");
+    expect(onChange).toHaveBeenLastCalledWith(["legacy", "tools"]);
+    onChange.mockClear();
+    await user.type(field, "tools{Enter}");
+    expect(onChange).not.toHaveBeenCalled();
+    await user.keyboard("{Backspace}");
+    expect(onChange).toHaveBeenLastCalledWith(["legacy"]);
+    await user.click(screen.getByRole("button", { name: "legacy çıkar" }));
+    expect(onChange).toHaveBeenLastCalledWith([]);
+  });
+
+  it("splits a pasted list and keeps what was typed when the field loses focus", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<Tags onChange={onChange} />);
+    const field = screen.getByRole("textbox", { name: "Klasörler" });
+    await user.click(field);
+    await user.paste("a\nb, c");
+    expect(onChange).toHaveBeenLastCalledWith(["legacy", "a", "b", "c"]);
+    await user.type(field, "d");
+    await user.tab();
+    expect(onChange).toHaveBeenLastCalledWith(["legacy", "a", "b", "c", "d"]);
+  });
+});
+
+describe("highlight", () => {
+  it("colours PHP and keeps the source text intact", () => {
+    const { container } = render(<code>{highlight("$a = strlen('x'); // ok")}</code>);
+    expect(container.textContent).toBe("$a = strlen('x'); // ok");
+    expect(container.querySelector(".tok-variable")?.textContent).toBe("$a");
+    expect(container.querySelector(".tok-function")?.textContent).toBe("strlen");
+    expect(container.querySelector(".tok-string")?.textContent).toBe("'x'");
+    expect(container.querySelector(".tok-comment")?.textContent).toBe("// ok");
+  });
+
+  it("leaves other files plain", () => {
+    const { container } = render(<code>{highlight("FROM php:8.4", [], false)}</code>);
+    expect(container.querySelector("[class^=tok-]")).toBeNull();
+  });
+});
+
+describe("squarify", () => {
+  const items = [47, 22, 19, 18, 9, 9, 8, 8, 7, 7, 7, 7, 6, 5, 4, 4, 3, 1, 1, 1, 1, 1].map((value) => ({ value }));
+
+  it("gives each file an area in proportion to its findings and fills the box", () => {
+    const tiles = squarify(items, 730, 770);
+    const total = items.reduce((a, b) => a + b.value, 0);
+    expect(tiles).toHaveLength(items.length);
+    expect(tiles.reduce((a, t) => a + t.width * t.height, 0)).toBeCloseTo(730 * 770, 3);
+    for (const tile of tiles) {
+      expect((tile.width * tile.height) / (730 * 770)).toBeCloseTo(tile.item.value / total, 6);
+      expect(tile.x + tile.width).toBeLessThanOrEqual(730.001);
+      expect(tile.y + tile.height).toBeLessThanOrEqual(770.001);
+    }
+  });
+
+  it("does not overlap tiles and keeps them from getting thin", () => {
+    const tiles = squarify(items, 730, 770);
+    for (const a of tiles) {
+      expect(Math.max(a.width / a.height, a.height / a.width)).toBeLessThan(5);
+      for (const b of tiles) {
+        if (a === b) continue;
+        const apart = a.x + a.width <= b.x + 0.001 || b.x + b.width <= a.x + 0.001 || a.y + a.height <= b.y + 0.001 || b.y + b.height <= a.y + 0.001;
+        expect(apart).toBe(true);
+      }
+    }
+  });
+
+  it("ignores empty values and an empty box", () => {
+    expect(squarify([{ value: 0 }], 100, 100)).toEqual([]);
+    expect(squarify([{ value: 3 }], 0, 100)).toEqual([]);
+    expect(squarify([{ value: 3 }, { value: 0 }], 100, 100)).toHaveLength(1);
+  });
+});
+
+describe("fileStats", () => {
+  const finding = (file: string, severity: Finding["severity"]) => ({ file, severity }) as Finding;
+  const stats = fileStats([finding("a.php", "breaking"), finding("b.php", "deprecated"), finding("b.php", "breaking"), finding("b.php", "behavior"), finding("c.php", "behavior")]);
+
+  it("counts severities per file with the heaviest first", () => {
+    expect(stats.map((s) => s.file)).toEqual(["b.php", "a.php", "c.php"]);
+    expect(stats[0]).toMatchObject({ value: 3, breaking: 1, deprecated: 1, behavior: 1 });
+  });
+
+  it("finds how few files hold half of the findings", () => {
+    expect(filesHoldingHalf(stats)).toBe(1);
+    expect(filesHoldingHalf(fileStats([finding("a", "breaking"), finding("b", "breaking"), finding("c", "breaking"), finding("d", "breaking")]))).toBe(2);
+    expect(filesHoldingHalf([])).toBe(0);
+  });
+});
+
+describe("rule notes", () => {
+  it("has text for both languages", () => {
+    for (const [id, note] of Object.entries(RULE_NOTES)) {
+      expect(note.why.tr.length, id).toBeGreaterThan(40);
+      expect(note.why.en.length, id).toBeGreaterThan(40);
+    }
+  });
+});
+
+describe("relatedFindings", () => {
+  const finding = (id: string, ruleId: string, file: string) => ({ id, ruleId, file }) as Finding;
+  const list = [
+    finding("a", "removed.set_magic_quotes_runtime", "a.php"),
+    finding("b", "removed.get_magic_quotes_gpc", "b.php"),
+    finding("c", "removed.magic_quotes_runtime", "a.php"),
+    finding("d", "removed.each", "a.php"),
+    finding("e", "removed.set_magic_quotes_runtime", "c.php"),
+  ];
+
+  it("joins rules that share a note and puts the same file first", () => {
+    expect(relatedFindings(list[0], list).map((f) => f.id)).toEqual(["c", "b", "e"]);
+  });
+
+  it("keeps to the same rule when there is no note", () => {
+    const plain = [finding("a", "x.one", "a.php"), finding("b", "x.two", "a.php"), finding("c", "x.one", "b.php")];
+    expect(relatedFindings(plain[0], plain).map((f) => f.id)).toEqual(["c"]);
+  });
+
+  it("stops at the limit", () => {
+    expect(relatedFindings(list[0], list, 1)).toHaveLength(1);
+  });
+});
+
+describe("splitRows", () => {
+  const line = (kind: "context" | "add" | "del", text: string) => ({ kind, text, oldNo: 1, newNo: 1 });
+
+  it("pairs removed and added lines and keeps context on both sides", () => {
+    const rows = splitRows([line("context", "a"), line("del", "b"), line("del", "c"), line("add", "d"), line("context", "e")]);
+    expect(rows.map((r) => [r.left?.text, r.right?.text])).toEqual([["a", "a"], ["b", "d"], ["c", undefined], ["e", "e"]]);
+  });
+
+  it("handles an addition with nothing removed", () => {
+    expect(splitRows([line("add", "x")]).map((r) => [r.left?.text, r.right?.text])).toEqual([[undefined, "x"]]);
+  });
+});
+
+describe("history chart helpers", () => {
+  const scan = (at: number) => ({ at, target: "8.4", score: 1, total: 1 }) as HistoryEntry;
+
+  it("rounds the bar axis up to an even, readable top", () => {
+    expect([0, 1, 7, 21, 36, 195, 1234].map(niceMax)).toEqual([2, 2, 8, 22, 36, 200, 1400]);
+  });
+
+  it("never overshoots between two points", () => {
+    const path = smoothPath([0, 10, 20, 30], [100, 100, 0, 0]);
+    const ys = [...path.matchAll(/C[\d.]+ ([\d.-]+) [\d.]+ ([\d.-]+) [\d.]+ ([\d.-]+)/g)].flatMap((m) => m.slice(1).map(Number));
+    expect(Math.max(...ys)).toBeLessThanOrEqual(100);
+    expect(Math.min(...ys)).toBeGreaterThanOrEqual(0);
+    expect(smoothPath([5], [6])).toBe("M5 6");
+    expect(smoothPath([], [])).toBe("");
+  });
+
+  it("places an event between the scans around it", () => {
+    const scans = [scan(100), scan(200), scan(400)];
+    expect(columnOf(150_000, scans)).toBeCloseTo(0.5);
+    expect(columnOf(300_000, scans)).toBeCloseTo(1.5);
+    expect(columnOf(50_000, scans)).toBeLessThan(0);
+    expect(columnOf(900_000, scans)).toBeGreaterThan(2);
+  });
+
+  it("keeps marks apart and inside the chart", () => {
+    expect(spreadOut([10, 10, 50], 3)).toEqual([10, 13, 50]);
+    expect(spreadOut([99, 100, 100], 3)).toEqual([94, 97, 100]);
+    expect(spreadOut([50, 10], 3)).toEqual([50, 10]);
+  });
+
+  it("names each day once and thins labels when scans are dense", () => {
+    const t = DICTS.tr;
+    const noon = new Date(2026, 10, 2, 12).getTime() / 1000;
+    const scans = [noon, noon + 60, noon + 86400, noon + 86460].map(scan);
+    expect(dayLabels(scans, t).filter(Boolean)).toHaveLength(2);
+    const dense = Array.from({ length: 30 }, (_, i) => scan(noon + i * 86400));
+    expect(dayLabels(dense, t).filter(Boolean).length).toBeLessThanOrEqual(8);
+  });
+
+  it("measures ranges from now", () => {
+    expect(rangeStart("all")).toBe(0);
+    expect(rangeStart("7", 8 * 86_400_000)).toBe(86_400_000);
+  });
+
+  it("keeps events from the same second apart", () => {
+    const keys = historyEvents([scan(10), scan(10), scan(10)], [], [], []).map((e) => e.key);
+    expect(new Set(keys).size).toBe(3);
+  });
+
+  it("merges events newest first in milliseconds", () => {
+    const events = historyEvents(
+      [scan(10)],
+      [{ id: "a", createdAt: 30_000, projectRoot: "/", label: "x", files: [] } as Snapshot],
+      [{ at: 20 } as DockerSummary],
+      [{ at: 5 } as CheckSummary],
+    );
+    expect(events.map((e) => [e.kind, e.at])).toEqual([["fix", 30_000], ["real", 20_000], ["scan", 10_000], ["check", 5_000]]);
+  });
+});
+
+describe("relativeTo", () => {
+  it("returns the path inside the root", () => {
+    expect(relativeTo("/p/app", "/p/app/src/old")).toBe("src/old");
+    expect(relativeTo("/p/app/", "/p/app/src/")).toBe("src");
+    expect(relativeTo("C:\\p\\app", "C:\\p\\app\\legacy")).toBe("legacy");
+  });
+
+  it("refuses the root itself and anything outside it", () => {
+    expect(relativeTo("/p/app", "/p/app")).toBeNull();
+    expect(relativeTo("/p/app", "/p/application/src")).toBeNull();
+  });
+});
+
+describe("ComboField", () => {
+  function Host({ options }: { options: string[] }) {
+    const [value, setValue] = useState("");
+    return (
+      <I18nProvider>
+        <ComboField label="Sunucu" value={value} options={options} onChange={setValue} />
+      </I18nProvider>
+    );
+  }
+
+  it("suggests matches and takes the one chosen with the keyboard", async () => {
+    const user = userEvent.setup();
+    render(<Host options={["prod", "staging", "prod-eu"]} />);
+    const field = screen.getByRole("combobox", { name: "Sunucu" });
+    await user.type(field, "pro");
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["prod", "prod-eu"]);
+    await user.keyboard("{ArrowDown}{ArrowDown}{Enter}");
+    expect(field).toHaveValue("prod-eu");
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  });
+
+  it("accepts a host that is not on the list and closes on Escape", async () => {
+    const user = userEvent.setup();
+    render(<Host options={["prod"]} />);
+    const field = screen.getByRole("combobox", { name: "Sunucu" });
+    await user.click(field);
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    await user.type(field, "example.test");
+    expect(field).toHaveValue("example.test");
   });
 });

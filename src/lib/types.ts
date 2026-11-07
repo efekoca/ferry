@@ -91,11 +91,19 @@ export interface IgnoreEntry {
   reason: string;
 }
 
+export interface ScanCounts {
+  breaking: number;
+  deprecated: number;
+  behavior: number;
+  files: number;
+}
+
 export interface HistoryEntry {
   at: number;
   target: string;
   score: number;
   total: number;
+  counts?: ScanCounts | null;
 }
 
 export interface ScanHistory {
@@ -489,4 +497,9 @@ export interface Settings {
   snapshotLimit: number | null;
   editor: string | null;
   editorCommand: string | null;
+}
+
+export interface SourceLine {
+  number: number;
+  text: string;
 }

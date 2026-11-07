@@ -1,22 +1,40 @@
 import { useEffect, useMemo, useState } from "react";
-import { CircleAlert, CircleCheck, CircleStop, Download, GitBranch, GitCompareArrows, Pin, RotateCw, ShieldCheck, Sparkles, Wand2 } from "lucide-react";
+import { ArrowRight, CircleAlert, CircleCheck, CircleStop, Download, FileCode2, GitBranch, GitCompareArrows, ListChecks, Pin, RotateCw, ShieldCheck, Sparkles, Wand2 } from "lucide-react";
 import { DiffViewer, type HunkChoice } from "../components/DiffViewer";
 import { ConfirmDialog } from "../components/Modal";
-import { PageHeader } from "../components/Shell";
+import { PageHeader, usePageTitle } from "../components/Shell";
 import { Splitter } from "../components/Splitter";
-import { Button, Callout, Card, CommandLine, EmptyState, Progress, RiskBadge, RuleChips, Segmented } from "../components/ui";
+import { Button, Callout, CommandLine, EmptyState, Progress, RiskBadge, RuleChips, Segmented, Select } from "../components/ui";
 import { useI18n } from "../i18n";
 import { useStore } from "../lib/store";
+import { isPin } from "../lib/fixes";
 import { stepsBetween, type FileChange, type RectorMode } from "../lib/types";
+
+const ALL_STEPS = "all";
+const DIFF_VIEW = "ferry.diffView";
+
+
+function storedView() {
+  try {
+    return localStorage.getItem(DIFF_VIEW) === "split" ? "split" : "unified";
+  } catch {
+    return "unified";
+  }
+}
 
 export function Changes() {
   const { t, loc } = useI18n();
-  const { toolchain, installRector, installingRector, preview, previewMode, previewing, loadPreview, cancelPreview, skippedHunks: skipped, skipHunks, applyChanges, applying, target, setView, api, project } =
+  const { toolchain, installRector, installingRector, preview, previewMode, previewing, loadPreview, clearPreview, cancelPreview, skippedHunks: skipped, skipHunks, applyChanges, applying, target, setView, api, project } =
     useStore();
   const [dirty, setDirty] = useState<string[]>([]);
   const [unclean, setUnclean] = useState<string[]>([]);
   const [ownBranch, setOwnBranch] = useState(false);
-  const [mode, setMode] = useState<RectorMode>(previewMode);
+  const [kinds, setKinds] = useState({ compat: previewMode !== "pins", modernize: previewMode === "modernize", pins: previewMode === "pins" });
+  const mode: RectorMode = kinds.modernize ? "modernize" : kinds.compat ? "compat" : "pins";
+  const withPins = kinds.pins && mode !== "pins";
+  const [scope, setScope] = useState<"all" | "code" | "pins">("all");
+  const [diffView, setDiffView] = useState<"unified" | "split">(storedView);
+  usePageTitle(t.changes.title);
   const [excluded, setExcluded] = useState<{ previewId: number | null; files: Set<string> }>({ previewId: null, files: new Set() });
   const [active, setActive] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
@@ -28,20 +46,23 @@ export function Changes() {
   const nextStep = step ? (steps[steps.indexOf(step) + 1] ?? target) : null;
   const goToStep = (value: string) => {
     setPickedStep(value);
-    void loadPreview(mode, steps.includes(value) ? value : undefined);
+    void loadPreview(mode, steps.includes(value) ? value : undefined, withPins);
   };
   const stepPicker = steps.length > 0 && mode !== "pins" && (
-    <label className="step-picker">
+    <div className="step-picker">
       <span>{t.changes.step}</span>
-      <select className="input" value={step ?? ""} disabled={previewing} onChange={(e) => (preview ? goToStep(e.target.value) : setPickedStep(e.target.value))}>
-        <option value="">{t.changes.stepAll(target)}</option>
-        {steps.map((v) => (
-          <option key={v} value={v}>
-            {t.changes.stepTo(v)}
-          </option>
-        ))}
-      </select>
-    </label>
+      <Select
+        label={t.changes.step}
+        value={step ?? ALL_STEPS}
+        disabled={previewing}
+        options={[{ value: ALL_STEPS, label: t.changes.stepAll(target) }, ...steps.map((v) => ({ value: v, label: t.changes.stepTo(v) }))]}
+        onChange={(v) => {
+          const picked = v === ALL_STEPS ? "" : v;
+          if (preview) goToStep(picked);
+          else setPickedStep(picked);
+        }}
+      />
+    </div>
   );
   const nextStepButton = nextStep && (
     <Button variant="primary" onClick={() => goToStep(nextStep)}>
@@ -49,16 +70,23 @@ export function Changes() {
     </Button>
   );
 
-  const modes = [
-    { value: "compat" as const, label: t.changes.compat },
-    { value: "modernize" as const, label: t.changes.modernize },
-    { value: "pins" as const, label: t.changes.pins },
+  const options = [
+    { value: "compat" as const, label: t.changes.compat, text: t.changes.compatShort, icon: ShieldCheck },
+    { value: "modernize" as const, label: t.changes.modernize, text: t.changes.modernizeShort, icon: Sparkles },
+    { value: "pins" as const, label: t.changes.pins, text: t.changes.pinsShort, icon: Pin },
   ];
-  const modeIcon = { compat: ShieldCheck, modernize: Sparkles, pins: Pin };
-  const modeText = { compat: t.changes.compatText, modernize: t.changes.modernizeText, pins: t.changes.pinsText };
   const nothingText = { compat: t.changes.nothingCompat, modernize: t.changes.nothingModern, pins: t.changes.nothingPins };
+  const onlyPins = () => setKinds({ compat: false, modernize: false, pins: true });
+  const toggleKind = (kind: "compat" | "modernize" | "pins") =>
+    setKinds((k) => {
+      const on = !k[kind];
+      if (kind === "modernize") return { ...k, modernize: on, compat: on || k.compat };
+      if (kind === "compat") return { ...k, compat: on, modernize: on && k.modernize };
+      return { ...k, pins: on };
+    });
+  const nothingChosen = !kinds.compat && !kinds.modernize && !kinds.pins;
   const pinsInstead = (
-    <Button variant="secondary" icon={<Pin size={15} />} onClick={() => setMode("pins")}>
+    <Button variant="secondary" icon={<Pin size={15} />} onClick={onlyPins}>
       {t.changes.pinsInstead}
     </Button>
   );
@@ -72,13 +100,24 @@ export function Changes() {
     () =>
       preview && excluded.previewId === preview.id
         ? excluded.files
-        : new Set(preview?.mode === "pins" ? [] : changes.filter((c) => c.fix !== "auto").map((c) => c.file)),
+        : new Set(changes.filter((c) => c.fix !== "auto" && !isPin(c)).map((c) => c.file)),
     [preview, excluded, changes],
   );
   const [viewed, setViewed] = useState<{ previewId: number | null; files: Set<string> }>({ previewId: null, files: new Set() });
   const seen = preview && viewed.previewId === preview.id ? viewed.files : null;
   const selected = useMemo(() => new Set(changes.filter((c) => !off?.has(c.file)).map((c) => c.file)), [changes, off]);
-  const current = changes.find((c) => c.file === active) ?? changes[0] ?? null;
+  const pinCount = useMemo(() => changes.filter(isPin).length, [changes]);
+  const mixed = pinCount > 0 && pinCount < changes.length;
+  const shownChanges = useMemo(() => (!mixed || scope === "all" ? changes : changes.filter((c) => isPin(c) === (scope === "pins"))), [changes, mixed, scope]);
+  const groups = useMemo(() => {
+    const code = shownChanges.filter((c) => !isPin(c));
+    return [
+      { key: "auto", label: t.fix.auto, items: code.filter((c) => c.fix === "auto") },
+      { key: "review", label: t.changes.reviewGroup, items: code.filter((c) => c.fix !== "auto") },
+      { key: "pins", label: t.changes.pins, items: shownChanges.filter(isPin) },
+    ].filter((g) => g.items.length > 0);
+  }, [shownChanges, t]);
+  const current = shownChanges.find((c) => c.file === active) ?? shownChanges[0] ?? null;
   useEffect(() => {
     if (!preview || !current || seen?.has(current.file)) return;
     setViewed({ previewId: preview.id, files: new Set([...(seen ?? []), current.file]) });
@@ -138,7 +177,9 @@ export function Changes() {
     const counts = new Map<string, number>();
     for (const c of chosen) for (const r of c.rules) counts.set(loc(r.title), (counts.get(loc(r.title)) ?? 0) + 1);
     const lines = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([title, n]) => `- ${title} (${n})`);
-    return [t.git.subject(preview?.target ?? target, chosen.length, preview?.mode === "pins"), "", ...lines].join("\n");
+    const pins = chosen.filter(isPin).length;
+    const kind = pins === 0 ? "code" : pins === chosen.length ? "pins" : "mixed";
+    return [t.git.subject(preview?.target ?? target, chosen.length, kind), "", ...lines].join("\n");
   }, [chosen, loc, preview, target, t]);
   const openConfirm = () => {
     setDirty([]);
@@ -172,26 +213,28 @@ export function Changes() {
       actions={
         preview && (
           <>
-            <Segmented
-              label={t.changes.mode}
-              options={modes}
-              value={mode}
-              onChange={(m) => {
-                const previous = mode;
-                setMode(m);
-                loadPreview(m, m === "pins" ? undefined : step).then((ok) => {
-                  if (!ok) setMode(previous);
-                });
-              }}
-              disabled={previewing}
-            />
+            {mixed && (
+              <Segmented
+                label={t.changes.scope}
+                value={scope}
+                onChange={setScope}
+                options={[
+                  { value: "all", label: <>{t.changes.scopeAll} <span className="segmented__count">{changes.length}</span></> },
+                  { value: "code", label: <>{mode === "modernize" ? t.changes.modernize : t.changes.compat} <span className="segmented__count">{changes.length - pinCount}</span></> },
+                  { value: "pins", label: <>{t.changes.pins} <span className="segmented__count">{pinCount}</span></> },
+                ]}
+              />
+            )}
             {stepPicker}
             {previewing && (
               <Button variant="ghost" size="sm" icon={<CircleStop size={14} />} onClick={cancelPreview}>
                 {t.changes.stop}
               </Button>
             )}
-            <Button variant="secondary" size="sm" icon={<RotateCw size={14} />} onClick={() => loadPreview(mode, step)} loading={previewing}>
+            <Button variant="ghost" size="sm" icon={<ListChecks size={14} />} disabled={previewing} onClick={clearPreview}>
+              {t.changes.changeChoice}
+            </Button>
+            <Button variant="secondary" size="sm" icon={<RotateCw size={14} />} onClick={() => loadPreview(mode, step, withPins)} loading={previewing}>
               {t.changes.recalculate}
             </Button>
           </>
@@ -258,61 +301,44 @@ export function Changes() {
   if (!preview) {
     return (
       <>
-        {header}
-        <div className="page-scroll">
-          <div className="page-body page-body--narrow stack">
-            <Card bodyClassName="card__body stack">
-              <div className="intro__title">
-                <Wand2 size={18} aria-hidden />
-                <h2>{t.changes.introTitle(step ?? target)}</h2>
-              </div>
-              <p className="muted">{mode === "pins" ? t.changes.introPins : t.changes.introText}</p>
-              {mode !== "pins" && <p className="hint">{t.changes.introTrust}</p>}
-              <div className="mode-cards" role="radiogroup" aria-label={t.changes.mode}>
-                {modes.map((m) => {
-                  const Icon = modeIcon[m.value];
-                  return (
-                  <label key={m.value} className="mode-card" data-checked={mode === m.value}>
-                    <input
-                      type="radio"
-                      name="rector-mode"
-                      className="sr-only"
-                      value={m.value}
-                      checked={mode === m.value}
-                      disabled={previewing}
-                      onChange={() => setMode(m.value)}
-                    />
-                    <span className="mode-card__title">
-                      <Icon size={15} aria-hidden />
-                      {m.label}
-                      {m.value === "compat" && <span className="mode-card__tag">{t.changes.recommended}</span>}
-                    </span>
-                    <span className="mode-card__text">{modeText[m.value]}</span>
-                  </label>
-                  );
-                })}
-              </div>
-              {stepPicker}
-              {stepPicker && <p className="hint">{t.changes.stepHint}</p>}
-              {previewing ? (
-                <div className="stack stack--tight">
-                  <Progress value={null} label={t.changes.calculating} />
-                  <div className="row row--between">
-                    <span className="hint">{t.changes.calculatingHint}</span>
-                    <Button variant="secondary" size="sm" icon={<CircleStop size={14} />} onClick={cancelPreview}>
-                      {t.changes.stop}
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <div>
-                  <Button variant="primary" icon={<Sparkles size={15} />} onClick={() => loadPreview(mode, step)}>
-                    {t.changes.calculate}
-                  </Button>
-                </div>
-              )}
-            </Card>
+        <h1 className="sr-only">{t.changes.title}</h1>
+        <div className="overview-start fixes-start" data-tauri-drag-region>
+          <h2 className="page-title">{t.changes.startTitle}</h2>
+          <p className="page-lead">{t.changes.startLead}</p>
+          <div className="opts" role="group" aria-label={t.changes.mode}>
+            {options.map((o) => (
+              <label key={o.value} className="opt" data-checked={kinds[o.value]}>
+                <input type="checkbox" className="checkbox opt__check" checked={kinds[o.value]} disabled={previewing} onChange={() => toggleKind(o.value)} aria-label={o.label} />
+                <span className="opt__icon" aria-hidden>
+                  <o.icon size={15} />
+                </span>
+                <span>
+                  <span className="opt__title">{o.label}</span>
+                  <span className="opt__text">{o.text}</span>
+                </span>
+              </label>
+            ))}
           </div>
+          {stepPicker}
+          {previewing ? (
+            <div className="fixes-start__progress">
+              <Progress value={null} label={t.changes.calculating} />
+              <div className="row row--between">
+                <span className="hint">{t.changes.calculatingHint}</span>
+                <Button variant="secondary" size="sm" icon={<CircleStop size={14} />} onClick={cancelPreview}>
+                  {t.changes.stop}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <Button variant="primary" size="cta" disabled={nothingChosen} onClick={() => loadPreview(mode, step, withPins)}>
+              {t.changes.calculate}
+              <span className="btn__chip">
+                <ArrowRight size={15} aria-hidden />
+              </span>
+            </Button>
+          )}
+          {mode !== "pins" && <p className="hint">{t.changes.introTrust}</p>}
         </div>
       </>
     );
@@ -370,32 +396,37 @@ export function Changes() {
             <span>{t.changes.selected(chosen.length, changes.length)}</span>
           </label>
           <div className="change-list__narrow">
-            <select title={t.git.byRuleNote} className="input" aria-label={t.git.selectBy} value="" onChange={(e) => narrow(e.target.value)}>
-              <option value="" disabled>
-                {t.git.selectBy}
-              </option>
-              <option value="all">{t.git.selectAll}</option>
-              <option value="auto">{t.git.onlyAuto}</option>
-              {ruleOptions.map(([cls, r]) => (
-                <option key={cls} value={cls}>
-                  {t.git.byRule(r.title, r.files.length)}
-                </option>
-              ))}
-            </select>
+            <Select
+              block
+              title={t.git.byRuleNote}
+              label={t.git.selectBy}
+              value=""
+              options={[
+                { value: "all", label: t.git.selectAll },
+                { value: "auto", label: t.git.onlyAuto },
+                ...ruleOptions.map(([cls, r]) => ({ value: cls, label: t.git.byRule(r.title, r.files.length) })),
+              ]}
+              onChange={narrow}
+            />
           </div>
-          <ul className="change-list" aria-label={t.changes.files}>
-            {changes.map((c) => (
-              <ChangeItem
-                key={c.file}
-                change={c}
-                seen={!!seen?.has(c.file)}
-                checked={selected.has(c.file)}
-                active={c.file === current?.file}
-                onToggle={() => toggle(c.file)}
-                onSelect={() => setActive(c.file)}
-              />
+          <div className="change-list" role="list" aria-label={t.changes.files}>
+            {groups.map((group) => (
+              <div key={group.key} role="presentation">
+                <div className="change-group">{group.label}</div>
+                {group.items.map((c) => (
+                  <ChangeItem
+                    key={c.file}
+                    change={c}
+                    seen={!!seen?.has(c.file)}
+                    checked={selected.has(c.file)}
+                    active={c.file === current?.file}
+                    onToggle={() => toggle(c.file)}
+                    onSelect={() => setActive(c.file)}
+                  />
+                ))}
+              </div>
             ))}
-          </ul>
+          </div>
           <div className="apply-bar">
             {preview.errors.length > 0 && <ErrorList errors={preview.errors} compact />}
             <div className="row row--between">
@@ -413,17 +444,10 @@ export function Changes() {
         <section className="diff-pane" aria-label={t.changes.details}>
           {current ? (
             <>
-              <div className="diff-header">
-                <span className="diff-header__file" title={current.file}>
-                  {current.file}
-                </span>
-                <span className="stat-add">+{current.diff.additions}</span>
-                <span className="stat-del">−{current.diff.deletions}</span>
-                <span className="push-end">
-                  <RiskBadge fix={current.fix} />
-                </span>
+              <div className="diff-rules">
+                <RiskBadge fix={current.fix} />
+                <RuleChips rules={current.rules} />
               </div>
-              <RuleChips rules={current.rules} />
               {current.fix === "likely" && (
                 <div className="diff-note">
                   <Callout tone="info" icon={<ShieldCheck size={15} />}>
@@ -431,7 +455,40 @@ export function Changes() {
                   </Callout>
                 </div>
               )}
-              <DiffViewer diff={current.diff} file={current.file} choice={hunkChoice(current)} />
+              <DiffViewer
+                diff={current.diff}
+                file={current.file}
+                choice={hunkChoice(current)}
+                split={diffView === "split"}
+                bar={
+                  <>
+                    <FileCode2 size={14} aria-hidden />
+                    <span className="diff__path" title={current.file}>
+                      {current.file.slice(0, current.file.lastIndexOf("/") + 1)}
+                      <b>{current.file.slice(current.file.lastIndexOf("/") + 1)}</b>
+                    </span>
+                    <span className="stat-add">+{current.diff.additions}</span>
+                    <span className="stat-del">−{current.diff.deletions}</span>
+                    <Segmented
+                      size="sm"
+                      label={t.changes.diffView}
+                      value={diffView}
+                      onChange={(view) => {
+                        setDiffView(view);
+                        try {
+                          localStorage.setItem(DIFF_VIEW, view);
+                        } catch {
+                          return;
+                        }
+                      }}
+                      options={[
+                        { value: "unified", label: t.changes.unified },
+                        { value: "split", label: t.changes.split },
+                      ]}
+                    />
+                  </>
+                }
+              />
             </>
           ) : (
             <EmptyState icon={<GitCompareArrows size={24} />} title={t.changes.pickFile} />
@@ -509,7 +566,7 @@ function ChangeItem({
 }) {
   const { t } = useI18n();
   return (
-    <li className="change-item" data-active={active} onClick={onSelect}>
+    <div className="change-item" role="listitem" data-active={active} onClick={onSelect}>
       <input
         type="checkbox"
         className="checkbox"
@@ -519,20 +576,19 @@ function ChangeItem({
         aria-label={t.changes.selectFile(change.file)}
       />
       <button type="button" className="change-item__body" aria-current={active || undefined} onClick={onSelect}>
-        <div className="change-item__file" title={change.file}>
-          <bdi>{change.file}</bdi>
-        </div>
-        <div className="change-item__meta">
-          <RiskBadge fix={change.fix} />
-          <span className="stat-add">+{change.diff.additions}</span>
-          <span className="stat-del">−{change.diff.deletions}</span>
-          <span className="meta">
-            {t.common.rules(change.rules.length)}
+        <span className="change-item__file" title={change.file}>
+          {change.file.slice(0, change.file.lastIndexOf("/") + 1)}
+          <b>{change.file.slice(change.file.lastIndexOf("/") + 1)}</b>
+        </span>
+        <span className="stat-add">+{change.diff.additions}</span>
+        <span className="stat-del">−{change.diff.deletions}</span>
+        {change.fix !== "auto" && !seen && (
+          <span className="change-item__unseen" title={t.changes.notViewed}>
+            <span className="sr-only">{t.changes.notViewed}</span>
           </span>
-          {change.fix !== "auto" && !seen && <span className="change-item__unseen">{t.changes.notViewed}</span>}
-        </div>
+        )}
       </button>
-    </li>
+    </div>
   );
 }
 

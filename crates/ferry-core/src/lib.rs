@@ -22,6 +22,7 @@ mod guards;
 pub mod history;
 pub mod i18n;
 pub mod ignore;
+pub mod images;
 pub mod index;
 pub mod lexer;
 pub mod localcheck;

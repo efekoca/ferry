@@ -1,4 +1,5 @@
 import type {
+  SourceLine,
   CheckSummary,
   DatabaseChoice,
   DatabasePlan,
@@ -6,6 +7,7 @@ import type {
   DockerImageUsage,
   DockerResponse,
   DockerSummary,
+  HistoryEntry,
   DockerStep,
   SnapshotConflict,
   ApplyResult,
@@ -56,7 +58,7 @@ export interface Api {
   wordpressLatest(items: { kind: string; slug: string }[]): Promise<WpLatest[]>;
   toolchainStatus(): Promise<ToolchainStatus>;
   installRector(): Promise<ToolchainStatus>;
-  rectorPreview(path: string, target: string, mode: RectorMode): Promise<RectorPreview>;
+  rectorPreview(path: string, target: string, mode: RectorMode, withPins: boolean): Promise<RectorPreview>;
   cancelPreview(path?: string): Promise<void>;
   cancelScan(path: string): Promise<void>;
   dockerCompare(path: string, source: string, target: string, extensions: boolean, cleanImages: boolean, pages: string[], database: DatabaseChoice | null, prepare: string | null, test: string | null, fix?: DockerFixChoice): Promise<DockerResponse>;
@@ -64,6 +66,7 @@ export interface Api {
   databasePlan(path: string): Promise<DatabasePlan>;
   sshHosts(): Promise<string[]>;
   dockerImageUsage(): Promise<DockerImageUsage>;
+  scanHistory(path: string): Promise<HistoryEntry[]>;
   dockerHistory(path: string): Promise<DockerSummary[]>;
   checkHistory(path: string): Promise<CheckSummary[]>;
   removeDockerImages(): Promise<number>;
@@ -82,6 +85,7 @@ export interface Api {
   unignoreFinding(path: string, id: string): Promise<ScanResult>;
   pruneIgnores(path: string): Promise<ScanResult>;
   openInEditor(path: string, file: string, line: number, column: number): Promise<void>;
+  sourceLines(path: string, file: string, line: number): Promise<SourceLine[]>;
   revealPath(path: string): Promise<void>;
   getSettings(): Promise<Settings>;
   setLanguage(lang: Lang): Promise<void>;
@@ -127,7 +131,7 @@ async function tauriApi(): Promise<Api> {
     wordpressLatest: (items) => invoke("wordpress_latest", { items }),
     toolchainStatus: () => invoke("toolchain_status"),
     installRector: () => invoke("install_rector"),
-    rectorPreview: (path, target, mode) => invoke("rector_preview", { path, target, mode }),
+    rectorPreview: (path, target, mode, withPins) => invoke("rector_preview", { path, target, mode, withPins }),
     cancelPreview: (path) => invoke("cancel_rector_preview", { path }),
     cancelScan: (path) => invoke("cancel_scan", { path }),
     dockerCompare: (path, source, target, extensions, cleanImages, pages, database, prepare, test, fix) => invoke("docker_compare", { path, source, target, extensions, cleanImages, pages, database, prepare, test, fix: fix ?? null }),
@@ -135,6 +139,7 @@ async function tauriApi(): Promise<Api> {
     databasePlan: (path) => invoke("database_plan", { path }),
     sshHosts: () => invoke("ssh_hosts"),
     dockerImageUsage: () => invoke("docker_image_usage"),
+    scanHistory: (path) => invoke("scan_history", { path }),
     dockerHistory: (path) => invoke("docker_history", { path }),
     checkHistory: (path) => invoke("check_history", { path }),
     removeDockerImages: () => invoke("remove_docker_images"),
@@ -155,6 +160,7 @@ async function tauriApi(): Promise<Api> {
     ignoreFinding: (path, id, reason) => invoke("ignore_finding", { path, id, reason }),
     unignoreFinding: (path, id) => invoke("unignore_finding", { path, id }),
     pruneIgnores: (path) => invoke("prune_ignores", { path }),
+    sourceLines: (path, file, line) => invoke("source_lines", { path, file, line }),
     openInEditor: (path, file, line, column) => invoke("open_in_editor", { path, file, line, column }),
     revealPath: (path) => opener.revealItemInDir(path),
     getSettings: () => invoke("get_settings"),

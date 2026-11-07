@@ -515,7 +515,12 @@ pub(crate) struct Container<'a> {
     shared: RefCell<Option<SharedDatabase>>,
 }
 
-impl Container<'_> {
+impl<'a> Container<'a> {
+    #[cfg(test)]
+    pub fn for_test(docker: &'a Path, cancel: &'a AtomicBool, prefix: String) -> Self {
+        Container { docker, cancel, prefix, shared: RefCell::new(None) }
+    }
+
     /// Later runs share the network of `database` and receive its settings.
     pub fn attach(&self, database: Option<&str>, socket: Option<String>, env: Vec<(String, String)>) {
         *self.shared.borrow_mut() = Some((database.map(str::to_string), socket, env));
@@ -602,6 +607,7 @@ fn loaded(container: &Container, version: PhpVersion, project: &Path, image: &st
     let done = container.run(&format!("modules-{}", version.compact()), project, image, false, "php -m", Duration::from_secs(300))?;
     if done.status.and_then(|s| s.code()) == Some(125) {
         let reason = tail(output(&done).trim());
+        let image = crate::images::tag_of(image);
         return Err(crate::t!("{image} kalıbı çalıştırılamadı: {reason}", "Couldn't run the {image} image: {reason}"));
     }
     Ok(output(&done).lines().map(|l| l.trim().to_ascii_lowercase()).collect())
@@ -675,7 +681,7 @@ fn prepare_image(
     setup: &Setup,
     step: &dyn Fn(Step),
 ) -> Result<PreparedImage, String> {
-    let base = format!("php:{version}-cli");
+    let base = crate::images::pinned(&format!("php:{version}-cli"));
     let mut image = base.clone();
     let mut modules = loaded(container, version, project, &image)?;
     let missing: Vec<String> = setup.used.iter().filter(|e| !modules.contains(*e)).cloned().collect();
@@ -806,7 +812,7 @@ fn run_version(
     events.retain(|e| !e.path.is_empty());
     Ok(VersionRun {
         version,
-        image,
+        image: crate::images::tag_of(&image).to_string(),
         lint_errors,
         lint_files,
         lint_stopped,
@@ -838,6 +844,17 @@ impl Drop for BuiltImages<'_> {
     }
 }
 
+/// A custom command or a crash fails without naming a test, and that still has to count.
+fn failures_on_target(source: &VersionRun, target: &VersionRun, command: Option<&str>) -> Vec<String> {
+    let named: Vec<String> = target.failed_tests.iter().filter(|t| !source.failed_tests.contains(t)).cloned().collect();
+    let passed_before = source.tests.as_ref().is_some_and(|t| t.passed);
+    let failed_now = target.tests.as_ref().is_some_and(|t| !t.passed && !t.timed_out);
+    if named.is_empty() && passed_before && failed_now {
+        return vec![command.map_or_else(|| crate::t!("Test paketi", "Test suite"), str::to_string)];
+    }
+    named
+}
+
 /// Symfony's bridge exits with 1 over deprecations even though every test passed.
 fn tests_passed(output: &str) -> bool {
     output.lines().any(|l| l.starts_with("OK (") || l.starts_with("OK, but"))
@@ -864,12 +881,12 @@ fn failed_tests(output: &str) -> Vec<String> {
 
 /// Symfony's bridge downloads PHPUnit on first use, which the offline test run can't do.
 fn phpunit_bridge_version(project: &Path) -> Option<String> {
-    let manifest = std::fs::read_to_string(project.join("composer.json")).ok()?;
+    let manifest = crate::safefs::read_text(project.join("composer.json")).ok()?;
     if !manifest.contains("symfony/phpunit-bridge") || manifest.contains("\"phpunit/phpunit\"") {
         return None;
     }
-    let config = std::fs::read_to_string(project.join("phpunit.xml.dist"))
-        .or_else(|_| std::fs::read_to_string(project.join("phpunit.xml")))
+    let config = crate::safefs::read_text(project.join("phpunit.xml.dist"))
+        .or_else(|_| crate::safefs::read_text(project.join("phpunit.xml")))
         .unwrap_or_default();
     let version = config.split("SYMFONY_PHPUNIT_VERSION\" value=\"").nth(1).and_then(|r| r.split('"').next()).unwrap_or("9.6");
     let safe = version.chars().all(|c| c.is_ascii_digit() || c == '.');
@@ -914,7 +931,7 @@ pub fn compare(
     let mut install_log = String::new();
     if needs_install {
         step(Step::Installing);
-        let runtime = std::fs::read_to_string(base.join("composer.json")).is_ok_and(|t| t.contains("symfony/runtime"));
+        let runtime = crate::safefs::read_text(base.join("composer.json")).is_ok_and(|t| t.contains("symfony/runtime"));
         let install = "composer install --no-interaction --no-progress --no-scripts --no-plugins --no-security-blocking";
         let script = if base.join("composer.lock").is_file() {
             format!("{install} --ignore-platform-reqs")
@@ -927,9 +944,10 @@ pub fn compare(
         let script = format!(
             "mkdir /tmp/build && cp -a /app/. /tmp/build && cd /tmp/build && {{ {script}{bridge}; }} && cp -a vendor /app/{keep_lock}"
         );
-        let mut done = container.run("install", &base, "composer:2", true, &script, INSTALL_TIMEOUT)?;
+        let composer = crate::images::pinned("composer:2");
+        let mut done = container.run("install", &base, &composer, true, &script, INSTALL_TIMEOUT)?;
         if runtime && done.status.is_some_and(|s| s.success()) {
-            done = container.run("runtime", &base, "composer:2", false, &runtime_script(), INSTALL_TIMEOUT)?;
+            done = container.run("runtime", &base, &composer, false, &runtime_script(), INSTALL_TIMEOUT)?;
         }
         drop_outside_links(&base).map_err(|e| e.to_string())?;
         dependencies_installed = done.status.is_some_and(|s| s.success());
@@ -999,7 +1017,7 @@ pub fn compare(
     }
     let pages = crate::web::compare(&source_run.crawl, &target_run.crawl);
     let data_changes = crate::database::data_changes(&source_run.data, &target_run.data);
-    let new_failures = target_run.failed_tests.iter().filter(|t| !source_run.failed_tests.contains(t)).cloned().collect();
+    let new_failures = failures_on_target(&source_run, &target_run, options.test.as_deref());
     let (new_on_target, gone_on_target) = changed_events(&source_run.events, &target_run.events, !options.fixes.is_empty());
     let origins = crate::origin::group(root, &new_on_target, target);
     let mut comparison = Comparison {
@@ -1120,6 +1138,23 @@ mod tests {
             gaps: Vec::new(),
             stamp: String::new(),
         }
+    }
+
+    #[test]
+    fn a_suite_that_fails_without_names_counts_as_a_new_failure() {
+        let mut result = comparison(&[], Vec::new());
+        let (source, target) = (&mut result.source, &mut result.target);
+        assert!(failures_on_target(source, target, None).is_empty());
+        target.tests.as_mut().unwrap().passed = false;
+        assert_eq!(failures_on_target(source, target, Some("php tests/run.php")), ["php tests/run.php"]);
+        target.tests.as_mut().unwrap().timed_out = true;
+        assert!(failures_on_target(source, target, None).is_empty());
+        target.tests.as_mut().unwrap().timed_out = false;
+        source.tests.as_mut().unwrap().passed = false;
+        assert!(failures_on_target(source, target, None).is_empty());
+        source.tests.as_mut().unwrap().passed = true;
+        target.failed_tests = vec!["CartTest::testTotal".to_string()];
+        assert_eq!(failures_on_target(source, target, None), ["CartTest::testTotal"]);
     }
 
     #[test]

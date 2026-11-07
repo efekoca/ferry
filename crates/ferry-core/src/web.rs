@@ -154,7 +154,7 @@ pub fn document_root(project: &Path) -> &'static str {
     ["public", "web", "webroot", "htdocs", "pub"].into_iter().find(|d| project.join(d).join("index.php").is_file()).unwrap_or(".")
 }
 
-fn quoted(text: &str) -> String {
+pub(crate) fn quoted(text: &str) -> String {
     format!("'{}'", text.replace('\'', "'\\''"))
 }
 
