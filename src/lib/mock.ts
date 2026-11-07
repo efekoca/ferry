@@ -430,14 +430,15 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
       await sleep(delay * 3);
       return toolchain();
     },
-    rectorPreview: async (_path, target, mode) => {
+    rectorPreview: async (_path, target, mode, withPins) => {
       cancelled = false;
       const id = ++previewId;
       await sleep(delay * 2);
       if (cancelled) throw new Error("Rector was stopped.");
       if (mode === "pins") return { id, target, mode, changes: fixed.has(PIN_FILE) ? [] : [pinChange(target)], errors: [], durationMs: 12 };
       const changes = pending.filter((c) => c.rules.some((r) => !r.since || versionLte(r.since, target)));
-      return { id, target, mode, changes, errors: [], durationMs: 2140 };
+      const pins = withPins && !fixed.has(PIN_FILE) ? [pinChange(target)] : [];
+      return { id, target, mode, changes: [...changes, ...pins], errors: [], durationMs: 2140 };
     },
     cancelScan: async () => {},
     cancelLocalCheck: async () => {},

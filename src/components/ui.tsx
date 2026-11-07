@@ -18,7 +18,7 @@ import type { AppliedRule, FixKind, Severity } from "../lib/types";
 
 type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: "primary" | "secondary" | "ghost" | "danger";
-  size?: "sm" | "md" | "lg";
+  size?: "sm" | "md" | "lg" | "cta";
   icon?: ReactNode;
   loading?: boolean;
   iconOnly?: boolean;
@@ -123,7 +123,7 @@ export function Segmented<T extends string>({
   value: T;
   onChange: (v: T) => void;
   label: string;
-  size?: "md" | "lg";
+  size?: "sm" | "md" | "lg";
   disabled?: boolean;
 }) {
   const id = useId();
@@ -142,7 +142,7 @@ export function Segmented<T extends string>({
     <div
       role="radiogroup"
       aria-label={label}
-      className={`segmented ${size === "lg" ? "segmented--lg" : ""}`}
+      className={`segmented ${size !== "md" ? `segmented--${size}` : ""}`}
       onKeyDown={(e) => {
         if (e.key === "ArrowRight") move(e.currentTarget, 1);
         if (e.key === "ArrowLeft") move(e.currentTarget, -1);

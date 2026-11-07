@@ -35,9 +35,9 @@ describe("accessibility", { timeout: 30_000 }, () => {
     await screen.findByRole("listbox", { name: "Bulgu listesi" });
     await check("findings");
     await user.click(nav(/Düzeltmeler/));
-    await screen.findByRole("button", { name: /Değişiklikleri hesapla/ });
+    await screen.findByRole("button", { name: /Önizlemeyi hazırla/ });
     await check("fixes intro");
-    await user.click(screen.getByRole("button", { name: /Değişiklikleri hesapla/ }));
+    await user.click(screen.getByRole("button", { name: /Önizlemeyi hazırla/ }));
     await screen.findByRole("list", { name: "Dosyalar" });
     await check("fixes");
     await user.click(screen.getByRole("checkbox", { name: "Tümünü seç" }));
@@ -155,7 +155,7 @@ describe("accessibility", { timeout: 30_000 }, () => {
     await user.click(await screen.findByRole("button", { name: /Taramayı başlat/ }));
     await screen.findByRole("img", { name: /Hazırlık puanı/ });
     await user.click(nav(/Düzeltmeler/));
-    await user.click(await screen.findByRole("button", { name: /Değişiklikleri hesapla/ }));
+    await user.click(await screen.findByRole("button", { name: /Önizlemeyi hazırla/ }));
     await user.click(await screen.findByRole("checkbox", { name: "Tümünü seç" }));
     await user.click(await screen.findByRole("button", { name: "Tümünü uygula" }));
     expect(await screen.findByRole("dialog")).toHaveAccessibleDescription(/satır değişecek/);

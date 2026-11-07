@@ -1127,7 +1127,13 @@ async fn install_rector(state: State<'_, AppState>) -> CmdResult<ToolchainStatus
 }
 
 #[tauri::command]
-async fn rector_preview(state: State<'_, AppState>, path: String, target: String, mode: RectorMode) -> CmdResult<PreviewResponse> {
+async fn rector_preview(
+    state: State<'_, AppState>,
+    path: String,
+    target: String,
+    mode: RectorMode,
+    with_pins: bool,
+) -> CmdResult<PreviewResponse> {
     let path = normalize_path(path);
     let target = parse_step(&target)?;
     let tools = state.tools_dir();
@@ -1150,8 +1156,9 @@ async fn rector_preview(state: State<'_, AppState>, path: String, target: String
         let php = toolchain::find_php(php_override.as_deref()).ok_or_else(|| toolchain::ToolError::PhpMissing.to_string())?;
         toolchain::require_supported_php(&php).map_err(|e| e.to_string())?;
         let info = project::inspect(&root).map_err(|e| e.to_string())?;
-        rector::preview(&php, &toolchain::rector_entry(&tools), &root, target, mode, &info.excluded_dirs, &work, &cancel)
-            .map_err(|e| e.to_string())
+        let preview = rector::preview(&php, &toolchain::rector_entry(&tools), &root, target, mode, &info.excluded_dirs, &work, &cancel)
+            .map_err(|e| e.to_string())?;
+        Ok(if with_pins { preview.with_pins(ferry_core::server::bump(&root, target)) } else { preview })
     })
     .await;
     {

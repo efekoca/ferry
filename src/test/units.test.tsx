@@ -4,7 +4,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { DiffViewer, wordDiff } from "../components/DiffViewer";
+import { DiffViewer, splitRows, wordDiff } from "../components/DiffViewer";
 import { Select, TagInput } from "../components/ui";
 import { DICTS, I18nProvider } from "../i18n";
 import { highlight } from "../lib/code";
@@ -456,5 +456,18 @@ describe("relatedFindings", () => {
 
   it("stops at the limit", () => {
     expect(relatedFindings(list[0], list, 1)).toHaveLength(1);
+  });
+});
+
+describe("splitRows", () => {
+  const line = (kind: "context" | "add" | "del", text: string) => ({ kind, text, oldNo: 1, newNo: 1 });
+
+  it("pairs removed and added lines and keeps context on both sides", () => {
+    const rows = splitRows([line("context", "a"), line("del", "b"), line("del", "c"), line("add", "d"), line("context", "e")]);
+    expect(rows.map((r) => [r.left?.text, r.right?.text])).toEqual([["a", "a"], ["b", "d"], ["c", undefined], ["e", "e"]]);
+  });
+
+  it("handles an addition with nothing removed", () => {
+    expect(splitRows([line("add", "x")]).map((r) => [r.left?.text, r.right?.text])).toEqual([[undefined, "x"]]);
   });
 });

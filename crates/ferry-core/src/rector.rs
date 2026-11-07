@@ -220,6 +220,16 @@ pub struct RectorPreview {
     pub duration_ms: u64,
 }
 
+impl RectorPreview {
+    pub fn with_pins(mut self, pins: RectorPreview) -> RectorPreview {
+        let taken: std::collections::HashSet<String> = self.changes.iter().map(|c| c.file.clone()).collect();
+        self.changes.extend(pins.changes.into_iter().filter(|c| !taken.contains(&c.file)));
+        self.errors.extend(pins.errors);
+        self.duration_ms += pins.duration_ms;
+        self
+    }
+}
+
 #[derive(Debug)]
 pub enum RectorError {
     Tool(ToolError),
@@ -644,6 +654,39 @@ pub fn apply(root: &Path, changes: &[&FileChange]) -> Result<Vec<String>, Rector
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn edited(file: &str, text: &str) -> FileChange {
+        FileChange {
+            file: file.to_string(),
+            rules: Vec::new(),
+            fix: FixKind::Likely,
+            diff: crate::diff::compute("old", text, 3),
+            original_hash: 0,
+            new_content: text.to_string(),
+        }
+    }
+
+    fn preview_of(mode: RectorMode, changes: Vec<FileChange>, errors: &[&str]) -> RectorPreview {
+        RectorPreview {
+            target: PhpVersion::new(8, 4),
+            mode,
+            changes,
+            errors: errors.iter().map(|e| e.to_string()).collect(),
+            duration_ms: 5,
+        }
+    }
+
+    #[test]
+    fn version_files_join_the_code_preview_without_replacing_it() {
+        let code = preview_of(RectorMode::Compat, vec![edited("a.php", "rector"), edited("composer.json", "rector")], &["one"]);
+        let pins = preview_of(RectorMode::Pins, vec![edited("Dockerfile", "pin"), edited("composer.json", "pin")], &["two"]);
+        let merged = code.with_pins(pins);
+        assert_eq!(merged.mode, RectorMode::Compat);
+        assert_eq!(merged.changes.iter().map(|c| c.file.as_str()).collect::<Vec<_>>(), ["a.php", "composer.json", "Dockerfile"]);
+        assert_eq!(merged.changes[1].new_content, "rector");
+        assert_eq!(merged.errors, ["one", "two"]);
+        assert_eq!(merged.duration_ms, 10);
+    }
 
     #[cfg(unix)]
     fn change(file: &str, before: &str, after: &str) -> FileChange {
