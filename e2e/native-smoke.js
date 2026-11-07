@@ -41,8 +41,8 @@
     await emit(`project ${document.querySelector(".project-chip__name")?.textContent}`);
 
     await click("Taramayı başlat");
-    await until(() => document.querySelector(".score-ring"), "tarama sonucu", 60000);
-    await emit(`scan score=${document.querySelector(".score-ring__number")?.textContent} findings=${document.querySelector(".nav__count")?.textContent}`);
+    await until(() => document.querySelector(".overview-score"), "tarama sonucu", 60000);
+    await emit(`scan score=${document.querySelector(".overview-score")?.dataset.score} findings=${document.querySelector(".nav__count")?.textContent}`);
     await step("overview");
 
     await nav("Bulgular");
@@ -73,8 +73,8 @@
     await step("applied");
 
     await nav("Geçmiş");
-    await click("Geri yükle", await until(() => document.querySelector("table"), "geçmiş tablosu"));
-    await click("Geri yükle", await until(() => document.querySelector('[role="dialog"]'), "geri yükleme onayı"));
+    await click("Geri al", await until(() => document.querySelector(".history-backup"), "yedek satırı"));
+    await click("Geri al", await until(() => document.querySelector('[role="dialog"]'), "geri alma onayı"));
     await until(() => text().includes("Geri yüklendi"), "geri yükleme bildirimi", 60000);
     await emit("restored");
     await step("history");

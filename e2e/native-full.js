@@ -100,12 +100,12 @@
   };
   const scan = async () => {
     await click("Taramayı başlat");
-    await until(() => $(".score-ring"), "scan result", 120000);
-    return Number($(".score-ring__number")?.textContent);
+    await until(() => $(".overview-score"), "scan result", 120000);
+    return Number($(".overview-score").dataset.score);
   };
   const preview = async () => {
     await nav("Düzeltmeler");
-    await click("Değişiklikleri hesapla", undefined, 10000);
+    await click("Önizlemeyi hazırla", undefined, 10000);
     await until(() => $(".change-item") || text().includes("Yapılacak değişiklik yok"), "preview", 300000);
     const files = $$(".change-item__file").map((e) => e.textContent);
     const all = $(".change-list__header input");
@@ -149,9 +149,10 @@
       const score = await scan();
       await emit(`  score=${score} findings=${$(".nav__count")?.textContent}`);
       const rescan = async (version) => {
-        radio(version).click();
-        await until(() => $(".score__meta .badge")?.textContent === `PHP ${version}` && $(".score-ring"), `rescan for ${version}`, 120000);
-        return Number($(".score-ring__number")?.textContent);
+        $(".overview-target [role=combobox]").click();
+        (await until(() => $$("[role=option]").find((o) => o.textContent.startsWith(`PHP ${version}`)), `target ${version}`)).click();
+        await until(() => $(".overview-target .select__value")?.textContent === `PHP ${version}` && $(".overview-score"), `rescan for ${version}`, 120000);
+        return Number($(".overview-score").dataset.score);
       };
       const score85 = await rescan("8.5");
       await emit(`  8.5 score=${score85}`);
@@ -159,9 +160,14 @@
 
       await nav("Bulgular");
       const all = await until(() => $$(".finding").length, "findings");
-      await click("Elle düzelt");
+      const fixKind = async (label) => {
+        $(".toolbar__select [role=combobox]").click();
+        (await until(() => $$("[role=option]").find((o) => o.textContent.startsWith(label)), label)).click();
+        await sleep(200);
+      };
+      await fixKind("Elle düzelt");
       const manual = $$(".finding").length;
-      await click("Elle düzelt");
+      await fixKind("Tüm türler");
       check($$(".finding").length === all, "filter toggle restores list");
       const search = $('input[type="search"], input[aria-label="Bulgularda ara"]');
       search.focus();
@@ -193,8 +199,8 @@
       check(left.length === 1 && left[0] === files[0], `unapplied file stays listed: ${left}`);
 
       await nav("Geçmiş");
-      const row = await until(() => $$("tbody tr")[0], "history row");
-      await click("İncele", row);
+      const row = await until(() => $$(".history-backup")[0], "history row");
+      row.querySelector(".line__open").click();
       const review = await dialog();
       await until(() => review.innerText.includes(`${files.length - 1} dosya`), "review meta");
       key("Escape", false);
@@ -203,23 +209,23 @@
 
       await emit(`MODIFY ${projects.kuzey}/${files[1]}`);
       await sleep(3000);
-      await click("Geri yükle", $$("tbody tr")[0]);
+      await click("Geri al", $$(".history-backup")[0]);
       const confirm = await dialog();
       await until(() => confirm.innerText.includes("uygulamadan sonra değiştirilmiş"), "conflict warning", 10000);
       check(confirm.innerText.includes(files[1]), "conflict lists edited file");
       const before = seen.length;
-      await click("Geri yükle", confirm);
+      await click("Geri al", confirm);
       await until(() => seen.slice(before).includes("Geri yüklendi"), "restored toast", 30000);
       await until(() => !$('[role="dialog"]'), "restore dialog closed");
 
-      await until(() => $$("tbody tr").some((r) => r.innerText.includes("Geri yükleme öncesi")), "edited file kept in a backup");
+      await until(() => $$(".history-backup").some((r) => r.innerText.includes("Geri yükleme öncesi")), "edited file kept in a backup");
 
-      for (let n = $$("tbody tr").length; n > 0; n--) {
+      for (let n = $$(".history-backup").length; n > 0; n--) {
         emit("  deleting snapshot");
-        (await until(() => $('tbody tr button[aria-label="Yedeği sil"]'), "delete button")).click();
+        (await until(() => $('.history-backup button[aria-label="Yedeği sil"]'), "delete button")).click();
         emit("  confirming delete");
         await click("Sil", await dialog());
-        await until(() => $$("tbody tr").length < n, "snapshot deleted");
+        await until(() => $$(".history-backup").length < n, "snapshot deleted");
       }
       emit("  waiting for empty history");
       await until(() => text().includes("Henüz bir değişiklik uygulanmadı"), "history empty after delete");
@@ -235,9 +241,9 @@
       await applyAndConfirm();
       await until(() => text().includes("Hepsi uygulandı"), "all applied state");
       await nav("Geçmiş");
-      await click("Geri yükle", await until(() => $$("tbody tr")[0], "history row"));
+      await click("Geri al", await until(() => $$(".history-backup")[0], "history row"));
       const before = seen.length;
-      await click("Geri yükle", await dialog());
+      await click("Geri al", await dialog());
       await until(() => seen.slice(before).includes("Geri yüklendi"), "restored", 30000);
       await until(() => !$('[role="dialog"]'), "restore dialog closed");
     },
@@ -246,18 +252,18 @@
       await openRecent(projects.wp);
       await scan();
       await nav("Düzeltmeler");
-      await click("Değişiklikleri hesapla", undefined, 10000);
+      await click("Önizlemeyi hazırla", undefined, 10000);
       const before = seen.length;
       const finished = () => $(".change-item") || text().includes("Yapılacak değişiklik yok");
       await until(() => button("Durdur") || finished(), "Stop button or results", 10000);
       const stopped = !!button("Durdur");
       if (stopped) {
         button("Durdur").click();
-        await until(() => button("Değişiklikleri hesapla") || finished(), "calculate button back after stop", 15000);
+        await until(() => button("Önizlemeyi hazırla") || finished(), "calculate button back after stop", 15000);
       }
       await sleep(1000);
       noErrorToast(before);
-      const raced = !button("Değişiklikleri hesapla");
+      const raced = !button("Önizlemeyi hazırla");
       if (raced) await emit("  Rector finished before Stop took effect");
       else check(!$(".change-item"), "no stale results after stop");
       const files = raced ? $$(".change-item__file").map((e) => e.textContent) : await preview();
@@ -273,20 +279,20 @@
       await openRecent(projects.wp);
       await scan();
       const compat = await preview();
-      radio("Modernleştirme").click();
-      if (button("Durdur")) check(button("uygula", $(".apply-bar")) === undefined, "apply is disabled while recalculating");
-      await until(() => !$$("button").some((b) => b.textContent.includes("Durdur")), "modern preview", 300000);
-      check(await settles(() => radio("Modernleştirme").getAttribute("aria-checked") === "true"), "modernize stays selected");
+      await click("Seçimi değiştir");
+      (await until(() => $$(".opt").find((o) => o.textContent.includes("Modernleştirme")), "modernize option")).querySelector("input").click();
+      await click("Önizlemeyi hazırla");
+      await until(() => $(".change-item") && !$$("button").some((b) => b.textContent.includes("Durdur")), "modern preview", 300000);
       const modern = $$(".change-item__file").map((e) => e.textContent);
       await emit(`  compat=${compat.length} modern=${modern.length}: ${modern.join(", ")}`);
       check(modern.length >= compat.length, "modernize covers at least the compat files");
       await applyAndConfirm();
       await nav("Geçmiş");
-      const row = await until(() => $$("tbody tr")[0], "history row");
+      const row = await until(() => $$(".history-backup")[0], "history row");
       check(row.innerText.includes("Modernleştirme"), "history label says modernize");
-      await click("Geri yükle", row);
+      await click("Geri al", row);
       const before = seen.length;
-      await click("Geri yükle", await dialog());
+      await click("Geri al", await dialog());
       await until(() => seen.slice(before).includes("Geri yüklendi"), "restored", 30000);
       await until(() => !$('[role="dialog"]'), "restore dialog closed");
     },
@@ -315,12 +321,12 @@
       await emit(`DUMP ${projects.unicode}/src/a.php`);
       await sleep(1500);
       await nav("Geçmiş");
-      await click("Geri yükle", await until(() => $$("tbody tr")[0], "history row"));
+      await click("Geri al", await until(() => $$(".history-backup")[0], "history row"));
       const confirm = await dialog();
       await sleep(800);
       check(!confirm.innerText.includes("uygulamadan sonra"), "no conflict warning when untouched");
       const before = seen.length;
-      await click("Geri yükle", confirm);
+      await click("Geri al", confirm);
       await until(() => seen.slice(before).includes("Geri yüklendi"), "restored", 30000);
       await until(() => !$('[role="dialog"]'), "restore dialog closed");
     },
@@ -341,18 +347,18 @@
       await sleep(500);
       await emit(`  deps: ${$("main").innerText.replace(/\n+/g, " / ").slice(0, 500)}`);
       check(text().includes("acme/dev"), "dev package listed");
-      radio("Sadece üretim").click();
+      $("[role=switch]").click();
       check(await settles(() => !text().includes("acme/dev") && text().includes("acme/x")), "production filter hides dev packages");
-      radio("Tümü").click();
+      $("[role=switch]").click();
       const files = await preview();
       await emit(`  preview: ${files.join(", ")}`);
       await emit(`  changes screen: ${$("main").innerText.replace(/\n+/g, " / ").slice(0, 600)}`);
       if (files.length) {
         await applyAndConfirm();
         await nav("Geçmiş");
-        await click("Geri yükle", await until(() => $$("tbody tr")[0], "history row"));
+        await click("Geri al", await until(() => $$(".history-backup")[0], "history row"));
         const before = seen.length;
-        await click("Geri yükle", await dialog());
+        await click("Geri al", await dialog());
         await until(() => seen.slice(before).includes("Geri yüklendi"), "restored", 30000);
       await until(() => !$('[role="dialog"]'), "restore dialog closed");
       }
@@ -431,7 +437,8 @@
       await until(() => button("Testi başlat"), "start button back after stop", 60000);
       noErrorToast(before);
       check(!text().includes("sürümünde yeni"), "no result after a stop");
-      const clean = $$(".docker-option").find((l) => l.textContent.includes("bitince"));
+      await click("Seçenekler");
+      const clean = await until(() => $$(".real-check").find((l) => /bitince/i.test(l.textContent)), "clean option");
       clean.querySelector("input").click();
       await click("Testi başlat");
       await until(() => text().includes("Kurulan PHP eklentileri"), "extension installed", 600000);
@@ -447,12 +454,13 @@
       await openRecent(projects.unicode);
       await scan();
       await nav("Gerçek test");
-      const select = await until(() => $$("select").find((s) => [...s.options].some((o) => o.value.startsWith("dump:"))), "database choices");
-      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set;
-      setter.call(select, "dump:database/dump.sql");
-      select.dispatchEvent(new Event("change", { bubbles: true }));
+      await click("Seçenekler");
+      const select = await until(() => $$('[role="combobox"]').find((s) => s.getAttribute("aria-label") === "Veritabanı"), "database choices");
+      select.click();
+      const option = await until(() => $$('[role="option"]').find((o) => o.textContent.includes("database/dump.sql")), "database dump");
+      option.click();
       await click("Testi başlat");
-      await until(() => text().includes("İstekler sonrası"), "data comparison", 900000);
+      await until(() => text().includes("Farklı tablo"), "data comparison", 900000);
       noErrorToast(before);
     },
 
@@ -491,7 +499,7 @@
       radio("Sistem").click();
       still.remove();
       if (vibrancy) document.documentElement.dataset.vibrancy = vibrancy;
-      check(failures.length === 0, `contrast: ${failures.slice(0, 5).join("; ")}`);
+      check(failures.length === 0, `contrast: ${failures.join("; ")}`);
     },
 
     async function settings() {
@@ -509,7 +517,7 @@
       await until(() => text().includes("Görünüm"), "back to turkish");
       radio("Açık").click();
       const before = seen.length;
-      await click("Yeniden kontrol et");
+      $('button[aria-label="Yeniden kontrol et"]').click();
       await sleep(2500);
       noErrorToast(before);
       await emit(`  tools: ${$("main").innerText.replace(/\n+/g, " / ").slice(0, 500)}`);

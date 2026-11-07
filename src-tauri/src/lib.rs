@@ -271,6 +271,10 @@ impl AppState {
         self.data_dir.join("checks").join(format!("{:016x}.json", fnv1a(path.as_bytes())))
     }
 
+    fn scan_history_path(&self, path: &str) -> PathBuf {
+        self.data_dir.join("history").join(format!("{:016x}.json", fnv1a(path.as_bytes())))
+    }
+
     fn docker_history_path(&self, path: &str) -> PathBuf {
         self.data_dir.join("docker").join(format!("{:016x}.json", fnv1a(path.as_bytes())))
     }
@@ -655,6 +659,11 @@ async fn keep_docker_trial(state: State<'_, AppState>, path: String) -> CmdResul
 }
 
 #[tauri::command]
+fn scan_history(state: State<'_, AppState>, path: String) -> Vec<history::Entry> {
+    history::scans(&state.scan_history_path(&normalize_path(path)))
+}
+
+#[tauri::command]
 fn check_history(state: State<'_, AppState>, path: String) -> Vec<ferry_core::localcheck::Summary> {
     ferry_core::localcheck::history(&state.check_history_path(&normalize_path(path)))
 }
@@ -745,7 +754,7 @@ async fn scan_project<R: Runtime>(app: AppHandle<R>, path: String, target: Strin
     }
     let mut response = respond(Path::new(&path), scan, state.runtime_log(&path).as_ref());
     if latest {
-        let file = state.data_dir.join("history").join(format!("{:016x}.json", fnv1a(path.as_bytes())));
+        let file = state.scan_history_path(&path);
         let target = response.scan.target.to_string();
         response.progress = history::record(&file, now_secs(), &target, response.summary.score, &response.scan.findings).ok();
     }
@@ -924,6 +933,20 @@ fn custom_editor(template: &str, file: &Path, line: usize, column: usize) -> Opt
     let program = args.next()?;
     let found = toolchain::find_executable(&program).unwrap_or_else(|| PathBuf::from(&program));
     Some(EditorCall::Command(found, args.collect()))
+}
+
+#[derive(Serialize)]
+struct SourceLine {
+    number: usize,
+    text: String,
+}
+
+#[tauri::command]
+async fn source_lines(path: String, file: String, line: usize) -> CmdResult<Vec<SourceLine>> {
+    let path = normalize_path(path);
+    let root = project_root(&path)?;
+    let lines = ferry_core::safefs::lines_around(&root, &file, line, 2).map_err(|e| e.to_string())?;
+    Ok(lines.into_iter().map(|(number, text)| SourceLine { number, text }).collect())
 }
 
 #[tauri::command]
@@ -1113,7 +1136,13 @@ async fn install_rector(state: State<'_, AppState>) -> CmdResult<ToolchainStatus
 }
 
 #[tauri::command]
-async fn rector_preview(state: State<'_, AppState>, path: String, target: String, mode: RectorMode) -> CmdResult<PreviewResponse> {
+async fn rector_preview(
+    state: State<'_, AppState>,
+    path: String,
+    target: String,
+    mode: RectorMode,
+    with_pins: bool,
+) -> CmdResult<PreviewResponse> {
     let path = normalize_path(path);
     let target = parse_step(&target)?;
     let tools = state.tools_dir();
@@ -1136,8 +1165,9 @@ async fn rector_preview(state: State<'_, AppState>, path: String, target: String
         let php = toolchain::find_php(php_override.as_deref()).ok_or_else(|| toolchain::ToolError::PhpMissing.to_string())?;
         toolchain::require_supported_php(&php).map_err(|e| e.to_string())?;
         let info = project::inspect(&root).map_err(|e| e.to_string())?;
-        rector::preview(&php, &toolchain::rector_entry(&tools), &root, target, mode, &info.excluded_dirs, &work, &cancel)
-            .map_err(|e| e.to_string())
+        let preview = rector::preview(&php, &toolchain::rector_entry(&tools), &root, target, mode, &info.excluded_dirs, &work, &cancel)
+            .map_err(|e| e.to_string())?;
+        Ok(if with_pins { preview.with_pins(ferry_core::server::bump(&root, target)) } else { preview })
     })
     .await;
     {
@@ -1591,6 +1621,7 @@ pub fn with_commands<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R
     builder.invoke_handler(tauri::generate_handler![
         inspect_project,
         save_project_config,
+        source_lines,
         interrupted_writes,
         scan_project,
         cancel_scan,
@@ -1627,6 +1658,7 @@ pub fn with_commands<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R
         cancel_local_check,
         docker_image_usage,
         docker_history,
+        scan_history,
         check_history,
         remove_docker_images,
         clear_runtime_log,

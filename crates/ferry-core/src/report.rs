@@ -80,6 +80,35 @@ fn md_escape(s: &str) -> String {
     s.replace('|', "\\|").replace('\n', " ")
 }
 
+/// Text from the project outside code: it can't become a link, an image or HTML.
+fn md_text(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '\\' | '`' | '[' | ']' | '<' | '>' | '|' | '&' => {
+                out.push('\\');
+                out.push(c);
+            }
+            c if c.is_control() => out.push(' '),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// Text from the project as inline code. The fence is longer than any run of backticks inside.
+fn md_code(s: &str) -> String {
+    let text: String = s.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
+    let text = text.replace('|', "\\|");
+    let longest = text.split(|c| c != '`').map(str::len).max().unwrap_or(0);
+    let fence = "`".repeat(longest + 1);
+    if text.starts_with('`') || text.ends_with('`') {
+        format!("{fence} {text} {fence}")
+    } else {
+        format!("{fence}{text}{fence}")
+    }
+}
+
 fn docker_section(result: &crate::docker::Comparison, lang: Lang) -> String {
     let l = |t: Text| t.get(lang).to_string();
     let summary = result.summary(0);
@@ -122,10 +151,10 @@ fn docker_section(result: &crate::docker::Comparison, lang: Lang) -> String {
     }
     md.push('\n');
     for name in result.new_failures.iter().take(20) {
-        md.push_str(&format!("- `{}`\n", md_escape(name)));
+        md.push_str(&format!("- {}\n", md_code(name)));
     }
     for page in result.pages.iter().filter(|p| p.broke()).take(20) {
-        md.push_str(&format!("- `{}` ({} → {})\n", md_escape(&page.path), page.source_status, page.target_status));
+        md.push_str(&format!("- {} ({} → {})\n", md_code(&page.path), page.source_status, page.target_status));
     }
     if !result.new_failures.is_empty() || result.pages.iter().any(|p| p.broke()) {
         md.push('\n');
@@ -140,7 +169,7 @@ fn docker_section(result: &crate::docker::Comparison, lang: Lang) -> String {
                 OriginKind::Extension => Text::new("Eklenti ya da tema", "Plugin or theme"),
             };
             let name = [o.name.as_str(), o.version.as_deref().unwrap_or_default()].join(" ");
-            md.push_str(&format!("- {} {}: {}\n", l(kind), md_escape(name.trim()), o.messages));
+            md.push_str(&format!("- {} {}: {}\n", l(kind), md_text(name.trim()), o.messages));
             if let Some(advice) = &o.advice {
                 md.push_str(&format!("  {}\n", md_escape(advice.get(lang))));
             }
@@ -161,7 +190,7 @@ pub fn to_markdown(
     let s = summarize(&scan.findings);
     let current = project.current_version.map_or_else(|| l(Text::new("bilinmiyor", "unknown")).to_string(), |v| format!("PHP {v}"));
     let mut md = String::new();
-    md.push_str(&format!("# {}: {}\n\n", l(Text::new("Ferry raporu", "Ferry report")), project.name));
+    md.push_str(&format!("# {}: {}\n\n", l(Text::new("Ferry raporu", "Ferry report")), md_text(&project.name)));
     md.push_str(&format!(
         "- **{}:** PHP {}\n- **{}:** {}\n- **{}:** {} ({} {})\n- **{}:** {}/100\n\n",
         l(Text::new("Hedef sürüm", "Target version")),
@@ -198,7 +227,7 @@ pub fn to_markdown(
             ))
         ));
         for e in &scan.errors {
-            md.push_str(&format!("- `{}`: {}\n", md_escape(&e.file), md_escape(&e.message)));
+            md.push_str(&format!("- {}: {}\n", md_code(&e.file), md_text(&e.message)));
         }
         md.push('\n');
     }
@@ -222,8 +251,8 @@ pub fn to_markdown(
         md.push_str("|---|---:|---|---|---|---|\n");
         for f in &scan.findings {
             md.push_str(&format!(
-                "| `{}` | {} | {} (PHP {}) | {} | {} | {} |\n",
-                md_escape(&f.file),
+                "| {} | {} | {} (PHP {}) | {} | {} | {} |\n",
+                md_code(&f.file),
                 f.line,
                 md_escape(f.title.get(lang)),
                 f.since,
@@ -241,9 +270,9 @@ pub fn to_markdown(
         md.push_str(&format!("## {}\n\n", l(Text::new("Bağımlılıklar", "Dependencies"))));
         if deps.root_status == DependencyStatus::Incompatible {
             let constraint = match (&deps.root_constraint, &deps.root_conflict) {
-                (Some(r), Some(c)) => format!("require `{r}`, conflict `{c}`"),
-                (None, Some(c)) => format!("conflict `{c}`"),
-                (r, None) => format!("`{}`", r.as_deref().unwrap_or("")),
+                (Some(r), Some(c)) => format!("require {}, conflict {}", md_code(r), md_code(c)),
+                (None, Some(c)) => format!("conflict {}", md_code(c)),
+                (r, None) => md_code(r.as_deref().unwrap_or("")),
             };
             md.push_str(&match lang {
                 Lang::Tr => format!("composer.json'daki PHP kısıtı ({constraint}) PHP {} ile uyumlu değil.\n\n", deps.target),
@@ -299,10 +328,10 @@ pub fn to_markdown(
             md.push_str("|---|---|---|\n");
             for p in bad {
                 md.push_str(&format!(
-                    "| `{}` | {} | `{}` |\n",
-                    p.name.replace('|', "\\|"),
-                    p.version.replace('|', "\\|"),
-                    p.php_constraint.as_deref().unwrap_or("—").replace('|', "\\|")
+                    "| {} | {} | {} |\n",
+                    md_code(&p.name),
+                    md_text(&p.version),
+                    md_code(p.php_constraint.as_deref().unwrap_or("—"))
                 ));
             }
             md.push('\n');
@@ -432,6 +461,17 @@ mod tests {
         assert_eq!((s.total, s.breaking, s.deprecated, s.behavior), (3, 1, 1, 1));
         assert_eq!((s.auto, s.likely, s.manual), (0, 2, 1));
         assert_eq!(s.files_affected, 1);
+    }
+
+    #[test]
+    fn text_from_the_project_stays_text_in_the_report() {
+        assert_eq!(md_code("src/a.php"), "`src/a.php`");
+        assert_eq!(md_code("a`b"), "``a`b``");
+        assert_eq!(md_code("`x"), "`` `x ``");
+        assert_eq!(md_code("^7.0 || ^8.0"), "`^7.0 \\|\\| ^8.0`");
+        assert_eq!(md_code("a\nb"), "`a b`");
+        assert_eq!(md_text("[x](http://e.test) <img src=x>"), "\\[x\\](http://e.test) \\<img src=x\\>");
+        assert_eq!(md_text("a\n# b"), "a # b");
     }
 
     #[test]

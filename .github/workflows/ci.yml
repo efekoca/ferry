@@ -120,7 +120,7 @@ jobs:
       - name: Real Docker comparison
         env:
           FERRY_TEST_DOCKER: "1"
-        run: cargo test -p ferry-core --lib docker::tests -- --test-threads=1
+        run: cargo test -p ferry-core --lib -- docker::tests database::snapshot_tests --test-threads=1
 
   windows:
     needs: changes

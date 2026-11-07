@@ -21,6 +21,13 @@ export function formatBytes(bytes: number, locale: string): string {
   return new Intl.NumberFormat(locale, { style: "unit", unit: units[unit], unitDisplay: "short", maximumFractionDigits: unit ? 1 : 0 }).format(value);
 }
 
+export function relativeTo(root: string, path: string) {
+  const clean = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "");
+  const base = `${clean(root)}/`;
+  const full = clean(path);
+  return full.startsWith(base) ? full.slice(base.length) : null;
+}
+
 export function formatRelative(ts: number, t: Dict, now = Date.now()): string {
   const min = Math.round(Math.max(0, now - ts) / 60000);
   if (min < 1) return t.time.justNow;

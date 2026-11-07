@@ -271,7 +271,7 @@ fn version_files_move_to_the_target_and_can_be_undone_over_ipc() {
     let root = h.root.clone();
     let dockerfile = Path::new(&root).join("Dockerfile");
     std::fs::write(&dockerfile, "FROM php:7.4-cli\n").unwrap();
-    let preview = h.ok("rector_preview", json!({ "path": root, "target": "8.4", "mode": "pins" }));
+    let preview = h.ok("rector_preview", json!({ "path": root, "target": "8.4", "mode": "pins", "withPins": false }));
     assert_eq!(preview["mode"], "pins");
     assert_eq!(preview["changes"][0]["file"], "Dockerfile");
     let id = preview["id"].as_u64().unwrap();
@@ -304,7 +304,7 @@ fn a_batch_goes_on_its_own_branch_and_a_dirty_tree_can_be_refused() {
     git(&["add", "."]);
     git(&["commit", "-qm", "first"]);
 
-    let id = h.ok("rector_preview", json!({ "path": root, "target": "8.4", "mode": "pins" }))["id"].as_u64().unwrap();
+    let id = h.ok("rector_preview", json!({ "path": root, "target": "8.4", "mode": "pins", "withPins": false }))["id"].as_u64().unwrap();
     std::fs::write(dir.join("notes.txt"), "open work\n").unwrap();
     let args = json!({ "path": root, "previewId": id, "files": ["Dockerfile"], "label": "pins", "commitMessage": "Update PHP" });
     let err = h.invoke("apply_changes", args.clone()).unwrap_err();
@@ -320,6 +320,32 @@ fn a_batch_goes_on_its_own_branch_and_a_dirty_tree_can_be_refused() {
 }
 
 #[test]
+fn code_fixes_and_version_files_share_one_preview_over_ipc() {
+    if toolchain::test_tools().is_none() {
+        eprintln!("FERRY_TEST_TOOLS ayarlı değil; birleşik önizleme testi atlandı");
+        return;
+    }
+    let h = harness();
+    let root = h.root.clone();
+    let dir = Path::new(&root);
+    let dockerfile = dir.join("Dockerfile");
+    std::fs::write(&dockerfile, "FROM php:7.4-cli\n").unwrap();
+    let code = std::fs::read_to_string(dir.join("src/Greeter.php")).unwrap();
+    let preview = h.ok("rector_preview", json!({ "path": root, "target": "8.4", "mode": "compat", "withPins": true }));
+    assert_eq!(preview["mode"], "compat");
+    let files: Vec<&str> = preview["changes"].as_array().unwrap().iter().map(|c| c["file"].as_str().unwrap()).collect();
+    assert!(files.contains(&"Dockerfile") && files.contains(&"src/Greeter.php"), "{files:?}");
+    let id = preview["id"].as_u64().unwrap();
+    let result =
+        h.ok("apply_changes", json!({ "path": root, "previewId": id, "files": ["Dockerfile", "src/Greeter.php"], "label": "both" }));
+    assert_eq!(std::fs::read_to_string(&dockerfile).unwrap(), "FROM php:8.4-cli\n");
+    assert_ne!(std::fs::read_to_string(dir.join("src/Greeter.php")).unwrap(), code);
+    h.ok("restore_snapshot", json!({ "path": root, "id": result["snapshot"]["id"] }));
+    assert_eq!(std::fs::read_to_string(&dockerfile).unwrap(), "FROM php:7.4-cli\n");
+    assert_eq!(std::fs::read_to_string(dir.join("src/Greeter.php")).unwrap(), code);
+}
+
+#[test]
 fn rector_preview_apply_restore_over_ipc() {
     if toolchain::test_tools().is_none() {
         eprintln!("FERRY_TEST_TOOLS ayarlı değil; Rector IPC testi atlandı");
@@ -328,7 +354,7 @@ fn rector_preview_apply_restore_over_ipc() {
     let _lang = turkish();
     let h = harness();
     let root = h.root.clone();
-    let preview = h.ok("rector_preview", json!({ "path": root, "target": "8.4", "mode": "compat" }));
+    let preview = h.ok("rector_preview", json!({ "path": root, "target": "8.4", "mode": "compat", "withPins": false }));
     let changes = preview["changes"].as_array().unwrap();
     let greeter = changes.iter().find(|c| c["file"] == "src/Greeter.php").expect("Greeter change");
     assert!(greeter["diff"]["hunks"][0]["lines"][0]["kind"].is_string());
@@ -338,7 +364,7 @@ fn rector_preview_apply_restore_over_ipc() {
     let greeter_path = Path::new(&root).join("src/Greeter.php");
 
     let older = preview["id"].as_u64().unwrap();
-    let preview = h.ok("rector_preview", json!({ "path": root, "target": "8.4", "mode": "compat" }));
+    let preview = h.ok("rector_preview", json!({ "path": root, "target": "8.4", "mode": "compat", "withPins": false }));
     let id = preview["id"].as_u64().unwrap();
     assert_ne!(id, older);
     let err =

@@ -65,19 +65,19 @@ pub fn detect_framework(root: &Path) -> Framework {
     {
         return Framework::Joomla;
     }
-    if ["version.php", "public/version.php"].iter().any(|v| std::fs::read_to_string(root.join(v)).is_ok_and(|t| t.contains("$release")))
+    if ["version.php", "public/version.php"].iter().any(|v| crate::safefs::read_text(root.join(v)).is_ok_and(|t| t.contains("$release")))
         && (root.join("lib/moodlelib.php").is_file() || root.join("public/lib/moodlelib.php").is_file())
     {
         return Framework::Moodle;
     }
-    if std::fs::read_to_string(root.join("includes/Defines.php")).is_ok_and(|t| t.contains("MW_VERSION"))
-        || std::fs::read_to_string(root.join("includes/DefaultSettings.php")).is_ok_and(|t| t.contains("$wgVersion"))
+    if crate::safefs::read_text(root.join("includes/Defines.php")).is_ok_and(|t| t.contains("MW_VERSION"))
+        || crate::safefs::read_text(root.join("includes/DefaultSettings.php")).is_ok_and(|t| t.contains("$wgVersion"))
     {
         return Framework::MediaWiki;
     }
     if ["includes/constants.php", "phpBB/includes/constants.php"]
         .iter()
-        .any(|c| std::fs::read_to_string(root.join(c)).is_ok_and(|t| t.contains("PHPBB_VERSION")))
+        .any(|c| crate::safefs::read_text(root.join(c)).is_ok_and(|t| t.contains("PHPBB_VERSION")))
     {
         return Framework::Phpbb;
     }
@@ -127,7 +127,7 @@ pub fn detect_framework(root: &Path) -> Framework {
 /// `require` says what the project runs on, and `name` that it's the framework's own repository.
 /// `suggest`, `conflict` and `require-dev` say neither.
 fn required_packages(root: &Path) -> Vec<String> {
-    let text = std::fs::read_to_string(root.join("composer.json")).unwrap_or_default();
+    let text = crate::safefs::read_text(root.join("composer.json")).unwrap_or_default();
     let manifest: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
     let required = manifest.get("require").and_then(|r| r.as_object()).into_iter().flat_map(|r| r.keys().map(String::as_str));
     required.chain(manifest.get("name").and_then(|n| n.as_str())).map(str::to_ascii_lowercase).collect()
@@ -172,12 +172,12 @@ pub fn framework_excludes(framework: Framework) -> Vec<String> {
 const DRUPAL_DOCROOTS: [&str; 5] = ["", "web", "docroot", "html", "public"];
 
 pub(crate) fn drupal7_root(root: &Path) -> bool {
-    std::fs::read_to_string(root.join("includes/bootstrap.inc")).is_ok_and(|t| t.contains("define('VERSION', '7."))
+    crate::safefs::read_text(root.join("includes/bootstrap.inc")).is_ok_and(|t| t.contains("define('VERSION', '7."))
 }
 
 pub(crate) fn prestashop_root(root: &Path) -> bool {
-    std::fs::read_to_string(root.join("config/settings.inc.php")).is_ok_and(|t| t.contains("_PS_VERSION_"))
-        || std::fs::read_to_string(root.join("app/AppKernel.php")).is_ok_and(|t| t.contains("PrestaShop"))
+    crate::safefs::read_text(root.join("config/settings.inc.php")).is_ok_and(|t| t.contains("_PS_VERSION_"))
+        || crate::safefs::read_text(root.join("app/AppKernel.php")).is_ok_and(|t| t.contains("PrestaShop"))
         || root.join("classes/PrestaShopAutoload.php").is_file()
 }
 
@@ -292,14 +292,14 @@ pub fn collect_php_files(root: &Path, excluded: &[String]) -> Vec<PathBuf> {
 }
 
 fn composer_php_constraint(root: &Path) -> Option<String> {
-    let text = std::fs::read_to_string(root.join("composer.json")).ok()?;
+    let text = crate::safefs::read_text(root.join("composer.json")).ok()?;
     let json: serde_json::Value = serde_json::from_str(&text).ok()?;
     let php = json.get("require")?.get("php")?.as_str()?;
     Some(php.to_string())
 }
 
 fn composer_platform_php(root: &Path) -> Option<PhpVersion> {
-    let text = std::fs::read_to_string(root.join("composer.json")).ok()?;
+    let text = crate::safefs::read_text(root.join("composer.json")).ok()?;
     let json: serde_json::Value = serde_json::from_str(&text).ok()?;
     json.pointer("/config/platform/php")?.as_str()?.parse().ok()
 }

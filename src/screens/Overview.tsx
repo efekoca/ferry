@@ -1,37 +1,19 @@
-import { useState, type ReactNode } from "react";
-import {
-  ArrowRight,
-  Check,
-  CircleAlert,
-  Download,
-  FileCode2,
-  Layers,
-  Package,
-  Play,
-  RotateCw,
-  ScanSearch,
-  ShieldCheck,
-  Sparkles,
-  Wrench,
-  ShieldAlert,
-  Columns3,
-  CircleDashed,
-  CircleStop,
-} from "lucide-react";
-import { ConfirmDialog } from "../components/Modal";
-import { PageHeader } from "../components/Shell";
-import { ScoreRing } from "../components/ScoreRing";
-import { Badge, Button, Callout, Card, Progress, RiskBadge, Segmented } from "../components/ui";
+import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { Check, CircleAlert, CircleStop, Columns3, Download, MoreHorizontal, Play, RotateCw, ScanSearch, ShieldCheck } from "lucide-react";
+import { ConfirmDialog, Sheet } from "../components/Modal";
+import { usePageTitle } from "../components/Shell";
+import { ActionMenu, Button, Callout, Card, EmptyState, Progress, Segmented, Select, Tooltip } from "../components/ui";
 import { useI18n } from "../i18n";
-import { commonTitle, dependencyBlockers, FRAMEWORK_LABEL, formatDuration, formatNumber, readiness, scoreHeadline, scoreTone, type Readiness } from "../lib/labels";
+import { commonTitle, dependencyBlockers, formatDuration, formatNumber, readiness, scoreHeadline, scoreTone } from "../lib/labels";
 import { useStore } from "../lib/store";
 import { BLOCKED_TARGETS, PATCHED, PHP2SHELL_CVES, isBlockedTarget } from "../lib/security";
-import { TARGETS, type Finding, type FixKind, type HistoryEntry, type ScanHistory, type Target, type TargetSummary } from "../lib/types";
+import { TARGETS, type Finding, type Severity, type Target, type TargetSummary } from "../lib/types";
+import { squarify, type Tile } from "../lib/treemap";
 import { useToast } from "../components/Toast";
 import { errorMessage } from "../lib/api";
 
 function topRules(findings: Finding[], loc: (f: Finding) => string) {
-  const map = new Map<string, { titles: string[]; fix: Finding["fix"]; since: string; count: number }>();
+  const map = new Map<string, { titles: string[]; severity: Severity; count: number }>();
   for (const f of findings) {
     const title = loc(f);
     const cur = map.get(f.ruleId);
@@ -39,20 +21,52 @@ function topRules(findings: Finding[], loc: (f: Finding) => string) {
       cur.count++;
       if (!cur.titles.includes(title)) cur.titles.push(title);
     } else {
-      map.set(f.ruleId, { titles: [title], fix: f.fix, since: f.since, count: 1 });
+      map.set(f.ruleId, { titles: [title], severity: f.severity, count: 1 });
     }
   }
   return [...map.entries()]
     .sort((a, b) => b[1].count - a[1].count)
-    .slice(0, 6)
+    .slice(0, 5)
     .map(([id, r]) => [id, { ...r, title: commonTitle(r.titles) }] as const);
 }
 
+export interface FileStat {
+  file: string;
+  value: number;
+  breaking: number;
+  deprecated: number;
+  behavior: number;
+}
+
+export function fileStats(findings: Finding[]): FileStat[] {
+  const files = new Map<string, FileStat>();
+  for (const f of findings) {
+    const stat = files.get(f.file) ?? { file: f.file, value: 0, breaking: 0, deprecated: 0, behavior: 0 };
+    stat.value++;
+    stat[f.severity]++;
+    files.set(f.file, stat);
+  }
+  return [...files.values()].sort((a, b) => b.value - a.value || a.file.localeCompare(b.file));
+}
+
+export function filesHoldingHalf(files: FileStat[]): number {
+  const total = files.reduce((a, f) => a + f.value, 0);
+  let sum = 0;
+  for (let i = 0; i < files.length; i++) {
+    sum += files[i].value;
+    if (sum * 2 >= total) return i + 1;
+  }
+  return files.length;
+}
+
+const MAX_TILES = 36;
+
 export function Overview() {
   const { t, loc } = useI18n();
-  const { dockerStep, project, target, setTarget, scan, scanning, progress, runScan, cancelScan, deps, setView, showFindings, toolchain, exportReport, preview, dockerHistory } =
-    useStore();
+  const { dockerStep, project, target, setTarget, scan, scanning, progress, runScan, cancelScan, deps, setView, showFindings, exportReport, preview, dockerHistory } = useStore();
   const [pendingTarget, setPendingTarget] = useState<Target | null>(null);
+  const [comparing, setComparing] = useState(false);
+  usePageTitle(t.overview.title);
   if (!project) return null;
 
   const chooseTarget = (next: Target) => {
@@ -62,83 +76,46 @@ export function Overview() {
   };
 
   const pct = progress && progress.total > 0 ? (progress.done / progress.total) * 100 : null;
-  const s = scan?.summary;
-  const ready = scan ? readiness(scan, deps, dockerHistory) : null;
-  const settled = !!ready && ready.blockers === 0 && ready.unscanned === 0 && ready.deps.state === "verified" && ready.docker !== "failed" && ready.ignoredBreaking === 0 && (ready.docker === "passed" || (ready.check.state === "passed" && ready.check.kind === "tests"));
-  const baseTone = s ? scoreTone(s.score) : "auto";
-  const tone = ready && ready.blockers > 0 && baseTone === "auto" ? "manual" : baseTone;
-  const blockers = dependencyBlockers(deps);
-  const frameworkBlockers = scan?.findings.filter((f) => f.ruleId.startsWith("framework.") && f.ruleId.endsWith("_version")) ?? [];
-  const blockerText = blockers.root
-    ? t.overview.rootBlocked(deps?.rootConstraint ?? "", target, blockers.packages)
-    : t.overview.packagesBlocked(blockers.packages, target);
   const fmt = (n: number) => formatNumber(n, t.locale);
   const versionHint = project.currentVersion ? t.overview.currentHint(project.currentVersion) : t.overview.currentUnknown;
   const skipped = project.excludedDirs.length > 0 ? t.overview.skipped(project.excludedDirs.join(", ")) : t.overview.skippedVendor;
+  const blockedText = t.overview.blockedTarget(BLOCKED_TARGETS.join(", "), PHP2SHELL_CVES, Object.values(PATCHED));
 
-  return (
+  const dialogs = (
     <>
-      <PageHeader
-        title={t.overview.title}
-        subtitle={project.root}
-        actions={
-          scan && (
-            <>
-              <Button variant="ghost" size="sm" icon={<Download size={14} />} onClick={exportReport}>
-                {t.overview.exportReport}
-              </Button>
-              <Button variant="secondary" size="sm" icon={<RotateCw size={14} />} onClick={() => runScan()} loading={scanning}>
-                {t.overview.rescan}
-              </Button>
-            </>
-          )
-        }
-      />
-      <div className="page-scroll">
-        <div className="page-body stack">
-          <Card bodyClassName="facts">
-            <Fact label={t.overview.platform} value={FRAMEWORK_LABEL[project.framework]} />
-            <Fact label={t.overview.phpFiles} value={fmt(project.phpFiles)} />
-            <Fact label={t.overview.currentVersion} value={project.currentVersion ? `PHP ${project.currentVersion}` : t.common.unknown} />
-            <Fact label={t.overview.constraint} value={project.phpConstraint ?? "—"} mono />
-          </Card>
+      <ConfirmDialog
+        open={pendingTarget !== null}
+        icon={<RotateCw size={20} />}
+        title={t.overview.switchTitle(pendingTarget ?? target)}
+        confirmLabel={t.overview.switchConfirm}
+        onCancel={() => setPendingTarget(null)}
+        onConfirm={() => {
+          if (pendingTarget) setTarget(pendingTarget);
+          setPendingTarget(null);
+        }}
+      >
+        {t.overview.switchText(preview?.changes.length ?? 0)}
+      </ConfirmDialog>
+      <Sheet open={comparing} title={t.compare.title} onClose={() => setComparing(false)}>
+        <CompareCard
+          root={project.root}
+          current={target}
+          onPick={(next) => {
+            setComparing(false);
+            chooseTarget(next);
+          }}
+        />
+      </Sheet>
+    </>
+  );
 
-          <Card bodyClassName={scan ? "target target--compact" : "target"}>
-            <div className="target__text">
-              <h2>{t.overview.targetTitle}</h2>
-              <p>
-                {versionHint}
-                {!scan && skipped}
-              </p>
-            </div>
-            <div className="target__controls">
-              <Segmented<Target>
-                label={t.overview.targetLabel}
-                size="lg"
-                value={target}
-                onChange={chooseTarget}
-                disabled={scanning || !!dockerStep}
-                options={TARGETS.map((v) =>
-                  isBlockedTarget(v) ? { value: v, label: v, disabled: true, describedBy: "target-blocked" } : { value: v, label: v },
-                )}
-              />
-              {!scan && (
-                <Button variant="primary" size="lg" icon={<Play size={16} />} onClick={() => runScan()} loading={scanning}>
-                  {t.overview.startScan}
-                </Button>
-              )}
-            </div>
-            <details className="target__note" id="target-blocked">
-              <summary>
-                <ShieldAlert size={14} aria-hidden />
-                <span>{t.overview.blockedShort(BLOCKED_TARGETS.join(", "))}</span> <span className="target__why">{t.overview.why}</span>
-              </summary>
-              <p>{t.overview.blockedTarget(BLOCKED_TARGETS.join(", "), PHP2SHELL_CVES, Object.values(PATCHED))}</p>
-            </details>
-          </Card>
-
-          {scanning && (
-            <Card bodyClassName="scan-progress">
+  if (scanning || !scan) {
+    return (
+      <>
+        <div className="overview-start" data-tauri-drag-region>
+          <h1 className="sr-only">{t.overview.title}</h1>
+          {scanning ? (
+            <div className="overview-scan" role="status">
               <div className="row">
                 <ScanSearch size={16} className="subtle" />
                 <strong>{t.overview.scanning(target)}</strong>
@@ -153,242 +130,302 @@ export function Overview() {
                   {fmt(progress?.done ?? 0)} / {fmt(progress?.total ?? project.phpFiles)}
                 </span>
               </div>
-            </Card>
-          )}
-
-          {!scan && !scanning && (
-            <Card bodyClassName="">
-              <div className="steps">
-                <Step state="active" icon={<ScanSearch size={14} />} title={t.overview.steps.scan.title} desc={t.overview.steps.scan.text} />
-                <Step icon={<Sparkles size={14} />} title={t.overview.steps.fix.title} desc={t.overview.steps.fix.text} />
-                <Step icon={<Package size={14} />} title={t.overview.steps.deps.title} desc={t.overview.steps.deps.text} />
-                <Step icon={<Layers size={14} />} title={t.overview.steps.live.title} desc={t.overview.steps.live.text} />
-              </div>
-            </Card>
-          )}
-
-          {scan && s && (
+            </div>
+          ) : (
             <>
-              <Card className="score-card" bodyClassName="score">
-                <div className="score__glow" data-tone={tone} aria-hidden />
-                <div className="score__ring" title={t.overview.scoreNote}>
-                  <ScoreRing score={s.score} tone={tone} />
-                </div>
-                <div className="score__text">
-                  <div className="score__meta">
-                    <Badge tone="accent">PHP {scan.target}</Badge>
-                    <span>
-                      {t.overview.scanMeta(fmt(scan.filesScanned), fmt(scan.linesScanned), formatDuration(scan.durationMs, t.locale))}
-                    </span>
-                  </div>
-                  <h2>{scoreHeadline(s.score, s.total, t, scan.errors.length > 0, settled)}</h2>
-                  <p>
-                    {s.total > 0
-                      ? t.overview.summary(s.total, s.filesAffected, s.auto + s.likely)
-                      : scan.errors.length > 0
-                        ? t.overview.cleanPartial
-                        : t.overview.clean}
-                  </p>
-                  {ready && (
-                    <ReadinessList
-                      ready={ready}
-                      onBlockers={() => (ready.blockers > ready.deps.count ? showFindings({ severity: "breaking" }) : setView("dependencies"))}
-                      onCoverage={() => document.getElementById("unscanned")?.scrollIntoView({ block: "center" })}
-                      onDeps={() => setView("dependencies")}
-                      onCheck={() => showFindings()}
-                      onDocker={() => setView("runtime")}
-                    />
-                  )}
-                  <p className="score__note">{t.overview.scoreNote}</p>
-                </div>
-                {s.total > 0 && (
-                  <div className="fix-tiles">
-                    {(["auto", "likely", "manual"] as const).map((kind) => (
-                      <FixTile key={kind} kind={kind} n={s[kind]} total={s.total} onClick={() => showFindings({ fix: kind })} />
-                    ))}
-                  </div>
-                )}
-              </Card>
-
-              {scan.errors.length > 0 && (
-                <div id="unscanned">
-                <Callout tone="warn" icon={<CircleAlert size={16} />}>
-                  {t.overview.unreadable(
-                    scan.errors.length,
-                    scan.errors.slice(0, 3).map((e) => e.file).join(", ") + (scan.errors.length > 3 ? "…" : ""),
-                  )}
-                </Callout>
-                </div>
-              )}
-
-              {frameworkBlockers.map((f) => {
-                const [lead, ...rest] = loc(f.message).split(/(?<=\.) /);
-                return (
-                  <Callout key={f.id} tone={f.severity === "breaking" ? "danger" : "warn"} icon={<CircleAlert size={16} />}>
-                    <strong>{lead}</strong> {rest.join(" ")}
-                  </Callout>
-                );
-              })}
-
-              {scan.progress && <ProgressCard progress={scan.progress} />}
-
-              <CompareCard root={project.root} current={target} onPick={chooseTarget} />
-
-              <div className="grid-4">
-                <Metric label={t.severity.breaking} value={s.breaking} hint={t.overview.metrics.breakingHint} tone="danger" onClick={() => showFindings({ severity: "breaking" })} />
-                <Metric label={t.severity.deprecated} value={s.deprecated} hint={t.overview.metrics.deprecatedHint} tone="manual" onClick={() => showFindings({ severity: "deprecated" })} />
-                <Metric label={t.severity.behavior} value={s.behavior} hint={t.overview.metrics.behaviorHint} tone="neutral" onClick={() => showFindings({ severity: "behavior" })} />
-                <Metric
-                  label={t.overview.metrics.blockers}
-                  value={deps ? blockers.total : "—"}
-                  hint={
-                    blockers.root
-                      ? t.overview.metrics.rootIncluded
-                      : deps?.hasLockFile
-                        ? t.overview.metrics.ofPackages(deps.packages.length)
-                        : t.overview.metrics.noLock
-                  }
-                  tone={!deps ? "neutral" : blockers.total > 0 ? "danger" : "auto"}
-                  onClick={() => setView("dependencies")}
-                />
-              </div>
-
-              <div className="grid-2">
-                <Card
-                  title={t.overview.commonIssues}
-                  actions={
-                    s.total > 0 && (
-                      <Button variant="ghost" size="sm" onClick={() => showFindings()}>
-                        {t.overview.viewAll} <ArrowRight size={13} />
-                      </Button>
-                    )
-                  }
-                  bodyClassName="rule-list"
-                >
-                  {s.total === 0 ? (
-                    <div className="card__body muted">{t.overview.noIssues}</div>
-                  ) : (
-                    topRules(scan.findings, (f) => loc(f.title)).map(([id, r]) => (
-                      <button key={id} type="button" className="rule-row" onClick={() => showFindings({ rule: id })}>
-                        <span className="rule-row__title">{r.title}</span>
-                        <Badge mono>PHP {r.since}</Badge>
-                        <RiskBadge fix={r.fix} />
-                        <span className="rule-row__count">{r.count}</span>
-                      </button>
-                    ))
-                  )}
-                </Card>
-
-                <Card title={t.overview.nextSteps} bodyClassName="">
-                  <div className="steps steps--card">
-                    <Step state="done" icon={<Check size={14} />} title={t.overview.scanDone} desc={t.overview.classified(s.total)} />
-                    {frameworkBlockers.map((f) => (
-                      <Step
-                        key={f.id}
-                        state="active"
-                        icon={<CircleAlert size={14} />}
-                        title={t.overview.upgradeFramework(loc(f.title).replace(/\s+[\d.]+$/, ""))}
-                        desc={f.replacement ? loc(f.replacement) : loc(f.message)}
-                        action={
-                          <Button size="sm" variant="ghost" onClick={() => showFindings({ rule: f.ruleId })}>
-                            {t.overview.inspect}
-                          </Button>
-                        }
-                      />
-                    ))}
-                    <Step
-                      state={preview ? "done" : "active"}
-                      icon={preview ? <Check size={14} /> : <Sparkles size={14} />}
-                      title={t.overview.reviewFixes}
-                      desc={toolchain && !toolchain.rector ? t.overview.installRectorFirst : t.overview.reviewFixesText}
-                      action={
-                        <Button size="sm" variant={preview ? "secondary" : "primary"} onClick={() => setView("changes")}>
-                          {t.nav.fixes}
-                        </Button>
-                      }
-                    />
-                    <Step
-                      state={blockers.total > 0 ? "active" : "done"}
-                      icon={blockers.total > 0 ? <CircleAlert size={14} /> : <Check size={14} />}
-                      title={t.overview.updateDeps}
-                      desc={blockers.total > 0 ? blockerText : t.overview.noBlockers}
-                      action={
-                        <Button size="sm" variant="ghost" onClick={() => setView("dependencies")}>
-                          {t.overview.inspect}
-                        </Button>
-                      }
-                    />
-                    <Step
-                      state={s.manual > 0 ? undefined : "done"}
-                      icon={s.manual > 0 ? <FileCode2 size={14} /> : <Check size={14} />}
-                      title={t.overview.resolveManual}
-                      desc={t.overview.manualLeft(s.manual)}
-                      action={
-                        s.manual > 0 && (
-                          <Button size="sm" variant="ghost" onClick={() => showFindings({ fix: "manual" })}>
-                            {t.overview.inspect}
-                          </Button>
-                        )
-                      }
-                    />
-                  </div>
-                </Card>
-              </div>
-
+              <h2 className="page-title">{t.overview.targetTitle}</h2>
+              <p className="page-lead">
+                {versionHint}
+                {skipped}
+              </p>
+              <Segmented<Target>
+                label={t.overview.targetLabel}
+                size="lg"
+                value={target}
+                onChange={chooseTarget}
+                disabled={!!dockerStep}
+                options={TARGETS.map((v) => (isBlockedTarget(v) ? { value: v, label: v, disabled: true, tip: blockedText } : { value: v, label: v }))}
+              />
+              <Button variant="primary" size="lg" icon={<Play size={16} />} onClick={() => runScan()}>
+                {t.overview.startScan}
+              </Button>
             </>
           )}
         </div>
-      </div>
+        {dialogs}
+      </>
+    );
+  }
 
-      <ConfirmDialog
-        open={pendingTarget !== null}
-        icon={<RotateCw size={20} />}
-        title={t.overview.switchTitle(pendingTarget ?? target)}
-        confirmLabel={t.overview.switchConfirm}
-        onCancel={() => setPendingTarget(null)}
-        onConfirm={() => {
-          if (pendingTarget) setTarget(pendingTarget);
-          setPendingTarget(null);
-        }}
-      >
-        {t.overview.switchText(preview?.changes.length ?? 0)}
-      </ConfirmDialog>
+  const s = scan.summary;
+  const ready = readiness(scan, deps, dockerHistory);
+  const settled = ready.blockers === 0 && ready.unscanned === 0 && ready.deps.state === "verified" && ready.docker !== "failed" && ready.ignoredBreaking === 0 && (ready.docker === "passed" || (ready.check.state === "passed" && ready.check.kind === "tests"));
+  const baseTone = scoreTone(s.score);
+  const tone = ready.blockers > 0 && baseTone === "auto" ? "manual" : baseTone;
+  const blockers = dependencyBlockers(deps);
+  const frameworkBlockers = scan.findings.filter((f) => f.ruleId.startsWith("framework.") && f.ruleId.endsWith("_version"));
+  const files = fileStats(scan.findings);
+  const half = filesHoldingHalf(files);
+  const concentrated = files.length >= 3 && half <= 6 && half < files.length;
+  const heaviest = files[0];
+  const heaviestName = heaviest?.file.slice(heaviest.file.lastIndexOf("/") + 1);
+  const r = t.overview.readiness;
+  const depsText = {
+    blocked: blockers.root ? t.overview.rootBlocked(deps?.rootConstraint ?? "", target, blockers.packages) : t.overview.packagesBlocked(blockers.packages, target),
+    unknown: r.depsUnknown(ready.deps.count),
+    verified: r.depsVerified,
+    missing: r.depsMissing,
+    pending: r.depsPending,
+  }[ready.deps.state];
+  const steps: { key: string; title: string; state?: "done" | "next" | "blocked"; count?: number; hint: string; onClick: () => void }[] = [
+    {
+      key: "scan",
+      title: t.overview.stepScan,
+      state: ready.unscanned ? "blocked" : "done",
+      count: ready.unscanned || undefined,
+      hint: ready.unscanned ? r.coveragePartial(ready.unscanned) : t.overview.scanMeta(fmt(scan.filesScanned), fmt(scan.linesScanned), formatDuration(scan.durationMs, t.locale)),
+      onClick: () => (ready.unscanned ? document.getElementById("unscanned")?.scrollIntoView({ block: "center" }) : showFindings()),
+    },
+    ...frameworkBlockers.map((f) => ({
+      key: f.id,
+      title: t.overview.upgradeFramework(loc(f.title).replace(/\s+[\d.]+$/, "")),
+      state: "blocked" as const,
+      hint: f.replacement ? loc(f.replacement) : loc(f.message),
+      onClick: () => showFindings({ rule: f.ruleId }),
+    })),
+    {
+      key: "fixes",
+      title: t.nav.fixes,
+      state: "next",
+      count: s.auto + s.likely || undefined,
+      hint: t.overview.reviewFixesText,
+      onClick: () => setView("changes"),
+    },
+    {
+      key: "deps",
+      title: t.nav.dependencies,
+      state: ready.deps.state === "blocked" ? "blocked" : ready.deps.state === "verified" ? "done" : undefined,
+      count: ready.deps.count || undefined,
+      hint: depsText,
+      onClick: () => setView("dependencies"),
+    },
+    {
+      key: "real",
+      title: t.nav.runtime,
+      state: ready.docker === "passed" ? "done" : ready.docker === "failed" ? "blocked" : undefined,
+      hint: r.dockerState[ready.docker],
+      onClick: () => setView("runtime"),
+    },
+  ];
+
+  return (
+    <>
+      <h1 className="sr-only">{t.overview.title}</h1>
+      <div className="map-page">
+        <div className="map-rail">
+          <div className="map-bar" data-tauri-drag-region>
+            <Select<Target>
+              className="overview-target"
+              label={t.overview.targetLabel}
+              value={target}
+              icon={<span className="overview-target__hint">{t.overview.targetShort}</span>}
+              disabled={!!dockerStep}
+              options={TARGETS.map((v) => (isBlockedTarget(v) ? { value: v, label: `PHP ${v}`, disabled: true, hint: t.overview.blockedHint } : { value: v, label: `PHP ${v}` }))}
+              onChange={chooseTarget}
+            />
+            <Tooltip className="map-bar__push" place="down" text={`${t.overview.rescan} · ${t.overview.scanMeta(fmt(scan.filesScanned), fmt(scan.linesScanned), formatDuration(scan.durationMs, t.locale))}`}>
+              <Button variant="ghost" iconOnly onClick={() => runScan()}>
+                <RotateCw size={15} aria-hidden />
+                <span className="sr-only">{t.overview.rescan}</span>
+              </Button>
+            </Tooltip>
+            <ActionMenu
+              label={t.overview.more}
+              icon={<MoreHorizontal size={15} aria-hidden />}
+              items={[
+                { label: t.overview.exportReport, icon: <Download size={14} aria-hidden />, onClick: exportReport },
+                { label: t.compare.title, icon: <Columns3 size={14} aria-hidden />, onClick: () => setComparing(true) },
+              ]}
+            />
+          </div>
+
+          <Tooltip align="start" text={t.overview.scoreNote} className="overview-score-tip">
+            <span className={`badge badge--${tone} overview-score`} role="img" tabIndex={0} aria-label={t.scoreLabel(s.score)} data-score={s.score}>
+              {t.overview.scorePill(s.score)}
+            </span>
+          </Tooltip>
+          <h2 className="page-title map-rail__title">{concentrated ? t.overview.concentrated(half) : scoreHeadline(s.score, s.total, t, scan.errors.length > 0, settled)}</h2>
+          <p className="page-lead">
+            {heaviest ? (
+              <>
+                {t.overview.heaviest} <code>{heaviestName}</code>: {t.overview.heaviestCount(heaviest.value, heaviest.breaking)}
+              </>
+            ) : scan.errors.length > 0 ? (
+              t.overview.cleanPartial
+            ) : (
+              t.overview.clean
+            )}
+          </p>
+          {s.total > 0 && (
+            <div>
+              <Button variant="primary" size="lg" onClick={() => setView("changes")}>
+                {t.overview.startFixes}
+              </Button>
+            </div>
+          )}
+
+          {s.total > 0 && (
+            <ul className="map-counts">
+              {(["breaking", "deprecated", "behavior"] as const).map((severity) => (
+                <li key={severity}>
+                  <button type="button" onClick={() => showFindings({ severity })}>
+                    <span className="map-counts__name">
+                      <span className={`dot dot--${severity}`} aria-hidden />
+                      {t.severity[severity]}
+                    </span>
+                    <span className="map-counts__value">{fmt(s[severity])}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {s.total > 0 && (
+            <section className="slot" aria-label={t.overview.commonIssues}>
+              <div className="slot__head">
+                <h3 className="slot__title">{t.overview.commonIssues}</h3>
+                <button type="button" className="link" onClick={() => showFindings()}>
+                  {t.overview.viewAll}
+                </button>
+              </div>
+              <div className="slot__list">
+                {topRules(scan.findings, (f) => loc(f.title)).map(([id, rule]) => (
+                  <button key={id} type="button" className="krow" onClick={() => showFindings({ rule: id })}>
+                    <span className={`dot dot--${rule.severity}`} aria-hidden />
+                    <span className="krow__name">{rule.title}</span>
+                    <span className="krow__value">{rule.count}</span>
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
+
+          <ol className="map-steps" aria-label={t.overview.stepsLabel}>
+            {steps.map((step, i) => (
+              <li key={step.key} data-state={step.state}>
+                <button type="button" title={step.hint} onClick={step.onClick}>
+                  <span className="chain__mark" aria-hidden>
+                    {step.state === "done" ? <Check size={10} strokeWidth={2.6} /> : i + 1}
+                  </span>
+                  <span className="map-steps__title">{step.title}</span>
+                  {step.count !== undefined && <small>{fmt(step.count)}</small>}
+                </button>
+              </li>
+            ))}
+          </ol>
+        </div>
+
+        <div className="map-main">
+          {scan.errors.length > 0 && (
+            <div id="unscanned">
+              <Callout tone="warn" icon={<CircleAlert size={16} />}>
+                {t.overview.unreadable(scan.errors.length, scan.errors.slice(0, 3).map((e) => e.file).join(", ") + (scan.errors.length > 3 ? "…" : ""))}
+              </Callout>
+            </div>
+          )}
+          {frameworkBlockers.map((f) => {
+            const [lead, ...rest] = loc(f.message).split(/(?<=\.) /);
+            return (
+              <Callout key={f.id} tone={f.severity === "breaking" ? "danger" : "warn"} icon={<CircleAlert size={16} />}>
+                <strong>{lead}</strong> {rest.join(" ")}
+              </Callout>
+            );
+          })}
+          {files.length > 0 ? (
+            <FileMap files={files} onOpen={(file) => showFindings(file ? { query: file } : {})} />
+          ) : (
+            <EmptyState icon={<ShieldCheck size={24} />} title={t.overview.noIssues} />
+          )}
+        </div>
+      </div>
+      {dialogs}
     </>
   );
 }
 
-function Fact({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
+type MapItem = { value: number; stat: FileStat | null; files: number };
+
+function FileMap({ files, onOpen }: { files: FileStat[]; onOpen: (file: string | null) => void }) {
+  const { t } = useI18n();
+  const box = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState({ width: 720, height: 720 });
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const read = () => {
+      if (el.clientWidth > 0 && el.clientHeight > 0) setSize({ width: el.clientWidth, height: el.clientHeight });
+    };
+    read();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(read);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  const tiles = useMemo(() => {
+    const rest = files.slice(MAX_TILES);
+    const items: MapItem[] = files.slice(0, MAX_TILES).map((stat) => ({ value: stat.value, stat, files: 1 }));
+    if (rest.length > 0) items.push({ value: rest.reduce((a, f) => a + f.value, 0), stat: null, files: rest.length });
+    return squarify(items, size.width, size.height);
+  }, [files, size]);
   return (
-    <div className="fact">
-      <div className="fact__label">{label}</div>
-      <div className={`fact__value ${mono ? "mono" : "tabular"}`} title={value}>
-        {value}
-      </div>
+    <div className="fmap" ref={box} role="group" aria-label={t.overview.mapLabel}>
+      {tiles.map((tile) => (
+        <FileTile key={tile.item.stat?.file ?? "rest"} tile={tile} size={size} onOpen={onOpen} />
+      ))}
     </div>
   );
 }
 
-const FIX_TILE_ICON = {
-  auto: <Sparkles size={14} />,
-  likely: <ShieldCheck size={14} />,
-  manual: <Wrench size={14} />,
-} as const;
-
-function FixTile({ kind, n, total, onClick }: { kind: FixKind; n: number; total: number; onClick: () => void }) {
+function FileTile({ tile, size, onOpen }: { tile: Tile<MapItem>; size: { width: number; height: number }; onOpen: (file: string | null) => void }) {
   const { t } = useI18n();
-  const share = total ? n / total : 0;
+  const { stat, value, files } = tile.item;
+  const big = tile.width >= 150 && tile.height >= 96;
+  const mid = tile.width >= 92 && tile.height >= 58;
+  const cut = stat ? stat.file.lastIndexOf("/") + 1 : 0;
+  const parts = stat
+    ? (["breaking", "deprecated", "behavior"] as const)
+        .filter((k) => stat[k] > 0)
+        .map((k) => `${stat[k]} ${t.severity[k].toLocaleLowerCase(t.locale)}`)
+        .join(", ")
+    : "";
+  const label = stat ? `${stat.file} · ${t.overview.fileSummary(value, parts)}` : t.overview.moreFiles(files);
+  const center = tile.x + tile.width / 2;
+  const tip = ["tip__box", tile.y < 60 && "tip__box--down", center < 130 ? "tip__box--start" : center > size.width - 130 ? "tip__box--end" : false].filter(Boolean).join(" ");
+  const style: CSSProperties = {
+    left: `${(tile.x / size.width) * 100}%`,
+    top: `${(tile.y / size.height) * 100}%`,
+    width: `${(tile.width / size.width) * 100}%`,
+    height: `${(tile.height / size.height) * 100}%`,
+  };
+  const heat = stat ? (0.34 * stat.breaking) / value : 0;
   return (
-    <button type="button" className="fix-tile" data-kind={kind} onClick={onClick} title={t.fixDesc[kind]}>
-      <span className="fix-tile__icon" aria-hidden>
-        {FIX_TILE_ICON[kind]}
+    <button type="button" className={`fmap__tile tip ${big ? "fmap__tile--big" : mid ? "" : "fmap__tile--tiny"}`} style={style} aria-label={label} onClick={() => onOpen(stat?.file ?? null)}>
+      <span className="fmap__body" style={{ "--heat": heat } as CSSProperties}>
+        {big && stat && <span className="fmap__dir">{stat.file.slice(0, cut)}</span>}
+        {(big || mid) && <span className="fmap__name">{stat ? stat.file.slice(cut) : t.overview.moreFiles(files)}</span>}
+        <span className="fmap__count">{value}</span>
+        {stat && (
+          <span className="fmap__mix" aria-hidden>
+            {(["breaking", "deprecated", "behavior"] as const)
+              .filter((k) => stat[k] > 0)
+              .map((k) => (
+                <i key={k} className={`dot--${k}`} style={{ flex: `${stat[k]} 1 0` }} />
+              ))}
+          </span>
+        )}
       </span>
-      <span className="fix-tile__label">{t.fix[kind]}</span>
-      <span className="fix-tile__count tabular">{n}</span>
-      <span className="fix-tile__bar" aria-hidden>
-        <span style={{ width: `${share * 100}%` }} />
-      </span>
-      <span className="fix-tile__pct tabular">
-        {new Intl.NumberFormat(t.locale, { style: "percent" }).format(share)}
+      <span className={tip} role="tooltip">
+        {label}
       </span>
     </button>
   );
@@ -413,7 +450,7 @@ function CompareCard({ root, current, onPick }: { root: string; current: Target;
     }
   };
   return (
-    <Card title={t.compare.title} bodyClassName="">
+    <Card bodyClassName="">
       {!list ? (
         <div className="compare__intro">
           <p className="muted">{t.compare.text}</p>
@@ -477,185 +514,3 @@ function CompareCard({ root, current, onPick }: { root: string; current: Target;
     </Card>
   );
 }
-
-function ProgressCard({ progress }: { progress: ScanHistory }) {
-  const { t } = useI18n();
-  const { history, newSinceLast, fixedSinceLast } = progress;
-  const date = (at: number) => new Date(at * 1000).toLocaleString(t.locale, { dateStyle: "medium", timeStyle: "short" });
-  const changed = (newSinceLast ?? 0) > 0 || (fixedSinceLast ?? 0) > 0;
-  return (
-    <Card bodyClassName="progress-card">
-      <div className="progress-card__text">
-        <div className="metric__label">{t.progress.since}</div>
-        {newSinceLast === null || fixedSinceLast === null ? (
-          <p className="muted">{t.progress.first}</p>
-        ) : changed ? (
-          <div className="progress-card__delta">
-            <span className="progress-card__good">{t.progress.resolved(fixedSinceLast)}</span>
-            <span className="progress-card__sep" aria-hidden>
-              ·
-            </span>
-            <span>{t.progress.added(newSinceLast)}</span>
-          </div>
-        ) : (
-          <div className="progress-card__delta">{t.progress.unchanged}</div>
-        )}
-      </div>
-      {history.length > 1 && <Sparkline points={history} label={t.progress.trend(history.map((h) => h.score).join(", "))} describe={(h) => t.progress.point(date(h.at), h.score, h.total)} />}
-    </Card>
-  );
-}
-
-function Sparkline({ points, label, describe }: { points: HistoryEntry[]; label: string; describe: (h: HistoryEntry) => string }) {
-  const [hover, setHover] = useState<number | null>(null);
-  const width = 200;
-  const height = 48;
-  const pad = 6;
-  const x = (i: number) => pad + (i * (width - pad * 2)) / Math.max(1, points.length - 1);
-  const y = (score: number) => pad + ((100 - score) * (height - pad * 2)) / 100;
-  const path = points.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p.score).toFixed(1)}`).join(" ");
-  const last = points.length - 1;
-  const shown = hover ?? last;
-  return (
-    <div className="sparkline" onMouseLeave={() => setHover(null)}>
-      <svg
-        viewBox={`0 0 ${width} ${height}`}
-        width={width}
-        height={height}
-        role="img"
-        aria-label={label}
-        onMouseMove={(e) => {
-          const box = e.currentTarget.getBoundingClientRect();
-          const rel = ((e.clientX - box.left) / box.width) * width;
-          setHover(Math.max(0, Math.min(last, Math.round(((rel - pad) / (width - pad * 2)) * last))));
-        }}
-      >
-        <path d={path} className="sparkline__line" />
-        {hover !== null && <line x1={x(hover)} x2={x(hover)} y1={0} y2={height} className="sparkline__cross" />}
-        <circle cx={x(shown)} cy={y(points[shown].score)} r={4} className="sparkline__dot" />
-      </svg>
-      <div className="sparkline__caption">{describe(points[shown])}</div>
-    </div>
-  );
-}
-
-function Metric({
-  label,
-  value,
-  hint,
-  tone,
-  onClick,
-}: {
-  label: string;
-  value: number | string;
-  hint: string;
-  tone: "danger" | "manual" | "neutral" | "auto";
-  onClick: () => void;
-}) {
-  return (
-    <button type="button" className="card card--interactive metric" onClick={onClick}>
-      <div className="metric__label">
-        <span className={`dot dot--${tone}`} aria-hidden />
-        {label}
-      </div>
-      <div className="metric__value">{value}</div>
-      <div className="metric__hint">{hint}</div>
-    </button>
-  );
-}
-
-function Step({
-  state,
-  icon,
-  title,
-  desc,
-  action,
-  badge,
-}: {
-  state?: "done" | "active";
-  icon: ReactNode;
-  title: string;
-  desc: string;
-  action?: ReactNode;
-  badge?: string;
-}) {
-  return (
-    <div className="step">
-      <span className={`step__icon ${state ? `step__icon--${state}` : ""}`}>{icon}</span>
-      <div className="step__text">
-        <div className="step__title">
-          {title} {badge && <Badge>{badge}</Badge>}
-        </div>
-        <div className="step__desc">{desc}</div>
-      </div>
-      {action}
-    </div>
-  );
-}
-
-function ReadinessList({
-  ready,
-  onBlockers,
-  onCoverage,
-  onDeps,
-  onCheck,
-  onDocker,
-}: {
-  ready: Readiness;
-  onBlockers: () => void;
-  onCoverage: () => void;
-  onDeps: () => void;
-  onCheck: () => void;
-  onDocker: () => void;
-}) {
-  const { t } = useI18n();
-  const r = t.overview.readiness;
-  const deps = {
-    blocked: r.depsBlocked(ready.deps.count),
-    unknown: r.depsUnknown(ready.deps.count),
-    verified: r.depsVerified,
-    missing: r.depsMissing,
-    pending: r.depsPending,
-  }[ready.deps.state];
-  const items: { label: string; value: string; state: "ok" | "warn" | "bad"; onClick?: () => void }[] = [
-    { label: r.blockers, value: ready.blockers ? r.blockersSome(ready.blockers) : r.blockersNone, state: ready.blockers ? "bad" : "ok", onClick: ready.blockers ? onBlockers : undefined },
-    { label: r.coverage, value: ready.unscanned ? r.coveragePartial(ready.unscanned) : r.coverageFull, state: ready.unscanned ? "warn" : "ok", onClick: ready.unscanned ? onCoverage : undefined },
-    {
-      label: r.deps,
-      value: deps,
-      state: ready.deps.state === "blocked" ? "bad" : ready.deps.state === "verified" ? "ok" : "warn",
-      onClick: onDeps,
-    },
-    {
-      label: r.check,
-      value: ready.check.state === "passed" ? r.checkPassed(ready.check.kind) : ready.check.state === "failed" ? r.checkFailed(ready.check.kind) : r.checkNone,
-      state: ready.check.state === "passed" ? "ok" : ready.check.state === "failed" ? "bad" : "warn",
-      onClick: onCheck,
-    },
-    {
-      label: r.docker,
-      value: r.dockerState[ready.docker],
-      state: ready.docker === "passed" ? "ok" : ready.docker === "failed" ? "bad" : "warn",
-      onClick: onDocker,
-    },
-  ];
-  const icon = { ok: <Check size={13} aria-hidden />, warn: <CircleDashed size={13} aria-hidden />, bad: <CircleAlert size={13} aria-hidden /> };
-  return (
-    <ul className="readiness" aria-label={r.label}>
-      {items.map((item) => (
-        <li key={item.label} data-state={item.state}>
-          {icon[item.state]}
-          <span className="readiness__label">{item.label}</span>
-          {item.onClick ? (
-            <button type="button" className="readiness__value" onClick={item.onClick}>
-              {item.value}
-            </button>
-          ) : (
-            <span className="readiness__value">{item.value}</span>
-          )}
-        </li>
-      ))}
-    </ul>
-  );
-}
-
