@@ -4,10 +4,12 @@ import { DiffViewer, type HunkChoice } from "../components/DiffViewer";
 import { ConfirmDialog } from "../components/Modal";
 import { PageHeader } from "../components/Shell";
 import { Splitter } from "../components/Splitter";
-import { Button, Callout, Card, CommandLine, EmptyState, Progress, RiskBadge, RuleChips, Segmented } from "../components/ui";
+import { Button, Callout, Card, CommandLine, EmptyState, Progress, RiskBadge, RuleChips, Segmented, Select } from "../components/ui";
 import { useI18n } from "../i18n";
 import { useStore } from "../lib/store";
 import { stepsBetween, type FileChange, type RectorMode } from "../lib/types";
+
+const ALL_STEPS = "all";
 
 export function Changes() {
   const { t, loc } = useI18n();
@@ -31,17 +33,20 @@ export function Changes() {
     void loadPreview(mode, steps.includes(value) ? value : undefined);
   };
   const stepPicker = steps.length > 0 && mode !== "pins" && (
-    <label className="step-picker">
+    <div className="step-picker">
       <span>{t.changes.step}</span>
-      <select className="input" value={step ?? ""} disabled={previewing} onChange={(e) => (preview ? goToStep(e.target.value) : setPickedStep(e.target.value))}>
-        <option value="">{t.changes.stepAll(target)}</option>
-        {steps.map((v) => (
-          <option key={v} value={v}>
-            {t.changes.stepTo(v)}
-          </option>
-        ))}
-      </select>
-    </label>
+      <Select
+        label={t.changes.step}
+        value={step ?? ALL_STEPS}
+        disabled={previewing}
+        options={[{ value: ALL_STEPS, label: t.changes.stepAll(target) }, ...steps.map((v) => ({ value: v, label: t.changes.stepTo(v) }))]}
+        onChange={(v) => {
+          const picked = v === ALL_STEPS ? "" : v;
+          if (preview) goToStep(picked);
+          else setPickedStep(picked);
+        }}
+      />
+    </div>
   );
   const nextStepButton = nextStep && (
     <Button variant="primary" onClick={() => goToStep(nextStep)}>
@@ -370,18 +375,18 @@ export function Changes() {
             <span>{t.changes.selected(chosen.length, changes.length)}</span>
           </label>
           <div className="change-list__narrow">
-            <select title={t.git.byRuleNote} className="input" aria-label={t.git.selectBy} value="" onChange={(e) => narrow(e.target.value)}>
-              <option value="" disabled>
-                {t.git.selectBy}
-              </option>
-              <option value="all">{t.git.selectAll}</option>
-              <option value="auto">{t.git.onlyAuto}</option>
-              {ruleOptions.map(([cls, r]) => (
-                <option key={cls} value={cls}>
-                  {t.git.byRule(r.title, r.files.length)}
-                </option>
-              ))}
-            </select>
+            <Select
+              block
+              title={t.git.byRuleNote}
+              label={t.git.selectBy}
+              value=""
+              options={[
+                { value: "all", label: t.git.selectAll },
+                { value: "auto", label: t.git.onlyAuto },
+                ...ruleOptions.map(([cls, r]) => ({ value: cls, label: t.git.byRule(r.title, r.files.length) })),
+              ]}
+              onChange={narrow}
+            />
           </div>
           <ul className="change-list" aria-label={t.changes.files}>
             {changes.map((c) => (

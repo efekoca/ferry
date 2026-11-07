@@ -24,7 +24,7 @@ import {
 import { DiffViewer } from "../components/DiffViewer";
 import { ConfirmDialog, Sheet } from "../components/Modal";
 import { PageHeader } from "../components/Shell";
-import { Badge, Button, Callout, Card, CommandLine, EmptyState, RiskBadge, RuleChips, Segmented } from "../components/ui";
+import { Badge, Button, Callout, Card, CommandLine, EmptyState, RiskBadge, RuleChips, Segmented, Select, TagInput, TextArea } from "../components/ui";
 import { PHP2SHELL_CVES, isVulnerable, patchedFor } from "../lib/security";
 import { useToast } from "../components/Toast";
 import { LANGS, useI18n, type Lang } from "../i18n";
@@ -398,10 +398,7 @@ function ServerProbe({ target, extensions }: { target: string; extensions: Exten
           <CommandLine command={`https://example.com/ferry-probe.php?token=${token}`} />
         </div>
       )}
-      <label className="field">
-        <span className="field__label">{t.deps.probePaste}</span>
-        <textarea className="input mono" rows={3} value={text} placeholder={t.deps.probePlaceholder} onChange={(e) => remember(e.target.value)} />
-      </label>
+      <TextArea className="field" label={t.deps.probePaste} mono rows={3} value={text} placeholder={t.deps.probePlaceholder} onChange={(e) => remember(e.target.value)} />
       {text.trim() && !probe && <Callout tone="warn" icon={<CircleAlert size={15} />}>{t.deps.probeInvalid}</Callout>}
       {report && (
         <>
@@ -779,6 +776,8 @@ const withIcon = (icon: ReactElement, label: string) => (
   </span>
 );
 
+const SYSTEM_EDITOR = "system";
+
 const EDITORS = [
   ["vscode", "Visual Studio Code"],
   ["cursor", "Cursor"],
@@ -814,20 +813,16 @@ function EditorCommand({ value, onSave }: { value: string; onSave: (command: str
 function ProjectSettings() {
   const { t } = useI18n();
   const { project, saveConfig } = useStore();
-  const [exclude, setExclude] = useState(project?.config.exclude.join("\n") ?? "");
+  const [exclude, setExclude] = useState(project?.config.exclude ?? []);
   const [requireClean, setRequireClean] = useState(project?.config.git.requireClean ?? false);
   const [branchPerBatch, setBranchPerBatch] = useState(project?.config.git.branchPerBatch ?? false);
   if (!project) return null;
-  const list = exclude.split("\n").map((d) => d.trim()).filter(Boolean);
   const pinned = project.config.target;
   return (
     <Card title={t.settings.projectTitle(project.name)}>
       <p className="subtle">{t.settings.projectNote}</p>
       {pinned && <p>{t.settings.projectTarget(pinned)}</p>}
-      <label className="docker-field">
-        <span>{t.settings.projectExclude}</span>
-        <textarea className="input" rows={3} placeholder="legacy&#10;tools/old" value={exclude} onChange={(e) => setExclude(e.target.value)} />
-      </label>
+      <TagInput className="field" label={t.settings.projectExclude} values={exclude} placeholder={t.settings.projectExcludeAdd} removeLabel={t.settings.projectExcludeRemove} onChange={setExclude} />
       {project.isGitRepo && (
         <>
           <label className="git-batch">
@@ -840,8 +835,8 @@ function ProjectSettings() {
           </label>
         </>
       )}
-      <div className="docker-save">
-        <Button variant="secondary" size="sm" onClick={() => void saveConfig({ ...project.config, exclude: list, git: { requireClean, branchPerBatch } })}>
+      <div className="row row--end">
+        <Button variant="secondary" size="sm" onClick={() => void saveConfig({ ...project.config, exclude, git: { requireClean, branchPerBatch } })}>
           {t.settings.projectSave}
         </Button>
       </div>
@@ -995,20 +990,16 @@ export function SettingsScreen() {
                   <div className="setting__title">{t.settings.editor}</div>
                   <div className="setting__desc">{t.settings.editorText}</div>
                 </div>
-                <select
-                  className="input"
-                  aria-label={t.settings.editor}
-                  value={settings.editor ?? ""}
-                  onChange={(e) => void save({ editor: e.target.value || null })}
-                >
-                  <option value="">{t.settings.editorSystem}</option>
-                  {EDITORS.map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                  <option value="custom">{t.settings.editorCustom}</option>
-                </select>
+                <Select
+                  label={t.settings.editor}
+                  value={settings.editor ?? SYSTEM_EDITOR}
+                  options={[
+                    { value: SYSTEM_EDITOR, label: t.settings.editorSystem },
+                    ...EDITORS.map(([value, label]) => ({ value, label })),
+                    { value: "custom", label: t.settings.editorCustom },
+                  ]}
+                  onChange={(editor) => void save({ editor: editor === SYSTEM_EDITOR ? null : editor })}
+                />
               </div>
               {settings.editor === "custom" && <EditorCommand value={settings.editorCommand ?? ""} onSave={(editorCommand) => void save({ editorCommand: editorCommand || null })} />}
             </div>
