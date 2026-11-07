@@ -4,6 +4,10 @@ import { Button } from "./ui";
 import { useI18n } from "../i18n";
 
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]';
+/** Toasts stay reachable while a dialog is open. */
+const TOAST_FOCUSABLE = FOCUSABLE.split(", ")
+  .map((selector) => `.toasts ${selector}`)
+  .join(", ");
 
 function hideBackground(dialog: Element) {
   const hidden: Element[] = [];
@@ -41,7 +45,9 @@ function useModal(open: boolean, dialogRef: RefObject<HTMLElement | null>, initi
         return;
       }
       if (e.key !== "Tab") return;
-      const items = [...dialog.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((el) => el.tabIndex >= 0 && !el.matches(":disabled"));
+      const usable = (el: HTMLElement) => el.tabIndex >= 0 && !el.matches(":disabled");
+      const toasts = [...document.querySelectorAll<HTMLElement>(TOAST_FOCUSABLE)].filter(usable);
+      const items = [...[...dialog.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(usable), ...toasts];
       if (!items.length) {
         e.preventDefault();
         return;
@@ -49,7 +55,7 @@ function useModal(open: boolean, dialogRef: RefObject<HTMLElement | null>, initi
       const first = items[0];
       const last = items[items.length - 1];
       const active = document.activeElement;
-      const outside = !dialog.contains(active);
+      const outside = !dialog.contains(active) && !toasts.includes(active as HTMLElement);
       if (e.shiftKey && (active === first || outside)) {
         e.preventDefault();
         last.focus();

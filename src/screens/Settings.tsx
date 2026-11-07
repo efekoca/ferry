@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { FolderOpen, RefreshCw, ShieldAlert, Trash2 } from "lucide-react";
+import { FolderOpen, RefreshCw, ShieldAlert, Trash2, X } from "lucide-react";
 import { ConfirmDialog } from "../components/Modal";
 import { PageHeader } from "../components/Shell";
 import { Badge, Button, Callout, Card, Segmented, Select, Switch, TagInput, TextField, Tooltip } from "../components/ui";
@@ -62,8 +62,9 @@ function ProjectSettings() {
   const [exclude, setExclude] = useState(project?.config.exclude ?? []);
   const [requireClean, setRequireClean] = useState(project?.config.git.requireClean ?? false);
   const [branchPerBatch, setBranchPerBatch] = useState(project?.config.git.branchPerBatch ?? false);
+  const [keepTarget, setKeepTarget] = useState(true);
   if (!project) return null;
-  const pinned = project.config.target;
+  const pinned = keepTarget ? project.config.target : null;
   const pickFolder = async () => {
     if (!api) return;
     try {
@@ -77,7 +78,18 @@ function ProjectSettings() {
     }
   };
   return (
-    <Card className="settings-fill" title={project.name} actions={pinned && <Badge>{t.settings.projectTarget(pinned)}</Badge>} bodyClassName="card__body setting-project">
+    <Card className="settings-fill" title={project.name} actions={
+        pinned && (
+          <span className="pinned-target">
+            <Badge>{t.settings.projectTarget(pinned)}</Badge>
+            <Tooltip text={t.settings.projectTargetClear} align="end">
+              <Button variant="ghost" size="sm" iconOnly aria-label={t.settings.projectTargetClear} onClick={() => setKeepTarget(false)}>
+                <X size={12} />
+              </Button>
+            </Tooltip>
+          </span>
+        )
+      } bodyClassName="card__body setting-project">
       <TagInput
         label={t.settings.projectExclude}
         values={exclude}
@@ -106,7 +118,7 @@ function ProjectSettings() {
       )}
       <div className="setting-project__end">
         <Tooltip text={t.settings.projectNote} align="end">
-          <Button onClick={() => void saveConfig({ ...project.config, exclude, git: { requireClean, branchPerBatch } })}>{t.settings.projectSave}</Button>
+          <Button onClick={() => void saveConfig({ ...project.config, target: pinned, exclude, git: { requireClean, branchPerBatch } })}>{t.settings.projectSave}</Button>
         </Tooltip>
       </div>
     </Card>

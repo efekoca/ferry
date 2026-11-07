@@ -215,7 +215,7 @@ function PackagesView({ deps, prodOnly }: { deps: DependencyReport; prodOnly: bo
         <Callout tone="warn" icon={<CircleAlert size={16} />}>
           {t.deps.noLock}
         </Callout>
-      ) : bad === 0 && unknown > 0 ? (
+      ) : bad === 0 && !rootBlocked && unknown > 0 ? (
         <Callout tone="warn" icon={<CircleAlert size={16} />}>
           {t.deps.someUnknown(unknown, deps.target)}
         </Callout>

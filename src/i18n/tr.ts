@@ -143,10 +143,10 @@ export const tr = {
       depsMissing: "composer.lock yok",
       depsUnreadable: "composer.json okunamadı",
       depsPending: "Kontrol ediliyor",
-      check: "Hedef sürümde lint/test",
+      check: "Hedef sürümde sözdizimi ve testler",
       docker: "Gerçek test",
       dockerState: { none: "Henüz çalıştırılmadı", incomplete: "Kesin değil", passed: "Yeni hata yok", partial: "Testler karşılaştırılamadı", failed: "Yeni sorunlar var" },
-      checkPassed: (kind: "lint" | "tests" | null): string => (kind === "tests" ? "Testler geçti" : "Lint temiz"),
+      checkPassed: (kind: "lint" | "tests" | null): string => (kind === "tests" ? "Testler geçti" : "Sözdizimi temiz"),
       checkFailed: (kind: "lint" | "tests" | null): string => (kind === "tests" ? "Testler başarısız" : "Sözdizimi hatası var"),
       checkNone: "Çalıştırılmadı",
     },
@@ -294,7 +294,7 @@ export const tr = {
     runtimeRootApply: "Uygula",
     checkResult: (c: CheckRun) => {
       if (c.kind === "lint") {
-        if (c.passed) return `${c.files} dosya lint edildi, sözdizimi hatası yok.`;
+        if (c.passed) return `${c.files} dosyanın sözdizimi denetlendi, hata yok.`;
         const parts = [c.failed > 0 && `${c.failed} dosyada sözdizimi hatası var`, c.notRun > 0 && `${c.notRun} dosya kontrol edilemedi`];
         return `${parts.filter(Boolean).join(", ")}.`;
       }
@@ -303,7 +303,7 @@ export const tr = {
       return c.passed ? "Testler geçti." : `Testler başarısız oldu (çıkış kodu ${c.exitCode}).`;
     },
     showOutput: "Çıktıyı göster",
-    lintWith: (v: string) => `PHP ${v} ile lint et`,
+    lintWith: (v: string) => `Sözdizimini PHP ${v} ile denetle`,
     testWith: (v: string) => `Testleri PHP ${v} ile çalıştır`,
     testTitle: "Projenin testleri çalıştırılsın mı?",
     testText: (v: string) =>
@@ -459,7 +459,7 @@ export const tr = {
     wpFailed: "En son sürümler alınamadı",
     wpClosed: "Kaldırıldı",
     wpNotListed: "Listede yok",
-    wpPlugin: "eklenti",
+    wpPlugin: "WordPress eklentisi",
     wpTheme: "tema",
     wpRequires: (v: string) => `PHP ${v}+`,
   },
@@ -496,7 +496,7 @@ export const tr = {
     moreRecords: (n: number) => `${n} kayıt daha`,
     backups: "Yedekler",
     checks: "Son kontroller",
-    lint: "Lint",
+    lint: "Sözdizimi",
     tests: "Testler",
     reviewTitle: "Uygulanan değişiklikler",
     reviewMeta: (when: string, n: number) => `${when} · ${n} dosya`,
@@ -524,6 +524,7 @@ export const tr = {
   settings: {
     projectNote: "Bu ayarlar .ferry/config.json dosyasında durur. Git'e eklerseniz ekip ve CI aynı ayarları kullanır.",
     projectTarget: (v: string) => `Hedef PHP ${v}`,
+    projectTargetClear: "Hedef sabitlemesini kaldır",
     projectExclude: "Taranmayacak klasörler",
     projectExcludeAdd: "Klasör ekle",
     projectExcludePick: "Klasör seç",
@@ -628,7 +629,7 @@ export const tr = {
     again: "Yeniden test et",
     stop: "Durdur",
     installing: "Bağımlılıklar kuruluyor…",
-    linting: (v: string) => `PHP ${v} ile lint ediliyor…`,
+    linting: (v: string) => `Sözdizimi PHP ${v} ile denetleniyor…`,
     testing: (v: string) => `Testler PHP ${v} ile çalışıyor…`,
     failed: "Test tamamlanamadı",
     stoppedByLeaving: "Başka projeye geçtiğiniz için Gerçek test durduruldu.",

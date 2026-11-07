@@ -91,7 +91,7 @@ Ferry also reads the files around the code that decide which PHP actually runs:
 - `.htaccess`: `php_value` and `php_flag` lines outside `<IfModule mod_php.c>`, which give a 500 error on PHP-FPM, and `<IfModule mod_php5.c>` or `mod_php7.c` blocks that PHP 8 no longer matches
 - `.user.ini`, `php.ini` and `.htaccess` settings that PHP removed or deprecated, such as `register_globals` (PHP won't start with it on), `track_errors`, `allow_url_include` and `session.trans_sid_hosts`
 - `composer.json` with `platform-check` turned off or `config.platform.ext-*` pinned to an old version, a `composer.lock` written by Composer 1, and Composer plugins that only work with Composer 1
-- PHP versions pinned below your target in `Dockerfile` (also `ARG PHP_VERSION`), Docker Compose (also build arguments), GitHub Actions (also `container:`, `docker run` and YAML lists), GitLab CI, Travis, Bitbucket Pipelines, DDEV, Lando, Platform.sh, PHP-FPM socket paths in `.conf` files and Caddyfiles, `.tool-versions`, `.php-version`, and `config.platform.php` in `composer.json`. The **Version files** mode on the Changes screen, or `ferry-cli pins <project> --write`, updates them
+- PHP versions pinned below your target in `Dockerfile` (also `ARG PHP_VERSION`), Docker Compose (also build arguments), GitHub Actions (also `container:`, `docker run` and YAML lists), GitLab CI, Travis, Bitbucket Pipelines, DDEV, Lando, Platform.sh, PHP-FPM socket paths in `.conf` files and Caddyfiles, `.tool-versions`, `.php-version`, and `config.platform.php` in `composer.json`. The **Version files** mode on the Fixes screen, or `ferry-cli pins <project> --target 8.4 --write`, updates them
 
 ### Review every change before it is applied
 
@@ -121,7 +121,7 @@ Polyfills the project requires itself, such as `symfony/polyfill-php80` or `para
 
 Each package is marked **Compatible**, **Incompatible**, or **Unknown** (when the package declares no PHP requirement, or one Ferry can't read), with incompatible packages listed first. When nothing blocks the upgrade but some packages are unknown, the page says so instead of calling everything compatible. Development packages are labeled, and **Production only** hides them. The warning above the list gives a ready-to-copy `composer update` command naming exactly the packages that block the upgrade.
 
-**Find compatible versions** asks Packagist which release to move each blocking package to: the newest release of the first major version whose PHP requirement, and the framework's own support range where Ferry knows it, allows the target. It's the only feature that goes online, and only when you click it.
+**Find compatible versions** asks Packagist which release to move each blocking package to: the newest release of the first major version whose PHP requirement, and the framework's own support range where Ferry knows it, allows the target. It goes online only when you click it. [Privacy](#privacy) lists every feature that does.
 
 In a WordPress project, **WordPress plugins and themes** lists every plugin and theme with its installed version, its `Requires PHP` header and the breaking issues found in its own code. **Find latest versions** asks api.wordpress.org for the current release of each and marks plugins that were closed there.
 
@@ -375,7 +375,7 @@ The screenshots in this README come from `node scripts/readme-shots.mjs` while `
 | `src` | React and TypeScript interface |
 | `demo` | sample projects for trying the app and for the tests |
 
-CI checks formatting and runs the interface and engine tests (including real Rector) on Linux and Windows for every pull request and push to `main`, drives the real app with the native e2e on both, and builds the macOS, Windows and Linux packages for `v*` tags.
+CI checks formatting and runs the interface and engine tests (including real Rector) on Linux and Windows for every pull request and push to `main`, drives the real app with the native e2e on both, with the Real test scenarios on Linux, runs the Docker tests and the GitHub Action, and builds the macOS, Windows and Linux packages for `v*` tags. Changes to documentation only skip the tests.
 
 Bug reports and pull requests are welcome.
 
