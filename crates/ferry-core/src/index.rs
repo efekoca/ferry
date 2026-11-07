@@ -100,6 +100,7 @@ pub struct ProjectIndex {
     enums: HashSet<String>,
     target: Option<crate::version::PhpVersion>,
     overridden_by_all: std::sync::OnceLock<HashMap<String, HashSet<String>>>,
+    redefines_checks: std::sync::OnceLock<bool>,
 }
 
 #[derive(Debug, Clone)]
@@ -212,6 +213,21 @@ impl ProjectIndex {
     }
 
     /// A plain name in a namespace reaches that namespace's constant first, then the global one.
+    /// A namespace elsewhere in the project can declare its own `PHP_VERSION_ID` or
+    /// `function_exists()`, and the checks in its files then no longer ask what they seem to.
+    pub(crate) fn redefines_checks(&self) -> bool {
+        *self.redefines_checks.get_or_init(|| {
+            let short = |name: &'_ str| name.rsplit_once('\\').map(|(_, short)| short.to_string());
+            let constant = self.constants.iter().filter_map(|c| short(c)).any(|c| crate::guards::VERSION_NAMES.contains(&c.as_str()));
+            constant
+                || self
+                    .functions
+                    .iter()
+                    .filter_map(|f| short(f))
+                    .any(|f| crate::guards::CHECK_FUNCTIONS.iter().any(|c| c.eq_ignore_ascii_case(&f)))
+        })
+    }
+
     pub(crate) fn defines_constant_in(&self, space: &str, name: &str) -> bool {
         crate::analyzer::constant_visible(&self.constants, space, name)
     }

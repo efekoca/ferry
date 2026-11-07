@@ -4313,6 +4313,11 @@ button.menu__item:focus-visible {
   color: var(--danger-fg);
 }
 
+.plot__pin--warn {
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+}
+
 .plot__x {
   display: grid;
   grid-template-columns: repeat(var(--n), minmax(0, 1fr));

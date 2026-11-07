@@ -21,8 +21,8 @@ fn too_deep(tokens: &[Token]) -> bool {
     })
 }
 
-const VERSION_NAMES: [&str; 3] = ["PHP_VERSION_ID", "PHP_MAJOR_VERSION", "PHP_VERSION"];
-const CHECK_FUNCTIONS: [&str; 8] =
+pub(crate) const VERSION_NAMES: [&str; 3] = ["PHP_VERSION_ID", "PHP_MAJOR_VERSION", "PHP_VERSION"];
+pub(crate) const CHECK_FUNCTIONS: [&str; 8] =
     ["version_compare", "phpversion", "function_exists", "class_exists", "interface_exists", "defined", "is_callable", "extension_loaded"];
 
 /// A namespace can declare its own `PHP_VERSION_ID` or `function_exists()`, and then the checks

@@ -90,7 +90,7 @@ const INSTALLABLE: &[&str] = &[
 /// Each worker writes to its own file, so messages from several files can't mix in one pipe.
 const LINT_COMMAND: &str = "-print0 > /tmp/files; tr -cd '\\0' < /tmp/files | wc -c | sed 's/^ */FERRY-FILES /'; mkdir /tmp/lint; \
     xargs -0 -P 4 -I{} sh -c \
-    'php -n -d error_reporting=-1 -d display_errors=stderr -d log_errors=0 -l \"$1\" > /tmp/lint/$$ 2>&1' _ {} < /tmp/files; \
+    'php -n -d error_reporting=-1 -d display_errors=stderr -d log_errors=0 -l \"$1\" > /tmp/lint/$$ 2>&1; exit 0' _ {} < /tmp/files; \
     cat /tmp/lint/* 2>/dev/null | grep -v '^No syntax errors'";
 const SELECT_TESTS: &str = "bin=vendor/bin/phpunit; [ -f vendor/bin/pest ] && bin=vendor/bin/pest; \
     flags='--display-deprecations --display-warnings --no-progress'; \
@@ -184,6 +184,7 @@ pub enum Gap {
     TestsStopped,
     TestsDidNotRun,
     FewerTests,
+    TestsNotCompared,
     ExtensionImage,
     UnreadFiles,
     /// Pages or tables differ with no error to explain why, so someone has to look.
@@ -258,6 +259,8 @@ impl Comparison {
         note(tests().any(|t| !t.ran && !t.timed_out), Gap::TestsDidNotRun);
         let totals = (self.source.tests.as_ref().and_then(|t| t.total), self.target.tests.as_ref().and_then(|t| t.total));
         note(matches!(totals, (Some(source), Some(target)) if target < source), Gap::FewerTests);
+        let both_failed = tests().filter(|t| t.ran && !t.passed).count() == 2;
+        note(both_failed && runs.iter().any(|r| r.failed_tests.is_empty()), Gap::TestsNotCompared);
         note(runs.iter().any(|r| r.image_failed), Gap::ExtensionImage);
         use crate::web::PageChange;
         let differs = self.pages.iter().any(|p| matches!(p.change, PageChange::Body | PageChange::Redirect | PageChange::Errors));
@@ -364,7 +367,12 @@ pub fn outcome(before: &Comparison, after: &Comparison) -> Outcome {
     let tests_checked = after.target.tests.as_ref().is_some_and(|t| !t.timed_out && (t.passed || !after.target.failed_tests.is_empty()));
     let tests = if tests_checked { after.new_failures.as_slice() } else { before.new_failures.as_slice() };
     let tables = |c: &Comparison| -> Vec<String> { c.data_changes.iter().map(|d| d.table.clone()).collect() };
-    let finished = after.dependencies_installed && !after.target.lint_stopped && !after.target.pages_stopped && !after.target.pages_limited;
+    let tests_stopped = after.target.tests.as_ref().is_some_and(|t| t.timed_out);
+    let finished = after.dependencies_installed
+        && !after.target.lint_stopped
+        && !after.target.pages_stopped
+        && !after.target.pages_limited
+        && !tests_stopped;
     let messages = if finished { after.new_on_target.as_slice() } else { before.new_on_target.as_slice() };
     let data_read = !before.database_used || !after.target.data.is_empty();
     let tables_after = if finished && data_read { tables(after) } else { tables(before) };
@@ -815,7 +823,7 @@ fn run_version(
             timed_out: run.stopped == Some(Stop::TimedOut),
             passed: run.stopped.is_none() && exit_code == Some(0),
             by_file: false,
-            ran: run.stopped.is_none(),
+            ran: run.stopped.is_none() && command_finished(exit_code),
             total: None,
         })
     } else if has_tests {
@@ -838,7 +846,7 @@ fn run_version(
         log.push_str(&text);
         failed = failed_tests(&text);
         let exit_code = run.status.and_then(|s| s.code());
-        let total = test_total(&text);
+        let total = if crashed { files_total(&text) } else { test_total(&text) };
         let ran = run.stopped.is_none() && crate::localcheck::ran_tests(&text) && total.is_some_and(|n| n > 0);
         Some(TestRun {
             exit_code,
@@ -906,11 +914,21 @@ fn tests_passed(output: &str) -> bool {
 }
 
 /// The tests PHPUnit lists under its errors and failures, leaving out skipped and risky ones.
+/// Codes from 125 up mean the command couldn't start or a signal ended it, so it reported nothing.
+fn command_finished(exit_code: Option<i32>) -> bool {
+    exit_code.is_some_and(|code| code < 125)
+}
+
 fn failed_tests(output: &str) -> Vec<String> {
     let mut failing = false;
     let mut found = Vec::new();
     for line in output.lines() {
-        if let Some(rest) = line.strip_prefix("There w") {
+        if let Some(rest) = line.trim_start().strip_prefix("FAILED  ") {
+            let name = rest.trim().split("  ").next().unwrap_or_default();
+            if name.contains(" > ") && !found.iter().any(|f| f == name) {
+                found.push(name.to_string());
+            }
+        } else if let Some(rest) = line.strip_prefix("There w") {
             failing = rest.contains("error") || rest.contains("failure");
         } else if line.contains(" triggered ") {
             failing = false;
@@ -1110,28 +1128,83 @@ fn changed_events(source: &[Event], target: &[Event], fixed: bool) -> (Vec<Event
 
 /// The test count from PHPUnit's or Pest's last line.
 fn test_total(output: &str) -> Option<usize> {
-    output.lines().rev().find_map(|line| {
-        if let Some(rest) = line.trim().strip_prefix("OK (") {
-            return rest.split_whitespace().next()?.parse().ok();
-        }
-        let rest = line.trim().strip_prefix("Tests:")?.trim();
-        if let Some((first, _)) = rest.split_once(',').filter(|(n, _)| n.bytes().all(|b| b.is_ascii_digit())) {
-            return first.parse().ok();
-        }
-        let words: Vec<&str> = rest.split([' ', ',']).filter(|w| !w.is_empty()).collect();
-        let counted = |pair: &[&str]| {
-            matches!(pair[1], "passed" | "failed" | "skipped" | "todos" | "risky" | "incomplete")
-                .then(|| pair[0].parse::<usize>().ok())
-                .flatten()
-        };
-        let sum: usize = words.windows(2).filter_map(counted).sum();
-        (sum > 0).then_some(sum)
-    })
+    output.lines().rev().find_map(summary_total)
+}
+
+/// A run file by file prints one summary per file.
+fn files_total(output: &str) -> Option<usize> {
+    output.lines().filter_map(summary_total).reduce(|sum, n| sum + n)
+}
+
+fn summary_total(line: &str) -> Option<usize> {
+    if let Some(rest) = line.trim().strip_prefix("OK (") {
+        return rest.split_whitespace().next()?.parse().ok();
+    }
+    let rest = line.trim().strip_prefix("Tests:")?.trim();
+    if let Some((first, _)) = rest.split_once(',').filter(|(n, _)| n.bytes().all(|b| b.is_ascii_digit())) {
+        return first.parse().ok();
+    }
+    let words: Vec<&str> = rest.split([' ', ',']).filter(|w| !w.is_empty()).collect();
+    let counted = |pair: &[&str]| {
+        matches!(pair[1], "passed" | "failed" | "skipped" | "todos" | "risky" | "incomplete")
+            .then(|| pair[0].parse::<usize>().ok())
+            .flatten()
+    };
+    let sum: usize = words.windows(2).filter_map(counted).sum();
+    (sum > 0).then_some(sum)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn a_parse_error_doesnt_stop_the_lint_of_the_other_files() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let (bin, code) = (dir.path().join("bin"), dir.path().join("code"));
+        std::fs::create_dir(&bin).unwrap();
+        std::fs::create_dir(&code).unwrap();
+        let php = "#!/bin/sh\nfor last; do :; done\necho \"PHP Parse error: x in $last on line 1\"\nexit 255\n";
+        std::fs::write(bin.join("php"), php).unwrap();
+        std::fs::set_permissions(bin.join("php"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        for n in 0..40 {
+            std::fs::write(code.join(format!("{n}.php")), "<?php\n").unwrap();
+        }
+        let work = format!("{}/", dir.path().display());
+        let script = format!("find . -name '*.php' {}", LINT_COMMAND.replace("/tmp/", &work));
+        let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
+        let done = std::process::Command::new("sh").arg("-c").arg(script).current_dir(&code).env("PATH", path).output().unwrap();
+        let text = String::from_utf8_lossy(&done.stdout);
+        assert_eq!(lint_lines(&text).count(), 40, "{text}");
+    }
+
+    #[test]
+    fn a_command_that_crashed_or_never_started_didnt_run() {
+        assert!(command_finished(Some(0)) && command_finished(Some(1)));
+        assert!(!command_finished(Some(127)) && !command_finished(Some(139)) && !command_finished(None));
+    }
+
+    #[test]
+    fn pest_failures_are_named_and_files_add_up() {
+        let pest = "\n   FAILED  Tests\\Unit\\CartTest > it adds up   ErrorException\n  Failed asserting.\n\n   FAILED  Tests\\Unit\\CartTest > it rounds\n";
+        assert_eq!(failed_tests(pest), ["Tests\\Unit\\CartTest > it adds up", "Tests\\Unit\\CartTest > it rounds"]);
+        let files = "OK (3 tests, 3 assertions)\nsomething\nTests: 4, Assertions: 9, Failures: 1.\nOK (2 tests, 2 assertions)\n";
+        assert_eq!(test_total(files), Some(2));
+        assert_eq!(files_total(files), Some(9));
+        assert_eq!(files_total("nothing here"), None);
+    }
+
+    #[test]
+    fn tests_that_fail_on_both_versions_without_names_cant_be_compared() {
+        let mut result = comparison(&[], Vec::new());
+        let failing = TestRun { exit_code: Some(1), timed_out: false, passed: false, by_file: false, ran: true, total: None };
+        (result.source.tests, result.target.tests) = (Some(failing.clone()), Some(failing));
+        assert!(result.gaps(0).contains(&Gap::TestsNotCompared));
+        (result.source.failed_tests, result.target.failed_tests) = (vec!["A::b".to_string()], vec!["A::b".to_string()]);
+        assert!(!result.gaps(0).contains(&Gap::TestsNotCompared));
+    }
 
     #[test]
     fn no_composer_step_with_network_loads_plugins() {
@@ -1697,14 +1770,23 @@ mod tests {
         let root = dir.path();
         std::fs::create_dir(root.join("admin")).unwrap();
         std::fs::write(root.join("index.php"), "<?php header('Location: /home.php');").unwrap();
-        std::fs::write(root.join("home.php"), "<a href=\"about.php?x=1\">a</a><a href=\"/admin/\">b</a>").unwrap();
+        std::fs::write(
+            root.join("home.php"),
+            "<a href=\"about.php?x=1\">a</a><a href=\"/admin/\">b</a><a href=plain.php>c</a><a href=\"amp.php?a=1&amp;b=2\">d</a>",
+        )
+        .unwrap();
         let broken = "<?php if (PHP_VERSION_ID >= 80000) { each($a); } echo 'ok';";
         std::fs::write(root.join("about.php"), broken).unwrap();
         std::fs::write(root.join("admin/index.php"), broken).unwrap();
+        std::fs::write(root.join("plain.php"), broken).unwrap();
+        std::fs::write(root.join("amp.php"), "<?php echo isset($_GET['b']) ? 'ok' : each($a);").unwrap();
         let options = Options { pages: vec!["/".into()], ..Options::default() };
         let result = compare(root, PhpVersion::new(7, 4), PhpVersion::new(8, 4), options, &AtomicBool::new(false), |_| {}).unwrap();
         let broke: Vec<&str> = result.pages.iter().filter(|p| p.broke()).map(|p| p.path.as_str()).collect();
         assert_eq!(result.verdict, Verdict::Regressed);
         assert!(broke.contains(&"/about.php?x=1") && broke.contains(&"/admin/"), "{broke:?}");
+        assert!(broke.contains(&"/plain.php"), "{broke:?}");
+        let amp = result.pages.iter().find(|p| p.path == "/amp.php?a=1&b=2").expect("the decoded link");
+        assert!(!amp.broke());
     }
 }

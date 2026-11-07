@@ -11,7 +11,7 @@ import { highlight } from "../lib/code";
 import { columnOf, dayLabels, historyEvents, niceMax, rangeStart, smoothPath, spreadOut } from "../lib/history";
 import { squarify } from "../lib/treemap";
 import { filesHoldingHalf, fileStats } from "../screens/Overview";
-import { commonTitle, dependencyBlockers, formatBytes, formatDuration, formatRelative, joinPath, firstFew, fold, relativeTo, scoreHeadline, scoreTone } from "../lib/labels";
+import { commonTitle, dependencyBlockers, formatBytes, formatDuration, formatRelative, joinPath, firstFew, fold, isSettled, readiness, relativeTo, scoreHeadline, scoreTone } from "../lib/labels";
 import { NO_FILTER, type FindingsFilter } from "../lib/store";
 import { filterFindings, prioritizeFindings } from "../screens/Findings";
 import { relatedFindings } from "../screens/FindingDetail";
@@ -93,6 +93,24 @@ describe("labels", () => {
     expect(scoreHeadline(100, 0, tr)).toBe("Hedef sürüme hazır");
     expect(scoreHeadline(100, 0, tr, true)).toBe("Tarama eksik kaldı");
     expect(scoreHeadline(30, 12, en)).toBe("A substantial migration");
+    expect(scoreHeadline(100, 0, en, false, false, 2)).toBe("No open findings, but 2 critical ones are ignored");
+    expect(scoreHeadline(100, 0, tr, true, false, 2)).toBe("Tarama eksik kaldı");
+  });
+
+  it("calls a project ready only on complete evidence", () => {
+    const ready = { blockers: 0, unscanned: 0, deps: { state: "verified", count: 0 }, check: { state: "passed", kind: "tests" }, docker: "none", ignoredBreaking: 0 } as const;
+    expect(isSettled(ready)).toBe(true);
+    expect(isSettled({ ...ready, docker: "passed", check: { state: "none", kind: null } })).toBe(true);
+    expect(isSettled({ ...ready, docker: "partial" })).toBe(false);
+    expect(isSettled({ ...ready, docker: "failed" })).toBe(false);
+    expect(isSettled({ ...ready, ignoredBreaking: 1 })).toBe(false);
+  });
+
+  it("doesn't verify dependencies when composer.json can't be read", () => {
+    const scan = { summary: { breaking: 0 }, errors: [], ignored: [], target: "8.4", stamp: "a" } as never;
+    const deps = { packages: [], rootStatus: "compatible", rootConstraint: null, hasLockFile: true, lockUnreadable: false };
+    expect(readiness(scan, deps as never).deps.state).toBe("verified");
+    expect(readiness(scan, { ...deps, manifestUnreadable: true } as never).deps.state).toBe("unreadable");
   });
 
   it("formats relative times per language", () => {

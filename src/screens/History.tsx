@@ -24,9 +24,10 @@ interface ScanChange {
 
 const dockerIssues = (run: DockerSummary) => run.differingPages + run.newFailures + run.dataChanges;
 
-function dockerState(run: DockerSummary, t: Dict): { tone: Tone; text: string } {
+function dockerState(run: DockerSummary, t: Dict): { tone: "good" | "bad" | "warn"; text: string } {
   const states = t.overview.readiness.dockerState;
   if (run.regressed) return { tone: "bad", text: dockerIssues(run) > 0 ? t.history.checkFailed(dockerIssues(run)) : states.failed };
+  if (run.incomplete) return { tone: "warn", text: states.incomplete };
   return run.testsCompared ? { tone: "good", text: states.passed } : { tone: "warn", text: states.partial };
 }
 
@@ -322,7 +323,7 @@ export function History() {
     () =>
       [...events].reverse().flatMap((event): ChartMark[] => {
         if (event.kind === "fix") return [{ at: event.at, tone: "good", icon: <Wrench size={12} />, text: `${event.snapshot.label} · ${t.history.fileCount(event.snapshot.files.length)}` }];
-        if (event.kind === "real") return [{ at: event.at, tone: event.run.regressed ? "bad" : "good", icon: <Container size={12} />, text: `${t.nav.runtime} · ${dockerState(event.run, t).text}` }];
+        if (event.kind === "real") return [{ at: event.at, tone: dockerState(event.run, t).tone, icon: <Container size={12} />, text: `${t.nav.runtime} · ${dockerState(event.run, t).text}` }];
         return [];
       }),
     [events, t],

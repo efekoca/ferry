@@ -538,9 +538,14 @@ impl Running<'_> {
             if self.exec(&check, PROBE_TIMEOUT).is_some() {
                 return Ok(());
             }
-            let state = toolchain::command(self.docker).args(["inspect", "-f", "{{.State.Running}}", &self.name]).output();
-            if state.is_ok_and(|o| String::from_utf8_lossy(&o.stdout).trim() == "false") {
-                let logs = toolchain::command(self.docker).args(["logs", "--tail", "12", &self.name]).output();
+            let docker = |args: &[&str]| {
+                let mut cmd = toolchain::command(self.docker);
+                cmd.args(args);
+                toolchain::run_process(cmd, self.docker, cancel, PROBE_TIMEOUT).ok()
+            };
+            let state = docker(&["inspect", "-f", "{{.State.Running}}", &self.name]);
+            if state.is_some_and(|o| String::from_utf8_lossy(&o.stdout).trim() == "false") {
+                let logs = docker(&["logs", "--tail", "12", &self.name]);
                 let text = logs.map(|o| String::from_utf8_lossy(&o.stderr).to_string()).unwrap_or_default();
                 let reason = text.trim().to_string();
                 return Err(crate::t!(
@@ -556,13 +561,15 @@ impl Running<'_> {
     pub fn snapshot(&self) -> Snapshot {
         let script = match self.connection.engine {
             Engine::Mysql => format!(
-                "{}c -e \"select table_name from information_schema.tables where table_schema='$FERRY_DB_TEXT' and table_type='BASE TABLE'\" | while read t; do \
+                "{}t=$(c -e \"select table_name from information_schema.tables where table_schema='$FERRY_DB_TEXT' and table_type='BASE TABLE'\") || exit 1; \
+                 [ -z \"$t\" ] || printf '%s\\n' \"$t\" | while read -r t; do \
                  r=$(c -D \"$FERRY_DB\" -e \"select count(*) from \\`$t\\`\"); s=$(c -D \"$FERRY_DB\" -e \"checksum table \\`$t\\`\" | cut -f2); echo \"$t|$r|$s\"; done",
                 self.client()
             ),
             Engine::Postgres | Engine::Sqlite => format!(
-                "{}c -c \"select tablename from pg_tables where schemaname='public'\" | while read t; do \
-                 r=$(c -c \"select count(*) from \\\"$t\\\"\"); s=$(c -c \"select md5(coalesce(string_agg(x::text, '|' order by x::text), '')) from \\\"$t\\\" x\"); echo \"$t|$r|$s\"; done",
+                "{}t=$(c -c \"select case when schemaname = 'public' then quote_ident(tablename) else quote_ident(schemaname) || '.' || quote_ident(tablename) end from pg_tables where schemaname not in ('pg_catalog', 'information_schema')\") || exit 1; \
+                 [ -z \"$t\" ] || printf '%s\\n' \"$t\" | while read -r t; do \
+                 r=$(c -c \"select count(*) from $t\"); s=$(c -c \"select md5(coalesce(string_agg(x::text, '|' order by x::text), '')) from $t x\"); echo \"$t|$r|$s\"; done",
                 self.client()
             ),
         };
@@ -610,7 +617,7 @@ fn parse_snapshot(text: &str) -> Snapshot {
                 Some(rows) if !sum.is_empty() => (rows, sum.to_string()),
                 _ => (rows.unwrap_or(0), UNREADABLE.to_string()),
             };
-            Some((table.to_string(), entry))
+            Some((table.trim_matches('"').to_string(), entry))
         })
         .collect()
 }
@@ -766,7 +773,9 @@ fn dump_live(container: &Container, connection: &Connection, file: &Path) -> Res
     let name = format!("{}-dump", container.prefix);
     let docker = container.docker;
     let linux = cfg!(target_os = "linux");
-    let system = if linux { toolchain::command(docker).args(["info", "--format", "{{.OperatingSystem}}"]).output().ok() } else { None };
+    let mut info = toolchain::command(docker);
+    info.args(["info", "--format", "{{.OperatingSystem}}"]);
+    let system = if linux { toolchain::run_process(info, docker, container.cancel, PROBE_TIMEOUT).ok() } else { None };
     let system = system.map_or(String::new(), |out| String::from_utf8_lossy(&out.stdout).into_owned());
     let (port, user, base) = (connection.port.to_string(), &connection.user, &connection.name);
     let mut first_failure = None;
@@ -840,10 +849,39 @@ pub fn engine_for(root: &Path, source: &Source) -> Engine {
     }
 }
 
-/// A database in WAL mode keeps recent rows in a file next to it.
+fn wal_of(path: &Path) -> PathBuf {
+    PathBuf::from(format!("{}-wal", path.display()))
+}
+
+fn file_state(path: &Path) -> Option<(u64, std::time::SystemTime)> {
+    let meta = std::fs::metadata(path).ok()?;
+    Some((meta.len(), meta.modified().ok()?))
+}
+
+/// A write or checkpoint between the two files would lose rows, so a copy counts only if neither moved.
+fn copy_while_still<S: PartialEq>(state: impl Fn() -> S, copy: impl Fn() -> std::io::Result<()>) -> std::io::Result<()> {
+    for _ in 0..5 {
+        let before = state();
+        copy()?;
+        if state() == before {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    Err(std::io::Error::other(crate::t!(
+        "Veritabanı kopyalanırken değişip durdu. Ona yazmayı durdurup yeniden deneyin.",
+        "The database kept changing during the copy. Stop writing to it and try again."
+    )))
+}
+
 fn copy_sqlite(original: &Path, copy: &Path) -> std::io::Result<()> {
+    copy_while_still(|| [file_state(original), file_state(&wal_of(original))], || copy_sqlite_files(original, copy))
+}
+
+/// A database in WAL mode keeps recent rows in a file next to it.
+fn copy_sqlite_files(original: &Path, copy: &Path) -> std::io::Result<()> {
     std::fs::copy(original, copy)?;
-    let beside = |path: &Path| PathBuf::from(format!("{}-wal", path.display()));
+    let beside = wal_of;
     match std::fs::symlink_metadata(beside(original)) {
         Ok(meta) if meta.is_file() => std::fs::copy(beside(original), beside(copy)).map(|_| ()),
         Ok(_) => Err(std::io::Error::other(crate::t!(
@@ -860,8 +898,13 @@ $db = new PDO('sqlite:' . $argv[1]);
 $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 foreach ($db->query("select name from sqlite_master where type = 'table' and substr(name, 1, 7) != 'sqlite_'")->fetchAll(PDO::FETCH_NUM) as $table) {
     try {
+        $name = '"' . str_replace('"', '""', $table[0]) . '"';
+        $columns = array();
+        foreach ($db->query('pragma table_info(' . $name . ')', PDO::FETCH_NUM) as $column) {
+            $columns[] = 'cast("' . str_replace('"', '""', $column[1]) . '" as text)';
+        }
         $lines = array();
-        foreach ($db->query('select * from "' . str_replace('"', '""', $table[0]) . '"', PDO::FETCH_NUM) as $row) {
+        foreach ($db->query('select ' . implode(', ', $columns) . ' from ' . $name, PDO::FETCH_NUM) as $row) {
             foreach ($row as $i => $value) {
                 $row[$i] = $value === null ? "\0" : (string) $value;
             }
@@ -896,7 +939,10 @@ pub(crate) fn sqlite_snapshot(
     let script = sqlite_script(SQLITE_SNAPSHOT, &crate::web::quoted(&connection.sqlite_path()));
     let name = format!("data-{}", version.compact());
     let run = container.run(&name, project, image, false, &script, Duration::from_secs(120));
-    run.map_or_else(|_| unreadable_snapshot(), |done| parse_snapshot(&crate::docker::output(&done)))
+    match run {
+        Ok(done) if done.status.is_some_and(|s| s.success()) => parse_snapshot(&crate::docker::output(&done)),
+        _ => unreadable_snapshot(),
+    }
 }
 
 pub(crate) struct Prepared {
@@ -1049,6 +1095,21 @@ mod snapshot_tests {
     }
 
     #[test]
+    fn a_copy_counts_only_if_the_files_held_still() {
+        use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
+        let (state, copies) = (AtomicUsize::new(0), AtomicUsize::new(0));
+        let copy = || {
+            copies.fetch_add(1, Relaxed);
+            Ok(())
+        };
+        let moved_once = || if state.fetch_add(1, Relaxed) < 2 { state.load(Relaxed) } else { 9 };
+        copy_while_still(moved_once, copy).unwrap();
+        assert_eq!(copies.swap(0, Relaxed), 2);
+        assert!(copy_while_still(|| state.fetch_add(1, Relaxed), copy).is_err());
+        assert_eq!(copies.load(Relaxed), 5);
+    }
+
+    #[test]
     fn a_linux_engine_tries_the_host_network_first() {
         assert_eq!(routes(true, "Ubuntu 24.04 LTS"), [Route::HostNetwork, Route::Gateway]);
         assert_eq!(routes(true, "Docker Desktop"), [Route::Gateway]);
@@ -1105,6 +1166,37 @@ mod snapshot_tests {
         };
         probe(&["rm", "-f", &name]);
         assert!(copied.unwrap() > 0);
+    }
+
+    #[test]
+    fn sqlite_rows_compare_the_same_on_every_php_and_a_broken_database_doesnt_read_as_empty() {
+        if std::env::var_os("FERRY_TEST_DOCKER").is_none() {
+            eprintln!("FERRY_TEST_DOCKER ayarlı değil; Docker testi atlandı");
+            return;
+        }
+        let docker = toolchain::find_executable("docker").unwrap();
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        let dir = tempfile::tempdir().unwrap();
+        let setup = "<?php $d = new PDO('sqlite:/app/a.sqlite'); $d->exec('create table t (a real, b text)'); $d->exec(\"insert into t values (10.0, 'x')\");";
+        std::fs::write(dir.path().join("setup.php"), setup).unwrap();
+        let container = Container::for_test(&docker, &cancel, format!("ferry-sqlite-{}", std::process::id()));
+        let image = |v: &str| crate::images::pinned(&format!("php:{v}-cli"));
+        let made = container.run("setup", dir.path(), &image("8.4"), false, "php setup.php", Duration::from_secs(120)).unwrap();
+        assert!(made.status.is_some_and(|s| s.success()), "{}", crate::docker::output(&made));
+        let connection = Connection {
+            engine: Engine::Sqlite,
+            host: String::new(),
+            port: 0,
+            name: "a.sqlite".into(),
+            user: String::new(),
+            password: String::new(),
+        };
+        let snapshot = |v: PhpVersion, tag: &str| sqlite_snapshot(&container, v, dir.path(), &image(tag), &connection);
+        let (old, new) = (snapshot(PhpVersion::new(7, 4), "7.4"), snapshot(PhpVersion::new(8, 4), "8.4"));
+        assert_eq!(old["t"].0, 1, "{old:?}");
+        assert_eq!(old, new);
+        std::fs::write(dir.path().join("a.sqlite"), "not a database, and long enough to be read as one").unwrap();
+        assert_eq!(snapshot(PhpVersion::new(8, 4), "8.4"), unreadable_snapshot());
     }
 
     #[test]

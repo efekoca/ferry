@@ -119,7 +119,9 @@ fn laravel_line(text: &str) -> Option<(String, usize, Level, String)> {
     let at = inner.find(".php:").and_then(|dot| inner[..dot].rfind(" at "))?;
     let (message, location) = (&inner[..at], &inner[at + 4..]);
     let (path, line) = location.split_once(')')?.0.rsplit_once(':')?;
-    let level = if class == "ErrorException" { Level::Warning } else { level_of(&format!("{class}: {message}"))? };
+    let own = class.starts_with("App\\");
+    let serious = (!own && matches!(severity, "ERROR" | "CRITICAL" | "ALERT" | "EMERGENCY")).then_some(Level::Fatal);
+    let level = if class == "ErrorException" { Level::Warning } else { level_of(&format!("{class}: {message}")).or(serious)? };
     Some((path.to_string(), line.parse().ok()?, level, message.to_string()))
 }
 
@@ -440,6 +442,18 @@ pub fn merge_from(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_logged_exception_counts_whatever_its_class_is_called() {
+        let line = |class: &str, severity: &str| {
+            format!(
+                "[2024-01-02 10:00:00] production.{severity}: boom {{\"exception\":\"[object] ({class}(code: 0): boom at /app/a.php:3)\n"
+            )
+        };
+        let events = parse(&line("RuntimeException", "ERROR"));
+        assert_eq!(events.iter().map(|e| (e.line, e.level)).collect::<Vec<_>>(), [(3, Level::Fatal)]);
+        assert!(parse(&line("RuntimeException", "INFO")).is_empty());
+    }
 
     #[test]
     fn a_long_log_on_a_busy_file_stays_linear() {
