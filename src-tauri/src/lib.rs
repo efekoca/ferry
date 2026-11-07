@@ -993,7 +993,10 @@ async fn open_in_editor<R: Runtime>(app: AppHandle<R>, path: String, file: Strin
     }
     match editor_url(&editor, &full, line, column) {
         Some(url) => app.opener().open_url(url, None::<&str>).map_err(|e| failed(&e)),
-        None if project::is_php_file(&full) => app.opener().open_path(full.to_string_lossy(), None::<&str>).map_err(|e| failed(&e)),
+        // Other PHP extensions, like Drupal's .theme, belong to other programs on some systems.
+        None if full.extension().is_some_and(|e| e.eq_ignore_ascii_case("php")) => {
+            app.opener().open_path(full.to_string_lossy(), None::<&str>).map_err(|e| failed(&e))
+        }
         None => app.opener().reveal_item_in_dir(&full).map_err(|e| failed(&e)),
     }
 }

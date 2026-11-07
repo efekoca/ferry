@@ -379,6 +379,36 @@ fn keep_output(kept: &mut Vec<u8>, chunk: &[u8], limit: usize) {
     kept.extend_from_slice(&chunk[..chunk.len().min(room)]);
 }
 
+/// Whether a process with this id is still running, for telling a finished run's leftovers apart.
+#[cfg(unix)]
+pub fn process_alive(pid: u32) -> bool {
+    let Ok(pid) = i32::try_from(pid) else { return false };
+    let signalled = unsafe { libc::kill(pid, 0) } == 0;
+    signalled || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+#[cfg(windows)]
+pub fn process_alive(pid: u32) -> bool {
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn OpenProcess(access: u32, inherit: i32, pid: u32) -> isize;
+        fn GetExitCodeProcess(process: isize, code: *mut u32) -> i32;
+        fn CloseHandle(handle: isize) -> i32;
+    }
+    const QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+    const STILL_ACTIVE: u32 = 259;
+    unsafe {
+        let handle = OpenProcess(QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle == 0 {
+            return std::io::Error::last_os_error().raw_os_error() != Some(87);
+        }
+        let mut code = 0;
+        let read = GetExitCodeProcess(handle, &mut code) != 0;
+        CloseHandle(handle);
+        !read || code == STILL_ACTIVE
+    }
+}
+
 pub fn run_process(
     cmd: Command,
     program: &Path,
