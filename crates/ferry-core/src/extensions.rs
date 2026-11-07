@@ -25,7 +25,7 @@ pub fn normalize(name: &str) -> String {
 }
 
 fn requirements(root: &Path) -> Vec<(String, String, bool)> {
-    let read = |file: &str| std::fs::read_to_string(root.join(file)).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok());
+    let read = |file: &str| crate::safefs::read_text(root.join(file)).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok());
     let exts = |v: &serde_json::Value, key: &str| -> Vec<String> {
         v.get(key)
             .and_then(|o| o.as_object())
@@ -67,7 +67,7 @@ pub fn used(root: &Path, files: &[PathBuf]) -> Vec<ExtensionUse> {
         if std::fs::metadata(path).is_ok_and(|m| m.len() > crate::project::MAX_FILE_BYTES) {
             continue;
         }
-        let Ok(bytes) = std::fs::read(path) else { continue };
+        let Ok(bytes) = crate::safefs::read_bytes(path) else { continue };
         let tokens = lex(&String::from_utf8_lossy(&bytes)).tokens;
         let rel = crate::analyzer::relative_path(root, path);
         for (k, t) in tokens.iter().enumerate() {

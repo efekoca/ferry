@@ -607,6 +607,7 @@ fn loaded(container: &Container, version: PhpVersion, project: &Path, image: &st
     let done = container.run(&format!("modules-{}", version.compact()), project, image, false, "php -m", Duration::from_secs(300))?;
     if done.status.and_then(|s| s.code()) == Some(125) {
         let reason = tail(output(&done).trim());
+        let image = crate::images::tag_of(image);
         return Err(crate::t!("{image} kalıbı çalıştırılamadı: {reason}", "Couldn't run the {image} image: {reason}"));
     }
     Ok(output(&done).lines().map(|l| l.trim().to_ascii_lowercase()).collect())
@@ -680,7 +681,7 @@ fn prepare_image(
     setup: &Setup,
     step: &dyn Fn(Step),
 ) -> Result<PreparedImage, String> {
-    let base = format!("php:{version}-cli");
+    let base = crate::images::pinned(&format!("php:{version}-cli"));
     let mut image = base.clone();
     let mut modules = loaded(container, version, project, &image)?;
     let missing: Vec<String> = setup.used.iter().filter(|e| !modules.contains(*e)).cloned().collect();
@@ -811,7 +812,7 @@ fn run_version(
     events.retain(|e| !e.path.is_empty());
     Ok(VersionRun {
         version,
-        image,
+        image: crate::images::tag_of(&image).to_string(),
         lint_errors,
         lint_files,
         lint_stopped,
@@ -880,12 +881,12 @@ fn failed_tests(output: &str) -> Vec<String> {
 
 /// Symfony's bridge downloads PHPUnit on first use, which the offline test run can't do.
 fn phpunit_bridge_version(project: &Path) -> Option<String> {
-    let manifest = std::fs::read_to_string(project.join("composer.json")).ok()?;
+    let manifest = crate::safefs::read_text(project.join("composer.json")).ok()?;
     if !manifest.contains("symfony/phpunit-bridge") || manifest.contains("\"phpunit/phpunit\"") {
         return None;
     }
-    let config = std::fs::read_to_string(project.join("phpunit.xml.dist"))
-        .or_else(|_| std::fs::read_to_string(project.join("phpunit.xml")))
+    let config = crate::safefs::read_text(project.join("phpunit.xml.dist"))
+        .or_else(|_| crate::safefs::read_text(project.join("phpunit.xml")))
         .unwrap_or_default();
     let version = config.split("SYMFONY_PHPUNIT_VERSION\" value=\"").nth(1).and_then(|r| r.split('"').next()).unwrap_or("9.6");
     let safe = version.chars().all(|c| c.is_ascii_digit() || c == '.');
@@ -930,7 +931,7 @@ pub fn compare(
     let mut install_log = String::new();
     if needs_install {
         step(Step::Installing);
-        let runtime = std::fs::read_to_string(base.join("composer.json")).is_ok_and(|t| t.contains("symfony/runtime"));
+        let runtime = crate::safefs::read_text(base.join("composer.json")).is_ok_and(|t| t.contains("symfony/runtime"));
         let install = "composer install --no-interaction --no-progress --no-scripts --no-plugins --no-security-blocking";
         let script = if base.join("composer.lock").is_file() {
             format!("{install} --ignore-platform-reqs")
@@ -943,9 +944,10 @@ pub fn compare(
         let script = format!(
             "mkdir /tmp/build && cp -a /app/. /tmp/build && cd /tmp/build && {{ {script}{bridge}; }} && cp -a vendor /app/{keep_lock}"
         );
-        let mut done = container.run("install", &base, "composer:2", true, &script, INSTALL_TIMEOUT)?;
+        let composer = crate::images::pinned("composer:2");
+        let mut done = container.run("install", &base, &composer, true, &script, INSTALL_TIMEOUT)?;
         if runtime && done.status.is_some_and(|s| s.success()) {
-            done = container.run("runtime", &base, "composer:2", false, &runtime_script(), INSTALL_TIMEOUT)?;
+            done = container.run("runtime", &base, &composer, false, &runtime_script(), INSTALL_TIMEOUT)?;
         }
         drop_outside_links(&base).map_err(|e| e.to_string())?;
         dependencies_installed = done.status.is_some_and(|s| s.success());

@@ -31,11 +31,11 @@ pub enum Engine {
 }
 
 impl Engine {
-    fn image(self) -> &'static str {
+    fn image(self) -> String {
         match self {
-            Engine::Mysql => "mysql:8.0",
-            Engine::Postgres => "postgres:16",
-            Engine::Sqlite => "",
+            Engine::Mysql => crate::images::pinned("mysql:8.0"),
+            Engine::Postgres => crate::images::pinned("postgres:16"),
+            Engine::Sqlite => String::new(),
         }
     }
 
@@ -234,7 +234,7 @@ fn unquoted(value: &str) -> String {
 fn env_values(root: &Path) -> BTreeMap<String, String> {
     let mut values = BTreeMap::new();
     for name in [".env.example", ".env", ".env.local"] {
-        let Ok(text) = std::fs::read_to_string(root.join(name)) else { continue };
+        let Ok(text) = crate::safefs::read_text(root.join(name)) else { continue };
         for line in text.lines() {
             if let Some((key, value)) = line.split_once('=').filter(|(k, _)| !k.trim_start().starts_with('#')) {
                 values.insert(key.trim().to_string(), unquoted(value));
@@ -322,8 +322,9 @@ pub fn detect(root: &Path) -> Option<Connection> {
             password: values.get("DB_PASSWORD").cloned().unwrap_or_default(),
         });
     }
-    let config =
-        std::fs::read_to_string(root.join("wp-config.php")).or_else(|_| std::fs::read_to_string(root.join("wp-config-sample.php"))).ok()?;
+    let config = crate::safefs::read_text(root.join("wp-config.php"))
+        .or_else(|_| crate::safefs::read_text(root.join("wp-config-sample.php")))
+        .ok()?;
     let host = wordpress_value(&config, "DB_HOST")?;
     let (host, port) = host.split_once(':').unwrap_or((&host, ""));
     Some(Connection {
@@ -408,13 +409,13 @@ fn point_copy_at(project: &Path, connection: &Connection) -> std::io::Result<()>
     let wordpress = project.join("wp-config.php");
     let sample = project.join("wp-config-sample.php");
     if wordpress.is_file() || sample.is_file() {
-        let text = std::fs::read_to_string(if wordpress.is_file() { &wordpress } else { &sample })?;
+        let text = crate::safefs::read_text(if wordpress.is_file() { &wordpress } else { &sample })?;
         std::fs::write(&wordpress, wordpress_config(&text, connection))?;
     }
     let example = project.join(".env.example");
     let env = project.join(".env");
     if env.is_file() || example.is_file() {
-        let text = std::fs::read_to_string(if env.is_file() { &env } else { &example })?;
+        let text = crate::safefs::read_text(if env.is_file() { &env } else { &example })?;
         let key = "base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".to_string();
         let url = match connection.engine {
             Engine::Sqlite => format!("sqlite:///{}", connection.sqlite_path()),
@@ -625,6 +626,9 @@ pub fn data_changes(source: &Snapshot, target: &Snapshot) -> Vec<DataChange> {
         .collect()
 }
 
+/// Enough for the images to prepare their data folder and drop to their own user.
+const DATABASE_CAPS: [&str; 5] = ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"];
+
 pub(crate) fn start<'a>(
     container: &Container<'a>,
     suffix: &str,
@@ -636,7 +640,11 @@ pub(crate) fn start<'a>(
     let socket = format!("{name}-socket");
     let engine = connection.engine;
     let mut cmd = toolchain::command(container.docker);
-    cmd.args(["run", "-d", "--name", &name, "--network", "none", "--memory", "2g"]);
+    cmd.args(["run", "-d", "--name", &name, "--network", "none", "--memory", "2g", "--pids-limit", "512"]);
+    cmd.args(["--security-opt", "no-new-privileges", "--cap-drop", "ALL"]);
+    for cap in DATABASE_CAPS {
+        cmd.args(["--cap-add", cap]);
+    }
     let mut pass = |key: &str, value: &str| {
         cmd.arg("-e").arg(key).env(key, value);
     };
@@ -670,7 +678,7 @@ pub(crate) fn start<'a>(
         cmd.arg("-v").arg(format!("{}:{folder}:ro", dir.display()));
     }
     if engine == Engine::Mysql && dump.is_some() {
-        cmd.args(["--entrypoint", "sh", engine.image(), "-c", MYSQL_IMPORT, "sh", "mysqld"]);
+        cmd.args(["--entrypoint", "sh", &engine.image(), "-c", MYSQL_IMPORT, "sh", "mysqld"]);
     } else {
         cmd.arg(engine.image());
     }
@@ -734,6 +742,7 @@ fn dump_live(container: &Container, connection: &Connection, file: &Path) -> Res
     let docker = container.docker;
     let mut cmd = toolchain::command(docker);
     cmd.args(["run", "--rm", "--name", &name, "--add-host=host.docker.internal:host-gateway"]);
+    cmd.args(["--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--pids-limit", "64", "--memory", "2g"]);
     let (port, user, base) = (connection.port.to_string(), &connection.user, &connection.name);
     match connection.engine {
         Engine::Mysql => {

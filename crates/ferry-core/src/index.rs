@@ -692,7 +692,7 @@ fn type_decl(tokens: &[Token], kw: usize, names: &Names) -> Option<TypeDecl> {
 }
 
 pub(crate) fn composer_files(root: &Path) -> Vec<PathBuf> {
-    let Ok(text) = std::fs::read_to_string(root.join("vendor/composer/autoload_files.php")) else {
+    let Ok(text) = crate::safefs::read_text(root.join("vendor/composer/autoload_files.php")) else {
         return Vec::new();
     };
     let mut out = Vec::new();

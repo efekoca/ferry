@@ -91,7 +91,7 @@ pub fn check(root: &Path, framework: Framework, target: PhpVersion) -> Vec<Findi
 }
 
 fn locked_version(root: &Path, names: &[&str]) -> Option<(String, String)> {
-    let lock: serde_json::Value = serde_json::from_slice(&std::fs::read(root.join("composer.lock")).ok()?).ok()?;
+    let lock: serde_json::Value = serde_json::from_slice(&crate::safefs::read_bytes(root.join("composer.lock")).ok()?).ok()?;
     let packages = lock["packages"].as_array()?;
     names.iter().find_map(|name| {
         let p = packages.iter().find(|p| p["name"] == *name)?;
@@ -100,7 +100,7 @@ fn locked_version(root: &Path, names: &[&str]) -> Option<(String, String)> {
 }
 
 fn package_line(root: &Path, package: &str, fallback: &str) -> (String, usize, String) {
-    std::fs::read_to_string(root.join("composer.json"))
+    crate::safefs::read_text(root.join("composer.json"))
         .ok()
         .and_then(|t| line_of(&t, &format!("\"{package}\"")))
         .map(|(l, s)| ("composer.json".to_string(), l, s))
@@ -112,7 +112,7 @@ fn table_lookup<T: Copy>(table: &[((u32, u32), T)], version: (u32, u32)) -> Opti
 }
 
 fn drupal(root: &Path, target: PhpVersion) -> Option<Finding> {
-    let d7 = std::fs::read_to_string(root.join("includes/bootstrap.inc")).ok().and_then(|text| {
+    let d7 = crate::safefs::read_text(root.join("includes/bootstrap.inc")).ok().and_then(|text| {
         let (line, snippet) = line_of(&text, "define('VERSION'")?;
         let version = snippet.split(['\'', '"']).nth(3)?.to_string();
         Some((line, snippet, version))
@@ -122,7 +122,7 @@ fn drupal(root: &Path, target: PhpVersion) -> Option<Finding> {
     }
     let (package, version) = locked_version(root, &["drupal/core", "drupal/core-recommended", "drupal/drupal"]).or_else(|| {
         ["", "web/", "docroot/", "html/", "public/"].iter().find_map(|base| {
-            let text = std::fs::read_to_string(root.join(format!("{base}core/lib/Drupal.php"))).ok()?;
+            let text = crate::safefs::read_text(root.join(format!("{base}core/lib/Drupal.php"))).ok()?;
             let (_, line) = line_of(&text, "const VERSION")?;
             Some(("drupal/core".to_string(), line.split(['\'', '"']).nth(1)?.to_string()))
         })
@@ -304,7 +304,7 @@ struct Located {
 
 fn locate(root: &Path, sources: &[(&str, &str)]) -> Option<Located> {
     sources.iter().find_map(|(rel, needle)| {
-        let text = std::fs::read_to_string(root.join(rel)).ok()?;
+        let text = crate::safefs::read_text(root.join(rel)).ok()?;
         let (line, snippet) = line_of(&text, needle)?;
         let raw = snippet.split(['\'', '"']).find(|p| p.starts_with(|c: char| c.is_ascii_digit()))?;
         let version: String = raw.chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
@@ -384,7 +384,7 @@ fn check_release(
 }
 
 fn joomla(root: &Path, target: PhpVersion) -> Option<Finding> {
-    let found = std::fs::read_to_string(root.join("libraries/src/Version.php"))
+    let found = crate::safefs::read_text(root.join("libraries/src/Version.php"))
         .ok()
         .and_then(|text| {
             let num = |name: &str| {
@@ -398,7 +398,7 @@ fn joomla(root: &Path, target: PhpVersion) -> Option<Finding> {
         })
         .or_else(|| {
             let rel = "libraries/cms/version/version.php";
-            let text = std::fs::read_to_string(root.join(rel)).ok()?;
+            let text = crate::safefs::read_text(root.join(rel)).ok()?;
             let value = |name: &str| line_of(&text, name).and_then(|(l, s)| Some((l, s.clone(), s.split(['\'', '"']).nth(1)?.to_string())));
             let (line, snippet, release) = value("RELEASE")?;
             let level = value("DEV_LEVEL").map(|v| v.2).unwrap_or_else(|| "0".into());
@@ -451,7 +451,7 @@ fn yii(root: &Path, target: PhpVersion) -> Option<Finding> {
 fn cakephp(root: &Path, target: PhpVersion) -> Option<Finding> {
     let found = locked(root, "cakephp/cakephp").or_else(|| {
         let rel = "lib/Cake/VERSION.txt";
-        let text = std::fs::read_to_string(root.join(rel)).ok()?;
+        let text = crate::safefs::read_text(root.join(rel)).ok()?;
         let lines: Vec<&str> = text.lines().collect();
         let line = lines.iter().rposition(|l| l.starts_with(|c: char| c.is_ascii_digit()))?;
         let version = lines[line];
@@ -489,7 +489,7 @@ fn release_label((major, minor, patch): Release) -> String {
 }
 
 fn magento(root: &Path, target: PhpVersion) -> Option<Finding> {
-    if let Ok(text) = std::fs::read_to_string(root.join("app/Mage.php")) {
+    if let Ok(text) = crate::safefs::read_text(root.join("app/Mage.php")) {
         if text.contains("getOpenMageVersionInfo") || locked_version(root, &["openmage/magento-lts"]).is_some() {
             return None;
         }
@@ -552,7 +552,7 @@ fn prestashop(root: &Path, target: PhpVersion) -> Option<Finding> {
     ]
     .iter()
     .find_map(|(rel, needle)| {
-        let text = std::fs::read_to_string(root.join(rel)).ok()?;
+        let text = crate::safefs::read_text(root.join(rel)).ok()?;
         let (line, snippet) = line_of(&text, needle)?;
         let version = snippet.split(['\'', '"']).find(|p| p.starts_with(|c: char| c.is_ascii_digit()))?.to_string();
         Some((rel.to_string(), line, snippet.clone(), version))
@@ -663,7 +663,7 @@ fn finding(
 }
 
 fn laravel(root: &Path, target: PhpVersion) -> Option<Finding> {
-    let lock: serde_json::Value = serde_json::from_slice(&std::fs::read(root.join("composer.lock")).ok()?).ok()?;
+    let lock: serde_json::Value = serde_json::from_slice(&crate::safefs::read_bytes(root.join("composer.lock")).ok()?).ok()?;
     let version = lock["packages"].as_array()?.iter().find(|p| p["name"] == "laravel/framework")?["version"].as_str()?.to_string();
     let (major, _) = version_parts(&version)?;
     let &(_, max) = LARAVEL_MAX_PHP.iter().find(|(m, _)| *m == major.max(5))?;
@@ -672,7 +672,7 @@ fn laravel(root: &Path, target: PhpVersion) -> Option<Finding> {
         return None;
     }
     let needed = LARAVEL_MAX_PHP.iter().find(|(_, m)| PhpVersion::new(m.0, m.1) >= target).map(|(m, _)| *m)?;
-    let (file, (line, snippet)) = std::fs::read_to_string(root.join("composer.json"))
+    let (file, (line, snippet)) = crate::safefs::read_text(root.join("composer.json"))
         .ok()
         .and_then(|t| line_of(&t, "\"laravel/framework\""))
         .map(|l| ("composer.json", l))
@@ -698,7 +698,7 @@ fn laravel(root: &Path, target: PhpVersion) -> Option<Finding> {
 fn wordpress(root: &Path, target: PhpVersion) -> Option<Finding> {
     let (rel, text) = ["", "wp", "web/wp", "public/wp", "wordpress"].iter().find_map(|base| {
         let rel = if base.is_empty() { "wp-includes/version.php".to_string() } else { format!("{base}/wp-includes/version.php") };
-        std::fs::read_to_string(root.join(&rel)).ok().map(|t| (rel, t))
+        crate::safefs::read_text(root.join(&rel)).ok().map(|t| (rel, t))
     })?;
     let (line, snippet) = line_of(&text, "$wp_version =")?;
     let quoted = snippet.split(['\'', '"']).nth(1)?;

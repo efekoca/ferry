@@ -52,7 +52,7 @@ fn status_for(constraint: Option<&str>, conflict: Option<&str>, target: PhpVersi
 }
 
 fn read_json(path: &Path) -> Option<serde_json::Value> {
-    let text = std::fs::read_to_string(path).ok()?;
+    let text = crate::safefs::read_text(path).ok()?;
     serde_json::from_str(&text).ok()
 }
 
