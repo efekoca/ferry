@@ -347,7 +347,17 @@ impl<'a> Lexer<'a> {
     }
 }
 
-fn skip_quoted(b: &[u8], mut p: usize) -> usize {
+/// Far deeper than real code, and shallow enough that a crafted file can't overflow the stack.
+const MAX_NESTING: usize = 128;
+
+fn skip_quoted(b: &[u8], p: usize) -> usize {
+    quoted_end(b, p, 0)
+}
+
+fn quoted_end(b: &[u8], mut p: usize, depth: usize) -> usize {
+    if depth > MAX_NESTING {
+        return b.len();
+    }
     let quote = b[p];
     p += 1;
     while p < b.len() {
@@ -357,11 +367,11 @@ fn skip_quoted(b: &[u8], mut p: usize) -> usize {
             continue;
         }
         if quote != b'\'' && ch == b'{' && b.get(p + 1) == Some(&b'$') && b.get(p + 2).is_some_and(|&c| c == b'$' || is_ident_start(c)) {
-            p = skip_code(b, p + 1);
+            p = code_end(b, p + 1, depth + 1);
             continue;
         }
         if quote != b'\'' && ch == b'$' && b.get(p + 1) == Some(&b'{') {
-            p = skip_code(b, p + 2);
+            p = code_end(b, p + 2, depth + 1);
             continue;
         }
         p += 1;
@@ -372,18 +382,18 @@ fn skip_quoted(b: &[u8], mut p: usize) -> usize {
     p.min(b.len())
 }
 
-fn skip_code(b: &[u8], mut p: usize) -> usize {
-    let mut depth = 1;
+fn code_end(b: &[u8], mut p: usize, nesting: usize) -> usize {
+    let mut braces = 1;
     while p < b.len() {
         match b[p] {
             b'\'' | b'"' => {
-                p = skip_quoted(b, p);
+                p = quoted_end(b, p, nesting);
                 continue;
             }
-            b'{' => depth += 1,
+            b'{' => braces += 1,
             b'}' => {
-                depth -= 1;
-                if depth == 0 {
+                braces -= 1;
+                if braces == 0 {
                     return p + 1;
                 }
             }
@@ -532,6 +542,12 @@ impl Token {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deeply_nested_strings_cant_overflow_the_stack() {
+        let source = format!("<?php {}", "\"{$a[".repeat(300_000));
+        assert!(!lex(&source).tokens.is_empty());
+    }
 
     fn kinds(src: &str) -> Vec<(TokenKind, String)> {
         tokenize(src).into_iter().map(|t| (t.kind, t.text)).collect()

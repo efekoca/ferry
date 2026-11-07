@@ -270,7 +270,6 @@ function FixLoop({ result, preview, onTry }: { result: DockerComparison; preview
       ) : (
         <>
           <p>{t.docker.fixIntro}</p>
-          <p className="hint">{t.changes.introTrust}</p>
           {result.newOnTarget.length > 0 && <p className="subtle">{t.docker.fixMatched(matched, result.newOnTarget.length)}</p>}
           <div className="docker-fixes">
             {changes.map((c) => (
@@ -297,7 +296,7 @@ function FixLoop({ result, preview, onTry }: { result: DockerComparison; preview
   );
 }
 
-function Verdict({ result, action }: { result: DockerComparison; action?: ReactNode }) {
+function Verdict({ result, action, note }: { result: DockerComparison; action?: ReactNode; note?: string }) {
   const { t } = useI18n();
   const bad = result.verdict === "regressed";
   const incomplete = result.verdict === "incomplete";
@@ -317,6 +316,7 @@ function Verdict({ result, action }: { result: DockerComparison; action?: ReactN
             ))}
           </ul>
         )}
+        {note && <p className="hint">{note}</p>}
       </div>
       {action}
     </section>
@@ -413,6 +413,7 @@ function Result({ result, onTry }: { result: DockerComparison; onTry: (files: st
   const missing = [...new Set([...result.source.missingExtensions, ...result.target.missingExtensions])];
   const fixable = bad || result.newOnTarget.length > 0 || result.pages.some((p) => p.change !== "same");
   const ready = fixable && preview && previewMode === "compat" && preview.target === result.target.version ? preview : null;
+  const prepares = fixable && !ready && !(toolchain && !toolchain.rector);
   const action =
     !fixable || ready ? undefined : toolchain && !toolchain.rector ? (
       <Button size="lg" onClick={() => setView("changes")}>
@@ -425,7 +426,7 @@ function Result({ result, onTry }: { result: DockerComparison; onTry: (files: st
     );
   return (
     <>
-      <Verdict result={result} action={action} />
+      <Verdict result={result} action={action} note={prepares ? t.changes.introTrust : undefined} />
       {ready && <FixLoop result={result} preview={ready} onTry={onTry} />}
       <Metrics result={result} />
       {!result.dependenciesInstalled && (
@@ -570,7 +571,7 @@ export function DockerCompare() {
   const lastRemote = lastDatabase?.kind === "ssh" ? lastDatabase : null;
   const shown = trying && lastRemote ? lastRemote : remote;
   const attempt = (files: string[]) => (lastRemote ? setTrying(files) : void tryFixes(files));
-  const projectCommands = [prepare.trim(), test.trim()].filter((c) => c && (c === project.config.docker.prepare || c === project.config.docker.test));
+  const projectCommands = [prepare.trim(), test.trim()].filter((c) => c && (c === project.config.docker.prepare?.trim() || c === project.config.docker.test?.trim()));
   const asksServer = dataSource === "ssh" || !!trying;
   const start = () => {
     setConfirming(false);

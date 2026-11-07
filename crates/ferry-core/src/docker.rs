@@ -484,6 +484,8 @@ fn check_space(root: &Path, temp: &Path) -> Result<(), String> {
 /// copied. Returns how many entries couldn't be read, so a partial copy can't pass as a full run.
 fn copy_project(root: &Path, dest: &Path) -> std::io::Result<usize> {
     let mut unread = 0;
+    #[cfg(unix)]
+    let mut links = Vec::new();
     for entry in project_entries(root) {
         let entry = match entry {
             Ok(entry) => entry,
@@ -507,8 +509,16 @@ fn copy_project(root: &Path, dest: &Path) -> std::io::Result<usize> {
         } else {
             #[cfg(unix)]
             if let Ok(link) = std::fs::read_link(entry.path()) {
-                std::os::unix::fs::symlink(link, &to)?;
+                links.push((link, to));
             }
+        }
+    }
+    // On a case-insensitive disk a link made earlier could stand in for a folder named like it.
+    #[cfg(unix)]
+    for (link, to) in links {
+        match std::os::unix::fs::symlink(link, &to) {
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            made => made?,
         }
     }
     drop_outside_links(dest)?;
@@ -641,7 +651,7 @@ fn installable(missing: &[String]) -> Vec<String> {
 fn loaded(container: &Container, version: PhpVersion, project: &Path, image: &str) -> Result<HashSet<String>, String> {
     let done = container.run(&format!("modules-{}", version.compact()), project, image, false, "php -m", Duration::from_secs(300))?;
     if done.status.and_then(|s| s.code()) == Some(125) {
-        let reason = tail(output(&done).trim());
+        let reason = crate::redact::text(&tail(output(&done).trim()));
         let image = crate::images::tag_of(image);
         return Err(crate::t!("{image} kalıbı çalıştırılamadı: {reason}", "Couldn't run the {image} image: {reason}"));
     }
@@ -934,6 +944,16 @@ fn differs(events: &[Event], other: &[Event]) -> Vec<Event> {
     events.iter().filter(|e| !known.contains(&(e.path.as_str(), e.line, e.message.as_str()))).cloned().collect()
 }
 
+/// This container has network access, so no Composer step here may load the project's plugins.
+fn install_script(locked: bool, source: PhpVersion) -> String {
+    let install = "composer install --no-interaction --no-progress --no-scripts --no-plugins --no-security-blocking";
+    if locked {
+        return format!("{install} --ignore-platform-reqs");
+    }
+    let advisories = "composer remove --no-update --no-plugins --no-scripts --dev roave/security-advisories 2>/dev/null";
+    format!("{advisories}; composer config --no-plugins platform.php {source}.0 && {install} '--ignore-platform-req=ext-*'")
+}
+
 /// Lints the project and runs its tests on both versions, each in a fresh copy with no network.
 /// Only Composer and image builds use the network, and neither runs the project's code, scripts or plugins.
 /// With `clean_images`, the images used are removed afterwards, also when the run fails or is stopped.
@@ -965,13 +985,7 @@ pub fn compare(
     if needs_install {
         step(Step::Installing);
         let runtime = crate::safefs::read_text(base.join("composer.json")).is_ok_and(|t| t.contains("symfony/runtime"));
-        let install = "composer install --no-interaction --no-progress --no-scripts --no-plugins --no-security-blocking";
-        let script = if base.join("composer.lock").is_file() {
-            format!("{install} --ignore-platform-reqs")
-        } else {
-            let advisories = "composer remove --no-update --dev roave/security-advisories 2>/dev/null";
-            format!("{advisories}; composer config platform.php {source}.0 && {install} '--ignore-platform-req=ext-*'")
-        };
+        let script = install_script(base.join("composer.lock").is_file(), source);
         let bridge = phpunit_bridge_version(&base).map_or(String::new(), |v| format!(" && {v}"));
         let keep_lock = if runtime { format!(" && cp -a composer.lock /app/{RUNTIME_LOCK}") } else { String::new() };
         let script = format!(
@@ -1030,7 +1044,7 @@ pub fn compare(
         let image = prepare_image(&container, source, &base, &setup, &step)?.image;
         let run = container.run("prepare", &base, &image, true, command, INSTALL_TIMEOUT)?;
         if !run.status.is_some_and(|s| s.success()) {
-            let reason = tail(&output(&run));
+            let reason = crate::redact::text(&tail(&output(&run)));
             return Err(crate::t!("Hazırlık komutu başarısız oldu: {reason}", "The prepare command failed: {reason}"));
         }
         drop_outside_links(&base).map_err(|e| e.to_string())?;
@@ -1118,6 +1132,30 @@ fn test_total(output: &str) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn no_composer_step_with_network_loads_plugins() {
+        for locked in [true, false] {
+            let script = install_script(locked, PhpVersion::new(7, 4));
+            for step in script.split("composer ").skip(1) {
+                assert!(step.split(&[';', '&'][..]).next().unwrap().contains("--no-plugins"), "{step}");
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_cant_stand_in_for_a_folder_that_differs_only_in_case() {
+        let Some(sensitive) = std::env::var_os("FERRY_TEST_CASE_SENSITIVE_DIR") else { return };
+        let project = tempfile::tempdir_in(sensitive).unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(outside.path(), project.path().join("L")).unwrap();
+        std::fs::create_dir(project.path().join("l")).unwrap();
+        std::fs::write(project.path().join("l/planted.php"), "<?php\n").unwrap();
+        let work = tempfile::tempdir().unwrap();
+        copy_project(project.path(), &work.path().join("copy")).unwrap();
+        assert!(!outside.path().join("planted.php").exists());
+    }
 
     #[cfg(unix)]
     #[test]

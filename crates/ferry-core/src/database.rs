@@ -844,9 +844,14 @@ pub fn engine_for(root: &Path, source: &Source) -> Engine {
 fn copy_sqlite(original: &Path, copy: &Path) -> std::io::Result<()> {
     std::fs::copy(original, copy)?;
     let beside = |path: &Path| PathBuf::from(format!("{}-wal", path.display()));
-    match std::fs::copy(beside(original), beside(copy)) {
-        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
-        _ => Ok(()),
+    match std::fs::symlink_metadata(beside(original)) {
+        Ok(meta) if meta.is_file() => std::fs::copy(beside(original), beside(copy)).map(|_| ()),
+        Ok(_) => Err(std::io::Error::other(crate::t!(
+            "SQLite -wal dosyası normal bir dosya değil.",
+            "The SQLite -wal file isn't a regular file."
+        ))),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e),
     }
 }
 
@@ -1029,6 +1034,18 @@ mod snapshot_tests {
         assert_eq!(sql_text(r"a'b\c"), r"a''b\\c");
         assert_eq!(pg_database("shop"), "dbname='shop'");
         assert_eq!(pg_database(r"host=evil a'b\"), r"dbname='host=evil a\'b\\'");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_wal_link_cant_bring_a_host_file_into_the_copy() {
+        let dir = tempfile::tempdir().unwrap();
+        let (original, copy) = (dir.path().join("a.sqlite"), dir.path().join("copy.sqlite"));
+        std::fs::write(&original, "db").unwrap();
+        std::fs::write(dir.path().join("secret"), "host file").unwrap();
+        std::os::unix::fs::symlink(dir.path().join("secret"), dir.path().join("a.sqlite-wal")).unwrap();
+        assert!(copy_sqlite(&original, &copy).is_err());
+        assert!(!dir.path().join("copy.sqlite-wal").exists());
     }
 
     #[test]

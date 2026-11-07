@@ -45,7 +45,16 @@ pub fn load(root: &Path) -> Vec<Ignore> {
 /// For anything that's about to rewrite the file: a broken file must not turn into an empty list,
 /// or the next save would wipe what the team shares in it.
 pub fn load_for_update(root: &Path) -> Result<Vec<Ignore>, String> {
-    let Ok(bytes) = crate::safefs::read_bytes(path(root)) else { return Ok(Vec::new()) };
+    let bytes = match crate::safefs::read_bytes(path(root)) {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => {
+            return Err(crate::t!(
+                ".ferry/ignore.json okunamadı, önce düzeltin: {e}",
+                "Couldn't read .ferry/ignore.json, fix it first: {e}"
+            ))
+        }
+    };
     serde_json::from_slice::<IgnoreFile>(&bytes)
         .map(|f| f.ignores)
         .map_err(|e| crate::t!(".ferry/ignore.json okunamadı, önce düzeltin: {e}", "Couldn't read .ferry/ignore.json, fix it first: {e}"))
@@ -318,6 +327,32 @@ mod tests {
         let ignores = [Ignore::for_finding(dir.path(), &findings[0], "old", 1)];
         let applied = apply(dir.path(), findings, &ignores);
         assert_eq!((applied.ignored.len(), applied.stale.len()), (1, 0));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_file_that_cant_be_read_is_not_treated_as_empty_when_saving() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        save(
+            dir.path(),
+            &[Ignore {
+                rule_id: "r".into(),
+                file: "a.php".into(),
+                snippet: "s".into(),
+                line_hash: None,
+                reason: "x".into(),
+                created_at: 0,
+            }],
+        )
+        .unwrap();
+        std::fs::set_permissions(path(dir.path()), std::fs::Permissions::from_mode(0o000)).unwrap();
+        let enforced = std::fs::File::open(path(dir.path())).is_err();
+        let loaded = load_for_update(dir.path());
+        std::fs::set_permissions(path(dir.path()), std::fs::Permissions::from_mode(0o644)).unwrap();
+        if enforced {
+            assert!(loaded.is_err());
+        }
     }
 
     #[test]
