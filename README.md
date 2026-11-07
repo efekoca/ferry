@@ -359,6 +359,8 @@ To run the tests against real Rector, point `FERRY_TEST_TOOLS` to a folder where
 
 `scripts/runtime-benchmark.sh <project> <test-dir> [target]` runs a project's PHPUnit tests in Docker on the target PHP and merges the deprecations they report with the static scan. On Monolog, league/commonmark, Laravel, PHPMailer and Carbon, 104 of 116 runtime deprecations (90%) were already reported statically.
 
+Docker images are pinned by digest in `crates/ferry-core/src/images.rs`, so a run uses the image that was tested. `node scripts/update-image-digests.mjs` refreshes them. Once a month, a workflow does the same on the `chore/image-digests` branch and opens an issue with a link to its pull request.
+
 `pnpm e2e:native` drives a debug build of the real app through the demo projects and edge cases such as a Unicode path, a symlink loop and an empty project, checks text contrast in both themes, and reports each scenario.
 
 The screenshots in this README come from `node scripts/readme-shots.mjs` while `pnpm dev` is running: it drives the sample-data interface in headless Chrome, frames each page and writes PNG files to `assets/readme/`, which are then converted to WebP with `cwebp`.
