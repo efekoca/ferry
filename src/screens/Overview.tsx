@@ -4,7 +4,7 @@ import { ConfirmDialog, Sheet } from "../components/Modal";
 import { usePageTitle } from "../components/Shell";
 import { ActionMenu, Button, Callout, Card, EmptyState, Progress, Segmented, Select, Tooltip } from "../components/ui";
 import { useI18n } from "../i18n";
-import { commonTitle, dependencyBlockers, formatDuration, formatNumber, readiness, scoreHeadline, scoreTone } from "../lib/labels";
+import { commonTitle, dependencyBlockers, formatDuration, formatNumber, readiness, scoreHeadline, scoreTone, firstFew } from "../lib/labels";
 import { useStore } from "../lib/store";
 import { BLOCKED_TARGETS, PATCHED, PHP2SHELL_CVES, isBlockedTarget } from "../lib/security";
 import { TARGETS, type Finding, type Severity, type Target, type TargetSummary } from "../lib/types";
@@ -229,7 +229,7 @@ export function Overview() {
               label={t.overview.targetLabel}
               value={target}
               icon={<span className="overview-target__hint">{t.overview.targetShort}</span>}
-              disabled={!!dockerStep}
+              disabled={!!dockerStep} title={dockerStep ? t.overview.busyRealTest : undefined}
               options={TARGETS.map((v) => (isBlockedTarget(v) ? { value: v, label: `PHP ${v}`, disabled: true, hint: t.overview.blockedHint } : { value: v, label: `PHP ${v}` }))}
               onChange={chooseTarget}
             />
@@ -329,7 +329,7 @@ export function Overview() {
           {scan.errors.length > 0 && (
             <div id="unscanned">
               <Callout tone="warn" icon={<CircleAlert size={16} />}>
-                {t.overview.unreadable(scan.errors.length, scan.errors.slice(0, 3).map((e) => e.file).join(", ") + (scan.errors.length > 3 ? "…" : ""))}
+                {t.overview.unreadable(scan.errors.length, firstFew(scan.errors.map((e) => e.file), 3))}
               </Callout>
             </div>
           )}
@@ -433,16 +433,16 @@ function FileTile({ tile, size, onOpen }: { tile: Tile<MapItem>; size: { width: 
 
 function CompareCard({ root, current, onPick }: { root: string; current: Target; onPick: (t: Target) => void }) {
   const { t } = useI18n();
-  const { api } = useStore();
+  const { api, scan } = useStore();
   const toast = useToast();
-  const [rows, setRows] = useState<{ root: string; list: TargetSummary[] } | null>(null);
+  const [rows, setRows] = useState<{ root: string; scan: unknown; list: TargetSummary[] } | null>(null);
   const [loading, setLoading] = useState(false);
-  const list = rows?.root === root ? rows.list : null;
+  const list = rows?.root === root && rows.scan === scan ? rows.list : null;
   const run = async () => {
     if (!api) return;
     setLoading(true);
     try {
-      setRows({ root, list: await api.compareTargets(root) });
+      setRows({ root, scan, list: await api.compareTargets(root) });
     } catch (e) {
       toast.push({ tone: "error", title: t.compare.failed, description: errorMessage(e, t.common.genericError) });
     } finally {

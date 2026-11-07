@@ -8,6 +8,7 @@ import { Button, Callout, CommandLine, EmptyState, Progress, RiskBadge, RuleChip
 import { useI18n } from "../i18n";
 import { useStore } from "../lib/store";
 import { isPin } from "../lib/fixes";
+import { firstFew } from "../lib/labels";
 import { stepsBetween, type FileChange, type RectorMode } from "../lib/types";
 
 const ALL_STEPS = "all";
@@ -24,7 +25,7 @@ function storedView() {
 
 export function Changes() {
   const { t, loc } = useI18n();
-  const { toolchain, installRector, installingRector, preview, previewMode, previewing, loadPreview, clearPreview, cancelPreview, skippedHunks: skipped, skipHunks, applyChanges, applying, target, setView, api, project } =
+  const { toolchain, toolchainFailed, refreshToolchain, installRector, installingRector, preview, previewMode, previewing, loadPreview, clearPreview, cancelPreview, skippedHunks: skipped, skipHunks, applyChanges, applying, target, setView, api, project } =
     useStore();
   const [dirty, setDirty] = useState<string[]>([]);
   const [unclean, setUnclean] = useState<string[]>([]);
@@ -247,9 +248,21 @@ export function Changes() {
     return (
       <>
         {header}
-        <div className="page-body">
-          <Progress value={null} label={t.changes.checkingTools} />
-        </div>
+        {toolchainFailed ? (
+          <EmptyState
+            icon={<CircleAlert size={24} />}
+            title={t.toast.toolsFailed}
+            action={
+              <Button icon={<RotateCw size={14} />} onClick={refreshToolchain}>
+                {t.settings.recheck}
+              </Button>
+            }
+          />
+        ) : (
+          <div className="page-body">
+            <Progress value={null} label={t.changes.checkingTools} />
+          </div>
+        )}
       </>
     );
   }
@@ -331,7 +344,7 @@ export function Changes() {
               </div>
             </div>
           ) : (
-            <Button variant="primary" size="cta" disabled={nothingChosen} onClick={() => loadPreview(mode, step, withPins)}>
+            <Button variant="primary" size="cta" disabled={nothingChosen} title={nothingChosen ? t.changes.pickKind : undefined} onClick={() => loadPreview(mode, step, withPins)}>
               {t.changes.calculate}
               <span className="btn__chip">
                 <ArrowRight size={15} aria-hidden />
@@ -433,7 +446,7 @@ export function Changes() {
               <span className="hint">
                 <span className="stat-add">+{totals.add}</span> <span className="stat-del">−{totals.del}</span> {t.common.lines}
               </span>
-              <Button variant="primary" disabled={chosen.length === 0 || previewing} loading={applying} onClick={openConfirm}>
+              <Button variant="primary" disabled={chosen.length === 0 || previewing} title={chosen.length === 0 ? t.changes.pickFileFirst : undefined} loading={applying} onClick={openConfirm}>
                 {chosen.length === changes.length ? t.changes.applyAll : t.changes.applySome(chosen.length)}
               </Button>
             </div>
@@ -523,13 +536,13 @@ export function Changes() {
         {dirty.length > 0 && (
           <Callout tone="warn" icon={<GitBranch size={15} />}>
             <strong>{t.git.dirtyTitle(dirty.length)}</strong> {t.git.dirtyText}
-            <div className="mono selectable dirty-list">{dirty.slice(0, 5).join(", ")}</div>
+            <div className="mono selectable dirty-list">{firstFew(dirty, 5)}</div>
           </Callout>
         )}
         {unclean.length > 0 && (
           <Callout tone="danger" icon={<GitBranch size={15} />}>
             <strong>{t.git.uncleanTitle(unclean.length)}</strong> {t.git.uncleanText}
-            <div className="mono selectable dirty-list">{unclean.slice(0, 5).join(", ")}</div>
+            <div className="mono selectable dirty-list">{firstFew(unclean, 5)}</div>
           </Callout>
         )}
         {project?.isGitRepo && (
@@ -606,6 +619,7 @@ function ErrorList({ errors, compact = false }: { errors: string[]; compact?: bo
           {errors.slice(0, 8).map((e) => (
             <li key={e}>{e}</li>
           ))}
+          {errors.length > 8 && <li className="subtle">+{errors.length - 8}</li>}
         </ul>
       )}
     </Callout>

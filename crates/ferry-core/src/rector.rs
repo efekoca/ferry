@@ -230,6 +230,20 @@ impl RectorPreview {
     }
 }
 
+/// Rector's cache for every project. Runs in progress keep their files elsewhere.
+pub fn cache_size(work_dir: &Path) -> u64 {
+    project_caches(work_dir).iter().map(|dir| crate::snapshot::dir_size(dir)).sum()
+}
+
+pub fn clear_cache(work_dir: &Path) -> std::io::Result<()> {
+    project_caches(work_dir).iter().try_for_each(std::fs::remove_dir_all)
+}
+
+fn project_caches(work_dir: &Path) -> Vec<PathBuf> {
+    let Ok(projects) = std::fs::read_dir(work_dir) else { return Vec::new() };
+    projects.flatten().map(|e| e.path().join("cache")).filter(|dir| dir.is_dir()).collect()
+}
+
 #[derive(Debug)]
 pub enum RectorError {
     Tool(ToolError),
@@ -674,6 +688,22 @@ mod tests {
             errors: errors.iter().map(|e| e.to_string()).collect(),
             duration_ms: 5,
         }
+    }
+
+    #[test]
+    fn the_cache_is_measured_and_cleared_for_every_project() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = dir.path().join("abc/cache/x");
+        std::fs::create_dir_all(&cache).unwrap();
+        std::fs::write(cache.join("a"), "12345").unwrap();
+        let run = dir.path().join("abc/run-1");
+        std::fs::create_dir_all(&run).unwrap();
+        std::fs::write(run.join("b"), "keep").unwrap();
+        assert_eq!(cache_size(dir.path()), 5);
+        clear_cache(dir.path()).unwrap();
+        assert_eq!(cache_size(dir.path()), 0);
+        assert!(run.join("b").is_file(), "a run in progress stays");
+        assert_eq!(cache_size(&dir.path().join("missing")), 0);
     }
 
     #[test]

@@ -223,6 +223,7 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
     };
     return { findings: [...marked, extra], runtime: { file: runtimeLog, events: 31, confirmed: hit.size, added: 1, outside: runtimeRoots.length ? 9 : 4, outsideFatals: 0, check: runtimeCheck, roots: runtimeRoots } };
   };
+  let rectorCache = 18_400_000;
   const history = new Map<string, { at: number; score: number; total: number; counts: ScanCounts; ids: string[] }[]>();
   const pastScan = (hoursAgo: number, score: number, breaking: number, deprecated: number, behavior: number, files: number): HistoryEntry => ({
     at: Math.floor(Date.now() / 1000) - hoursAgo * 3600,
@@ -480,6 +481,10 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
     },
     snapshotConflicts: async () => [],
     scanHistory: async () => [...pastScans, ...[...history].flatMap(([target, list]) => list.map(({ at, score, total, counts }) => ({ at, target, score, total, counts })))],
+    rectorCacheSize: async () => rectorCache,
+    clearRectorCache: async () => {
+      rectorCache = 0;
+    },
     backupUsage: async () => ({
       snapshots: snapshots.length,
       projects: snapshots.length ? 1 : 0,

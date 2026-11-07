@@ -115,7 +115,7 @@ function ProjectSettings() {
 
 export function SettingsScreen() {
   const { t, lang, setLang } = useI18n();
-  const { theme, setTheme, toolchain, refreshToolchain, installRector, installingRector, api, project, refreshSnapshots } = useStore();
+  const { theme, setTheme, toolchain, refreshToolchain, installRector, installingRector, previewing, api, project, refreshSnapshots } = useStore();
   const toast = useToast();
   const [checking, setChecking] = useState(false);
   const [settings, setSettings] = useState<Settings>({ phpPath: null, snapshotLimit: null, editor: null, editorCommand: null });
@@ -124,12 +124,26 @@ export function SettingsScreen() {
   const [deleting, setDeleting] = useState(false);
   const [images, setImages] = useState<DockerImageUsage | null>(null);
   const [clearingImages, setClearingImages] = useState(false);
+  const [rectorCache, setRectorCache] = useState(0);
 
   useEffect(() => {
     api?.getSettings().then(setSettings).catch(() => {});
     api?.backupUsage().then(setUsage).catch(() => {});
     api?.dockerImageUsage().then(setImages).catch(() => {});
+    api?.rectorCacheSize().then(setRectorCache).catch(() => {});
   }, [api]);
+
+  const clearCache = async () => {
+    if (!api) return;
+    try {
+      await api.clearRectorCache();
+      toast.push({ tone: "success", title: t.settings.rectorCacheDone });
+    } catch (e) {
+      toast.push({ tone: "error", title: t.toast.deleteFailed, description: errorMessage(e, t.common.genericError) });
+    } finally {
+      api.rectorCacheSize().then(setRectorCache).catch(() => {});
+    }
+  };
 
   const imagesSize = images ? formatBytes(images.bytes, t.locale) : "";
   const removeImages = async () => {
@@ -314,7 +328,7 @@ export function SettingsScreen() {
                           </>
                         )}
                         {tool.name === "Rector" && (
-                          <Button size="sm" onClick={installRector} loading={installingRector} disabled={!toolchain?.composer}>
+                          <Button size="sm" onClick={installRector} loading={installingRector} disabled={!toolchain?.composer} title={toolchain && !toolchain.composer ? t.settings.needsComposer : undefined}>
                             {tool.info ? t.settings.update : t.settings.install}
                           </Button>
                         )}
@@ -350,6 +364,15 @@ export function SettingsScreen() {
                     </span>
                     <Button size="sm" variant="ghost" className="danger-text" onClick={() => setClearing(true)} disabled={!usage?.snapshots}>
                       {t.settings.deleteAll}
+                    </Button>
+                  </div>
+                  <div className="line">
+                    <span className="line__main">
+                      <span>{t.settings.rectorCache}</span>
+                      <span className="line__sub">{rectorCache > 0 ? formatBytes(rectorCache, t.locale) : t.settings.rectorCacheEmpty}</span>
+                    </span>
+                    <Button size="sm" variant="ghost" className="danger-text" onClick={clearCache} disabled={rectorCache === 0 || previewing}>
+                      {t.settings.rectorCacheDelete}
                     </Button>
                   </div>
                   <div className="line">
