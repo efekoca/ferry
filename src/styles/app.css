@@ -2627,10 +2627,6 @@ textarea.input {
   width: 260px;
 }
 
-.table tr[data-status="incompatible"] td:first-child {
-  box-shadow: inset 2px 0 0 var(--danger-fg);
-}
-
 .command {
   display: flex;
   align-items: flex-start;
@@ -5085,4 +5081,87 @@ button.menu__item:focus-visible {
   .kpi:nth-child(4) {
     box-shadow: -1px 0 0 var(--border), 0 -1px 0 var(--border);
   }
+}
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  margin: 0;
+  overflow: hidden;
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 13px var(--space-4);
+  box-shadow: -1px 0 0 var(--border);
+}
+
+.tile dt {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text-3);
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+}
+
+.tile dd {
+  margin: 0;
+  font-size: 24px;
+  line-height: 30px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.tile__code {
+  padding: 0;
+  background: none;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+
+.dep-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text-2);
+}
+
+.dep-only {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.dep-packages {
+  overflow: hidden;
+}
+
+.dep-table {
+  margin-top: var(--space-1);
+}
+
+.table .dep-more {
+  padding-block: var(--space-1);
+}
+
+.dep-more .btn {
+  margin-left: calc(var(--space-2) * -1);
+}
+
+.dep-hint {
+  margin: 0;
+  padding: var(--space-2) var(--space-4) 10px;
+  color: var(--text-3);
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
 }

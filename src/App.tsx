@@ -11,8 +11,9 @@ import { StoreProvider, useStore } from "./lib/store";
 import { Changes } from "./screens/Changes";
 import { Findings } from "./screens/Findings";
 import { DockerCompare } from "./screens/DockerCompare";
+import { Dependencies } from "./screens/Dependencies";
 import { History } from "./screens/History";
-import { Dependencies, Roadmap, SettingsScreen } from "./screens/Other";
+import { Roadmap, SettingsScreen } from "./screens/Other";
 import { Overview } from "./screens/Overview";
 import { Welcome } from "./screens/Welcome";
 

@@ -49,6 +49,9 @@ describe("accessibility", { timeout: 30_000 }, () => {
     await user.click(nav(/Bağımlılıklar/));
     await screen.findAllByRole("table");
     await check("dependencies");
+    await user.click(screen.getByRole("radio", { name: /PHP eklentileri/ }));
+    await screen.findByRole("table", { name: "PHP eklentileri" });
+    await check("dependencies extensions");
     await user.click(nav(/Geçmiş/));
     const [review] = await screen.findAllByRole("button", { name: /: incele$/ });
     await check("history");

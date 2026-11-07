@@ -284,10 +284,12 @@ describe("Ferry app", () => {
     const user = setup();
     await openAndScan(user);
     await user.click(nav(/Bağımlılıklar/));
-    expect(await screen.findByRole("heading", { name: "PHP eklentileri" })).toBeInTheDocument();
+    await user.click(await screen.findByRole("radio", { name: /PHP eklentileri/ }));
+    expect(await screen.findByRole("table", { name: "PHP eklentileri" })).toBeInTheDocument();
     expect(screen.getByText("PHP'den çıkarıldı")).toBeInTheDocument();
     expect(screen.getByText(/composer.json'a eklenebilir: "ext-mysqli": "\*", "ext-gd": "\*"/)).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Uyumlu sürümleri bul" }));
+    await user.click(screen.getByRole("radio", { name: /Paketler/ }));
+    await user.click(await screen.findByRole("button", { name: "Uyumlu sürümleri bul" }));
     expect(await screen.findByText(/Önerilen sürüm: v6.9.1/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Uyumlu sürümleri bul" })).not.toBeInTheDocument();
   });
@@ -541,6 +543,7 @@ describe("Ferry app", () => {
     const user = setup();
     await openAndScan(user);
     await user.click(nav(/Bağımlılıklar/));
+    await user.click(await screen.findByRole("radio", { name: /PHP eklentileri/ }));
     await user.click(await screen.findByRole("button", { name: "Yoklama dosyası oluştur" }));
     expect(await screen.findByText(/ferry-probe.php\?token=3f9c2a7be41d08c6a5e2f1b07d9c3e88/)).toBeInTheDocument();
     const output = '{"ferryProbe":1,"php":"8.2.10","sapi":"fpm-fcgi","os":"Linux","server":"nginx","extensions":["core","curl","mysqli"],"ini":{"memory_limit":"256M","disable_functions":"exec"}}';
@@ -1295,15 +1298,58 @@ describe("Ferry app", () => {
     expect(within(row).getByText("Uyumsuz")).toBeInTheDocument();
   });
 
-  it("limits the dependency warning to the packages shown", async () => {
+  it("limits the dependency counts and command to the packages shown", async () => {
     const user = setup();
     await openAndScan(user);
     await user.click(nav(/Bağımlılıklar/));
-    expect(await screen.findByText("3 paket PHP 8.4 ile çalışmıyor.")).toBeInTheDocument();
+    const blocked = async () => (await screen.findByText("Uyumsuz paket")).nextElementSibling;
+    expect(await blocked()).toHaveTextContent("3");
     expect(screen.getByText(/composer update .*phpunit\/phpunit/)).toBeInTheDocument();
-    await user.click(screen.getByRole("radio", { name: "Sadece üretim" }));
-    expect(screen.getByText("2 paket PHP 8.4 ile çalışmıyor.")).toBeInTheDocument();
+    await user.click(screen.getByRole("switch", { name: "Yalnızca üretim" }));
+    expect(await blocked()).toHaveTextContent("2");
     expect(screen.queryByText(/phpunit\/phpunit/)).not.toBeInTheDocument();
+  });
+
+  it("folds compatible packages behind a button", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    const real = api.checkDependencies;
+    api.checkDependencies = async (...args) => {
+      const report = await real(...args);
+      const extra = Array.from({ length: 6 }, (_, i) => ({ name: `acme/ok-${i}`, version: "1.0.0", phpConstraint: ">=7.0", status: "compatible" as const, dev: false }));
+      return { ...report, packages: [...report.packages, ...extra] };
+    };
+    render(<App api={api} />);
+    await openAndScan(user);
+    await user.click(nav(/Bağımlılıklar/));
+    const table = await screen.findByRole("region", { name: "Paketler" });
+    expect(within(table).getByText("phpmailer/phpmailer")).toBeInTheDocument();
+    expect(within(table).queryByText("acme/ok-5")).not.toBeInTheDocument();
+    await user.click(within(table).getByRole("button", { name: /uyumlu paket daha/ }));
+    expect(within(table).getByText("acme/ok-5")).toBeInTheDocument();
+  });
+
+  it("explains a composer constraint that blocks the target", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    const real = api.checkDependencies;
+    api.checkDependencies = async (...args) => ({ ...(await real(...args)), rootConstraint: ">=5.6 <8.0", rootStatus: "incompatible" });
+    render(<App api={api} />);
+    await openAndScan(user);
+    await user.click(nav(/Bağımlılıklar/));
+    const value = await screen.findByText(">=5.6 <8.0");
+    expect(value.closest(".tip")).toHaveTextContent(/\^8\.4 olarak güncelleyin/);
+  });
+
+  it("names a conflict rule when composer.json sets no constraint", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    const real = api.checkDependencies;
+    api.checkDependencies = async (...args) => ({ ...(await real(...args)), rootConstraint: null, rootConflict: ">=8.0", rootStatus: "incompatible" });
+    render(<App api={api} />);
+    await openAndScan(user);
+    await user.click(nav(/Bağımlılıklar/));
+    expect(await screen.findByText(/conflict alanı \(php: >=8\.0\)/)).toBeInTheDocument();
   });
 
   it("does not call unconfirmed packages compatible", async () => {
