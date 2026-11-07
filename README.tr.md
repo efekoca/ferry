@@ -12,7 +12,7 @@ Ferry, macOS, Windows ve Linux'ta çalışan bir masaüstü uygulamasıdır. PHP
 
 [Özellikler](#özellikler) · [Kurulum](#kurulum) · [Gizlilik](#gizlilik) · [Nasıl çalışır](#nasıl-çalışır) · [Kaynaktan derleme](#kaynaktan-derleme) · [English](README.md)
 
-![PHP 7.4'ten 8.4'e geçecek bir WordPress projesi için Ferry genel bakış ekranı: 39 puanlık hazırlık skoru ve geçişi hâlâ engelleyenler, otomatik, gözden geçirilecek ve elle yapılacak düzeltmelerin dağılımı ve Düzeltmeler sayfasından kurucu parametrelerini açıkça nullable yapan bir fark](assets/readme/hero-tr.webp)
+![PHP 7.4'ten 8.4'e geçecek bir WordPress projesi için Ferry genel bakış ekranı: 39 puanlık hazırlık skoru, sorunların yarısının dört dosyada olduğunu söyleyen başlık, önem derecesine göre sayılar, en sık çıkan sorunlar, sıradaki adımlar ve etkilenen her dosya için bir kutu gösteren proje haritası](assets/readme/hero-tr.webp)
 
 - **Sorunları kullanıcılarınızdan önce görün.** PHP 7.0 ile 8.5 arasında kaldırılan ya da değişen kod; dosyası, satırı ve neden önemli olduğuyla listelenir. Taramanın neyi bulup neyi bulamayacağını [docs/COVERAGE.md](docs/COVERAGE.md) gösterir.
 - **Siz onaylamadan hiçbir şey değişmez.** Rector yalnızca deneme modunda çalışır. Her değişikliği satır satır inceler, yalnızca seçtiğiniz dosyaları uygularsınız.
@@ -53,7 +53,7 @@ Bakımını sizin yapmadığınız framework kodu kendiliğinden atlanır: WordP
 
 **Bulgular** sayfası her sorunu dosyasına göre gruplar; satırını, kodunu ve düzeltme türünü gösterir. Dosyalarda ve sorunlarda arama yapabilir, düzeltme türüne ya da önem derecesine göre süzebilir ve kaç bulgunun eşleştiğini görebilirsiniz. Genel bakışta seçtiğiniz bir kural kaldırılabilir bir süzgeç olarak görünür; **Filtreleri temizle** hepsini sıfırlar. Sayfa değiştirdiğinizde süzgeçler korunur.
 
-![Dosyalara göre gruplanmış bulgular, düzeltme türü ve önem derecesi süzgeçleri, çalışma anı kontrolleri ve bir each() bulgusunun ayrıntıları: kod, neden önemli olduğu, yerine ne kullanılacağı ve düzeltme türü](assets/readme/findings-tr.webp)
+![Dosyalara göre gruplanmış bulgular, önem derecesi süzgeçleri ve arama kutusu, bir each() bulgusunun ayrıntıları: çevresindeki kod, nasıl düzeltileceği ve düzeltilmezse ne olacağı](assets/readme/findings-tr.webp)
 
 Bir bulguyu seçtiğinizde şunları görürsünüz:
 
@@ -117,7 +117,7 @@ Ferry, Rector'ın tek başına çözemediği durumları da ele alır. Örneğin 
 
 Projenin kendisinin istediği `symfony/polyfill-php80` ya da `paragonie/random_compat` gibi polyfill'lere, hedef PHP eklediklerini zaten içerdiğinde bir not düşülür.
 
-![PHP 8.4 ile uyumsuz üç paket, projenin PHP kısıtı ve her paketin sürümü, PHP gereksinimi ve durumunu gösteren Bağımlılıklar sayfası](assets/readme/dependencies-tr.webp)
+![PHP 8.4 ile uyumsuz üç paket, projenin PHP kısıtı, hepsini güncelleyen tek komut ve her paketin sürümü, PHP gereksinimi ve durumunu gösteren Bağımlılıklar sayfası](assets/readme/dependencies-tr.webp)
 
 Her paket **Uyumlu**, **Uyumsuz** ya da **Belirsiz** (paket bir PHP gereksinimi bildirmiyorsa ya da Ferry bunu okuyamıyorsa) olarak işaretlenir; uyumsuz paketler listenin başında yer alır. Engel yokken bazı paketler belirsizse sayfa her şeyi uyumlu saymaz, bunu ayrıca belirtir. Geliştirme paketleri etiketlidir; **Sadece üretim** seçeneği onları gizler. Listenin üstündeki uyarı, geçişi engelleyen paketleri tek tek adıyla içeren, kopyalamaya hazır bir `composer update` komutu verir.
 
@@ -131,12 +131,12 @@ WordPress projelerinde **WordPress eklentileri ve temaları** her eklentiyi ve t
 
 ### Her şeyi Geçmiş'ten geri alın
 
-Ferry her uygulamadan önce değiştireceği dosyaları yedekler. **Geçmiş** sayfası her uygulamayı zamanı ve dosya sayısıyla listeler.
+Ferry her uygulamadan önce değiştireceği dosyaları yedekler. **Geçmiş** sayfası hazırlık puanını ve önem derecesine göre bulguları taramalar boyunca grafikte gösterir, düzeltmelerin uygulandığı yerleri işaretler; her taramayı, uygulamayı ve kontrolü zaman çizelgesinde listeler. Aynı sayılar tablo olarak da açılır.
 
-![İncelemek için açılmış bir Geçmiş kaydı: solda değişen dosyalar, sağda seçili dosyanın farkı ve kuralları, altta Geri yükle düğmesi](assets/readme/history-tr.webp)
+![Taramalar boyunca yükselen hazırlık puanı, her tarama için önem derecesine göre yığılmış çubuklar, uygulanan düzeltmelerin işaretleri, altta zaman çizelgesi ve yedekler gösteren Geçmiş sayfası](assets/readme/history-tr.webp)
 
 - **İncele**, her uygulamanın neyi değiştirdiğini dosya dosya ve her değişikliğin ardındaki kurallarla birlikte gösterir.
-- **Geri yükle**, o uygulamadan önceki halleriyle bütün dosyaları geri getirir. Bunlardan birini sonradan düzenlediyseniz Ferry önce o dosyaları listeler ve şu anki içeriklerini Geçmiş'e yeni bir kayıt olarak yedekler; onayladıktan sonra değişen bir dosyanın üzerine ise yazmaz.
+- **Geri al**, o uygulamadan önceki halleriyle bütün dosyaları geri getirir. Bunlardan birini sonradan düzenlediyseniz Ferry önce o dosyaları listeler ve şu anki içeriklerini Geçmiş'e yeni bir kayıt olarak yedekler; onayladıktan sonra değişen bir dosyanın üzerine ise yazmaz.
 - **Ayarlar**'daki **Saklanacak yedek** seçeneği her projede tutulacak yedek sayısını sınırlar (10, 30 ya da 100). Varsayılanı sınırsızdır.
 - Bir uygulama yarıda kalırsa Ferry dosyaları kendiliğinden geri alır. Bu da başarısız olursa yedek Geçmiş'te kalır; oradan kendiniz geri yükleyebilirsiniz.
 
