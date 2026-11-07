@@ -118,7 +118,7 @@ pub fn detect_framework(root: &Path) -> Framework {
     if requires_prefix("drupal/core") || drupal_core_dirs(root).next().is_some() || drupal7_root(root) {
         return Framework::Drupal;
     }
-    if requires(&["symfony/framework-bundle"]) || root.join("bin/console").is_file() {
+    if requires(&["symfony/framework-bundle", "symfony/symfony"]) || root.join("bin/console").is_file() {
         return Framework::Symfony;
     }
     Framework::Generic
@@ -261,6 +261,13 @@ pub(crate) fn nested_composer_vendors(root: &Path) -> Vec<String> {
     dirs
 }
 
+/// `legacy`, `legacy/`, `./legacy/*` and `legacy/**` all mean the folder.
+fn exclude_path(entry: &str) -> String {
+    let path = entry.trim().replace('\\', "/");
+    let path = path.trim_start_matches("./");
+    path.strip_suffix("/**").or_else(|| path.strip_suffix("/*")).unwrap_or(path).trim_end_matches('/').to_string()
+}
+
 pub fn collect_php_files(root: &Path, excluded: &[String]) -> Vec<PathBuf> {
     let excluded: Vec<PathBuf> = excluded.iter().map(|d| root.join(d)).collect();
     let keep = |e: &DirEntry| {
@@ -275,7 +282,7 @@ pub fn collect_php_files(root: &Path, excluded: &[String]) -> Vec<PathBuf> {
             }
             return !excluded.iter().any(|x| x == e.path());
         }
-        true
+        !excluded.iter().any(|x| x == e.path())
     };
     let mut files: Vec<PathBuf> = WalkDir::new(root)
         .follow_links(false)
@@ -318,7 +325,7 @@ pub fn inspect(root: &Path) -> std::io::Result<ProjectInfo> {
         Err(e) => (Default::default(), Some(e)),
     };
     let mut excluded_dirs = project_excludes(root, framework);
-    excluded_dirs.extend(config.exclude.iter().map(|d| d.trim_end_matches('/').to_string()));
+    excluded_dirs.extend(config.exclude.iter().map(|d| exclude_path(d)));
     let php_files = collect_php_files(root, &excluded_dirs).iter().filter(|p| !p.is_dir()).count();
     let php_constraint = composer_php_constraint(root);
     let current_version =
@@ -414,6 +421,7 @@ mod detection_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     #[test]
     fn a_folder_inside_a_repository_counts_as_one() {
@@ -423,7 +431,21 @@ mod tests {
         std::fs::write(dir.path().join("apps/site/a.php"), "<?php\n").unwrap();
         assert!(inspect(&dir.path().join("apps/site")).unwrap().is_git_repo);
     }
-    use std::fs;
+
+    #[test]
+    fn exclude_entries_name_folders_in_any_form_and_single_files() {
+        for entry in ["legacy", "legacy/", "./legacy", "legacy/*", "legacy/**", " legacy/ "] {
+            assert_eq!(exclude_path(entry), "legacy", "{entry}");
+        }
+        assert_eq!(exclude_path("src\\old"), "src/old");
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("legacy")).unwrap();
+        for file in ["legacy/a.php", "b.php", "c.php"] {
+            std::fs::write(dir.path().join(file), "<?php\n").unwrap();
+        }
+        let files = collect_php_files(dir.path(), &["legacy".into(), "b.php".into()]);
+        assert_eq!(files.iter().map(|p| p.file_name().unwrap().to_string_lossy().to_string()).collect::<Vec<_>>(), ["c.php"]);
+    }
 
     #[test]
     fn detects_wordpress_and_skips_core() {

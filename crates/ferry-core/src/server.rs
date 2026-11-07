@@ -342,6 +342,13 @@ fn bumped_line(raw: &str, spans: &[Span], kind: Kind, target: PhpVersion) -> Opt
         let end = last.0.end + quote.len();
         return Some((format!("{}, {quote}{target}{quote}{}", &raw[..end], &raw[end..]), false));
     }
+    let item = raw.trim().strip_prefix("- ").map(|v| v.trim().trim_matches(['\'', '"']));
+    if kind == Kind::Ci && item == Some(&raw[last.0.clone()]) {
+        let line = raw.trim_end_matches(['\r', '\n']);
+        let ending = if raw.len() > line.len() { &raw[line.len()..] } else { "\n" };
+        let added = format!("{}{target}{}", &line[..last.0.start], &line[last.0.end..]);
+        return Some((format!("{line}{ending}{added}{}", &raw[line.len()..]), false));
+    }
     let full = kind == Kind::Pin && raw[last.0.clone()].matches('.').count() == 2;
     let version = if full { format!("{target}.0") } else { target.to_string() };
     Some((format!("{}{version}{}", &raw[..last.0.start], &raw[last.0.end..]), full))
@@ -449,7 +456,7 @@ fn htaccess(text: &str) -> Vec<Hit> {
                     replacement: Some(Localized::same("<IfModule mod_php.c>")),
                 });
             }
-            stack.push(!negated && module.contains("php"));
+            stack.push(!negated && (module.contains("php") || module.contains("lsapi") || module == "litespeed"));
             continue;
         }
         if lower.starts_with("</ifmodule") {
@@ -573,7 +580,7 @@ fn span_at(line: &str, start: usize) -> Option<Span> {
 
 fn image_version(line: &str) -> Option<Span> {
     let lower = line.to_ascii_lowercase();
-    for marker in ["php:", ":php", "/php"] {
+    for marker in ["php:", ":php", "/php", "-php"] {
         let mut from = 0;
         while let Some(k) = lower[from..].find(marker) {
             let start = from + k + marker.len();
@@ -583,7 +590,18 @@ fn image_version(line: &str) -> Option<Span> {
             from = start;
         }
     }
-    None
+    php_family_tag(line)
+}
+
+/// Images like `bitnami/php-fpm:7.4`. A name such as `php-redis` numbers its own releases.
+fn php_family_tag(line: &str) -> Option<Span> {
+    let lower = line.to_ascii_lowercase();
+    lower.match_indices("php-").find_map(|(k, _)| {
+        let colon = k + lower[k..].find(':')?;
+        let name = &lower[k..colon];
+        let known = name.split('-').skip(1).all(|part| matches!(part, "fpm" | "cli" | "apache" | "nginx" | "alpine" | "zts" | "dev"));
+        known.then(|| span_at(line, colon + 1)).flatten()
+    })
 }
 
 fn listed_versions(line: &str, from: usize) -> Vec<Span> {
@@ -635,7 +653,6 @@ fn line_spans(line: &str, kind: Kind) -> Vec<Span> {
         Kind::Hosting if matches!(key.as_str(), "type" | "via") => image_version(line).into_iter().collect(),
         _ if matches!(key.as_str(), "php" | "php-version" | "php-versions" | "php_version") => listed_versions(line, value),
         _ if matches!(key.as_str(), "image" | "container") => image_version(line).into_iter().collect(),
-        _ if key == "name" && lower.contains("php:") => image_version(line).into_iter().collect(),
         _ if lower.contains("docker run") => image_version(line).into_iter().collect(),
         _ => Vec::new(),
     }
@@ -667,7 +684,9 @@ fn pin_lines(text: &str, kind: Kind) -> Vec<(usize, Vec<Span>, bool)> {
     let mut out = Vec::new();
     let mut list = None;
     let mut matrix: Option<(usize, Matrix)> = None;
-    for (i, raw) in text.lines().enumerate().filter(|(_, raw)| !raw.trim().is_empty() && !raw.trim_start().starts_with('#')) {
+    let mut image_block: Option<usize> = None;
+    let comment = |raw: &str| raw.trim_start().starts_with('#') || (kind == Kind::Socket && raw.trim_start().starts_with(';'));
+    for (i, raw) in text.lines().enumerate().filter(|(_, raw)| !raw.trim().is_empty() && !comment(raw)) {
         let raw = without_comment(raw);
         let indent = raw.len() - raw.trim_start().len();
         let item = raw.trim_start().starts_with("- ");
@@ -706,7 +725,14 @@ fn pin_lines(text: &str, kind: Kind) -> Vec<(usize, Vec<Span>, bool)> {
             list = Some(indent);
             continue;
         }
-        let spans = line_spans(raw, kind);
+        if image_block.is_some_and(|open| indent <= open) {
+            image_block = None;
+        }
+        let key = key.to_ascii_lowercase();
+        if key == "image" && raw[value..].trim().is_empty() {
+            image_block = Some(indent);
+        }
+        let spans = if key == "name" && image_block.is_some() { image_version(raw).into_iter().collect() } else { line_spans(raw, kind) };
         if !spans.is_empty() {
             out.push((i + 1, spans, included));
         }
@@ -781,6 +807,74 @@ const COMPOSER1_LOCK: Text = Text::new(
     "This composer.lock was written by Composer 1 (there is no plugin-api-version). Composer 1 is no longer maintained and can't read Packagist's current metadata. Run composer update with Composer 2 before moving to PHP 8 compatible package versions.",
 );
 
+/// These ship with PHP and carry its version. PECL extensions such as redis number their own releases.
+const BUNDLED_EXTENSIONS: &[&str] = &[
+    "bcmath",
+    "bz2",
+    "calendar",
+    "ctype",
+    "curl",
+    "date",
+    "dba",
+    "dom",
+    "enchant",
+    "exif",
+    "ffi",
+    "fileinfo",
+    "filter",
+    "ftp",
+    "gd",
+    "gettext",
+    "gmp",
+    "hash",
+    "iconv",
+    "imap",
+    "intl",
+    "json",
+    "ldap",
+    "libxml",
+    "mbstring",
+    "mysqli",
+    "mysqlnd",
+    "odbc",
+    "opcache",
+    "openssl",
+    "pcntl",
+    "pcre",
+    "pdo",
+    "pdo_mysql",
+    "pdo_odbc",
+    "pdo_pgsql",
+    "pdo_sqlite",
+    "pgsql",
+    "phar",
+    "posix",
+    "pspell",
+    "readline",
+    "reflection",
+    "session",
+    "shmop",
+    "simplexml",
+    "snmp",
+    "soap",
+    "sockets",
+    "sodium",
+    "spl",
+    "sqlite3",
+    "standard",
+    "sysvmsg",
+    "sysvsem",
+    "sysvshm",
+    "tidy",
+    "tokenizer",
+    "xml",
+    "xmlreader",
+    "xmlwriter",
+    "xsl",
+    "zip",
+    "zlib",
+];
+
 fn line_of(text: &str, needle: &str) -> usize {
     text.lines().position(|l| l.contains(needle)).map_or(1, |k| k + 1)
 }
@@ -803,7 +897,8 @@ fn composer(text: &str, target: PhpVersion) -> Vec<Hit> {
         out.push(pin_hit(line, found, target, PLATFORM));
     }
     let platform = json.pointer("/config/platform").and_then(|p| p.as_object());
-    for (name, value) in platform.into_iter().flatten().filter(|(name, _)| name.starts_with("ext-")) {
+    let bundled = |name: &str| name.strip_prefix("ext-").is_some_and(|ext| BUNDLED_EXTENSIONS.contains(&ext.to_ascii_lowercase().as_str()));
+    for (name, value) in platform.into_iter().flatten().filter(|(name, _)| bundled(name)) {
         let pinned = value.as_str().unwrap_or_default();
         if version_at(pinned).is_some_and(|found| found < target) {
             out.push(Hit {
@@ -888,6 +983,57 @@ mod tests {
         let before = scan(root, PhpVersion::new(8, 4)).0.len();
         std::fs::write(root.join(".ferry/config.json"), r#"{"exclude": ["old/"]}"#).unwrap();
         assert_eq!(scan(root, PhpVersion::new(8, 4)).0.len(), before - 1);
+    }
+
+    #[test]
+    fn only_bundled_extensions_are_compared_with_the_php_target() {
+        let target = PhpVersion::new(8, 4);
+        let rules = |text: &str| composer(text, target).into_iter().map(|h| h.rule).collect::<Vec<_>>();
+        assert!(rules(r#"{"config":{"platform":{"ext-redis":"6.2"}}}"#).is_empty());
+        assert_eq!(rules(r#"{"config":{"platform":{"ext-mbstring":"7.4"}}}"#), ["server.composer_platform_ext"]);
+    }
+
+    #[test]
+    fn php_values_under_litespeed_stay_valid() {
+        let rules = |text: &str| htaccess(text).into_iter().map(|h| h.rule).collect::<Vec<_>>();
+        assert!(rules("<IfModule lsapi_module>\nphp_value max_execution_time 30\n</IfModule>\n").is_empty());
+        assert!(rules("<IfModule Litespeed>\nphp_value max_execution_time 30\n</IfModule>\n").is_empty());
+        assert_eq!(rules("php_value max_execution_time 30\n"), ["server.php_value_outside_mod_php"]);
+    }
+
+    #[test]
+    fn a_comment_in_a_conf_file_is_not_a_pin() {
+        let target = PhpVersion::new(8, 4);
+        assert!(pin_lines("; listen = /run/php/php7.4-fpm.sock\n", Kind::Socket).is_empty());
+        assert_eq!(stale_lines("listen = /run/php/php7.4-fpm.sock\n", Kind::Socket, target).len(), 1);
+    }
+
+    #[test]
+    fn images_named_for_php_are_found() {
+        let found = |line: &str| image_version(line).map(|(_, v)| v.to_string());
+        assert_eq!(found("image: bitnami/php-fpm:7.4"), Some("7.4".into()));
+        assert_eq!(found("image: webdevops/php-apache:8.1-alpine"), Some("8.1".into()));
+        assert_eq!(found("image: wordpress:5.8-php7.4-apache"), Some("7.4".into()));
+        assert_eq!(found("image: myorg/php-redis:6.2"), None);
+        assert_eq!(found("image: redis:6.2"), None);
+    }
+
+    #[test]
+    fn a_step_label_is_not_an_image() {
+        let target = PhpVersion::new(8, 4);
+        let steps = "jobs:\n  t:\n    steps:\n      - name: Test on php:7.4 images\n        run: phpunit\n";
+        assert!(stale_lines(steps, Kind::Ci, target).is_empty());
+        let image = "job:\n  image:\n    name: php:7.3-cli\n    entrypoint: ['']\n  script: phpunit\n";
+        assert_eq!(stale_lines(image, Kind::Ci, target).len(), 1);
+    }
+
+    #[test]
+    fn a_list_of_versions_keeps_them_and_gains_the_target() {
+        let target = PhpVersion::new(8, 4);
+        let (after, _) = bumped("php:\n  - 7.1\n  - '7.2'\nscript: phpunit\n", Kind::Ci, target).unwrap();
+        assert_eq!(after, "php:\n  - 7.1\n  - '7.2'\n  - '8.4'\nscript: phpunit\n");
+        let (last, _) = bumped("php:\n  - 7.2", Kind::Ci, target).unwrap();
+        assert_eq!(last, "php:\n  - 7.2\n  - 8.4");
     }
 
     #[test]
@@ -1078,7 +1224,7 @@ mod tests {
         let after = bump(dir.path(), target);
         let text = |name: &str| after.changes.iter().find(|c| c.file.replace('\\', "/") == name).unwrap().new_content.clone();
         assert_eq!(text("Dockerfile"), "ARG PHP_VERSION=8.4\nFROM php:${PHP_VERSION}-cli\n");
-        assert!(text(".travis.yml").contains("  - 7.1\n  - 8.4\n"));
+        assert!(text(".travis.yml").contains("  - 7.1\n  - 7.2\n  - 8.4\n"));
         assert!(text("docker-compose.yml").contains("PHP_VERSION: \"8.4\"") && text("docker-compose.yml").contains("- PHP_VERSION=8.4"));
         assert!(text(".github/workflows/b.yml").contains("docker run php:8.4-cli"));
     }

@@ -72,6 +72,37 @@ pub fn read_text(path: impl AsRef<Path>) -> std::io::Result<String> {
     String::from_utf8(read_bytes(path)?).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
 }
 
+/// For files only the app writes, such as settings and histories.
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let dir = path.parent().unwrap_or(Path::new("."));
+    std::fs::create_dir_all(dir)?;
+    let mut tmp = tempfile::NamedTempFile::new_in(dir)?;
+    tmp.write_all(bytes)?;
+    tmp.persist(path).map(|_| ()).map_err(|e| e.error)
+}
+
+static LIST_UPDATES: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Changes a list the app keeps on disk, one update at a time. A file it can't read is moved aside
+/// instead of being overwritten.
+pub fn update_list<T, R>(path: &Path, change: impl FnOnce(&mut Vec<T>) -> R) -> std::io::Result<R>
+where
+    T: serde::Serialize + serde::de::DeserializeOwned,
+{
+    let _turn = LIST_UPDATES.lock().unwrap_or_else(|e| e.into_inner());
+    let mut list = match std::fs::read(path) {
+        Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|_| {
+            let _ = std::fs::rename(path, path.with_extension("unreadable.json"));
+            Vec::new()
+        }),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(e) => return Err(e),
+    };
+    let result = change(&mut list);
+    write_atomic(path, &serde_json::to_vec(&list).map_err(std::io::Error::other)?)?;
+    Ok(result)
+}
+
 const MAX_SOURCE: u64 = 4 * 1024 * 1024;
 
 pub fn lines_around(root: &Path, rel: &str, line: usize, around: usize) -> Result<Vec<(usize, String)>> {
@@ -157,6 +188,19 @@ pub fn set_readonly(path: &Path, readonly: bool) -> Result<()> {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn a_list_that_cannot_be_read_is_kept_aside() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("list.json");
+        update_list::<u32, _>(&file, |list| list.push(1)).unwrap();
+        update_list::<u32, _>(&file, |list| list.push(2)).unwrap();
+        assert_eq!(serde_json::from_slice::<Vec<u32>>(&std::fs::read(&file).unwrap()).unwrap(), [1, 2]);
+        std::fs::write(&file, "not json").unwrap();
+        update_list::<u32, _>(&file, |list| list.push(3)).unwrap();
+        assert_eq!(serde_json::from_slice::<Vec<u32>>(&std::fs::read(&file).unwrap()).unwrap(), [3]);
+        assert_eq!(std::fs::read_to_string(dir.path().join("list.unreadable.json")).unwrap(), "not json");
+    }
 
     #[test]
     fn project_files_are_read_only_when_they_are_plain_files() {

@@ -93,11 +93,13 @@ pub struct Applied {
     pub stale: Vec<Ignore>,
 }
 
+const RULE_GROUPS: [&str; 7] = ["behavior", "deprecated", "framework", "removed", "runtime", "server", "syntax"];
+
 /// A directive starts a comment, or a line of a block comment. Prose that mentions it, or a word
 /// that only begins the same way, isn't one.
 fn directive_text(comment: &str) -> Option<&str> {
     comment.lines().find_map(|line| {
-        let rest = line.trim_start_matches(|c: char| c.is_whitespace() || "/#*!<-".contains(c)).strip_prefix("ferry-ignore")?;
+        let rest = line.trim_start_matches(|c: char| c.is_whitespace() || "/#;*!<-".contains(c)).strip_prefix("ferry-ignore")?;
         (rest.is_empty() || rest.starts_with(|c: char| c.is_whitespace() || matches!(c, ':' | '*' | '-'))).then_some(rest)
     })
 }
@@ -106,7 +108,8 @@ fn directive(comment: &str, rule_id: &str) -> Option<String> {
     let rest = directive_text(comment)?.trim_start_matches(':').trim();
     let rest = rest.split("*/").next().unwrap_or_default().split("-->").next().unwrap_or_default().trim();
     let (first, tail) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
-    let names_rule = first.contains('.') || first.ends_with('*');
+    let names_rule =
+        first.ends_with('*') || first.split_once('.').is_some_and(|(group, rest)| RULE_GROUPS.contains(&group) && !rest.is_empty());
     if names_rule {
         let matches = first.strip_suffix('*').map_or(first == rule_id, |prefix| rule_id.starts_with(prefix));
         matches.then(|| tail.trim().to_string())
@@ -148,6 +151,15 @@ impl Source {
                 let close = text[open..end].find("-->").map_or(end, |c| open + c + 3);
                 add(open, close);
                 from = close;
+            }
+        }
+        if !crate::project::is_php_file(path) {
+            for (i, line) in text.lines().enumerate() {
+                let start =
+                    line.char_indices().find(|&(at, c)| matches!(c, '#' | ';') && (at == 0 || line[..at].ends_with(char::is_whitespace)));
+                if let Some((at, _)) = start.filter(|&(at, _)| line[at..].contains("ferry-ignore")) {
+                    comments.entry(i + 1).or_default().push((line[at..].to_string(), line[..at].trim().is_empty()));
+                }
             }
         }
         let lines: Vec<String> = text.lines().map(str::to_string).collect();
@@ -214,6 +226,29 @@ mod tests {
         assert_eq!(kept[0].line, 5);
         assert_eq!((ignored[0].finding.line, ignored[0].reason.as_str()), (4, "vendored copy"));
         assert!(load(&dir.path().join("missing")).is_empty());
+    }
+
+    #[test]
+    fn a_directive_works_in_files_that_are_not_php() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("Dockerfile"), "# ferry-ignore server.php_version_pin kept for the old worker\nFROM php:7.4-cli\n")
+            .unwrap();
+        let (findings, _) = crate::server::scan(dir.path(), "8.4".parse().unwrap());
+        assert_eq!(findings.len(), 1);
+        let applied = apply(dir.path(), findings, &[]);
+        assert!(applied.kept.is_empty());
+        assert_eq!(applied.ignored[0].reason, "kept for the old worker");
+    }
+
+    #[test]
+    fn a_dotted_word_in_a_reason_is_not_a_rule_name() {
+        assert_eq!(
+            directive("// ferry-ignore docs.example.test says it is fine", "removed.each").as_deref(),
+            Some("docs.example.test says it is fine")
+        );
+        assert_eq!(directive("// ferry-ignore removed.split not this one", "removed.each"), None);
+        assert_eq!(directive("// ferry-ignore removed.each known", "removed.each").as_deref(), Some("known"));
+        assert_eq!(directive("// ferry-ignore removed.* legacy", "removed.each").as_deref(), Some("legacy"));
     }
 
     #[test]

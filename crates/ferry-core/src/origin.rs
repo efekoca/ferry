@@ -40,6 +40,14 @@ fn in_core(rel: &str, framework: Framework) -> bool {
     if framework == Framework::WordPress {
         return ["wp-admin", "wp-includes"].iter().any(|d| rel.starts_with(&format!("{d}/")) || rel.contains(&format!("/{d}/")));
     }
+    let own: &[&str] = match framework {
+        Framework::Joomla => &["libraries", "includes", "layouts", "cli", "administrator/includes"],
+        Framework::Moodle => &["lib", "admin", "course", "user", "backup", "public/lib", "public/admin", "public/course", "public/user"],
+        _ => &[],
+    };
+    if own.iter().any(|dir| rel.starts_with(&format!("{dir}/"))) {
+        return true;
+    }
     crate::project::framework_excludes(framework)
         .iter()
         .filter(|dir| !GENERATED.contains(&dir.rsplit('/').next().unwrap_or(dir)) && !dir.ends_with("vendor"))
@@ -144,6 +152,10 @@ mod tests {
         assert!(in_core("core/lib/Drupal.php", Framework::Drupal));
         assert!(!in_core("modules/custom/a.php", Framework::Drupal));
         assert!(in_core("web/wp/wp-includes/load.php", Framework::WordPress));
+        assert!(in_core("libraries/src/Factory.php", Framework::Joomla));
+        assert!(!in_core("components/com_shop/shop.php", Framework::Joomla));
+        assert!(in_core("lib/moodlelib.php", Framework::Moodle));
+        assert!(!in_core("local/shop/lib.php", Framework::Moodle));
     }
 
     #[test]

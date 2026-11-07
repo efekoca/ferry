@@ -273,9 +273,14 @@ impl SnapshotStore {
         Ok(out)
     }
 
-    pub fn prune(&self, project_root: &Path, keep: usize) -> Result<Vec<String>, SnapshotError> {
+    /// `newest` always stays: dates alone can't tell, because the clock may have been set back.
+    pub fn prune(&self, project_root: &Path, keep: usize, newest: &str) -> Result<Vec<String>, SnapshotError> {
         let mut removed = Vec::new();
-        for old in self.list(project_root)?.into_iter().skip(keep).filter(|s| !self.was_interrupted(project_root, &s.id)) {
+        let mut list = self.list(project_root)?;
+        if let Some(at) = list.iter().position(|s| s.id == newest) {
+            list[..=at].rotate_right(1);
+        }
+        for old in list.into_iter().skip(keep).filter(|s| !self.was_interrupted(project_root, &s.id)) {
             self.delete(project_root, &old.id)?;
             removed.push(old.id);
         }
@@ -428,6 +433,24 @@ mod tests {
     }
 
     #[test]
+    fn prune_keeps_the_backup_just_made_when_the_clock_went_back() {
+        let project = tempfile::tempdir().unwrap();
+        let store_dir = tempfile::tempdir().unwrap();
+        let store = SnapshotStore::new(store_dir.path());
+        let root = project.path();
+        fs::write(root.join("a.php"), "x").unwrap();
+        let older = store.create(root, &["a.php".to_string()], "older").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        let newest = store.create(root, &["a.php".to_string()], "newest").unwrap();
+        let manifest = store.project_dir(root).join(&older.id).join("manifest.json");
+        let mut json: serde_json::Value = serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
+        json["createdAt"] = serde_json::json!(newest.created_at + 60_000);
+        fs::write(&manifest, serde_json::to_vec(&json).unwrap()).unwrap();
+        assert_eq!(store.prune(root, 1, &newest.id).unwrap(), [older.id]);
+        assert_eq!(store.list(root).unwrap()[0].id, newest.id);
+    }
+
+    #[test]
     fn prune_keeps_the_newest_snapshots() {
         let project = tempfile::tempdir().unwrap();
         let store_dir = tempfile::tempdir().unwrap();
@@ -438,14 +461,14 @@ mod tests {
         let newest: Vec<String> = store.list(root).unwrap().into_iter().map(|s| s.id).collect();
         assert_eq!(newest.len(), 4);
 
-        let mut removed = store.prune(root, 2).unwrap();
+        let mut removed = store.prune(root, 2, "").unwrap();
         removed.sort();
         let mut expected = newest[2..].to_vec();
         expected.sort();
         assert_eq!(removed, expected);
         let left: Vec<String> = store.list(root).unwrap().into_iter().map(|s| s.id).collect();
         assert_eq!(left, newest[..2]);
-        assert!(store.prune(root, 2).unwrap().is_empty());
+        assert!(store.prune(root, 2, "").unwrap().is_empty());
         assert!(ids.iter().all(|id| left.contains(id) || removed.contains(id)));
     }
 
@@ -620,7 +643,7 @@ mod tests {
             assert_eq!(store.interrupted(&root).iter().map(|s| s.label.as_str()).collect::<Vec<_>>(), ["one"]);
         }
         store.create(&root, &["a.txt".to_string()], "two").unwrap();
-        store.prune(&root, 1).unwrap();
+        store.prune(&root, 1, "").unwrap();
         assert_eq!(store.interrupted(&root).len(), 1, "an unresolved backup outlives the limit");
         store.clear_writing(&root, &finished.id);
         assert!(store.interrupted(&root).is_empty());
