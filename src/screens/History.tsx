@@ -145,11 +145,12 @@ function Timeline({ events, since, onRestore }: { events: HistoryEvent[]; since:
   const [all, setAll] = useState(false);
   const shown = all ? events : events.slice(0, TIMELINE_LIMIT);
   const days = useMemo(() => {
-    const groups: { name: string; items: HistoryEvent[] }[] = [];
+    const groups: { key: string; name: string; items: HistoryEvent[] }[] = [];
     for (const event of shown) {
-      const name = dayName(event.at, t);
-      if (groups[groups.length - 1]?.name === name) groups[groups.length - 1].items.push(event);
-      else groups.push({ name, items: [event] });
+      const key = new Date(event.at).toDateString();
+      const last = groups[groups.length - 1];
+      if (last?.key === key) last.items.push(event);
+      else groups.push({ key, name: dayName(event.at, t), items: [event] });
     }
     return groups;
   }, [shown, t]);
@@ -157,13 +158,13 @@ function Timeline({ events, since, onRestore }: { events: HistoryEvent[]; since:
     <section className="card" aria-label={t.history.timeline}>
       <ol className="timeline">
         {days.map((day) => (
-          <li key={day.name}>
+          <li key={day.key}>
             <div className="timeline__day">{day.name}</div>
             <ol className="timeline__items">
               {day.items.map((event) => {
                 const { title, sub, hint } = eventText(event, t, since);
                 return (
-                  <li key={`${event.kind}-${event.at}`} className="history-row history-row--soft" title={hint}>
+                  <li key={event.key} className="history-row history-row--soft" title={hint}>
                     <EventIcon event={event} />
                     <span className="history-row__main">
                       <span className="history-row__title">{title}</span>

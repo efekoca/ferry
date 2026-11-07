@@ -517,6 +517,11 @@ describe("history chart helpers", () => {
     expect(rangeStart("7", 8 * 86_400_000)).toBe(86_400_000);
   });
 
+  it("keeps events from the same second apart", () => {
+    const keys = historyEvents([scan(10), scan(10), scan(10)], [], [], []).map((e) => e.key);
+    expect(new Set(keys).size).toBe(3);
+  });
+
   it("merges events newest first in milliseconds", () => {
     const events = historyEvents(
       [scan(10)],
