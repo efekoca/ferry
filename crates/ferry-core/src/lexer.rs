@@ -296,50 +296,7 @@ impl<'a> Lexer<'a> {
 
     fn lex_heredoc(&mut self) -> bool {
         let start = self.pos;
-        let mut p = self.pos + 3;
-        while p < self.b.len() && (self.b[p] == b' ' || self.b[p] == b'\t') {
-            p += 1;
-        }
-        let quote = match self.b.get(p) {
-            Some(b'\'') => Some(b'\''),
-            Some(b'"') => Some(b'"'),
-            _ => None,
-        };
-        if quote.is_some() {
-            p += 1;
-        }
-        let id_start = p;
-        while p < self.b.len() && is_ident_char(self.b[p]) {
-            p += 1;
-        }
-        if p == id_start || !is_ident_start(self.b[id_start]) {
-            return false;
-        }
-        let id = &self.src[id_start..p];
-        if let Some(q) = quote {
-            if self.b.get(p) != Some(&q) {
-                return false;
-            }
-            p += 1;
-        }
-        let body_start = match self.src[p..].find('\n') {
-            Some(i) => p + i + 1,
-            None => return false,
-        };
-        let mut line_start = body_start;
-        let mut end = self.b.len();
-        while line_start < self.b.len() {
-            let line_end = self.src[line_start..].find('\n').map_or(self.b.len(), |i| line_start + i);
-            let line = &self.src[line_start..line_end];
-            let trimmed = line.trim_start();
-            if let Some(rest) = trimmed.strip_prefix(id) {
-                if !rest.bytes().next().is_some_and(is_ident_char) {
-                    end = line_start + (line.len() - trimmed.len()) + id.len();
-                    break;
-                }
-            }
-            line_start = line_end + 1;
-        }
+        let Some((end, quote)) = heredoc_end(self.b, start) else { return false };
         self.pos = end;
         let text = self.src[start..end].to_string();
         self.push(TokenKind::Str { interpolates: quote != Some(b'\''), backtick: false }, start, end, text);
@@ -349,6 +306,43 @@ impl<'a> Lexer<'a> {
 
 /// Far deeper than real code, and shallow enough that a crafted file can't overflow the stack.
 const MAX_NESTING: usize = 128;
+
+/// Where a heredoc or nowdoc that starts at `at` ends, and the quote around its label.
+fn heredoc_end(b: &[u8], at: usize) -> Option<(usize, Option<u8>)> {
+    let mut p = at + 3;
+    while p < b.len() && (b[p] == b' ' || b[p] == b'\t') {
+        p += 1;
+    }
+    let quote = matches!(b.get(p), Some(b'\'' | b'"')).then(|| b[p]);
+    if quote.is_some() {
+        p += 1;
+    }
+    let id_start = p;
+    while p < b.len() && is_ident_char(b[p]) {
+        p += 1;
+    }
+    if p == id_start || !is_ident_start(b[id_start]) {
+        return None;
+    }
+    let id = &b[id_start..p];
+    if let Some(q) = quote {
+        if b.get(p) != Some(&q) {
+            return None;
+        }
+        p += 1;
+    }
+    let mut line_start = p + b[p..].iter().position(|&c| c == b'\n')? + 1;
+    while line_start < b.len() {
+        let line_end = b[line_start..].iter().position(|&c| c == b'\n').map_or(b.len(), |i| line_start + i);
+        let indent = b[line_start..line_end].iter().take_while(|&&c| c == b' ' || c == b'\t').count();
+        let rest = &b[line_start + indent..line_end];
+        if rest.starts_with(id) && !rest.get(id.len()).is_some_and(|&c| is_ident_char(c)) {
+            return Some((line_start + indent + id.len(), quote));
+        }
+        line_start = line_end + 1;
+    }
+    Some((b.len(), quote))
+}
 
 fn skip_quoted(b: &[u8], p: usize) -> usize {
     quoted_end(b, p, 0)
@@ -470,6 +464,12 @@ fn is_attribute(b: &[u8], at: usize, in_parameters: bool) -> bool {
                     b'\'' | b'"' => {
                         p = skip_quoted(b, p);
                         continue;
+                    }
+                    b'<' if b[p..].starts_with(b"<<<") => {
+                        if let Some((end, _)) = heredoc_end(b, p) {
+                            p = end;
+                            continue;
+                        }
                     }
                     b'/' if matches!(b.get(p + 1), Some(b'/' | b'*')) => {
                         p = skip_space(b, p);

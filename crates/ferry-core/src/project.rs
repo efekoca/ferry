@@ -187,6 +187,9 @@ fn drupal_core_dirs(root: &Path) -> impl Iterator<Item = &'static str> + '_ {
 
 fn project_excludes(root: &Path, framework: Framework) -> Vec<String> {
     let mut dirs = framework_excludes(framework);
+    if framework == Framework::Yii && !root.join("framework/YiiBase.php").is_file() {
+        dirs.retain(|d| d != "framework");
+    }
     if framework == Framework::Drupal && drupal7_root(root) {
         dirs = [
             "includes",
@@ -287,7 +290,7 @@ pub(crate) fn nested_composer_vendors(root: &Path) -> Vec<String> {
 }
 
 /// `legacy`, `legacy/`, `./legacy/*` and `legacy/**` all mean the folder.
-fn exclude_path(entry: &str) -> String {
+pub(crate) fn exclude_path(entry: &str) -> String {
     let path = entry.trim().replace('\\', "/");
     let path = path.trim_start_matches("./");
     path.strip_suffix("/**").or_else(|| path.strip_suffix("/*")).unwrap_or(path).trim_end_matches('/').to_string()
@@ -446,6 +449,17 @@ mod detection_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn yii_2_keeps_a_framework_folder_of_its_own() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("composer.json"), r#"{"require":{"yiisoft/yii2":"*"}}"#).unwrap();
+        std::fs::create_dir(dir.path().join("framework")).unwrap();
+        std::fs::write(dir.path().join("framework/b.php"), "<?php\n").unwrap();
+        assert!(scanned_files(dir.path()).iter().any(|p| p.ends_with("framework/b.php")));
+        std::fs::write(dir.path().join("framework/YiiBase.php"), "<?php\n").unwrap();
+        assert!(!scanned_files(dir.path()).iter().any(|p| p.ends_with("framework/b.php")));
+    }
 
     #[test]
     fn the_stamp_follows_the_files_a_run_depends_on() {

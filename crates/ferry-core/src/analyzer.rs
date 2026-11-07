@@ -59,6 +59,8 @@ pub fn relative_path(root: &Path, path: &Path) -> String {
 
 const FILE_BUDGET: std::time::Duration = std::time::Duration::from_secs(20);
 const FILE_STACK: usize = 64 * 1024 * 1024;
+/// Marks a receiver type taken from elsewhere in the class, so its fix isn't offered as automatic.
+const GUESSED: &str = "\u{0}guessed";
 const MAX_FINDINGS_PER_FILE: usize = 2_000;
 
 enum FileRun {
@@ -515,6 +517,13 @@ pub fn analyze_source(file: &str, src: &str, target: PhpVersion) -> Vec<Finding>
 }
 
 pub fn analyze_source_in(file: &str, src: &str, target: PhpVersion, index: &crate::index::ProjectIndex) -> Vec<Finding> {
+    let classic_mac;
+    let src = if src.contains('\r') && !src.contains('\n') {
+        classic_mac = src.replace('\r', "\n");
+        classic_mac.as_str()
+    } else {
+        src
+    };
     let lexed = lex(src);
     let tokens = lexed.tokens;
     let html = lexed.html;
@@ -556,8 +565,14 @@ pub fn analyze_source_in(file: &str, src: &str, target: PhpVersion, index: &crat
     for k in php4_constructors(&tokens) {
         ctx.pattern(&patterns::PHP4_CONSTRUCTOR, &tokens[k], None);
     }
+    let declared = declared_constants(&tokens);
+    let imported = imported_constants(&tokens);
     for k in bareword_keys(&tokens, |k, name| {
-        ctx.defined.contains(name) || index.defines_constant_in(crate::index::namespace_at(&ctx.namespaces, k), name)
+        let space = crate::index::namespace_at(&ctx.namespaces, k);
+        imported.contains(name)
+            || declared.contains(DYNAMIC_CONSTANT)
+            || constant_visible(&declared, space, name)
+            || index.defines_constant_in(space, name)
     }) {
         ctx.pattern(&patterns::BAREWORD_KEY, &tokens[k], None);
     }
@@ -1128,6 +1143,11 @@ impl<'a> Ctx<'a> {
             };
             if let Some(since) = reserved {
                 self.pattern_since(&patterns::RESERVED_NAME, tok.line, tok.column, since);
+            } else if is_type_decl && !crate::index::namespace_at(&self.namespaces, i).is_empty() {
+                let full = format!("{}\\{lower}", crate::index::namespace_at(&self.namespaces, i).to_ascii_lowercase());
+                if let Some(since) = crate::rules::added_namespaced_class(&full) {
+                    self.pattern_since(&patterns::REDECLARED_BUILTIN, tok.line, tok.column, since);
+                }
             } else if crate::index::namespace_at(&self.namespaces, i).is_empty() && !self.index.included_by_version_check(self.file) {
                 let added = if is_type_decl {
                     crate::rules::added_class_any(&lower)
@@ -1425,13 +1445,14 @@ impl<'a> Ctx<'a> {
             (MemberKind::StaticCall, Some(c)) => format!("{c}::{}()", tok.text),
             (_, c) => format!("{}::{}", c.unwrap_or_default(), tok.text),
         };
+        let guessed = known.as_ref().is_some_and(|types| types.contains(GUESSED));
         let hit = Hit {
             rule_id: m.rule.id,
             title: Localized::same(title),
             message: m.rule.note,
             since: m.rule.since(),
             severity: m.rule.severity(),
-            fix: m.rule.fix,
+            fix: if guessed && m.rule.fix == FixKind::Auto { FixKind::Likely } else { m.rule.fix },
             replacement: m.rule.replacement.map(Into::into),
         };
         self.push(hit, tok.line, tok.column);
@@ -1462,7 +1483,7 @@ impl<'a> Ctx<'a> {
                 .into_iter()
                 .collect(),
             Some(c) => vec![c.to_ascii_lowercase()],
-            None => known.map(|k| k.iter().cloned().collect()).unwrap_or_default(),
+            None => known.map(|k| k.iter().filter(|c| *c != GUESSED).cloned().collect()).unwrap_or_default(),
         };
         for c in classes.iter().filter(|c| !self.index.declares_type(c)) {
             let key = format!("{c}::{method}");
@@ -2758,7 +2779,7 @@ impl Receivers {
     }
 
     /// An untyped parameter says nothing, and code often names a variable the same way throughout
-    /// a class, so what's shown elsewhere in it is the next best thing.
+    /// a class, so what's shown elsewhere in it is the next best thing. It stays a guess.
     fn anywhere(&self, tokens: &[Token], name: &str, at: usize) -> std::collections::HashSet<String> {
         let place = self.place(at);
         if place == usize::MAX {
@@ -2766,7 +2787,12 @@ impl Receivers {
         }
         self.remembered(name, 0, place, || {
             let same = |k: &usize| tokens[*k].kind == TokenKind::Variable && tokens[*k].text == name && self.same_place(place, *k);
-            (0..tokens.len()).filter(same).filter_map(|k| self.evidence(tokens, k)).find(|found| !found.is_empty()).unwrap_or_default()
+            let mut found: std::collections::HashSet<String> =
+                (0..tokens.len()).filter(same).filter_map(|k| self.evidence(tokens, k)).find(|found| !found.is_empty()).unwrap_or_default();
+            if !found.is_empty() {
+                found.insert(GUESSED.to_string());
+            }
+            found
         })
     }
 
@@ -2935,15 +2961,57 @@ fn repeated_statics(tokens: &[Token], receivers: &Receivers) -> Vec<usize> {
     out
 }
 
+/// The bracket a token sits in, and where that bracket closes.
+fn enclosing(tokens: &[Token], k: usize) -> Option<(usize, usize)> {
+    let mut depth = 0usize;
+    let open = (0..k).rev().find(|&j| {
+        let t = &tokens[j];
+        if t.is_punct(")") || t.is_punct("]") {
+            depth += 1;
+        } else if t.is_punct("(") || t.is_punct("[") {
+            if depth == 0 {
+                return true;
+            }
+            depth -= 1;
+        }
+        false
+    })?;
+    let mut depth = 0usize;
+    let close = (open..tokens.len()).find(|&j| {
+        let t = &tokens[j];
+        if t.is_punct("(") || t.is_punct("[") {
+            depth += 1;
+        } else if t.is_punct(")") || t.is_punct("]") {
+            depth -= 1;
+        }
+        depth == 0
+    })?;
+    Some((open, close))
+}
+
 fn assigned_this(tokens: &[Token]) -> Vec<usize> {
     let is_this = |k: usize| tokens[k].kind == TokenKind::Variable && tokens[k].text == "this";
+    let bound = |k: usize| {
+        let Some((open, close)) = enclosing(tokens, k) else { return false };
+        let before = open.checked_sub(1).map(|p| &tokens[p]);
+        let assigned = tokens.get(close + 1).is_some_and(|n| n.is_punct("="));
+        let declares = |p: usize| tokens[p].is_ident_ci("function") || tokens[p].is_ident_ci("fn");
+        let parameters = tokens[open].is_punct("(")
+            && (before.is_some_and(|b| b.is_ident_ci("fn") || b.is_ident_ci("function"))
+                || open >= 2 && tokens[open - 1].kind == TokenKind::Ident && declares(open - 2));
+        before.is_some_and(|b| b.is_ident_ci("catch") || b.is_ident_ci("use"))
+            || parameters
+            || assigned && (tokens[open].is_punct("[") || before.is_some_and(|b| b.is_ident_ci("list")))
+    };
     (0..tokens.len())
         .filter(|&k| is_this(k) && !k.checked_sub(1).is_some_and(|p| ["->", "?->", "::", "$"].iter().any(|o| tokens[p].is_punct(o))))
         .filter(|&k| {
             let prev = k.checked_sub(1).map(|p| &tokens[p]);
-            tokens.get(k + 1).is_some_and(|n| n.is_punct("="))
+            let next = tokens.get(k + 1);
+            next.is_some_and(|n| n.is_punct("="))
                 || prev.is_some_and(|p| p.is_ident_ci("global"))
-                || prev.is_some_and(|p| p.is_ident_ci("as")) && tokens.get(k + 1).is_some_and(|n| n.is_punct(")"))
+                || prev.is_some_and(|p| p.is_ident_ci("as")) && next.is_some_and(|n| n.is_punct(")"))
+                || next.is_some_and(|n| n.is_punct(",") || n.is_punct(")") || n.is_punct("]")) && bound(k)
         })
         .collect()
 }
@@ -3273,10 +3341,10 @@ fn concat_with_arithmetic(tokens: &[Token]) -> Vec<usize> {
         "??=", "**=", "<<=", ">>=",
     ];
     let mut out = Vec::new();
-    let mut stack = vec![(false, false, None::<usize>)];
+    let mut stack = vec![(false, false, None::<usize>, false)];
     for (k, t) in tokens.iter().enumerate() {
         if t.is_punct("(") || t.is_punct("[") || t.is_punct("{") || t.is_punct("#[") {
-            stack.push((false, false, None));
+            stack.push((false, false, None, false));
             continue;
         }
         if t.is_punct(")") || t.is_punct("]") || t.is_punct("}") {
@@ -3293,9 +3361,10 @@ fn concat_with_arithmetic(tokens: &[Token]) -> Vec<usize> {
         }
         if tokens.get(k + 1).is_some_and(|n| shift(t, n)) {
             level.1 |= binary && level.0;
+            level.3 |= binary;
             if level.0 && level.1 {
                 out.push(level.2.unwrap());
-                *level = (false, false, None);
+                *level = (false, false, None, false);
             }
             continue;
         }
@@ -3305,16 +3374,21 @@ fn concat_with_arithmetic(tokens: &[Token]) -> Vec<usize> {
             || (t.kind == TokenKind::Ident && ["and", "or", "xor", "return", "echo", "print"].iter().any(|r| t.is_ident_ci(r)))
             || compound
         {
-            *level = (false, false, None);
+            *level = (false, false, None, false);
+        } else if t.is_punct(".") && binary && level.3 {
+            // A shift before the dot: PHP 7 shifted by the joined string, PHP 8 joins the shifted number.
+            out.push(k);
+            *level = (false, false, None, false);
         } else if t.is_punct(".") && binary {
             level.0 = true;
             level.2.get_or_insert(k);
-        } else if (t.is_punct("+") || t.is_punct("-") || t.is_punct("<<") || t.is_punct(">>")) && binary && level.0 {
-            level.1 = true;
+        } else if (t.is_punct("+") || t.is_punct("-") || t.is_punct("<<") || t.is_punct(">>")) && binary {
+            level.1 |= level.0;
+            level.3 |= t.is_punct("<<") || t.is_punct(">>");
         }
         if level.0 && level.1 {
             out.push(level.2.unwrap());
-            *level = (false, false, None);
+            *level = (false, false, None, false);
         }
     }
     out
@@ -3853,6 +3927,9 @@ fn reads_magic_variable(tokens: &[Token], k: usize, receivers: &Receivers) -> bo
 
 /// Labels, `goto` targets, enum cases and the later names of a `const` list look like constants.
 fn not_a_constant(tokens: &[Token], i: usize) -> bool {
+    if in_use_statement(tokens, i) {
+        return true;
+    }
     let prev = i.checked_sub(1).map(|p| &tokens[p]);
     let next = tokens.get(i + 1);
     if prev.is_some_and(|p| p.is_ident_ci("goto")) {
@@ -3942,6 +4019,36 @@ fn defined_literal(tokens: &[Token], i: usize) -> Option<Option<&str>> {
         return None;
     }
     Some(tokens.get(i + 2).filter(|_| tokens.get(i + 3).is_some_and(|n| n.is_punct(","))).and_then(Token::literal))
+}
+
+/// `use const` aliases, which hold in the whole file.
+fn imported_constants(tokens: &[Token]) -> std::collections::HashSet<String> {
+    let mut names = std::collections::HashSet::new();
+    for i in 1..tokens.len() {
+        if tokens[i].is_ident_ci("const") && tokens[i - 1].is_ident_ci("use") {
+            let end = (i..tokens.len()).find(|&k| tokens[k].is_punct(";")).unwrap_or(tokens.len());
+            for part in tokens[i + 1..end].split(|t| t.is_punct(",")) {
+                if let Some(last) = part.iter().rfind(|t| t.kind == TokenKind::Ident) {
+                    names.insert(last.text.rsplit('\\').next().unwrap_or_default().to_string());
+                }
+            }
+        }
+    }
+    names
+}
+
+/// `use const Foo\{E_STRICT as ES}` names a constant to import, it doesn't use one.
+fn in_use_statement(tokens: &[Token], i: usize) -> bool {
+    let start = (0..i)
+        .rev()
+        .find(|&k| {
+            let t = &tokens[k];
+            let group = t.is_punct("{") && k > 0 && tokens[k - 1].text.ends_with('\\');
+            t.is_punct(";") || t.is_punct("}") || (t.is_punct("{") && !group) || t.kind == TokenKind::CloseTag
+        })
+        .map_or(0, |k| k + 1);
+    let start = (start..i).find(|&k| tokens[k].kind == TokenKind::Ident).unwrap_or(i);
+    tokens[start].is_ident_ci("use") && tokens.get(start + 1).is_some_and(|t| t.is_ident_ci("const") || t.is_ident_ci("function"))
 }
 
 /// Names this file can use as plain constants, `use const` aliases included.
@@ -4075,6 +4182,76 @@ mod bounded_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scan_accuracy_cases_from_the_review() {
+        let ids = |src: &str, target: &str| {
+            analyze_source("a.php", src, target.parse().unwrap()).into_iter().map(|f| f.rule_id).collect::<Vec<_>>()
+        };
+        let guarded =
+            "<?php if (extension_loaded('recode')) { recode_string('a', 'b'); } if (extension_loaded('wddx')) { wddx_serialize_value(1); }";
+        assert!(
+            analyze_source("a.php", guarded, PhpVersion::new(8, 4)).iter().all(|f| f.severity != crate::rules::Severity::Breaking),
+            "{:?}",
+            ids(guarded, "8.4")
+        );
+        let attribute = "<?php\n#[Attr(<<<'X'\nit's ) ] x\nX)]\nfunction f() {}\n";
+        assert!(
+            !ids(attribute, "8.4").iter().any(|r| r == "removed.hash_bracket_comment" || r == "syntax.unbalanced"),
+            "{:?}",
+            ids(attribute, "8.4")
+        );
+        assert!(ids("<?php namespace Random; class Randomizer {}", "8.2").contains(&"removed.redeclared_builtin".to_string()));
+        assert!(ids("<?php namespace Random; class Randomizer {}", "8.1").is_empty());
+        assert!(ids("<?php namespace App; class Randomizer {}", "8.4").is_empty());
+        assert!(ids("<?php ini_set('session.trans_sid_tags', 'a=href,area=href,frame=src,form=');", "8.4").is_empty());
+        assert_eq!(ids("<?php ini_set('session.trans_sid_tags', 'a=href');", "8.4"), ["deprecated.ini_setting"]);
+        assert!(!ids("<?php use const Foo\\{E_STRICT as ES};", "8.4").contains(&"deprecated.e_strict".to_string()));
+        assert!(
+            ids("<?php namespace Demo { const key = 1; } namespace { echo $a[key]; }", "8.4").contains(&"removed.bareword_key".to_string())
+        );
+        assert!(!ids("<?php namespace Demo { const key = 1; echo $a[key]; }", "8.4").contains(&"removed.bareword_key".to_string()));
+        assert!(
+            ids("<?php echo substr_compare($a, $b, 0, null); echo iconv_substr($a, 0, null);", "8.0")
+                .iter()
+                .filter(|r| *r == "behavior.null_length")
+                .count()
+                == 2
+        );
+        assert!(ids("<?php echo $a << 2 . 'x';", "8.0").contains(&"behavior.concat_precedence".to_string()));
+        assert!(!ids("<?php echo $a + 2 . 'x';", "8.0").contains(&"behavior.concat_precedence".to_string()));
+        for src in [
+            "<?php function f($this) {}",
+            "<?php try {} catch (E $this) {}",
+            "<?php list($this) = $a;",
+            "<?php [$this] = $a;",
+            "<?php $f = function () use ($this) {};",
+        ] {
+            assert!(ids(src, "7.1").contains(&"removed.assign_this".to_string()), "{src}");
+        }
+        for src in ["<?php foo($this);", "<?php $a = [$this];", "<?php function f() { return $this->x; }"] {
+            assert!(!ids(src, "7.1").contains(&"removed.assign_this".to_string()), "{src}");
+        }
+        let lines: Vec<usize> = analyze_source("a.php", "<?php\r\r each($a);", PhpVersion::new(8, 4))
+            .iter()
+            .filter(|f| f.rule_id == "removed.each")
+            .map(|f| f.line)
+            .collect();
+        assert_eq!(lines, [3]);
+    }
+
+    #[test]
+    fn a_receiver_guessed_from_another_method_isnt_fixed_automatically() {
+        let src = "<?php class A { function a() { $r = new ReflectionProperty('A', 'x'); } function b($r) { $r->setAccessible(true); } }";
+        let found: Vec<Finding> =
+            analyze_source("a.php", src, PhpVersion::new(8, 5)).into_iter().filter(|f| f.rule_id == "deprecated.set_accessible").collect();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].fix, FixKind::Likely);
+        let direct = "<?php $r = new ReflectionProperty('A', 'x'); $r->setAccessible(true);";
+        assert!(analyze_source("a.php", direct, PhpVersion::new(8, 5))
+            .iter()
+            .any(|f| f.rule_id == "deprecated.set_accessible" && f.fix == FixKind::Auto));
+    }
 
     #[test]
     fn a_version_constant_from_another_file_cant_hide_a_call() {
@@ -5388,7 +5565,7 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
         );
         assert_eq!(
             count85(
-                "<?php ini_set('session.sid_length', 64); ini_get('mbstring.func_overload'); ini_set('mbstring.func_overload', 0);",
+                "<?php ini_set('session.sid_length', 64); ini_get('mbstring.func_overload'); ini_set('mbstring.func_overload', 1);",
                 "deprecated.ini_setting"
             ),
             2
