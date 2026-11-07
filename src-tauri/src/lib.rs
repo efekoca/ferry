@@ -1357,14 +1357,20 @@ async fn apply_changes(
                     });
                 let lint_checked = lint.as_ref().is_some_and(|l| l.not_run.is_empty());
                 let lint_errors = lint.map(|l| l.errors).unwrap_or_default();
+                let needs_lint = written.iter().any(|file| ferry_core::project::is_php_file(Path::new(file)));
                 let committed = commit_message.as_deref().map(|message| {
-                    if lint_errors.is_empty() {
-                        git::commit(&root, &written, message)
-                    } else {
+                    if !lint_errors.is_empty() {
                         Err(t!(
                             "Yeni sözdizimi hatası olduğu için commit yapılmadı. Hataları düzeltip kendiniz commit edin ya da yedeği geri yükleyin.",
                             "No commit was made because of new syntax errors. Fix them and commit yourself, or restore the backup."
                         ))
+                    } else if needs_lint && !lint_checked {
+                        Err(t!(
+                            "PHP {target} ya da üstü bulunamadığı için sözdizimi denetlenemedi, commit yapılmadı. Ayarlar'dan bu sürümde bir PHP seçin ya da değişiklikleri kontrol edip kendiniz commit edin.",
+                            "No commit was made because the syntax couldn't be checked without PHP {target} or later. Choose that PHP in Settings, or check the changes and commit them yourself."
+                        ))
+                    } else {
+                        git::commit(&root, &written, message)
                     }
                 });
                 let (commit, git_error) = match committed {
@@ -1386,14 +1392,16 @@ async fn apply_changes(
             }
             Err(e) => {
                 let rolled_back = store.restore_files(&root, &snapshot.id, Some(&written));
-                if let Some(batch) = &batch {
-                    git::abort_batch(&root, batch);
-                }
+                let stayed = batch.as_ref().filter(|batch| !git::abort_batch(&root, batch)).map(|batch| batch.branch.clone());
+                let e = match stayed {
+                    Some(name) => t!("{e}\nDepo {name} dalında kaldı.", "{e}\nThe repository stayed on {name}."),
+                    None => e.to_string(),
+                };
                 match rolled_back {
                     Ok(_) => {
                         store.clear_writing(&root, &snapshot.id);
                         let _ = store.delete(&root, &snapshot.id);
-                        Err(e.to_string())
+                        Err(e)
                     }
                     Err(restore) => Err(t!(
                         "{e}\nDosyalar geri alınamadı ({restore}). Yedek Geçmiş sayfasında duruyor; oradan geri yükleyebilirsiniz.",

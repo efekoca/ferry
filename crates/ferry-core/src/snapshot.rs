@@ -65,7 +65,29 @@ pub struct SnapshotFile {
     pub existed: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<u32>,
 }
+
+#[cfg(unix)]
+fn file_mode(path: &Path) -> Option<u32> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(path).ok().map(|m| m.permissions().mode() & 0o7777)
+}
+
+#[cfg(not(unix))]
+fn file_mode(_: &Path) -> Option<u32> {
+    None
+}
+
+#[cfg(unix)]
+fn set_mode(path: &Path, mode: u32) {
+    use std::os::unix::fs::PermissionsExt;
+    let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode));
+}
+
+#[cfg(not(unix))]
+fn set_mode(_: &Path, _: u32) {}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -238,7 +260,12 @@ impl SnapshotStore {
                 }
                 write_new(&dest, bytes)?;
             }
-            files.push(SnapshotFile { path: rel.clone(), existed: content.is_some(), hash: content.as_deref().map(content_hash) });
+            files.push(SnapshotFile {
+                path: rel.clone(),
+                existed: content.is_some(),
+                hash: content.as_deref().map(content_hash),
+                mode: content.as_ref().and_then(|_| file_mode(&src)),
+            });
         }
         let snapshot = Snapshot {
             version: VERSION,
@@ -341,17 +368,21 @@ impl SnapshotStore {
                 None
             };
             let current = read_optional(&target)?;
-            plan.push((file.path.clone(), target, backup, current));
+            plan.push((file.path.clone(), target, backup, current, file.mode));
         }
-        for (i, (_, target, backup, current)) in plan.iter().enumerate() {
+        for (i, (_, target, backup, current, mode)) in plan.iter().enumerate() {
             if backup == current {
                 continue;
             }
-            if let Err(e) = put(target, backup.as_deref()) {
+            let written = put(target, backup.as_deref());
+            if let (Ok(()), Some(mode), Some(_)) = (&written, mode, backup) {
+                set_mode(target, *mode);
+            }
+            if let Err(e) = written {
                 let unrecovered = plan[..=i]
                     .iter()
                     .rev()
-                    .filter(|(_, target, _, current)| {
+                    .filter(|(_, target, _, current, _)| {
                         let unchanged = read_optional(target).is_ok_and(|now| now == *current);
                         !unchanged && put(target, current.as_deref()).is_err()
                     })
@@ -407,6 +438,25 @@ impl SnapshotStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn a_restore_brings_back_the_file_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let (project, data) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let (root, store) = (project.path(), SnapshotStore::new(data.path()));
+        let mode = |file: &str| std::fs::metadata(root.join(file)).unwrap().permissions().mode() & 0o777;
+        for (file, original) in [("secret.php", 0o600), ("run.php", 0o755)] {
+            std::fs::write(root.join(file), "<?php\n").unwrap();
+            std::fs::set_permissions(root.join(file), std::fs::Permissions::from_mode(original)).unwrap();
+        }
+        let snapshot = store.create(root, &["secret.php".to_string(), "run.php".to_string()], "x").unwrap();
+        std::fs::write(root.join("secret.php"), "<?php // changed\n").unwrap();
+        std::fs::set_permissions(root.join("secret.php"), std::fs::Permissions::from_mode(0o644)).unwrap();
+        std::fs::remove_file(root.join("run.php")).unwrap();
+        store.restore_files(root, &snapshot.id, None).unwrap();
+        assert_eq!((mode("secret.php"), mode("run.php")), (0o600, 0o755));
+    }
     use std::fs;
 
     #[test]

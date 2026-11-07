@@ -685,6 +685,26 @@ fn a_commit_that_fails_leaves_the_files_on_the_branch_it_started_from() {
 }
 
 #[test]
+fn php_is_not_committed_unless_its_syntax_was_checked() {
+    let h = harness();
+    let root = PathBuf::from(normalize_path(h.root.clone()));
+    let git = git_repo(&root);
+    let head = git(&["rev-parse", "HEAD"]);
+    let id = stage_preview(&h, &[("src/Greeter.php", "<?php // changed\n")]);
+    h._app.state::<AppState>().previews.lock().unwrap().get_mut(&root.to_string_lossy().to_string()).unwrap().1.target =
+        PhpVersion::new(9, 9);
+    let result = h.ok(
+        "apply_changes",
+        json!({ "path": h.root, "previewId": id, "files": ["src/Greeter.php"], "label": "x", "commitMessage": "Batch" }),
+    );
+    assert_eq!(result["commit"], Value::Null, "{result}");
+    assert!(result["gitError"].as_str().unwrap().contains("denetlenemedi"), "{result}");
+    assert_eq!(git(&["rev-parse", "HEAD"]), head);
+    assert_eq!(git(&["symbolic-ref", "--short", "HEAD"]), "main");
+    assert_eq!(std::fs::read_to_string(root.join("src/Greeter.php")).unwrap(), "<?php // changed\n");
+}
+
+#[test]
 fn new_syntax_errors_are_not_committed() {
     let Some(php) = toolchain::find_php(None) else { return };
     let Some(version) = toolchain::php_version(&php).and_then(|v| v.parse::<PhpVersion>().ok()) else { return };
