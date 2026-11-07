@@ -12,7 +12,7 @@ A desktop app for macOS, Windows and Linux that scans your PHP code, shows what 
 
 [Features](#features) · [Install](#install) · [Privacy](#privacy) · [How it works](#how-it-works) · [Build from source](#build-from-source) · [Türkçe](README.tr.md)
 
-![The Ferry overview for a WordPress project moving from PHP 7.4 to 8.4: a readiness score of 39 with what still blocks the upgrade, the split into automatic, review and manual fixes, and a diff from the Fixes page making constructor parameters explicitly nullable](assets/readme/hero-en.webp)
+![The Ferry overview for a WordPress project moving from PHP 7.4 to 8.4: a readiness score of 39, a headline saying half the problems are in four files, counts by severity, the most common issues, the next steps, and a map of the project with a tile for each affected file](assets/readme/hero-en.webp)
 
 - **See the problems before your users do.** Code that was removed or changed between PHP 7.0 and 8.5 is listed with its file, line, and the reason it matters. [docs/COVERAGE.md](docs/COVERAGE.md) shows what a scan can and can't find.
 - **Nothing changes without your approval.** Rector runs in dry-run mode only. You review each change line by line and apply only the files you pick.
@@ -53,7 +53,7 @@ After the second scan, **Since the last scan** shows how many findings were reso
 
 The **Findings** page lists every issue grouped by file, with the line, the code, and its fix type. Search files and issues, filter by fix type or severity, and see how many findings match. A rule picked on the overview shows up as a filter you can remove, and **Clear filters** resets everything. Filters stay put when you switch pages.
 
-![Findings page with issues grouped by file, filters for fix type and severity, the runtime checks, and the details of an each() finding: the code, why it matters, what to use instead, and its fix type](assets/readme/findings-en.webp)
+![Findings page with issues grouped by file, severity filters and a search box, and the details of an each() finding: the code around it, how to fix it and what happens if you don't](assets/readme/findings-en.webp)
 
 Select a finding to see:
 
@@ -117,7 +117,7 @@ A declared requirement like `^8.0` doesn't always mean the package works on the 
 
 Polyfills the project requires itself, such as `symfony/polyfill-php80` or `paragonie/random_compat`, get a note once the target PHP includes what they add.
 
-![Dependencies page with three incompatible packages for PHP 8.4, the project's PHP constraint, and each package's version, PHP requirement and status](assets/readme/dependencies-en.webp)
+![Dependencies page with three incompatible packages for PHP 8.4, the project's PHP constraint, one command to update them, and each package's version, PHP requirement and status](assets/readme/dependencies-en.webp)
 
 Each package is marked **Compatible**, **Incompatible**, or **Unknown** (when the package declares no PHP requirement, or one Ferry can't read), with incompatible packages listed first. When nothing blocks the upgrade but some packages are unknown, the page says so instead of calling everything compatible. Development packages are labeled, and **Production only** hides them. The warning above the list gives a ready-to-copy `composer update` command naming exactly the packages that block the upgrade.
 
@@ -131,12 +131,12 @@ In a WordPress project, **WordPress plugins and themes** lists every plugin and 
 
 ### Undo anything from History
 
-Before every apply, Ferry backs up the files it is about to change. The **History** page lists every apply with its time and number of files.
+Before every apply, Ferry backs up the files it is about to change. The **History** page charts the readiness score and findings by severity across scans, marks where fixes were applied, and lists every scan, apply and check on a timeline, with a table view of the same numbers.
 
-![A History entry opened for review: the changed files on the left, the diff and rules of the selected file on the right, and the Restore button](assets/readme/history-en.webp)
+![History page with the readiness score rising across scans, stacked bars of findings by severity for each scan, markers for applied fixes, and the timeline and backups below](assets/readme/history-en.webp)
 
 - **Review** shows exactly what each apply changed, file by file, with the rules behind each change.
-- **Restore** puts every file back as it was before that apply. If you edited any of them since, Ferry lists them first, backs up their current content as a new History entry, and refuses to overwrite a file that changes after you confirmed.
+- **Undo** puts every file back as it was before that apply. If you edited any of them since, Ferry lists them first, backs up their current content as a new History entry, and refuses to overwrite a file that changes after you confirmed.
 - **Backups to keep** in **Settings** limits how many backups each project keeps (10, 30 or 100). It is unlimited by default.
 - If an apply fails partway, Ferry rolls the files back on its own. If even that fails, the backup stays in History so you can restore it yourself.
 
