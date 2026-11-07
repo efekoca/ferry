@@ -100,8 +100,8 @@
   };
   const scan = async () => {
     await click("Taramayı başlat");
-    await until(() => $(".score-ring"), "scan result", 120000);
-    return Number($(".score-ring__number")?.textContent);
+    await until(() => $(".overview-score"), "scan result", 120000);
+    return Number($(".overview-score").dataset.score);
   };
   const preview = async () => {
     await nav("Düzeltmeler");
@@ -149,9 +149,10 @@
       const score = await scan();
       await emit(`  score=${score} findings=${$(".nav__count")?.textContent}`);
       const rescan = async (version) => {
-        radio(version).click();
-        await until(() => $(".score__meta .badge")?.textContent === `PHP ${version}` && $(".score-ring"), `rescan for ${version}`, 120000);
-        return Number($(".score-ring__number")?.textContent);
+        $(".overview-target [role=combobox]").click();
+        (await until(() => $$("[role=option]").find((o) => o.textContent.startsWith(`PHP ${version}`)), `target ${version}`)).click();
+        await until(() => $(".overview-target .select__value")?.textContent === `PHP ${version}` && $(".overview-score"), `rescan for ${version}`, 120000);
+        return Number($(".overview-score").dataset.score);
       };
       const score85 = await rescan("8.5");
       await emit(`  8.5 score=${score85}`);
