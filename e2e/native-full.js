@@ -447,10 +447,10 @@
       await openRecent(projects.unicode);
       await scan();
       await nav("Gerçek test");
-      const select = await until(() => $$("select").find((s) => [...s.options].some((o) => o.value.startsWith("dump:"))), "database choices");
-      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set;
-      setter.call(select, "dump:database/dump.sql");
-      select.dispatchEvent(new Event("change", { bubbles: true }));
+      const select = await until(() => $$('[role="combobox"]').find((s) => s.getAttribute("aria-label") === "Veritabanı"), "database choices");
+      select.click();
+      const option = await until(() => $$('[role="option"]').find((o) => o.textContent.includes("database/dump.sql")), "database dump");
+      option.click();
       await click("Testi başlat");
       await until(() => text().includes("İstekler sonrası"), "data comparison", 900000);
       noErrorToast(before);
@@ -491,7 +491,7 @@
       radio("Sistem").click();
       still.remove();
       if (vibrancy) document.documentElement.dataset.vibrancy = vibrancy;
-      check(failures.length === 0, `contrast: ${failures.slice(0, 5).join("; ")}`);
+      check(failures.length === 0, `contrast: ${failures.join("; ")}`);
     },
 
     async function settings() {

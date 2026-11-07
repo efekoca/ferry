@@ -1,10 +1,14 @@
 import { touches } from "../lib/fixes";
 import type { DockerEvent, FileChange } from "../lib/types";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { DiffViewer, wordHighlight } from "../components/DiffViewer";
+import { DiffViewer, wordDiff } from "../components/DiffViewer";
 import { ScoreRing } from "../components/ScoreRing";
-import { DICTS } from "../i18n";
+import { Select, TagInput } from "../components/ui";
+import { DICTS, I18nProvider } from "../i18n";
+import { highlight } from "../lib/code";
 import { commonTitle, dependencyBlockers, formatBytes, formatDuration, formatRelative, joinPath, scoreHeadline, scoreTone } from "../lib/labels";
 import { NO_FILTER, type FindingsFilter } from "../lib/store";
 import { filterFindings, prioritizeFindings } from "../screens/Findings";
@@ -26,12 +30,26 @@ describe("dictionaries", () => {
   });
 });
 
-describe("wordHighlight", () => {
+const changed = (text: string, marks: boolean[]) => [...text].filter((_, i) => marks[i]).join("");
+
+describe("wordDiff", () => {
   it("isolates the changed span", () => {
-    expect(wordHighlight("f(Foo $a = null)", "f(?Foo $a = null)")).toEqual(["f(", "", "Foo $a = null)"]);
-    expect(wordHighlight("f(?Foo $a = null)", "f(Foo $a = null)")).toEqual(["f(", "?", "Foo $a = null)"]);
-    expect(wordHighlight("same", "same")).toEqual(["same", "", ""]);
-    expect(wordHighlight("abc", "xyz")).toEqual(["", "abc", ""]);
+    const [before, after] = wordDiff("f(Foo $a = null)", "f(?Foo $a = null)");
+    expect(changed("f(Foo $a = null)", before)).toBe("");
+    expect(changed("f(?Foo $a = null)", after)).toBe("?");
+    expect(wordDiff("same", "same")[0].some(Boolean)).toBe(false);
+    expect(changed("abc", wordDiff("abc", "xyz")[0])).toBe("abc");
+  });
+
+  it("keeps an inserted word in one piece without its trailing space", () => {
+    const text = "    public function label($row)";
+    expect(changed(text, wordDiff("    function label($row)", text)[1])).toBe("public");
+  });
+
+  it("marks only the tokens that changed in a long line", () => {
+    const before = "return $row[status] == 'paid' ? 'yes' : $row[status];";
+    const after = "return $row['status'] == 'paid' ? 'yes' : $row['status'];";
+    expect(changed(after, wordDiff(before, after)[1])).toBe("''''");
   });
 });
 
@@ -57,9 +75,9 @@ describe("DiffViewer", () => {
     expect(screen.getByRole("region", { name: "a.php değişiklikleri" })).toBeInTheDocument();
     const rows = container.querySelectorAll("tr[data-kind]");
     expect([...rows].map((r) => r.getAttribute("data-kind"))).toEqual(["context", "del", "add"]);
-    expect(container.querySelector("tr.del mark")?.textContent).toBe("utf8_encode($s");
-    expect(container.querySelector("tr.add mark")?.textContent).toBe("mb_convert_encoding($s, 'UTF-8', 'ISO-8859-1'");
-    expect(container.querySelector(".diff__hunk")?.textContent).toContain("−3 +3");
+    expect(container.querySelector("tr.del mark")?.textContent).toBe("utf8_encode");
+    expect(container.querySelector("tr.add mark")?.textContent).toBe("mb_convert_encoding");
+    expect(container.querySelector(".diff__hunk")?.textContent).toContain("Satır 3");
   });
 });
 
@@ -230,5 +248,131 @@ describe("touches", () => {
     expect(touches(at("/app/a.php", 9), change)).toBe(true);
     expect(touches(at("/app/a.php", 11), change)).toBe(false);
     expect(touches(at("/app/b.php", 9), change)).toBe(false);
+  });
+});
+
+describe("Select", () => {
+  const options = [
+    { value: "a", label: "Alfa" },
+    { value: "b", label: "Beta", disabled: true },
+    { value: "c", label: "Gama" },
+  ];
+
+  function Picker({ onChange }: { onChange: (value: string) => void }) {
+    const [value, setValue] = useState("a");
+    return (
+      <Select
+        label="Seçim"
+        value={value}
+        options={options}
+        onChange={(v) => {
+          setValue(v);
+          onChange(v);
+        }}
+      />
+    );
+  }
+
+  it("moves past disabled options with the keyboard and picks with Enter", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<I18nProvider><Picker onChange={onChange} /></I18nProvider>);
+    const box = screen.getByRole("combobox", { name: "Seçim" });
+    box.focus();
+    await user.keyboard("{ArrowDown}");
+    expect(box).toHaveAttribute("aria-expanded", "true");
+    await user.keyboard("{ArrowDown}{Enter}");
+    expect(onChange).toHaveBeenCalledWith("c");
+    expect(box).toHaveAttribute("aria-expanded", "false");
+    expect(box).toHaveFocus();
+    expect(box).toHaveTextContent("Gama");
+  });
+
+  it("closes on Escape without changing the value and ignores a disabled click", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<I18nProvider><Picker onChange={onChange} /></I18nProvider>);
+    const box = screen.getByRole("combobox", { name: "Seçim" });
+    await user.click(box);
+    await user.click(screen.getByRole("option", { name: "Beta" }));
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("jumps to an option by typing and closes on an outside click", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<I18nProvider><Picker onChange={onChange} /><button>dış</button></I18nProvider>);
+    const box = screen.getByRole("combobox", { name: "Seçim" });
+    box.focus();
+    await user.keyboard("{Enter}g{Enter}");
+    expect(onChange).toHaveBeenCalledWith("c");
+    await user.click(box);
+    await user.click(screen.getByRole("button", { name: "dış" }));
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  });
+});
+
+describe("TagInput", () => {
+  function Tags({ onChange }: { onChange: (values: string[]) => void }) {
+    const [values, setValues] = useState(["legacy"]);
+    return (
+      <TagInput
+        label="Klasörler"
+        values={values}
+        removeLabel={(v) => `${v} çıkar`}
+        onChange={(next) => {
+          setValues(next);
+          onChange(next);
+        }}
+      />
+    );
+  }
+
+  it("adds on Enter, ignores duplicates and removes with Backspace or the button", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<Tags onChange={onChange} />);
+    const field = screen.getByRole("textbox", { name: "Klasörler" });
+    await user.type(field, "tools{Enter}");
+    expect(onChange).toHaveBeenLastCalledWith(["legacy", "tools"]);
+    onChange.mockClear();
+    await user.type(field, "tools{Enter}");
+    expect(onChange).not.toHaveBeenCalled();
+    await user.keyboard("{Backspace}");
+    expect(onChange).toHaveBeenLastCalledWith(["legacy"]);
+    await user.click(screen.getByRole("button", { name: "legacy çıkar" }));
+    expect(onChange).toHaveBeenLastCalledWith([]);
+  });
+
+  it("splits a pasted list and keeps what was typed when the field loses focus", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<Tags onChange={onChange} />);
+    const field = screen.getByRole("textbox", { name: "Klasörler" });
+    await user.click(field);
+    await user.paste("a\nb, c");
+    expect(onChange).toHaveBeenLastCalledWith(["legacy", "a", "b", "c"]);
+    await user.type(field, "d");
+    await user.tab();
+    expect(onChange).toHaveBeenLastCalledWith(["legacy", "a", "b", "c", "d"]);
+  });
+});
+
+describe("highlight", () => {
+  it("colours PHP and keeps the source text intact", () => {
+    const { container } = render(<code>{highlight("$a = strlen('x'); // ok")}</code>);
+    expect(container.textContent).toBe("$a = strlen('x'); // ok");
+    expect(container.querySelector(".tok-variable")?.textContent).toBe("$a");
+    expect(container.querySelector(".tok-function")?.textContent).toBe("strlen");
+    expect(container.querySelector(".tok-string")?.textContent).toBe("'x'");
+    expect(container.querySelector(".tok-comment")?.textContent).toBe("// ok");
+  });
+
+  it("leaves other files plain", () => {
+    const { container } = render(<code>{highlight("FROM php:8.4", [], false)}</code>);
+    expect(container.querySelector("[class^=tok-]")).toBeNull();
   });
 });
