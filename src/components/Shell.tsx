@@ -90,7 +90,7 @@ export function Sidebar() {
       </div>
 
       {project && (
-        <button className="project-chip" onClick={() => openProject()} disabled={opening} title={t.nav.openAnother}>
+        <button className="project-chip" onClick={() => openProject()} disabled={opening} title={`${project.root}\n${t.nav.openAnother}`}>
           <span className="project-chip__name">{project.name}</span>
           <span className="project-chip__meta">
             {FRAMEWORK_LABEL[project.framework]}
@@ -130,10 +130,14 @@ export function Sidebar() {
   );
 }
 
-export function PageHeader({ title, subtitle, actions }: { title: string; subtitle?: string; actions?: ReactNode }) {
+export function usePageTitle(title: string) {
   useEffect(() => {
     document.title = `${title} · Ferry`;
   }, [title]);
+}
+
+export function PageHeader({ title, subtitle, actions }: { title: string; subtitle?: string; actions?: ReactNode }) {
+  usePageTitle(title);
   return (
     <header className="page-header" data-tauri-drag-region>
       <div className="page-header__title">

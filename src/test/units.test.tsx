@@ -5,10 +5,11 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { DiffViewer, wordDiff } from "../components/DiffViewer";
-import { ScoreRing } from "../components/ScoreRing";
 import { Select, TagInput } from "../components/ui";
 import { DICTS, I18nProvider } from "../i18n";
 import { highlight } from "../lib/code";
+import { squarify } from "../lib/treemap";
+import { filesHoldingHalf, fileStats } from "../screens/Overview";
 import { commonTitle, dependencyBlockers, formatBytes, formatDuration, formatRelative, joinPath, scoreHeadline, scoreTone } from "../lib/labels";
 import { NO_FILTER, type FindingsFilter } from "../lib/store";
 import { filterFindings, prioritizeFindings } from "../screens/Findings";
@@ -105,10 +106,6 @@ describe("labels", () => {
     expect(formatDuration(1500, "en-US")).toBe("1.5 s");
   });
 
-  it("score ring exposes an accessible label", () => {
-    render(<ScoreRing score={73} />);
-    expect(screen.getByRole("img", { name: "Hazırlık puanı: 73/100" })).toHaveAttribute("data-tone", "manual");
-  });
 
   it("groups function families", () => {
     expect(commonTitle(["mysql_connect()", "mysql_query()"])).toBe("mysql_*()");
@@ -374,5 +371,55 @@ describe("highlight", () => {
   it("leaves other files plain", () => {
     const { container } = render(<code>{highlight("FROM php:8.4", [], false)}</code>);
     expect(container.querySelector("[class^=tok-]")).toBeNull();
+  });
+});
+
+describe("squarify", () => {
+  const items = [47, 22, 19, 18, 9, 9, 8, 8, 7, 7, 7, 7, 6, 5, 4, 4, 3, 1, 1, 1, 1, 1].map((value) => ({ value }));
+
+  it("gives each file an area in proportion to its findings and fills the box", () => {
+    const tiles = squarify(items, 730, 770);
+    const total = items.reduce((a, b) => a + b.value, 0);
+    expect(tiles).toHaveLength(items.length);
+    expect(tiles.reduce((a, t) => a + t.width * t.height, 0)).toBeCloseTo(730 * 770, 3);
+    for (const tile of tiles) {
+      expect((tile.width * tile.height) / (730 * 770)).toBeCloseTo(tile.item.value / total, 6);
+      expect(tile.x + tile.width).toBeLessThanOrEqual(730.001);
+      expect(tile.y + tile.height).toBeLessThanOrEqual(770.001);
+    }
+  });
+
+  it("does not overlap tiles and keeps them from getting thin", () => {
+    const tiles = squarify(items, 730, 770);
+    for (const a of tiles) {
+      expect(Math.max(a.width / a.height, a.height / a.width)).toBeLessThan(5);
+      for (const b of tiles) {
+        if (a === b) continue;
+        const apart = a.x + a.width <= b.x + 0.001 || b.x + b.width <= a.x + 0.001 || a.y + a.height <= b.y + 0.001 || b.y + b.height <= a.y + 0.001;
+        expect(apart).toBe(true);
+      }
+    }
+  });
+
+  it("ignores empty values and an empty box", () => {
+    expect(squarify([{ value: 0 }], 100, 100)).toEqual([]);
+    expect(squarify([{ value: 3 }], 0, 100)).toEqual([]);
+    expect(squarify([{ value: 3 }, { value: 0 }], 100, 100)).toHaveLength(1);
+  });
+});
+
+describe("fileStats", () => {
+  const finding = (file: string, severity: Finding["severity"]) => ({ file, severity }) as Finding;
+  const stats = fileStats([finding("a.php", "breaking"), finding("b.php", "deprecated"), finding("b.php", "breaking"), finding("b.php", "behavior"), finding("c.php", "behavior")]);
+
+  it("counts severities per file with the heaviest first", () => {
+    expect(stats.map((s) => s.file)).toEqual(["b.php", "a.php", "c.php"]);
+    expect(stats[0]).toMatchObject({ value: 3, breaking: 1, deprecated: 1, behavior: 1 });
+  });
+
+  it("finds how few files hold half of the findings", () => {
+    expect(filesHoldingHalf(stats)).toBe(1);
+    expect(filesHoldingHalf(fileStats([finding("a", "breaking"), finding("b", "breaking"), finding("c", "breaking"), finding("d", "breaking")]))).toBe(2);
+    expect(filesHoldingHalf([])).toBe(0);
   });
 });

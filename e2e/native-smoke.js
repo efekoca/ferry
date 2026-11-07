@@ -41,8 +41,8 @@
     await emit(`project ${document.querySelector(".project-chip__name")?.textContent}`);
 
     await click("Taramayı başlat");
-    await until(() => document.querySelector(".score-ring"), "tarama sonucu", 60000);
-    await emit(`scan score=${document.querySelector(".score-ring__number")?.textContent} findings=${document.querySelector(".nav__count")?.textContent}`);
+    await until(() => document.querySelector(".overview-score"), "tarama sonucu", 60000);
+    await emit(`scan score=${document.querySelector(".overview-score")?.dataset.score} findings=${document.querySelector(".nav__count")?.textContent}`);
     await step("overview");
 
     await nav("Bulgular");

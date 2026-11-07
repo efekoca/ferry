@@ -32,7 +32,7 @@ import { errorMessage } from "../lib/api";
 import { formatBytes, formatRelative } from "../lib/labels";
 import { useStore, type Theme } from "../lib/store";
 import { compareProbe, parseProbe } from "../lib/probe";
-import type { BackupUsage, DockerImageUsage, DependencyReport, DependencyStatus, ExtensionUse, FileChange, Settings, Snapshot, SnapshotConflict, VersionSuggestion, WpLatest } from "../lib/types";
+import type { BackupUsage, DockerImageUsage, DependencyReport, DependencyStatus, ExtensionUse, FileChange, Settings, Snapshot, SnapshotConflict, VersionSuggestion, WpLatest, HistoryEntry, ScanHistory } from "../lib/types";
 
 const DEP_TONE: Record<DependencyStatus, "danger" | "auto" | "neutral"> = {
   incompatible: "danger",
@@ -457,9 +457,70 @@ function ServerProbe({ target, extensions }: { target: string; extensions: Exten
   );
 }
 
+function ProgressCard({ progress }: { progress: ScanHistory }) {
+  const { t } = useI18n();
+  const { history, newSinceLast, fixedSinceLast } = progress;
+  const date = (at: number) => new Date(at * 1000).toLocaleString(t.locale, { dateStyle: "medium", timeStyle: "short" });
+  const changed = (newSinceLast ?? 0) > 0 || (fixedSinceLast ?? 0) > 0;
+  return (
+    <Card bodyClassName="progress-card">
+      <div className="progress-card__text">
+        <div className="metric__label">{t.progress.since}</div>
+        {newSinceLast === null || fixedSinceLast === null ? (
+          <p className="muted">{t.progress.first}</p>
+        ) : changed ? (
+          <div className="progress-card__delta">
+            <span className="progress-card__good">{t.progress.resolved(fixedSinceLast)}</span>
+            <span className="progress-card__sep" aria-hidden>
+              ·
+            </span>
+            <span>{t.progress.added(newSinceLast)}</span>
+          </div>
+        ) : (
+          <div className="progress-card__delta">{t.progress.unchanged}</div>
+        )}
+      </div>
+      {history.length > 1 && <Sparkline points={history} label={t.progress.trend(history.map((h) => h.score).join(", "))} describe={(h) => t.progress.point(date(h.at), h.score, h.total)} />}
+    </Card>
+  );
+}
+
+function Sparkline({ points, label, describe }: { points: HistoryEntry[]; label: string; describe: (h: HistoryEntry) => string }) {
+  const [hover, setHover] = useState<number | null>(null);
+  const width = 200;
+  const height = 48;
+  const pad = 6;
+  const x = (i: number) => pad + (i * (width - pad * 2)) / Math.max(1, points.length - 1);
+  const y = (score: number) => pad + ((100 - score) * (height - pad * 2)) / 100;
+  const path = points.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p.score).toFixed(1)}`).join(" ");
+  const last = points.length - 1;
+  const shown = hover ?? last;
+  return (
+    <div className="sparkline" onMouseLeave={() => setHover(null)}>
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        width={width}
+        height={height}
+        role="img"
+        aria-label={label}
+        onMouseMove={(e) => {
+          const box = e.currentTarget.getBoundingClientRect();
+          const rel = ((e.clientX - box.left) / box.width) * width;
+          setHover(Math.max(0, Math.min(last, Math.round(((rel - pad) / (width - pad * 2)) * last))));
+        }}
+      >
+        <path d={path} className="sparkline__line" />
+        {hover !== null && <line x1={x(hover)} x2={x(hover)} y1={0} y2={height} className="sparkline__cross" />}
+        <circle cx={x(shown)} cy={y(points[shown].score)} r={4} className="sparkline__dot" />
+      </svg>
+      <div className="sparkline__caption">{describe(points[shown])}</div>
+    </div>
+  );
+}
+
 export function History() {
   const { t } = useI18n();
-  const { api, project, snapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, dockerHistory, checkHistory } = useStore();
+  const { api, project, scan, snapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, dockerHistory, checkHistory } = useStore();
   const [clearing, setClearing] = useState(false);
   const [pending, setPending] = useState<{ snapshot: Snapshot; action: "restore" | "delete" } | null>(null);
   const [reviewing, setReviewing] = useState<Snapshot | null>(null);
@@ -496,6 +557,7 @@ export function History() {
       />
       <div className="page-scroll">
         <div className="page-body stack">
+          {scan?.progress && <ProgressCard progress={scan.progress} />}
           {dockerHistory.length > 0 && (
             <Card title={t.history.dockerTitle}>
               <ul className="docker-events">

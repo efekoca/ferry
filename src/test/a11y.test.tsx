@@ -117,7 +117,9 @@ describe("accessibility", { timeout: 30_000 }, () => {
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
     api.compareTargets = async () => [{ target: "8.4", summary: null as never, blockingPackages: 0, rootBlocks: false }];
     await user.click(nav(/Genel bakış/));
-    await user.click(screen.getByRole("button", { name: "Karşılaştır" }));
+    await user.click(screen.getByRole("button", { name: "Diğer" }));
+    await user.click(screen.getByRole("menuitem", { name: "Hedefleri karşılaştır" }));
+    await user.click(await screen.findByRole("button", { name: "Karşılaştır" }));
     await screen.findByRole("heading", { name: "Bu ekran gösterilemedi" });
     expect(await violations()).toEqual([]);
     spy.mockRestore();

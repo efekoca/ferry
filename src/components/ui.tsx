@@ -119,13 +119,14 @@ export function Segmented<T extends string>({
   size = "md",
   disabled = false,
 }: {
-  options: readonly { value: T; label: ReactNode; disabled?: boolean; describedBy?: string }[];
+  options: readonly { value: T; label: ReactNode; disabled?: boolean; tip?: string }[];
   value: T;
   onChange: (v: T) => void;
   label: string;
   size?: "md" | "lg";
   disabled?: boolean;
 }) {
+  const id = useId();
   const move = (group: HTMLElement, dir: 1 | -1) => {
     if (disabled) return;
     let j = options.findIndex((o) => o.value === value);
@@ -154,11 +155,18 @@ export function Segmented<T extends string>({
           role="radio"
           aria-checked={o.value === value}
           tabIndex={o.value === value ? 0 : -1}
-          disabled={disabled || o.disabled}
-          aria-describedby={o.describedBy}
-          onClick={() => onChange(o.value)}
+          disabled={disabled || (o.disabled && !o.tip)}
+          aria-disabled={o.disabled && o.tip ? true : undefined}
+          aria-describedby={o.tip ? `${id}-${o.value}` : undefined}
+          className={o.tip ? "tip" : undefined}
+          onClick={() => !o.disabled && onChange(o.value)}
         >
           {o.label}
+          {o.tip && (
+            <span id={`${id}-${o.value}`} className="tip__box" role="tooltip">
+              {o.tip}
+            </span>
+          )}
         </button>
       ))}
     </div>
@@ -568,6 +576,71 @@ export function TagInput({
         />
         {end && <span className="fbox__end">{end}</span>}
       </span>
+    </div>
+  );
+}
+
+export interface MenuAction {
+  label: string;
+  icon?: ReactNode;
+  onClick: () => void;
+}
+
+export function ActionMenu({ label, icon, items }: { label: string; icon: ReactNode; items: readonly MenuAction[] }) {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  const focusAt = (i: number) => menu.current?.querySelectorAll<HTMLElement>('[role="menuitem"]')[i]?.focus();
+  useEffect(() => {
+    if (!open) return;
+    focusAt(0);
+    const away = (e: PointerEvent) => {
+      if (!root.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", away);
+    return () => document.removeEventListener("pointerdown", away);
+  }, [open]);
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    const entries = [...(menu.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])];
+    const at = entries.indexOf(document.activeElement as HTMLElement);
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      focusAt((at + (e.key === "ArrowDown" ? 1 : -1) + entries.length) % entries.length);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      setOpen(false);
+      button.current?.focus();
+    } else if (e.key === "Tab") {
+      setOpen(false);
+    }
+  };
+  return (
+    <div ref={root} className="action-menu">
+      <Button ref={button} variant="ghost" iconOnly aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+        {icon}
+        <span className="sr-only">{label}</span>
+      </Button>
+      {open && (
+        <div ref={menu} role="menu" aria-label={label} className="menu action-menu__list" onKeyDown={onKeyDown}>
+          {items.map((item) => (
+            <button
+              key={item.label}
+              type="button"
+              role="menuitem"
+              className="menu__item"
+              onClick={() => {
+                setOpen(false);
+                item.onClick();
+              }}
+            >
+              {item.icon}
+              <span className="menu__main">{item.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

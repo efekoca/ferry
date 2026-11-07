@@ -18,6 +18,15 @@ async function pick(user: ReturnType<typeof userEvent.setup>, name: string, opti
   await user.click(await screen.findByRole("option", { name: option }));
 }
 
+const targetBox = () => screen.getByRole("combobox", { name: "Hedef PHP sürümü" });
+const pickTarget = (user: ReturnType<typeof userEvent.setup>, version: string) => pick(user, "Hedef PHP sürümü", new RegExp(`^PHP ${version.replace(".", "\\.")}`));
+
+async function compareTargets(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole("button", { name: "Diğer" }));
+  await user.click(screen.getByRole("menuitem", { name: "Hedefleri karşılaştır" }));
+  await user.click(await screen.findByRole("button", { name: "Karşılaştır" }));
+}
+
 async function openAndScan(user: ReturnType<typeof userEvent.setup>) {
   await user.click(await screen.findByRole("button", { name: "Proje klasörü seçin" }));
   await screen.findByRole("heading", { name: "Genel bakış" });
@@ -67,7 +76,8 @@ describe("Ferry app", () => {
     const user = setup();
     await openAndScan(user);
     expect(screen.getByText("kuzey-magaza")).toBeInTheDocument();
-    expect(screen.getByText("Ciddi bir geçiş gerekiyor")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: /Sorunların yarısı|Ciddi bir geçiş gerekiyor/ })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Dosyalara göre bulgular" })).toBeInTheDocument();
     expect(JSON.parse(localStorage.getItem("ferry.recent")!)[0].name).toBe("kuzey-magaza");
     expect(screen.getByText("mysql_*()")).toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent("WordPress 6.2, PHP 8.4 ile çalışmaz.");
@@ -77,12 +87,14 @@ describe("Ferry app", () => {
   it("shows what still stands between the project and the target", async () => {
     const user = setup();
     await openAndScan(user);
-    const list = screen.getByRole("list", { name: "Hazırlık durumu" });
-    expect(within(list).getByText("Geçişi engelleyenler").parentElement).toHaveAttribute("data-state", "bad");
-    expect(within(list).getByText("Tüm dosyalar")).toBeInTheDocument();
-    expect(within(list).getByRole("button", { name: "3 engel" })).toBeInTheDocument();
-    expect(within(list).getByRole("button", { name: "Çalıştırılmadı" })).toBeInTheDocument();
-    await user.click(within(list).getByRole("button", { name: "3 engel" }));
+    const list = screen.getByRole("list", { name: "Geçiş adımları" });
+    const step = (name: RegExp) => within(list).getByRole("button", { name });
+    expect(step(/Tarama/).parentElement).toHaveAttribute("data-state", "done");
+    expect(step(/Düzeltmeler/).parentElement).toHaveAttribute("data-state", "next");
+    expect(step(/Bağımlılıklar/).parentElement).toHaveAttribute("data-state", "blocked");
+    expect(step(/Bağımlılıklar/)).toHaveTextContent("3");
+    expect(step(/Gerçek test/)).toHaveAttribute("title", "Henüz çalıştırılmadı");
+    await user.click(step(/Bağımlılıklar/));
     expect(await screen.findByRole("heading", { name: "Bağımlılıklar" })).toBeInTheDocument();
   });
 
@@ -103,31 +115,44 @@ describe("Ferry app", () => {
   it("drops the framework warning for targets the framework supports", async () => {
     const user = setup();
     await openAndScan(user);
-    await user.click(screen.getByRole("radio", { name: "8.2" }));
-    expect(await screen.findByText("PHP 8.2", { selector: ".score__meta .badge" })).toBeInTheDocument();
+    await pickTarget(user, "8.2");
+    await waitFor(() => expect(targetBox()).toHaveTextContent("PHP 8.2"));
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("rescans when the target changes after a scan", async () => {
     const user = setup();
     await openAndScan(user);
-    await user.click(screen.getByRole("radio", { name: "8.3" }));
-    expect(await screen.findByText("PHP 8.3", { selector: ".score__meta .badge" })).toBeInTheDocument();
-    expect(screen.queryByText("PHP 8.4", { selector: ".score__meta .badge" })).not.toBeInTheDocument();
+    await pickTarget(user, "8.3");
+    await screen.findByRole("group", { name: "Dosyalara göre bulgular" });
+    expect(targetBox()).toHaveTextContent("PHP 8.3");
     expect(screen.queryByRole("button", { name: /Taramayı başlat/ })).not.toBeInTheDocument();
   });
 
   it("keeps PHP 8.1 out of reach and explains why", async () => {
     const user = setup();
     await openAndScan(user);
-    const blocked = screen.getByRole("radio", { name: "8.1" });
-    expect(blocked).toBeDisabled();
+    await user.click(targetBox());
+    const blocked = screen.getByRole("option", { name: /PHP 8\.1/ });
+    expect(blocked).toHaveAttribute("aria-disabled", "true");
+    expect(blocked).toHaveTextContent("Güvenlik yaması yok");
+    await user.click(blocked);
+    expect(targetBox()).toHaveTextContent("PHP 8.4");
+    await user.keyboard("{Escape}");
+    await pickTarget(user, "8.2");
+    await screen.findByRole("group", { name: "Dosyalara göre bulgular" });
+    targetBox().focus();
+    await user.keyboard("{Enter}{ArrowUp}{Enter}");
+    await waitFor(() => expect(targetBox()).toHaveTextContent("PHP 8.5"));
+  });
+
+  it("explains why PHP 8.1 is closed before the first scan", async () => {
+    const user = setup();
+    await user.click(await screen.findByRole("button", { name: /Proje klasörü/ }));
+    const blocked = await screen.findByRole("radio", { name: /8\.1/ });
+    expect(blocked).toHaveAttribute("aria-disabled", "true");
     expect(blocked).toHaveAccessibleDescription(/CVE-2026-109618.*8\.2\.35, 8\.3\.36, 8\.4\.27, 8\.5\.12/);
-    await user.click(screen.getByRole("radio", { name: "8.2" }));
-    await screen.findByText("PHP 8.2", { selector: ".score__meta .badge" });
-    screen.getByRole("radio", { name: "8.2" }).focus();
-    await user.keyboard("{ArrowLeft}");
-    expect(await screen.findByText("PHP 8.5", { selector: ".score__meta .badge" })).toBeInTheDocument();
+    await user.click(blocked);
     expect(blocked).toHaveAttribute("aria-checked", "false");
   });
 
@@ -135,7 +160,7 @@ describe("Ferry app", () => {
     localStorage.setItem("ferry.target", JSON.stringify("8.1"));
     const user = setup();
     await openAndScan(user);
-    expect(screen.getByRole("radio", { name: "8.4" })).toHaveAttribute("aria-checked", "true");
+    expect(targetBox()).toHaveTextContent("PHP 8.4");
   });
 
   it("warns when the local PHP is affected by the October 2026 vulnerabilities", async () => {
@@ -172,13 +197,13 @@ describe("Ferry app", () => {
     await user.click(await screen.findByRole("button", { name: /Değişiklikleri hesapla/ }));
     await screen.findByRole("list", { name: "Dosyalar" });
     await user.click(nav(/Genel bakış/));
-    await user.click(screen.getByRole("radio", { name: "8.3" }));
+    await pickTarget(user, "8.3");
     const dialog = await screen.findByRole("dialog", { name: "PHP 8.3 hedefine geçilsin mi?" });
     await user.click(within(dialog).getByRole("button", { name: "Vazgeç" }));
-    expect(screen.getByRole("radio", { name: "8.4" })).toHaveAttribute("aria-checked", "true");
-    await user.click(screen.getByRole("radio", { name: "8.3" }));
+    expect(targetBox()).toHaveTextContent("PHP 8.4");
+    await pickTarget(user, "8.3");
     await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Hedefi değiştir" }));
-    expect(await screen.findByText("PHP 8.3", { selector: ".score__meta .badge" })).toBeInTheDocument();
+    await waitFor(() => expect(targetBox()).toHaveTextContent("PHP 8.3"));
     await user.click(nav(/Düzeltmeler/));
     expect(await screen.findByRole("button", { name: /Değişiklikleri hesapla/ })).toBeInTheDocument();
   });
@@ -272,8 +297,12 @@ describe("Ferry app", () => {
   it("shows progress since the previous scan", async () => {
     const user = setup();
     await openAndScan(user);
-    expect(screen.getByText(/İlk tarama/)).toBeInTheDocument();
+    await user.click(nav(/Geçmiş/));
+    expect(await screen.findByText(/İlk tarama/)).toBeInTheDocument();
+    await user.click(nav(/Genel bakış/));
     await user.click(screen.getByRole("button", { name: /Tekrar tara/ }));
+    await screen.findByRole("img", { name: /Hazırlık puanı/ });
+    await user.click(nav(/Geçmiş/));
     expect(await screen.findByText("Değişiklik yok")).toBeInTheDocument();
     expect(screen.getByRole("img", { name: /Hazırlık puanının taramalar boyunca değişimi/ })).toBeInTheDocument();
   });
@@ -488,7 +517,9 @@ describe("Ferry app", () => {
     await user.click(screen.getByRole("button", { name: "Bulgularda göster" }));
     expect(await screen.findByText(/Docker · PHP .* → 8.4: 31 farklı mesaj/)).toBeInTheDocument();
     await user.click(nav(/Genel bakış/));
-    expect(await screen.findByRole("button", { name: "Yeni sorunlar var" })).toBeInTheDocument();
+    const real = within(await screen.findByRole("list", { name: "Geçiş adımları" })).getByRole("button", { name: /Gerçek test/ });
+    expect(real).toHaveAttribute("title", "Yeni sorunlar var");
+    expect(real.parentElement).toHaveAttribute("data-state", "blocked");
     await user.click(nav(/Geçmiş/));
     expect(await screen.findByText("Gerçek testler")).toBeInTheDocument();
     expect(screen.queryByText("Sunucudaki proje kökü")).not.toBeInTheDocument();
@@ -726,7 +757,7 @@ describe("Ferry app", () => {
     };
     render(<App api={api} />);
     await openAndScan(user);
-    await user.click(screen.getByRole("button", { name: "Karşılaştır" }));
+    await compareTargets(user);
     const table = await screen.findByRole("table", { name: "Hedefleri karşılaştır" });
     expect(within(table).getByText("Bazı dosyalar taranamadı")).toBeInTheDocument();
     expect(within(table).getByText("Bu hedef karşılaştırılamadı: boom")).toBeInTheDocument();
@@ -735,12 +766,12 @@ describe("Ferry app", () => {
   it("compares targets and switches to one", async () => {
     const user = setup();
     await openAndScan(user);
-    await user.click(screen.getByRole("button", { name: "Karşılaştır" }));
+    await compareTargets(user);
     const table = await screen.findByRole("table", { name: "Hedefleri karşılaştır" });
     expect(within(table).getAllByRole("row")).toHaveLength(5);
     expect(within(table).getByText("Seçili")).toBeInTheDocument();
     await user.click(within(table).getAllByRole("button", { name: "Bu hedefe geç" })[0]);
-    await waitFor(() => expect(screen.getByRole("radio", { name: "8.2" })).toHaveAttribute("aria-checked", "true"));
+    await waitFor(() => expect(targetBox()).toHaveTextContent("PHP 8.2"));
   });
 
   it("saves the editor used to open findings", async () => {
@@ -796,7 +827,7 @@ describe("Ferry app", () => {
     await user.click(nav(/Gerçek test/));
     await user.click(await screen.findByRole("button", { name: "Testi başlat" }));
     await user.click(nav(/Genel bakış/));
-    expect(await screen.findByRole("radio", { name: "8.5" })).toBeDisabled();
+    expect(await screen.findByRole("combobox", { name: "Hedef PHP sürümü" })).toBeDisabled();
     await user.click(document.querySelector<HTMLElement>(".project-chip")!);
     await waitFor(() => expect(cancel).toHaveBeenCalledWith("/sites/0"));
     expect(await screen.findByText("Başka projeye geçtiğiniz için Gerçek test durduruldu.")).toBeInTheDocument();
@@ -970,7 +1001,7 @@ describe("Ferry app", () => {
     await user.click(screen.getByRole("button", { name: "Choose project folder" }));
     await user.click(await screen.findByRole("button", { name: /Start scan/ }));
     await screen.findByRole("img", { name: /Readiness score/ });
-    expect(screen.getByText("A substantial migration")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: /Half the problems|A substantial migration/ })).toBeInTheDocument();
 
     await user.click(within(screen.getByRole("navigation", { name: "Sections" })).getByRole("button", { name: /Findings/ }));
     await user.type(screen.getByRole("searchbox", { name: "Search findings" }), "nullable");
@@ -986,7 +1017,7 @@ describe("Ferry app", () => {
     render(<App api={api} />);
     await user.click(await screen.findByRole("button", { name: "Proje klasörü seçin" }));
     await user.click(await screen.findByRole("button", { name: /Taramayı başlat/ }));
-    await waitFor(() => expect(screen.getByRole("radio", { name: "8.4" })).toBeDisabled());
+    await screen.findByText(/uyumluluğu kontrol ediliyor/);
     await user.keyboard("{Meta>}o{/Meta}");
     await waitFor(() => expect(screen.getByRole("radio", { name: "8.4" })).toBeEnabled());
     expect(screen.getByRole("button", { name: /Taramayı başlat/ })).toBeEnabled();
@@ -1022,7 +1053,7 @@ describe("Ferry app", () => {
     await screen.findByRole("button", { name: /Durdur/ });
     const before = cancels;
     await user.click(nav(/Genel bakış/));
-    await user.click(screen.getByRole("radio", { name: "8.3" }));
+    await pickTarget(user, "8.3");
     expect(cancels).toBeGreaterThan(before);
   });
 
