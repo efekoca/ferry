@@ -3,24 +3,34 @@ import type { CheckSummary, DockerSummary, HistoryEntry, Snapshot } from "./type
 
 export type HistoryRange = "7" | "30" | "all";
 
-export type HistoryEvent =
+type EventBody =
   | { kind: "scan"; at: number; entry: HistoryEntry }
   | { kind: "fix"; at: number; snapshot: Snapshot }
   | { kind: "real"; at: number; run: DockerSummary }
   | { kind: "check"; at: number; run: CheckSummary };
+
+export type HistoryEvent = EventBody & { key: string };
 
 const DAY = 86_400_000;
 
 export const rangeStart = (range: HistoryRange, now = Date.now()) => (range === "all" ? 0 : now - Number(range) * DAY);
 
 export function historyEvents(scans: HistoryEntry[], snapshots: Snapshot[], real: DockerSummary[], checks: CheckSummary[]): HistoryEvent[] {
-  const events: HistoryEvent[] = [
+  const events: EventBody[] = [
     ...scans.map((entry) => ({ kind: "scan" as const, at: entry.at * 1000, entry })),
     ...snapshots.map((snapshot) => ({ kind: "fix" as const, at: snapshot.createdAt, snapshot })),
     ...real.map((run) => ({ kind: "real" as const, at: run.at * 1000, run })),
     ...checks.map((run) => ({ kind: "check" as const, at: run.at * 1000, run })),
   ];
-  return events.sort((a, b) => b.at - a.at);
+  const seen = new Map<string, number>();
+  return events
+    .sort((a, b) => b.at - a.at)
+    .map((event) => {
+      const base = `${event.kind}-${event.at}`;
+      const repeat = seen.get(base) ?? 0;
+      seen.set(base, repeat + 1);
+      return { ...event, key: repeat ? `${base}-${repeat}` : base };
+    });
 }
 
 export function smoothPath(xs: number[], ys: number[]) {
