@@ -1134,12 +1134,14 @@ mod tests {
 
     #[test]
     fn the_path_prefix_starts_at_the_repository_root() {
-        let base = Path::new("/home/runner/work/app/app");
-        assert_eq!(repository_path("./site/", Some(base)).as_deref(), Some("site"));
-        assert_eq!(repository_path("site//public", Some(base)).as_deref(), Some("site/public"));
-        assert_eq!(repository_path("/home/runner/work/app/app/site", Some(base)).as_deref(), Some("site"));
-        assert_eq!(repository_path("/tmp/elsewhere", Some(base)), None);
-        assert_eq!(repository_path(".", Some(base)), None);
+        let base = std::env::temp_dir().join("work").join("app");
+        let inside = base.join("site").display().to_string();
+        let outside = std::env::temp_dir().join("elsewhere").display().to_string();
+        assert_eq!(repository_path("./site/", Some(&base)).as_deref(), Some("site"));
+        assert_eq!(repository_path("site//public", Some(&base)).as_deref(), Some("site/public"));
+        assert_eq!(repository_path(&inside, Some(&base)).as_deref(), Some("site"));
+        assert_eq!(repository_path(&outside, Some(&base)), None);
+        assert_eq!(repository_path(".", Some(&base)), None);
     }
 
     #[test]
