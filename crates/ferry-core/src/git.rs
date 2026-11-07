@@ -29,6 +29,7 @@ fn runs_a_program(key: &str, value: &str) -> bool {
         return false;
     }
     exact.contains(&key.as_str())
+        || (key.starts_with("hook.") && key.ends_with(".command"))
         || key == "diff.external"
         || key == "credential.helper"
         || (key.starts_with("gpg.") && key.ends_with("program"))
@@ -163,8 +164,15 @@ pub fn status(root: &Path, files: &[String]) -> Result<Status, String> {
     let prefix = git.text(&["rev-parse", "--show-prefix"]).unwrap_or_default();
     let everything = [".".to_string()];
     let paths = if files.is_empty() { &everything[..] } else { files };
-    let out = git.run(&["status", "--porcelain=v1", "-z", "--untracked-files=all", "--"], paths)?;
+    let out = git.run(&["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=dirty", "--"], paths)?;
     Ok(Status { repo: true, dirty: porcelain_paths(&out, &prefix) })
+}
+
+/// `git blame --line-porcelain` for one file.
+pub fn blame(root: &Path, file: &str) -> Result<Vec<u8>, String> {
+    let git = Git::find(root)?.ok_or_else(|| crate::t!("Bu proje bir Git deposu değil.", "This project isn't a Git repository."))?;
+    git.refuse_project_programs()?;
+    git.run(&["blame", "--no-textconv", "--line-porcelain", "--"], &[file.to_string()])
 }
 
 /// Ignored files and files inside a submodule can't go into the project's commit. This has to be
@@ -248,6 +256,36 @@ mod tests {
 
     fn files(names: &[&str]) -> Vec<String> {
         names.iter().map(|n| n.to_string()).collect()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_submodule_cant_run_its_own_filter_during_status() {
+        let (Some((dir, git)), Some((inner_dir, _))) = (repo(), repo()) else { return };
+        let root = dir.path();
+        let source = inner_dir.path().display().to_string();
+        git.run(&["-c", "protocol.file.allow=always", "submodule", "add", "-q", &source, "sub"], &[]).unwrap();
+        git.run(&["commit", "-qm", "sub"], &[]).unwrap();
+        let inner = Git { program: git.program.clone(), root: root.join("sub") };
+        let marker = root.join("ran");
+        inner.run(&["config", "filter.x.clean", &format!("touch {}; cat", marker.display())], &[]).unwrap();
+        std::fs::write(root.join("sub/.gitattributes"), "a.txt filter=x\n").unwrap();
+        std::fs::write(root.join("sub/a.txt"), "c\n").unwrap();
+        status(root, &[]).unwrap();
+        assert!(!marker.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn blame_refuses_a_project_that_would_run_a_program() {
+        let Some((dir, git)) = repo() else { return };
+        let root = dir.path();
+        assert!(String::from_utf8_lossy(&blame(root, "a.txt").unwrap()).contains("author T"));
+        let marker = root.join("ran");
+        git.run(&["config", "diff.x.textconv", &format!("touch {}; cat", marker.display())], &[]).unwrap();
+        std::fs::write(root.join(".gitattributes"), "a.txt diff=x\n").unwrap();
+        assert!(blame(root, "a.txt").is_err());
+        assert!(!marker.exists());
     }
 
     #[test]
@@ -337,6 +375,8 @@ mod tests {
         assert!(!runs_a_program("user.name", "x"));
         assert!(!runs_a_program("filter.lfs.clean", "git-lfs clean -- %f"));
         assert!(runs_a_program("filter.lfs.clean", "./evil.sh"));
+        assert!(runs_a_program("hook.audit.command", "./evil.sh"));
+        assert!(!runs_a_program("hook.audit.event", "pre-commit"));
     }
 
     #[test]

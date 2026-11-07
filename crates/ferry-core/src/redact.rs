@@ -34,6 +34,13 @@ fn value_start(b: &[u8], mut at: usize) -> Option<usize> {
     Some(at)
 }
 
+/// `Bearer` and the like only name the scheme: the credential comes after them.
+fn after_scheme(b: &[u8], at: usize) -> usize {
+    let scheme =
+        ["bearer ", "basic ", "token "].iter().find(|s| b.len() > at + s.len() && b[at..at + s.len()].eq_ignore_ascii_case(s.as_bytes()));
+    at + scheme.map_or(0, |s| s.len())
+}
+
 fn value_end(b: &[u8], from: usize) -> usize {
     (from..b.len()).find(|&k| b" \t\r\n'\"&,;<>)".contains(&b[k])).unwrap_or(b.len())
 }
@@ -75,7 +82,7 @@ pub fn text(input: &str) -> String {
         let key = KEYS.iter().find(|key| b.len() >= k + key.len() && b[k..k + key.len()].eq_ignore_ascii_case(key.as_bytes()));
         if let Some(found) = key.and_then(|key| Some((k + key.len(), value_start(b, k + key.len())?))) {
             let (after, start) = found;
-            let end = value_end(b, start);
+            let end = value_end(b, after_scheme(b, start));
             if end > start {
                 out.extend_from_slice(&b[k..start.max(after)]);
                 out.extend_from_slice(MASK.as_bytes());
@@ -100,7 +107,8 @@ mod tests {
         assert_eq!(text("password=hunter2&next=1"), "password=[redacted]&next=1");
         assert_eq!(text("{\"api_key\": \"abc123\"}"), "{\"api_key\": \"[redacted]\"}");
         assert_eq!(text("'secret' => 'abc'"), "'secret' => '[redacted]'");
-        assert_eq!(text("Authorization: Bearer abc.def"), "Authorization: [redacted] abc.def");
+        assert_eq!(text("Authorization: Bearer abc.def"), "Authorization: [redacted]");
+        assert_eq!(text("authorization: basic dXNlcjpwYXNz next"), "authorization: [redacted] next");
         assert_eq!(text("sent Bearer abc.def"), "sent Bearer [redacted]");
     }
 

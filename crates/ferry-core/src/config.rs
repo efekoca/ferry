@@ -95,7 +95,13 @@ pub fn save(root: &Path, config: &Config) -> Result<(), String> {
             .ok()
             .filter(serde_json::Value::is_object)
             .ok_or_else(|| crate::t!(".ferry/config.json bozuk, önce düzeltin.", ".ferry/config.json is broken, fix it first."))?,
-        Err(_) => serde_json::json!({}),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => serde_json::json!({}),
+        Err(e) => {
+            return Err(crate::t!(
+                ".ferry/config.json okunamadı, önce düzeltin: {e}",
+                "Couldn't read .ferry/config.json, fix it first: {e}"
+            ))
+        }
     };
     merge(&mut merged, serde_json::to_value(config).map_err(|e| e.to_string())?);
     let write = || -> std::io::Result<()> {
@@ -112,6 +118,23 @@ pub fn save(root: &Path, config: &Config) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn a_file_that_cant_be_read_is_not_overwritten() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join(".ferry")).unwrap();
+        std::fs::write(path(dir.path()), "{\"team\":\"keep\"}\n").unwrap();
+        std::fs::set_permissions(path(dir.path()), std::fs::Permissions::from_mode(0o000)).unwrap();
+        let enforced = std::fs::File::open(path(dir.path())).is_err();
+        let saved = save(dir.path(), &Config::default());
+        std::fs::set_permissions(path(dir.path()), std::fs::Permissions::from_mode(0o644)).unwrap();
+        if enforced {
+            assert!(saved.is_err());
+            assert!(std::fs::read_to_string(path(dir.path())).unwrap().contains("keep"));
+        }
+    }
 
     #[test]
     fn a_config_survives_saving_and_loading() {

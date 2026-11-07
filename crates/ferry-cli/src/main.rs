@@ -517,14 +517,34 @@ fn csv_field(s: &str) -> String {
     }
 }
 
+/// A path the user names can still lead through a link the project brought with it.
+fn write_file(root: &Path, path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let failed = |e: std::io::Error| format!("{}: {e}", path.display());
+    let full = std::env::current_dir().map_err(failed)?.join(path);
+    let mut clean = PathBuf::new();
+    for part in full.components() {
+        match part {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                clean.pop();
+            }
+            other => clean.push(other),
+        }
+    }
+    match clean.strip_prefix(root) {
+        Ok(rel) => {
+            let target = ferry_core::safefs::resolve(root, &rel.to_string_lossy()).map_err(failed)?;
+            ferry_core::safefs::replace(&target, bytes).map_err(failed)
+        }
+        Err(_) => std::fs::write(path, bytes).map_err(failed),
+    }
+}
+
 fn blame_authors(root: &std::path::Path, file: &str) -> std::collections::HashMap<usize, String> {
     let mut authors = std::collections::HashMap::new();
-    let Some(git) = ferry_core::toolchain::find_executable("git") else { return authors };
-    let Ok(out) = ferry_core::toolchain::command(git).arg("-C").arg(root).args(["blame", "--line-porcelain", "--", file]).output() else {
-        return authors;
-    };
+    let Ok(out) = ferry_core::git::blame(root, file) else { return authors };
     let mut line = 0;
-    for l in String::from_utf8_lossy(&out.stdout).lines() {
+    for l in String::from_utf8_lossy(&out).lines() {
         let mut parts = l.split(' ');
         if let (Some(hash), Some(_), Some(final_line)) = (parts.next(), parts.next(), parts.next()) {
             if hash.len() == 40 && hash.bytes().all(|b| b.is_ascii_hexdigit()) {
@@ -665,7 +685,7 @@ fn run(o: &Options) -> Result<Outcome, String> {
     if let Some(path) = &o.write_baseline {
         let value =
             json!({ "target": o.target.to_string(), "fingerprints": findings.iter().map(history::fingerprint).collect::<Vec<_>>() });
-        std::fs::write(path, serde_json::to_string_pretty(&value).unwrap() + "\n").map_err(|e| format!("{}: {e}", path.display()))?;
+        write_file(&root, path, (serde_json::to_string_pretty(&value).unwrap() + "\n").as_bytes())?;
     }
     let mut rendered = match o.format {
         Format::Text => render_text(&findings, &ignored, &summary, o) + &render_errors_text(&scan.errors, o),
@@ -683,7 +703,7 @@ fn run(o: &Options) -> Result<Outcome, String> {
         });
     }
     match &o.output {
-        Some(path) => std::fs::write(path, rendered).map_err(|e| format!("{}: {e}", path.display()))?,
+        Some(path) => write_file(&root, path, rendered.as_bytes())?,
         None => print!("{rendered}"),
     }
     if !scan.errors.is_empty() && !matches!(o.format, Format::Text) {
@@ -1061,6 +1081,22 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn a_report_cant_leave_the_project_through_its_links() {
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path().canonicalize().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("keep.json"), "mine").unwrap();
+        std::os::unix::fs::symlink(outside.path(), root.join(".ferry")).unwrap();
+        assert!(write_file(&root, &root.join(".ferry/keep.json"), b"x").is_err());
+        assert_eq!(std::fs::read_to_string(outside.path().join("keep.json")).unwrap(), "mine");
+        write_file(&root, &root.join("sub/../report.json"), b"x").unwrap();
+        assert_eq!(std::fs::read(root.join("report.json")).unwrap(), b"x");
+        write_file(&root, &outside.path().join("report.json"), b"y").unwrap();
+        assert_eq!(std::fs::read(outside.path().join("report.json")).unwrap(), b"y");
+    }
 
     #[test]
     fn xml_leaves_out_characters_it_cannot_hold() {

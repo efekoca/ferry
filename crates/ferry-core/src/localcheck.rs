@@ -121,7 +121,7 @@ pub fn run_tests(php: &Path, root: &Path, timeout: Duration, cancel: &std::sync:
         timed_out,
         passed: exit_code == Some(0) && done.stopped.is_none() && ran_tests(&output),
         duration_ms: done.duration.as_millis() as u64,
-        log: tail(&output),
+        log: crate::redact::text(&tail(&output)),
         output,
         ..CheckRun::default()
     })

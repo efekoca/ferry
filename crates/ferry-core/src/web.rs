@@ -228,7 +228,7 @@ pub fn compare(source: &Crawl, target: &Crawl) -> Vec<PageDiff> {
                 let new_errors: Vec<String> = t.errors.iter().filter(|e| !s.errors.contains(e)).cloned().collect();
                 let (source_text, target_text) = first_difference(&s.text, &t.text);
                 PageDiff {
-                    path: s.path.clone(),
+                    path: crate::redact::text(&s.path),
                     change: classify(s, t, &new_errors),
                     source_status: s.status,
                     target_status: t.status,
@@ -238,7 +238,7 @@ pub fn compare(source: &Crawl, target: &Crawl) -> Vec<PageDiff> {
                 }
             }
             None => PageDiff {
-                path: s.path.clone(),
+                path: crate::redact::text(&s.path),
                 change: PageChange::Missing,
                 source_status: s.status,
                 target_status: 0,

