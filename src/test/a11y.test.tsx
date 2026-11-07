@@ -80,11 +80,13 @@ describe("accessibility", { timeout: 30_000 }, () => {
     await screen.findByRole("dialog", { name: "Bu bulgu yok sayılsın mı?" });
     await check("ignore dialog");
     await user.keyboard("{Escape}");
-    await user.click(await screen.findByRole("button", { name: /ile çalıştır/ }));
+    await user.click(screen.getByRole("button", { name: "Diğer" }));
+    await user.click(await screen.findByRole("menuitem", { name: /ile çalıştır/ }));
     await screen.findByRole("dialog", { name: "Projenin testleri çalıştırılsın mı?" });
     await check("tests dialog");
     await user.keyboard("{Escape}");
-    await user.click(screen.getByRole("button", { name: "Log içe aktar" }));
+    await user.click(screen.getByRole("button", { name: "Diğer" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Log içe aktar" }));
     await screen.findByText(/php_errors.log: 31 farklı mesaj/);
     await check("runtime notice");
     await user.type(screen.getByRole("searchbox", { name: "Bulgularda ara" }), "zzzz-none");

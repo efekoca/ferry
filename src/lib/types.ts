@@ -490,3 +490,8 @@ export interface Settings {
   editor: string | null;
   editorCommand: string | null;
 }
+
+export interface SourceLine {
+  number: number;
+  text: string;
+}

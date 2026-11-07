@@ -583,6 +583,7 @@ export function TagInput({
 export interface MenuAction {
   label: string;
   icon?: ReactNode;
+  disabled?: boolean;
   onClick: () => void;
 }
 
@@ -630,6 +631,7 @@ export function ActionMenu({ label, icon, items }: { label: string; icon: ReactN
               type="button"
               role="menuitem"
               className="menu__item"
+              disabled={item.disabled}
               onClick={() => {
                 setOpen(false);
                 item.onClick();

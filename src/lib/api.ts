@@ -1,4 +1,5 @@
 import type {
+  SourceLine,
   CheckSummary,
   DatabaseChoice,
   DatabasePlan,
@@ -82,6 +83,7 @@ export interface Api {
   unignoreFinding(path: string, id: string): Promise<ScanResult>;
   pruneIgnores(path: string): Promise<ScanResult>;
   openInEditor(path: string, file: string, line: number, column: number): Promise<void>;
+  sourceLines(path: string, file: string, line: number): Promise<SourceLine[]>;
   revealPath(path: string): Promise<void>;
   getSettings(): Promise<Settings>;
   setLanguage(lang: Lang): Promise<void>;
@@ -155,6 +157,7 @@ async function tauriApi(): Promise<Api> {
     ignoreFinding: (path, id, reason) => invoke("ignore_finding", { path, id, reason }),
     unignoreFinding: (path, id) => invoke("unignore_finding", { path, id }),
     pruneIgnores: (path) => invoke("prune_ignores", { path }),
+    sourceLines: (path, file, line) => invoke("source_lines", { path, file, line }),
     openInEditor: (path, file, line, column) => invoke("open_in_editor", { path, file, line, column }),
     revealPath: (path) => opener.revealItemInDir(path),
     getSettings: () => invoke("get_settings"),

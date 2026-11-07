@@ -52,6 +52,26 @@ pub fn resolve(root: &Path, rel: &str) -> Result<PathBuf> {
     Ok(path)
 }
 
+const MAX_SOURCE: u64 = 4 * 1024 * 1024;
+
+pub fn lines_around(root: &Path, rel: &str, line: usize, around: usize) -> Result<Vec<(usize, String)>> {
+    let path = resolve(root, rel)?;
+    if std::fs::metadata(&path)?.len() > MAX_SOURCE {
+        return Err(refuse(crate::t!("{rel}: dosya çok büyük", "{rel}: the file is too large")));
+    }
+    let bytes = std::fs::read(&path)?;
+    let text = String::from_utf8_lossy(&bytes);
+    let first = line.saturating_sub(around).max(1);
+    let last = line.saturating_add(around);
+    Ok(text
+        .lines()
+        .enumerate()
+        .map(|(i, text)| (i + 1, text))
+        .filter(|(n, _)| (first..=last).contains(n))
+        .map(|(n, text)| (n, text.to_string()))
+        .collect())
+}
+
 pub fn replace(path: &Path, bytes: &[u8]) -> Result<()> {
     let meta = std::fs::symlink_metadata(path).ok();
     if meta.as_ref().is_some_and(|m| m.file_type().is_symlink()) {
@@ -117,6 +137,27 @@ pub fn set_readonly(path: &Path, readonly: bool) -> Result<()> {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn reads_the_lines_around_a_finding() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.php"), "one\r\ntwo\nthree\nfour\nfive\n").unwrap();
+        let lines = |line| lines_around(dir.path(), "a.php", line, 1).unwrap();
+        assert_eq!(lines(3), vec![(2, "two".to_string()), (3, "three".to_string()), (4, "four".to_string())]);
+        assert_eq!(lines(1), vec![(1, "one".to_string()), (2, "two".to_string())]);
+        assert_eq!(lines(5), vec![(4, "four".to_string()), (5, "five".to_string())]);
+        assert!(lines(9).is_empty());
+    }
+
+    #[test]
+    fn stays_inside_the_project_when_reading_lines() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("project");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(dir.path().join("secret.txt"), "x").unwrap();
+        assert!(lines_around(&root, "../secret.txt", 1, 1).is_err());
+        assert!(lines_around(&root, "/etc/hosts", 1, 1).is_err());
+    }
 
     #[test]
     fn replace_keeps_read_only_files_read_only() {

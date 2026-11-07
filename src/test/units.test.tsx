@@ -13,6 +13,8 @@ import { filesHoldingHalf, fileStats } from "../screens/Overview";
 import { commonTitle, dependencyBlockers, formatBytes, formatDuration, formatRelative, joinPath, scoreHeadline, scoreTone } from "../lib/labels";
 import { NO_FILTER, type FindingsFilter } from "../lib/store";
 import { filterFindings, prioritizeFindings } from "../screens/Findings";
+import { relatedFindings } from "../screens/FindingDetail";
+import { RULE_NOTES } from "../i18n/rules";
 import { isVulnerable, patchedFor } from "../lib/security";
 import type { ExtensionUse, FileDiff, Finding } from "../lib/types";
 import { compareProbe, parseProbe } from "../lib/probe";
@@ -421,5 +423,38 @@ describe("fileStats", () => {
     expect(filesHoldingHalf(stats)).toBe(1);
     expect(filesHoldingHalf(fileStats([finding("a", "breaking"), finding("b", "breaking"), finding("c", "breaking"), finding("d", "breaking")]))).toBe(2);
     expect(filesHoldingHalf([])).toBe(0);
+  });
+});
+
+describe("rule notes", () => {
+  it("has text for both languages", () => {
+    for (const [id, note] of Object.entries(RULE_NOTES)) {
+      expect(note.why.tr.length, id).toBeGreaterThan(40);
+      expect(note.why.en.length, id).toBeGreaterThan(40);
+    }
+  });
+});
+
+describe("relatedFindings", () => {
+  const finding = (id: string, ruleId: string, file: string) => ({ id, ruleId, file }) as Finding;
+  const list = [
+    finding("a", "removed.set_magic_quotes_runtime", "a.php"),
+    finding("b", "removed.get_magic_quotes_gpc", "b.php"),
+    finding("c", "removed.magic_quotes_runtime", "a.php"),
+    finding("d", "removed.each", "a.php"),
+    finding("e", "removed.set_magic_quotes_runtime", "c.php"),
+  ];
+
+  it("joins rules that share a note and puts the same file first", () => {
+    expect(relatedFindings(list[0], list).map((f) => f.id)).toEqual(["c", "b", "e"]);
+  });
+
+  it("keeps to the same rule when there is no note", () => {
+    const plain = [finding("a", "x.one", "a.php"), finding("b", "x.two", "a.php"), finding("c", "x.one", "b.php")];
+    expect(relatedFindings(plain[0], plain).map((f) => f.id)).toEqual(["c"]);
+  });
+
+  it("stops at the limit", () => {
+    expect(relatedFindings(list[0], list, 1)).toHaveLength(1);
   });
 });

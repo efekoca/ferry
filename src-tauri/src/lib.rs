@@ -926,6 +926,20 @@ fn custom_editor(template: &str, file: &Path, line: usize, column: usize) -> Opt
     Some(EditorCall::Command(found, args.collect()))
 }
 
+#[derive(Serialize)]
+struct SourceLine {
+    number: usize,
+    text: String,
+}
+
+#[tauri::command]
+async fn source_lines(path: String, file: String, line: usize) -> CmdResult<Vec<SourceLine>> {
+    let path = normalize_path(path);
+    let root = project_root(&path)?;
+    let lines = ferry_core::safefs::lines_around(&root, &file, line, 2).map_err(|e| e.to_string())?;
+    Ok(lines.into_iter().map(|(number, text)| SourceLine { number, text }).collect())
+}
+
 #[tauri::command]
 async fn open_in_editor<R: Runtime>(app: AppHandle<R>, path: String, file: String, line: usize, column: usize) -> CmdResult<()> {
     use tauri_plugin_opener::OpenerExt;
@@ -1591,6 +1605,7 @@ pub fn with_commands<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R
     builder.invoke_handler(tauri::generate_handler![
         inspect_project,
         save_project_config,
+        source_lines,
         interrupted_writes,
         scan_project,
         cancel_scan,

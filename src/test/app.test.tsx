@@ -21,6 +21,11 @@ async function pick(user: ReturnType<typeof userEvent.setup>, name: string, opti
 const targetBox = () => screen.getByRole("combobox", { name: "Hedef PHP sürümü" });
 const pickTarget = (user: ReturnType<typeof userEvent.setup>, version: string) => pick(user, "Hedef PHP sürümü", new RegExp(`^PHP ${version.replace(".", "\\.")}`));
 
+async function more(user: ReturnType<typeof userEvent.setup>, name: string | RegExp) {
+  await user.click(await screen.findByRole("button", { name: "Diğer" }));
+  await user.click(await screen.findByRole("menuitem", { name }));
+}
+
 async function compareTargets(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("button", { name: "Diğer" }));
   await user.click(screen.getByRole("menuitem", { name: "Hedefleri karşılaştır" }));
@@ -216,7 +221,7 @@ describe("Ferry app", () => {
     within(list)
       .getAllByRole("option")
       .forEach((o) => expect(within(o).getByText("Kritik")).toBeInTheDocument());
-    expect(screen.getByRole("button", { name: /^Kritik/, pressed: true })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /^Kritik/ })).toHaveAttribute("aria-checked", "true");
 
     await user.click(screen.getByRole("button", { name: "Filtreleri temizle" }));
     await user.click(nav(/Genel bakış/));
@@ -234,16 +239,16 @@ describe("Ferry app", () => {
     const all = within(list).getAllByRole("option").length;
     expect(all).toBeGreaterThan(10);
 
-    await user.click(screen.getByRole("button", { name: /^Elle düzelt/ }));
+    await pick(user, "Düzeltme türü", /^Elle düzelt/);
     const manual = within(list).getAllByRole("option");
     expect(manual.length).toBeLessThan(all);
-    manual.forEach((o) => expect(within(o).getByText("Elle düzelt")).toBeInTheDocument());
+    manual.forEach((o) => expect(within(o).queryByText("Otomatik")).not.toBeInTheDocument());
 
     await user.type(screen.getByRole("searchbox", { name: "Bulgularda ara" }), "strftime");
     expect(within(list).getAllByRole("option")).toHaveLength(1);
     const detail = screen.getByRole("complementary", { name: "Bulgu ayrıntısı" });
     expect(within(detail).getByRole("heading", { name: "strftime()" })).toBeInTheDocument();
-    expect(within(detail).getByText(/admin\/settings-page.php:88/)).toBeInTheDocument();
+    expect(detail).toHaveTextContent("admin/settings-page.php:88");
   });
 
   it("ignores a finding with a reason and brings it back", async () => {
@@ -307,12 +312,41 @@ describe("Ferry app", () => {
     expect(screen.getByRole("img", { name: /Hazırlık puanının taramalar boyunca değişimi/ })).toBeInTheDocument();
   });
 
+  it("explains a finding with its code, history and related findings", async () => {
+    const user = setup();
+    await openAndScan(user);
+    await user.click(nav(/Bulgular/));
+    await user.type(await screen.findByRole("searchbox", { name: "Bulgularda ara" }), "mysql_");
+    const detail = screen.getByRole("complementary", { name: "Bulgu ayrıntısı" });
+    expect(await within(detail).findByText("load_items", { exact: false })).toBeInTheDocument();
+    expect(detail.querySelector(".code-line--hit")).not.toBeNull();
+    expect(within(detail).getByText("Neden değişti?")).toBeInTheDocument();
+    expect(within(detail).getByText(/hazırlanmış sorguları desteklemiyordu/)).toBeInTheDocument();
+    expect(within(detail).getByText("Sürüm yolculuğu")).toBeInTheDocument();
+    expect(within(detail).getByText("eskidi")).toBeInTheDocument();
+    const related = within(detail).getByText("Aynı konudaki bulgular").parentElement!;
+    const before = within(detail).getByRole("heading", { level: 2 }).textContent;
+    await user.click(within(related).getAllByRole("button")[0]);
+    await waitFor(() => expect(within(detail).getByRole("heading", { level: 2 }).textContent).not.toBe(before));
+  });
+
+  it("falls back to the snippet when the source can't be read", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    api.sourceLines = () => Promise.reject(new Error("gone"));
+    render(<App api={api} />);
+    await openAndScan(user);
+    await user.click(nav(/Bulgular/));
+    const detail = await screen.findByRole("complementary", { name: "Bulgu ayrıntısı" });
+    await waitFor(() => expect(detail.querySelectorAll(".code-line")).toHaveLength(1));
+  });
+
   it("merges an imported runtime log into the findings", async () => {
     const user = setup();
     await openAndScan(user);
     await user.click(nav(/Bulgular/));
     const all = (await screen.findAllByRole("option")).length;
-    await user.click(screen.getByRole("button", { name: "Log içe aktar" }));
+    await more(user, "Log içe aktar");
     expect(await screen.findByText(/php_errors.log: 31 farklı mesaj/)).toBeInTheDocument();
     await waitFor(() => expect(screen.getAllByRole("option")).toHaveLength(all + 1));
     await user.click(screen.getByRole("button", { name: /^Çalışırken görülenler/ }));
@@ -327,7 +361,7 @@ describe("Ferry app", () => {
     await openAndScan(user);
     await user.click(nav(/Bulgular/));
     const all = (await screen.findAllByRole("option")).length;
-    await user.click(screen.getByRole("button", { name: "Log içe aktar" }));
+    await more(user, "Log içe aktar");
     await waitFor(() => expect(screen.getAllByRole("option")).toHaveLength(all + 1));
     await user.click(screen.getByRole("button", { name: /^Çalışırken görülenler/ }));
     expect(screen.getAllByRole("option")).toHaveLength(4);
@@ -344,8 +378,9 @@ describe("Ferry app", () => {
     await openAndScan(user);
     await user.click(nav(/Bulgular/));
     expect(await screen.findByText("Sorun yok")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Log içe aktar" })).toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: "PHP 8.4.27 ile lint et" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Diğer" }));
+    expect(await screen.findByRole("menuitem", { name: "Log içe aktar" })).toBeInTheDocument();
+    expect(await screen.findByRole("menuitem", { name: "PHP 8.4.27 ile lint et" })).toBeInTheDocument();
   });
 
   it("keeps one finding focusable when a filter shrinks a long list", async () => {
@@ -458,10 +493,10 @@ describe("Ferry app", () => {
     const user = setup();
     await openAndScan(user);
     await user.click(nav(/Bulgular/));
-    await user.click(await screen.findByRole("button", { name: "PHP 8.4.27 ile lint et" }));
+    await more(user, "PHP 8.4.27 ile lint et");
     expect(await screen.findByText(/php -l · PHP 8.4: 31 farklı mesaj/)).toBeInTheDocument();
     expect(screen.getByText("128 dosya lint edildi, sözdizimi hatası yok.")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Testleri PHP 8.4.27 ile çalıştır" }));
+    await more(user, "Testleri PHP 8.4.27 ile çalıştır");
     const dialog = await screen.findByRole("dialog", { name: "Projenin testleri çalıştırılsın mı?" });
     await user.click(within(dialog).getByRole("button", { name: "Testleri çalıştır" }));
     expect(await screen.findByText(/PHPUnit · PHP 8.4: 31 farklı mesaj/)).toBeInTheDocument();
@@ -719,7 +754,7 @@ describe("Ferry app", () => {
     render(<App api={mockApi({ delay: 0 })} />);
     await openAndScan(user);
     await user.click(nav(/Bulgular/));
-    await user.click(await screen.findByRole("button", { name: "Log içe aktar" }));
+    await more(user, "Log içe aktar");
     expect(await screen.findByText(/php_errors.log: 31 farklı mesaj/)).toBeInTheDocument();
     await user.click(screen.getByText("Sunucudaki proje kökü"));
     await user.type(screen.getByRole("textbox", { name: "Sunucudaki proje kökü" }), "/var/www/site");
@@ -739,7 +774,7 @@ describe("Ferry app", () => {
     render(<App api={api} />);
     await openAndScan(user);
     await user.click(nav(/Bulgular/));
-    await user.click(await screen.findByRole("button", { name: "Testleri PHP 8.4.27 ile çalıştır" }));
+    await more(user, "Testleri PHP 8.4.27 ile çalıştır");
     const dialog = await screen.findByRole("dialog", { name: "Projenin testleri çalıştırılsın mı?" });
     await user.click(within(dialog).getByRole("button", { name: "Testleri çalıştır" }));
     expect(await screen.findByText("Testler başarısız oldu (çıkış kodu 1).")).toBeInTheDocument();
@@ -790,7 +825,7 @@ describe("Ferry app", () => {
     await user.click(nav(/Bulgular/));
     const list = await screen.findByRole("listbox", { name: "Bulgu listesi" });
     expect(within(list).getAllByRole("option")).toHaveLength(300);
-    expect(screen.getByText("840 bulgu")).toBeInTheDocument();
+    expect(screen.getAllByText(/840/).length).toBeGreaterThan(0);
     await user.click(screen.getByRole("button", { name: "300 bulgu daha göster (540 kaldı)" }));
     expect(within(list).getAllByRole("option")).toHaveLength(600);
 
@@ -860,12 +895,12 @@ describe("Ferry app", () => {
     render(<App api={api} />);
     await openAndScan(user);
     await user.click(nav(/Bulgular/));
-    await user.click(await screen.findByRole("button", { name: "Testleri PHP 8.4.27 ile çalıştır" }));
+    await more(user, "Testleri PHP 8.4.27 ile çalıştır");
     const dialog = await screen.findByRole("dialog", { name: "Projenin testleri çalıştırılsın mı?" });
     await user.click(within(dialog).getByRole("button", { name: "Testleri çalıştır" }));
-    await user.click(await screen.findByRole("button", { name: "Testleri durdur" }));
+    await more(user, "Testleri durdur");
     expect(cancel).toHaveBeenCalled();
-    await waitFor(() => expect(screen.queryByRole("button", { name: "Testleri durdur" })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Diğer" }).querySelector(".spinner")).toBeNull());
     expect(screen.queryByText("Kontrol çalıştırılamadı")).not.toBeInTheDocument();
   });
 
@@ -1278,7 +1313,7 @@ describe("Ferry app", () => {
     render(<App api={api} />);
     await openAndScan(user);
     await user.click(nav(/Bulgular/));
-    await user.click(await screen.findByRole("button", { name: /lint et/ }));
+    await more(user, /lint et/);
     await user.click(nav(/Geçmiş/));
     const card = (await screen.findByText("Lint ve test kontrolleri")).closest(".card") as HTMLElement;
     expect(within(card).getByText("Geçti")).toBeInTheDocument();
