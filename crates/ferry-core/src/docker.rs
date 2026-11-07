@@ -385,14 +385,11 @@ pub fn history(file: &Path) -> Vec<Summary> {
 }
 
 pub fn record(file: &Path, summary: Summary) -> std::io::Result<Vec<Summary>> {
-    let mut entries = history(file);
-    entries.insert(0, summary);
-    entries.truncate(HISTORY_LIMIT);
-    if let Some(parent) = file.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(file, serde_json::to_vec(&entries)?)?;
-    Ok(entries)
+    crate::safefs::update_list(file, |entries: &mut Vec<Summary>| {
+        entries.insert(0, summary);
+        entries.truncate(HISTORY_LIMIT);
+        entries.clone()
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

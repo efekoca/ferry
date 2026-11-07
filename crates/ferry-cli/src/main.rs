@@ -646,6 +646,13 @@ fn run(o: &Options) -> Result<Outcome, String> {
         Some(path) => {
             let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
             let value: Value = serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+            if let Some(written) = value["target"].as_str().filter(|t| *t != o.target.to_string()) {
+                return Err(format!(
+                    "{}: written for PHP {written}, but this scan targets PHP {}. Write a new one with --write-baseline.",
+                    path.display(),
+                    o.target
+                ));
+            }
             let list = value["fingerprints"].as_array().ok_or_else(|| format!("{}: not a ferry-cli baseline", path.display()))?;
             Some(list.iter().filter_map(|v| v.as_str().map(String::from)).collect())
         }
@@ -1201,6 +1208,18 @@ mod tests {
             assert!(first.ends_with(",Ada Lovelace"), "{first}");
         }
         assert_eq!(csv_field("a,\"b\""), "\"a,\"\"b\"\"\"");
+    }
+
+    #[test]
+    fn a_baseline_for_another_target_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.php"), "<?php each($a);\n").unwrap();
+        let base = dir.path().join("base.json");
+        std::fs::write(&base, r#"{"target":"8.3","fingerprints":[]}"#).unwrap();
+        let text = format!("scan {} --target 8.4 --baseline {}", dir.path().display(), base.display());
+        assert!(run(&parse(&args(&text)).unwrap()).unwrap_err().contains("written for PHP 8.3"));
+        std::fs::write(&base, r#"{"target":"8.4","fingerprints":[]}"#).unwrap();
+        assert!(run(&parse(&args(&text)).unwrap()).is_ok());
     }
 
     #[test]
