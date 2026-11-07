@@ -32,13 +32,17 @@ pub fn path(root: &Path) -> PathBuf {
 }
 
 pub fn load(root: &Path) -> Vec<Ignore> {
-    std::fs::read(path(root)).ok().and_then(|b| serde_json::from_slice::<IgnoreFile>(&b).ok()).map(|f| f.ignores).unwrap_or_default()
+    crate::safefs::read_bytes(path(root))
+        .ok()
+        .and_then(|b| serde_json::from_slice::<IgnoreFile>(&b).ok())
+        .map(|f| f.ignores)
+        .unwrap_or_default()
 }
 
 /// For anything that's about to rewrite the file: a broken file must not turn into an empty list,
 /// or the next save would wipe what the team shares in it.
 pub fn load_for_update(root: &Path) -> Result<Vec<Ignore>, String> {
-    let Ok(bytes) = std::fs::read(path(root)) else { return Ok(Vec::new()) };
+    let Ok(bytes) = crate::safefs::read_bytes(path(root)) else { return Ok(Vec::new()) };
     serde_json::from_slice::<IgnoreFile>(&bytes)
         .map(|f| f.ignores)
         .map_err(|e| crate::t!(".ferry/ignore.json okunamadı, önce düzeltin: {e}", "Couldn't read .ferry/ignore.json, fix it first: {e}"))
@@ -119,7 +123,7 @@ struct Source {
 
 impl Source {
     fn read(path: &Path) -> Option<Self> {
-        let text = String::from_utf8_lossy(&std::fs::read(path).ok()?).into_owned();
+        let text = String::from_utf8_lossy(&crate::safefs::read_bytes(path).ok()?).into_owned();
         let lexed = crate::lexer::lex(&text);
         let mut starts = vec![0];
         starts.extend(text.match_indices('\n').map(|(i, _)| i + 1));

@@ -52,6 +52,26 @@ pub fn resolve(root: &Path, rel: &str) -> Result<PathBuf> {
     Ok(path)
 }
 
+/// Larger than any real manifest, lock file or setting file.
+const MAX_PROJECT_FILE: u64 = 64 * 1024 * 1024;
+
+/// Reads a file a project supplied. A link to `/dev/zero`, a pipe or a huge file can't hang the app.
+pub fn read_bytes(path: impl AsRef<Path>) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
+    let file = std::fs::File::open(path)?;
+    let meta = file.metadata()?;
+    if !meta.is_file() || meta.len() > MAX_PROJECT_FILE {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "not a regular file of a sensible size"));
+    }
+    let mut bytes = Vec::with_capacity(meta.len() as usize);
+    file.take(MAX_PROJECT_FILE).read_to_end(&mut bytes)?;
+    Ok(bytes)
+}
+
+pub fn read_text(path: impl AsRef<Path>) -> std::io::Result<String> {
+    String::from_utf8(read_bytes(path)?).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+}
+
 const MAX_SOURCE: u64 = 4 * 1024 * 1024;
 
 pub fn lines_around(root: &Path, rel: &str, line: usize, around: usize) -> Result<Vec<(usize, String)>> {
@@ -137,6 +157,20 @@ pub fn set_readonly(path: &Path, readonly: bool) -> Result<()> {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn project_files_are_read_only_when_they_are_plain_files() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.json"), "{}").unwrap();
+        assert_eq!(read_text(dir.path().join("a.json")).unwrap(), "{}");
+        assert!(read_bytes(dir.path()).is_err(), "a folder");
+        #[cfg(unix)]
+        {
+            let link = dir.path().join("composer.json");
+            std::os::unix::fs::symlink("/dev/zero", &link).unwrap();
+            assert!(read_text(&link).is_err(), "a link to a device");
+        }
+    }
 
     #[test]
     fn reads_the_lines_around_a_finding() {

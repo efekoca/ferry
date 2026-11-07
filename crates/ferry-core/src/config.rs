@@ -53,7 +53,7 @@ fn check(config: &Config) -> Result<(), String> {
 /// A missing file is an empty config. A broken one is an error, so settings are never dropped silently.
 pub fn load(root: &Path) -> Result<Config, String> {
     let file = path(root);
-    let bytes = match std::fs::read(&file) {
+    let bytes = match crate::safefs::read_bytes(&file) {
         Ok(bytes) => bytes,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Config::default()),
         Err(e) => return Err(crate::t!(".ferry/config.json okunamadı: {e}", "Couldn't read .ferry/config.json: {e}")),
@@ -90,7 +90,7 @@ pub fn save(root: &Path, config: &Config) -> Result<(), String> {
     crate::safefs::resolve(root, ".ferry/config.json").map_err(|e| e.to_string())?;
     let file = path(root);
     let dir = file.parent().unwrap();
-    let mut merged = match std::fs::read(&file) {
+    let mut merged = match crate::safefs::read_bytes(&file) {
         Ok(bytes) => serde_json::from_slice::<serde_json::Value>(&bytes)
             .ok()
             .filter(serde_json::Value::is_object)

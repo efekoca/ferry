@@ -695,10 +695,10 @@ fn safe_fixes(root: &Path, rector: &Path, target: PhpVersion) -> Result<Vec<(Str
     use ferry_core::{rector, rules::FixKind, toolchain};
     let php = toolchain::find_php(None).ok_or_else(|| toolchain::ToolError::PhpMissing.to_string())?;
     let excluded = project::inspect(root).map_err(|e| e.to_string())?.excluded_dirs;
-    let work = std::env::temp_dir().join("ferry-cli-rector");
+    let work = tempfile::Builder::new().prefix("ferry-cli-rector").tempdir().map_err(|e| e.to_string())?;
     let cancel = std::sync::atomic::AtomicBool::new(false);
-    let preview =
-        rector::preview(&php, rector, root, target, rector::RectorMode::Compat, &excluded, &work, &cancel).map_err(|e| e.to_string())?;
+    let preview = rector::preview(&php, rector, root, target, rector::RectorMode::Compat, &excluded, work.path(), &cancel)
+        .map_err(|e| e.to_string())?;
     Ok(preview.changes.into_iter().filter(|c| c.fix == FixKind::Auto).map(|c| (c.file, c.new_content)).collect())
 }
 
