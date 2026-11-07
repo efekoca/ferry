@@ -1,7 +1,7 @@
-import { useState, type ReactNode } from "react";
+import { useState } from "react";
 import { CircleAlert, CircleCheck, Package, Search, Server } from "lucide-react";
 import { PageHeader } from "../components/Shell";
-import { Badge, Button, Callout, Card, CommandLine, EmptyState, Segmented, Switch, TextArea, Tooltip } from "../components/ui";
+import { Badge, Button, Callout, Card, CommandLine, EmptyState, Segmented, Switch, TextArea, Tile, Tooltip } from "../components/ui";
 import { useToast } from "../components/Toast";
 import { useI18n } from "../i18n";
 import { errorMessage } from "../lib/api";
@@ -10,7 +10,7 @@ import { useStore } from "../lib/store";
 import type { Dependency, DependencyReport, DependencyStatus, ExtensionUse, VersionSuggestion, WpLatest } from "../lib/types";
 
 const DEP_ORDER: Record<DependencyStatus, number> = { incompatible: 0, unknown: 1, compatible: 2 };
-const DEP_DOT: Record<DependencyStatus, string> = { incompatible: "danger", unknown: "neutral", compatible: "ok" };
+const DEP_DOT: Record<DependencyStatus, "danger" | "neutral" | "ok"> = { incompatible: "danger", unknown: "neutral", compatible: "ok" };
 const COMPATIBLE_SHOWN = 3;
 
 function DepState({ status }: { status: DependencyStatus }) {
@@ -20,18 +20,6 @@ function DepState({ status }: { status: DependencyStatus }) {
       <span className={`dot dot--${DEP_DOT[status]}`} aria-hidden />
       {t.dep[status]}
     </span>
-  );
-}
-
-function Tile({ label, status, children }: { label: string; status: DependencyStatus; children: ReactNode }) {
-  return (
-    <div className="tile">
-      <dt>
-        <span className={`dot dot--${DEP_DOT[status]}`} aria-hidden />
-        {label}
-      </dt>
-      <dd>{children}</dd>
-    </div>
   );
 }
 
@@ -241,19 +229,19 @@ function PackagesView({ deps, prodOnly }: { deps: DependencyReport; prodOnly: bo
         <dl className="card tiles">
           {packages.length > 0 && (
             <>
-              <Tile label={t.deps.tileBad} status={bad > 0 ? "incompatible" : "unknown"}>
+              <Tile label={t.deps.tileBad} tone={bad > 0 ? "danger" : "neutral"}>
                 {bad}
               </Tile>
-              <Tile label={t.deps.tileUnknown} status="unknown">
+              <Tile label={t.deps.tileUnknown} tone="neutral">
                 {unknown}
               </Tile>
-              <Tile label={t.deps.tileGood} status={good > 0 ? "compatible" : "unknown"}>
+              <Tile label={t.deps.tileGood} tone={good > 0 ? "ok" : "neutral"}>
                 {good}
               </Tile>
             </>
           )}
           {deps.rootConstraint && (
-            <Tile label={t.deps.rootTile} status={deps.rootStatus}>
+            <Tile label={t.deps.rootTile} tone={DEP_DOT[deps.rootStatus]}>
               {rootHint ? (
                 <Tooltip text={rootHint} align="end">
                   <code className="tile__code" tabIndex={0}>

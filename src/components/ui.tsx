@@ -509,6 +509,91 @@ export function TextArea({
   );
 }
 
+export function ComboField({
+  label,
+  value,
+  onChange,
+  options,
+  placeholder,
+  disabled = false,
+  className = "",
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: readonly string[];
+  placeholder?: string;
+  disabled?: boolean;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(-1);
+  const id = useId();
+  const needle = value.trim().toLowerCase();
+  const matches = options.filter((o) => o !== value && o.toLowerCase().includes(needle)).slice(0, 8);
+  const shown = open && matches.length > 0;
+  const choose = (option: string) => {
+    onChange(option);
+    setOpen(false);
+    setActive(-1);
+  };
+  const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if ((e.key === "ArrowDown" || e.key === "ArrowUp") && matches.length > 0) {
+      e.preventDefault();
+      setOpen(true);
+      const step = e.key === "ArrowDown" ? 1 : -1;
+      setActive((active + step + matches.length) % matches.length);
+    } else if (e.key === "Enter" && shown && active >= 0) {
+      e.preventDefault();
+      choose(matches[active]);
+    } else if (e.key === "Escape" && shown) {
+      e.stopPropagation();
+      setOpen(false);
+    }
+  };
+  return (
+    <div className={`combo ${className}`}>
+      <label className={`fbox ${disabled ? "fbox--disabled" : ""}`}>
+        <span className="fbox__label">{label}</span>
+        <span className="fbox__row">
+          <input
+            className="fbox__input"
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded={shown}
+            aria-controls={shown ? `${id}-list` : undefined}
+            aria-activedescendant={shown && active >= 0 ? `${id}-${active}` : undefined}
+            autoComplete="off"
+            spellCheck={false}
+            value={value}
+            placeholder={placeholder}
+            disabled={disabled}
+            onFocus={() => setOpen(true)}
+            onBlur={() => setOpen(false)}
+            onChange={(e) => {
+              onChange(e.target.value);
+              setOpen(true);
+              setActive(-1);
+            }}
+            onKeyDown={onKeyDown}
+          />
+        </span>
+      </label>
+      {shown && (
+        <div id={`${id}-list`} role="listbox" aria-label={label} className="menu combo__menu" onMouseDown={(e) => e.preventDefault()}>
+          {matches.map((option, i) => (
+            <div key={option} id={`${id}-${i}`} role="option" aria-selected={i === active} className={`menu__item ${i === active ? "is-active" : ""}`} onPointerEnter={() => setActive(i)} onClick={() => choose(option)}>
+              <span className="menu__main">
+                <span className="menu__title">{option}</span>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function TagInput({
   label,
   values,
@@ -643,6 +728,18 @@ export function ActionMenu({ label, icon, items }: { label: string; icon: ReactN
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+export function Tile({ label, tone, children }: { label: string; tone: "danger" | "ok" | "warn" | "neutral"; children: ReactNode }) {
+  return (
+    <div className="tile">
+      <dt>
+        <span className={`dot dot--${tone}`} aria-hidden />
+        {label}
+      </dt>
+      <dd>{children}</dd>
     </div>
   );
 }

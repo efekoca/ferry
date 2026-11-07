@@ -366,9 +366,9 @@ export function History() {
         ) : (
           <div className="page-body stack">
             {scans.length > 0 ? <ProgressCard scans={scans} marks={marks} /> : allScans.length > 0 && <p className="history-note history-note--bare">{t.history.noScans}</p>}
-            <div className="history-grid">
+            <div className="grid-rail">
               {events.length > 0 && <Timeline events={events} since={since} onRestore={(snapshot) => setPending({ snapshot, action: "restore" })} />}
-              <div className="history-side">
+              <div className="grid-rail__side">
                 <Backups
                   snapshots={snapshots}
                   onReview={setReviewing}
