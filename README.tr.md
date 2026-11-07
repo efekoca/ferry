@@ -357,6 +357,8 @@ Testleri gerçek Rector'la çalıştırmak için `FERRY_TEST_TOOLS` değişkenin
 
 `scripts/runtime-benchmark.sh <proje> <test-klasörü> [hedef]` bir projenin PHPUnit testlerini Docker'da hedef PHP sürümüyle çalıştırır ve bildirdikleri kullanımdan kalkmaları statik taramayla birleştirir. Monolog, league/commonmark, Laravel, PHPMailer ve Carbon üzerinde, çalışma anındaki 116 kullanımdan kalkma mesajının 104'ünü (%90) statik tarama zaten bildirmişti.
 
+Docker kalıpları `crates/ferry-core/src/images.rs` içinde digest ile sabitlenir, böylece çalıştırmalar test edilen kalıbı kullanır. `node scripts/update-image-digests.mjs` bunları yeniler. Ayda bir workflow aynısını `chore/image-digests` dalında yapar ve pull request bağlantısını içeren bir issue açar.
+
 `pnpm e2e:native`, uygulamanın debug sürümünü demo projeler ve Unicode yol, symlink döngüsü ya da boş proje gibi uç durumlar üzerinde baştan sona çalıştırır, iki temada metin kontrastını ölçer ve her senaryonun sonucunu bildirir.
 
 Bu README'deki ekran görüntüleri, `pnpm dev` çalışırken `node scripts/readme-shots.mjs` ile alınır: Betik örnek verili arayüzü headless Chrome'da gezer, her sayfayı bir pencere çerçevesine yerleştirip PNG olarak `assets/readme/`'ye yazar; bunlar sonra `cwebp` ile WebP'ye çevrilir.
