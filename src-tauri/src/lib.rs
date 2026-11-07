@@ -21,6 +21,8 @@ use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 
 const CHANGES_FILE: &str = "changes.json";
 const WRITTEN_FILE: &str = "written.json";
+const SETTINGS_FILE: &str = "settings.json";
+const DEFAULT_BACKUPS: u32 = 30;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -51,9 +53,23 @@ pub struct AppState {
     next_preview: AtomicU64,
 }
 
+/// A new install starts with a backup limit. One that already has backups stays unlimited until
+/// the user picks a limit, so an update never deletes them.
+fn first_settings(data_dir: &Path) -> Settings {
+    let backups = SnapshotStore::new(data_dir.join("snapshots")).usage().snapshots;
+    let settings = Settings { snapshot_limit: (backups == 0).then_some(DEFAULT_BACKUPS), ..Settings::default() };
+    if let Ok(json) = serde_json::to_vec_pretty(&settings) {
+        let _ = ferry_core::safefs::write_atomic(&data_dir.join(SETTINGS_FILE), &json);
+    }
+    settings
+}
+
 impl AppState {
     pub fn new(data_dir: PathBuf) -> Self {
-        let settings = std::fs::read(data_dir.join("settings.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        let settings = match std::fs::read(data_dir.join(SETTINGS_FILE)) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => first_settings(&data_dir),
+            read => read.ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default(),
+        };
         Self {
             tools_dir: data_dir.join("tools"),
             data_dir,
@@ -88,7 +104,7 @@ impl AppState {
     }
 
     fn settings_path(&self) -> PathBuf {
-        self.data_dir.join("settings.json")
+        self.data_dir.join(SETTINGS_FILE)
     }
 }
 
@@ -790,8 +806,8 @@ async fn ignore_finding(state: State<'_, AppState>, path: String, id: String, re
             .find(|f| f.id == id)
             .ok_or_else(|| t!("Bulgu bulunamadı; projeyi yeniden tarayın.", "Finding not found; scan the project again."))?;
         let mut ignores = ignore::load_for_update(&root)?;
-        if !ignores.iter().any(|i| i.matches(finding)) {
-            ignores.push(Ignore::for_finding(finding, &reason, now_secs()));
+        if !ignores.iter().any(|i| i.covers(&root, finding)) {
+            ignores.push(Ignore::for_finding(&root, finding, &reason, now_secs()));
         }
         ignore::save(&root, &ignores).map_err(|e| {
             let e = ferry_core::i18n::io_error(&e);
@@ -817,13 +833,13 @@ async fn unignore_finding(state: State<'_, AppState>, path: String, id: String) 
             .find(|f| f.id == id)
             .ok_or_else(|| t!("Bulgu bulunamadı; projeyi yeniden tarayın.", "Finding not found; scan the project again."))?;
         let mut ignores = ignore::load_for_update(&root)?;
-        if !ignores.iter().any(|i| i.matches(finding)) {
+        if !ignores.iter().any(|i| i.covers(&root, finding)) {
             return Err(t!(
                 "Bu bulgu kaynak koddaki bir ferry-ignore yorumuyla yok sayılıyor; yeniden görmek için yorumu kaldırın.",
                 "This finding is ignored by a ferry-ignore comment in the code; remove the comment to see it again."
             ));
         }
-        ignores.retain(|i| !i.matches(finding));
+        ignores.retain(|i| !i.covers(&root, finding));
         ignore::save(&root, &ignores).map_err(|e| {
             let e = ferry_core::i18n::io_error(&e);
             t!("Yok sayma listesi kaydedilemedi: {e}", "Couldn't save the ignore list: {e}")

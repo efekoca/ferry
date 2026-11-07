@@ -199,9 +199,30 @@ fn compares_every_selectable_target() {
 }
 
 #[test]
+fn an_update_never_starts_deleting_backups() {
+    let limit = |dir: &std::path::Path| AppState::new(dir.to_path_buf()).settings.lock().unwrap().snapshot_limit;
+
+    let fresh = tempfile::tempdir().unwrap();
+    assert_eq!(limit(fresh.path()), Some(30));
+    assert!(fresh.path().join("settings.json").is_file());
+    assert_eq!(limit(fresh.path()), Some(30));
+
+    let used = tempfile::tempdir().unwrap();
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(project.path().join("a.php"), "<?php\n").unwrap();
+    SnapshotStore::new(used.path().join("snapshots")).create(project.path(), &["a.php".to_string()], "old").unwrap();
+    assert_eq!(limit(used.path()), None);
+    assert_eq!(limit(used.path()), None);
+
+    let chosen = tempfile::tempdir().unwrap();
+    std::fs::write(chosen.path().join("settings.json"), r#"{"snapshotLimit":null}"#).unwrap();
+    assert_eq!(limit(chosen.path()), None);
+}
+
+#[test]
 fn settings_round_trip() {
     let h = harness();
-    assert_eq!(h.ok("get_settings", json!({})), json!({ "phpPath": null, "snapshotLimit": null, "editor": null, "editorCommand": null }));
+    assert_eq!(h.ok("get_settings", json!({})), json!({ "phpPath": null, "snapshotLimit": 30, "editor": null, "editorCommand": null }));
     h.ok("save_settings", json!({ "settings": { "phpPath": "/opt/php/bin/php", "editor": "vscode" } }));
     assert_eq!(
         h.ok("get_settings", json!({})),
