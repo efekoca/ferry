@@ -8,6 +8,9 @@ pub struct Ignore {
     pub rule_id: String,
     pub file: String,
     pub snippet: String,
+    /// Only on a shortened snippet, so long lines that start alike stay apart.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line_hash: Option<String>,
     pub reason: String,
     #[serde(default)]
     pub created_at: u64,
@@ -59,12 +62,34 @@ pub fn save(root: &Path, ignores: &[Ignore]) -> std::io::Result<()> {
     tmp.persist(file).map(|_| ()).map_err(|e| e.error)
 }
 
+fn hash_line(line: &str) -> String {
+    format!("{:016x}", crate::snapshot::fnv1a(line.as_bytes()))
+}
+
+fn clean_line(line: &str) -> &str {
+    line.trim_start_matches('\u{feff}').trim()
+}
+
+fn line_at(root: &Path, finding: &Finding) -> Option<String> {
+    let bytes = crate::safefs::read_bytes(root.join(&finding.file)).ok()?;
+    let text = String::from_utf8_lossy(&bytes);
+    text.lines().nth(finding.line.checked_sub(1)?).map(|line| clean_line(line).to_string())
+}
+
 impl Ignore {
-    pub fn for_finding(finding: &Finding, reason: &str, created_at: u64) -> Self {
+    pub fn for_finding(root: &Path, finding: &Finding, reason: &str, created_at: u64) -> Self {
+        let snippet = finding.snippet.trim().to_string();
+        let line_hash = snippet
+            .ends_with('…')
+            .then(|| line_at(root, finding))
+            .flatten()
+            .filter(|line| crate::analyzer::clip_snippet(line) == snippet)
+            .map(|line| hash_line(&line));
         Self {
             rule_id: finding.rule_id.clone(),
             file: finding.file.clone(),
-            snippet: finding.snippet.trim().to_string(),
+            snippet,
+            line_hash,
             reason: reason.trim().to_string(),
             created_at,
         }
@@ -72,6 +97,18 @@ impl Ignore {
 
     pub fn matches(&self, finding: &Finding) -> bool {
         self.rule_id == finding.rule_id && self.file == finding.file && self.snippet == finding.snippet.trim()
+    }
+
+    fn same_line(&self, line: Option<&str>) -> bool {
+        match (&self.line_hash, line) {
+            (Some(want), Some(line)) => *want == hash_line(line),
+            _ => true,
+        }
+    }
+
+    /// `matches`, and the same full line when the snippet was shortened.
+    pub fn covers(&self, root: &Path, finding: &Finding) -> bool {
+        self.matches(finding) && (self.line_hash.is_none() || self.same_line(line_at(root, finding).as_deref()))
     }
 }
 
@@ -163,7 +200,7 @@ impl Source {
             }
         }
         let lines: Vec<String> = text.lines().map(str::to_string).collect();
-        let trimmed = lines.iter().map(|l| l.trim_start_matches('\u{feff}').trim().to_string()).collect();
+        let trimmed = lines.iter().map(|l| clean_line(l).to_string()).collect();
         Some(Self { lines, trimmed, comments })
     }
 
@@ -174,10 +211,13 @@ impl Source {
         on(line, false).or_else(|| line.checked_sub(1).filter(|&l| l > 0).and_then(|l| on(l, true)))
     }
 
-    fn has_snippet(&self, snippet: &str) -> bool {
-        match snippet.strip_suffix('…') {
+    fn has(&self, ignore: &Ignore) -> bool {
+        if let Some(want) = &ignore.line_hash {
+            return self.trimmed.iter().any(|line| hash_line(line) == *want);
+        }
+        match ignore.snippet.strip_suffix('…') {
             Some(prefix) => self.lines.iter().any(|l| l.trim().starts_with(prefix)),
-            None => self.trimmed.contains(snippet),
+            None => self.trimmed.contains(&ignore.snippet),
         }
     }
 }
@@ -186,7 +226,13 @@ pub fn apply(root: &Path, findings: Vec<Finding>, ignores: &[Ignore]) -> Applied
     let mut sources: std::collections::HashMap<String, Option<Source>> = std::collections::HashMap::new();
     let (mut kept, mut ignored) = (Vec::new(), Vec::new());
     for f in findings {
-        if let Some(i) = ignores.iter().find(|i| i.matches(&f)) {
+        let hit = ignores.iter().find(|i| {
+            i.matches(&f) && {
+                let source = sources.entry(f.file.clone()).or_insert_with(|| Source::read(&root.join(&f.file)));
+                i.same_line(source.as_ref().and_then(|s| s.lines.get(f.line.wrapping_sub(1))).map(|line| clean_line(line)))
+            }
+        });
+        if let Some(i) = hit {
             ignored.push(IgnoredFinding { reason: i.reason.clone(), finding: f, inline: false });
             continue;
         }
@@ -198,10 +244,10 @@ pub fn apply(root: &Path, findings: Vec<Finding>, ignores: &[Ignore]) -> Applied
     }
     let stale = ignores
         .iter()
-        .filter(|i| !ignored.iter().any(|g: &IgnoredFinding| !g.inline && i.matches(&g.finding)))
+        .filter(|i| i.line_hash.is_some() || !ignored.iter().any(|g: &IgnoredFinding| !g.inline && i.matches(&g.finding)))
         .filter(|i| {
             let source = sources.entry(i.file.clone()).or_insert_with(|| Source::read(&root.join(&i.file)));
-            !source.as_ref().is_some_and(|s| s.has_snippet(&i.snippet))
+            !source.as_ref().is_some_and(|s| s.has(i))
         })
         .cloned()
         .collect();
@@ -217,7 +263,7 @@ mod tests {
     fn ignores_survive_line_moves_and_round_trip() {
         let dir = tempfile::tempdir().unwrap();
         let before = analyze_source("a.php", "<?php\neach($a);\neach($b);", "8.0".parse().unwrap());
-        save(dir.path(), &[Ignore::for_finding(&before[0], " vendored copy ", 1)]).unwrap();
+        save(dir.path(), &[Ignore::for_finding(dir.path(), &before[0], " vendored copy ", 1)]).unwrap();
         let ignores = load(dir.path());
         assert_eq!(ignores[0].reason, "vendored copy");
         let after = analyze_source("a.php", "<?php\n\n\neach($a);\neach($b);", "8.0".parse().unwrap());
@@ -269,7 +315,7 @@ mod tests {
         let src = "\u{feff}<?php each($a);\n";
         std::fs::write(dir.path().join("a.php"), src).unwrap();
         let findings = analyze_source("a.php", src, "8.2".parse().unwrap());
-        let ignores = [Ignore::for_finding(&findings[0], "old", 1)];
+        let ignores = [Ignore::for_finding(dir.path(), &findings[0], "old", 1)];
         let applied = apply(dir.path(), findings, &ignores);
         assert_eq!((applied.ignored.len(), applied.stale.len()), (1, 0));
     }
@@ -290,6 +336,7 @@ mod tests {
         std::fs::write(dir.path().join("a.php"), src).unwrap();
         let findings = analyze_source("a.php", src, "8.2".parse().unwrap());
         let gone = Ignore {
+            line_hash: None,
             rule_id: "removed.each".into(),
             file: "a.php".into(),
             snippet: "each($old);".into(),
@@ -323,10 +370,45 @@ mod tests {
         std::fs::write(dir.path().join("a.php"), &src).unwrap();
         let findings = analyze_source("a.php", &src, "8.2".parse().unwrap());
         assert!(findings[0].snippet.ends_with('…'));
-        let ignores = [Ignore::for_finding(&findings[0], "kept", 0)];
+        let ignores = [Ignore::for_finding(dir.path(), &findings[0], "kept", 0)];
         let applied = apply(dir.path(), findings, &ignores);
         assert_eq!((applied.ignored.len(), applied.stale.len()), (1, 0));
         assert!(!applied.ignored[0].inline);
+    }
+
+    fn long_twins() -> (tempfile::TempDir, Vec<Finding>) {
+        let dir = tempfile::tempdir().unwrap();
+        let start = format!("each($a); // {}", "x".repeat(300));
+        let src = format!("<?php\n{start} one\n{start} two\n");
+        std::fs::write(dir.path().join("a.php"), &src).unwrap();
+        let findings = analyze_source("a.php", &src, "8.2".parse().unwrap());
+        assert_eq!(findings[0].snippet, findings[1].snippet);
+        (dir, findings)
+    }
+
+    #[test]
+    fn an_ignore_keeps_to_its_own_long_line() {
+        let (dir, findings) = long_twins();
+        let first = Ignore::for_finding(dir.path(), &findings[0], "kept", 0);
+        assert!(first.covers(dir.path(), &findings[0]) && !first.covers(dir.path(), &findings[1]));
+        let applied = apply(dir.path(), findings.clone(), std::slice::from_ref(&first));
+        assert_eq!((applied.kept.len(), applied.kept[0].line), (1, 3));
+        assert_eq!((applied.ignored.len(), applied.stale.len()), (1, 0));
+
+        let src = std::fs::read_to_string(dir.path().join("a.php")).unwrap().replacen(" one\n", " changed\n", 1);
+        std::fs::write(dir.path().join("a.php"), src).unwrap();
+        let applied = apply(dir.path(), findings, std::slice::from_ref(&first));
+        assert_eq!(applied.stale, [first]);
+    }
+
+    #[test]
+    fn an_older_entry_still_covers_every_line_it_used_to() {
+        let (dir, findings) = long_twins();
+        let old = Ignore { line_hash: None, ..Ignore::for_finding(dir.path(), &findings[0], "kept", 0) };
+        save(dir.path(), std::slice::from_ref(&old)).unwrap();
+        assert!(!std::fs::read_to_string(path(dir.path())).unwrap().contains("lineHash"));
+        let applied = apply(dir.path(), findings, &load(dir.path()));
+        assert_eq!((applied.kept.len(), applied.ignored.len(), applied.stale.len()), (0, 2, 0));
     }
 
     #[test]
@@ -336,7 +418,7 @@ mod tests {
         std::fs::write(dir.path().join("a.php"), &src).unwrap();
         let findings = analyze_source("a.php", &src, "8.2".parse().unwrap());
         let ignores: Vec<Ignore> =
-            (0..200).map(|n| Ignore { snippet: format!("gone{n}();"), ..Ignore::for_finding(&findings[0], "x", 0) }).collect();
+            (0..200).map(|n| Ignore { snippet: format!("gone{n}();"), ..Ignore::for_finding(dir.path(), &findings[0], "x", 0) }).collect();
         let started = std::time::Instant::now();
         let applied = apply(dir.path(), findings, &ignores);
         assert_eq!((applied.kept.len(), applied.stale.len()), (4000, 200));

@@ -137,7 +137,7 @@ Before every apply, Ferry backs up the files it is about to change. The **Histor
 
 - **Review** shows exactly what each apply changed, file by file, with the rules behind each change.
 - **Undo** puts every file back as it was before that apply. If you edited any of them since, Ferry lists them first, backs up their current content as a new History entry, and refuses to overwrite a file that changes after you confirmed.
-- **Backups to keep** in **Settings** limits how many backups each project keeps (10, 30 or 100). It is unlimited by default.
+- **Backups to keep** in **Settings** sets how many backups each project keeps: 10, 30, 100 or unlimited. A new install keeps 30. An install that already has backups stays unlimited until you choose, so an update never deletes them.
 - If an apply fails partway, Ferry rolls the files back on its own. If even that fails, the backup stays in History so you can restore it yourself.
 
 ### Made for your desktop
@@ -297,7 +297,7 @@ When something is missing, the **Fixes** page says what and offers **Install Rec
 
 - **Read:** the PHP files in the project folder you choose, plus `composer.json`, `composer.lock`, and the files that decide which PHP runs: `.htaccess`, `.user.ini`, `php.ini`, Dockerfiles, Docker Compose, CI and hosting configuration, and web server `.conf` files. The **Real test** screen also reads the project's `.env` and `wp-config.php` for its database settings, password included, and `~/.ssh/config` for the list of SSH hosts. Ferry doesn't read SSH keys.
 - **Written:** only the files you apply changes to, `.ferry/ignore.json` when you ignore a finding, and `.ferry/config.json` when you save project settings. If you choose to commit, Ferry creates Git commits in the project, on a separate branch if you ask for one. Real test works on temporary copies and leaves the project as it is.
-- **Stored:** backups of the files before each apply (all of them, or only the newest if you set a limit), a record of what was applied, the last 30 scan summaries per target, summaries of past checks and Real tests, Rector's cache, and your settings (`config.json`, including the path to a PHP binary if you set one), in the app's data folder: `~/Library/Application Support/io.github.efekoca.ferry` on macOS, `%APPDATA%\io.github.efekoca.ferry` on Windows, and `~/.local/share/io.github.efekoca.ferry` on Linux.
+- **Stored:** backups of the files before each apply (the newest 30 per project on a new install, or the limit you set), a record of what was applied, the last 30 scan summaries per target, summaries of past checks and Real tests, Rector's cache, and your settings (`settings.json`, including the path to a PHP binary if you set one), in the app's data folder: `~/Library/Application Support/io.github.efekoca.ferry` on macOS, `%APPDATA%\io.github.efekoca.ferry` on Windows, and `~/.local/share/io.github.efekoca.ferry` on Linux.
 - **Project code:** scanning never runs your code. Calculating fixes runs Rector in the project folder, and Rector loads the project's `vendor/autoload.php`, so files listed under Composer's `autoload.files` are executed. Everything in `vendor/autoload.php` runs on this computer, including on the Real test screen, because Rector isn't containerized. Only calculate fixes for projects you trust.
 - **Network:** Ferry makes no network requests until you start one of these:
   - **Install Rector:** Composer downloads Rector from Packagist.
