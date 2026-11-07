@@ -66,18 +66,11 @@ export const tr = {
   },
   welcome: {
     title: "Kodunuz yeni sürüme hazır olsun",
-    lead: "Ferry kodunuzu tarar, neyin bozulacağını önceden gösterir ve düzeltmeleri siz onayladıkça uygular. Uygulanan düzeltmeler geri alınabilir.",
+    lead: "Bir PHP projesini sürükleyin, neyin bozulacağını görün.",
     pick: "Proje klasörü seçin",
-    drop: "Proje klasörünü seçin ya da buraya sürükleyin",
     dropping: "Bırakabilirsiniz",
-    supports: "WordPress, Laravel, Symfony, Drupal ve düz PHP",
     recent: "Son açılanlar",
     forget: (name: string) => `${name} projesini listeden kaldır`,
-    features: [
-      { title: "Kapsamlı tarama", text: "PHP 7.0'dan 8.5'e kadar kaldırılan ya da değişen kullanımları saniyeler içinde bulur." },
-      { title: "Önce gör, sonra uygula", text: "Rector'ın önerdiği her değişikliği satır satır inceleyin, yalnızca istediklerinizi uygulayın." },
-      { title: "Tek tıkla geri al", text: "Her değişiklikten önce yedek alınır. Git kullanmasanız da olur." },
-    ],
   },
   overview: {
     title: "Genel bakış",
@@ -733,16 +726,17 @@ export const tr = {
     fixConfirm: "Projeye yaz",
     level: { fatal: "Hata", warning: "Uyarı", deprecated: "Kullanımdan kalkmış" },
   },
-  roadmap: {
-    ai: {
-      title: "AI önerileri",
-      text: "Kuralların güvenle çözemediği “elle düzelt” bulguları bağlamıyla birlikte Claude'a gönderilecek ve düzeltme önerisi alınacak. Öneriler yine diff olarak gösterilecek, siz onaylamadan uygulanmayacak.",
-      items: [
-        "Sadece elle düzeltilmesi gereken parçalar gönderilir",
-        "Öneriler aynı önizleme ve geri alma akışından geçer",
-        "Kapalıyken hiçbir kod bilgisayarınızdan çıkmaz",
-      ],
-    },
+  ai: {
+    title: "AI önerileri",
+    headline: (n: number) => `${n} elle düzeltme için AI önerisi`,
+    headlineEmpty: "Elle düzeltmeler için AI önerisi",
+    lead: "Öneriler aynı önizlemeden geçer, siz onaylamadan uygulanmaz.",
+    keyTitle: "Kendi API anahtarınız",
+    keyText: "Bulgunun çevresindeki kod seçtiğiniz sağlayıcıya gider.",
+    keyAction: "Anahtar ekle",
+    localTitle: "Yerel model",
+    localText: "Tek tıkla kurulur, kod bilgisayarınızdan çıkmaz.",
+    localAction: "Modeli kur",
   },
   toast: {
     toolsFailed: "Araçlar kontrol edilemedi",

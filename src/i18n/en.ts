@@ -68,18 +68,11 @@ export const en: Dict = {
   },
   welcome: {
     title: "Get your code ready for the new PHP",
-    lead: "Ferry scans your code, shows what will break before it does, and applies fixes only when you approve them. Applied fixes can be undone.",
+    lead: "Drag in a PHP project and see what will break.",
     pick: "Choose project folder",
-    drop: "Choose a project folder or drop it here",
     dropping: "Drop to open",
-    supports: "WordPress, Laravel, Symfony, Drupal and plain PHP",
     recent: "Recent projects",
     forget: (name) => `Remove ${name} from recent projects`,
-    features: [
-      { title: "Thorough scan", text: "Finds code removed or changed from PHP 7.0 to 8.5 in seconds." },
-      { title: "Preview first", text: "Review every change Rector suggests line by line and apply only what you want." },
-      { title: "One-click undo", text: "A backup is taken before every change. No Git required." },
-    ],
   },
   overview: {
     title: "Overview",
@@ -742,16 +735,17 @@ export const en: Dict = {
     fixConfirm: "Write to project",
     level: { fatal: "Error", warning: "Warning", deprecated: "Deprecated" },
   },
-  roadmap: {
-    ai: {
-      title: "AI suggestions",
-      text: "Manual findings that rules can't fix safely will be sent to Claude with their context for a suggested fix. Suggestions show up as diffs and are never applied without your approval.",
-      items: [
-        "Only the parts that need a manual fix are sent",
-        "Suggestions go through the same preview and undo flow",
-        "When it's off, no code leaves your computer",
-      ],
-    },
+  ai: {
+    title: "AI suggestions",
+    headline: (n) => `AI suggestions for ${n === 1 ? "1 manual fix" : `${n} manual fixes`}`,
+    headlineEmpty: "AI suggestions for manual fixes",
+    lead: "Suggestions go through the same preview and apply only once you approve.",
+    keyTitle: "Your own API key",
+    keyText: "The code around a finding goes to the provider you choose.",
+    keyAction: "Add a key",
+    localTitle: "Local model",
+    localText: "Installs in one click, and your code stays on this computer.",
+    localAction: "Install the model",
   },
   toast: {
     toolsFailed: "Couldn't check tools",

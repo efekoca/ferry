@@ -11,9 +11,9 @@ import { StoreProvider, useStore } from "./lib/store";
 import { Changes } from "./screens/Changes";
 import { Findings } from "./screens/Findings";
 import { DockerCompare } from "./screens/DockerCompare";
+import { Ai } from "./screens/Ai";
 import { Dependencies } from "./screens/Dependencies";
 import { History } from "./screens/History";
-import { Roadmap } from "./screens/Other";
 import { SettingsScreen } from "./screens/Settings";
 import { Overview } from "./screens/Overview";
 import { Welcome } from "./screens/Welcome";
@@ -66,7 +66,7 @@ function Screen() {
     case "runtime":
       return <DockerCompare />;
     case "ai":
-      return <Roadmap />;
+      return <Ai />;
     default:
       return <Overview />;
   }
