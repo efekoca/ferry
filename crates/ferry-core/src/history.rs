@@ -81,37 +81,39 @@ pub fn scans(file: &Path) -> Vec<Entry> {
 }
 
 pub fn record(file: &Path, at: u64, target: &str, score: u8, findings: &[Finding]) -> std::io::Result<Progress> {
-    let mut entries = load(file);
-    let previous = entries.iter().rev().find(|e| e.target == target).cloned();
-    let fingerprints: Vec<String> = findings.iter().map(fingerprint).collect();
-    let (new_since_last, fixed_since_last) = match &previous {
-        Some(p) => {
-            let added = new_findings(&p.fingerprints, findings).len();
-            (Some(added), Some((p.total + added).saturating_sub(findings.len())))
+    crate::safefs::update_list(file, |entries: &mut Vec<Entry>| {
+        let previous = entries.iter().rev().find(|e| e.target == target).cloned();
+        let fingerprints: Vec<String> = findings.iter().map(fingerprint).collect();
+        let (new_since_last, fixed_since_last) = match &previous {
+            Some(p) => {
+                let added = new_findings(&p.fingerprints, findings).len();
+                (Some(added), Some((p.total + added).saturating_sub(findings.len())))
+            }
+            None => (None, None),
+        };
+        for e in entries.iter_mut().filter(|e| e.target == target) {
+            e.fingerprints.clear();
         }
-        None => (None, None),
-    };
-    for e in entries.iter_mut().filter(|e| e.target == target) {
-        e.fingerprints.clear();
-    }
-    entries.push(Entry { at, target: target.to_string(), score, total: findings.len(), counts: Some(Counts::of(findings)), fingerprints });
-    let same = entries.iter().filter(|e| e.target == target).count();
-    let mut drop = same.saturating_sub(KEEP);
-    entries.retain(|e| {
-        let old = drop > 0 && e.target == target;
-        drop -= usize::from(old);
-        !old
-    });
-    if let Some(dir) = file.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
-    let tmp = file.with_extension("json.tmp");
-    std::fs::write(&tmp, serde_json::to_vec(&entries).map_err(std::io::Error::other)?)?;
-    std::fs::rename(tmp, file)?;
-    let history =
-        entries.iter().filter(|e| e.target == target).map(|e| Entry { fingerprints: Vec::new(), ..e.clone() }).collect::<Vec<_>>();
-    let history = history[history.len().saturating_sub(KEEP)..].to_vec();
-    Ok(Progress { history, new_since_last, fixed_since_last })
+        entries.push(Entry {
+            at,
+            target: target.to_string(),
+            score,
+            total: findings.len(),
+            counts: Some(Counts::of(findings)),
+            fingerprints,
+        });
+        let same = entries.iter().filter(|e| e.target == target).count();
+        let mut drop = same.saturating_sub(KEEP);
+        entries.retain(|e| {
+            let old = drop > 0 && e.target == target;
+            drop -= usize::from(old);
+            !old
+        });
+        let history =
+            entries.iter().filter(|e| e.target == target).map(|e| Entry { fingerprints: Vec::new(), ..e.clone() }).collect::<Vec<_>>();
+        let history = history[history.len().saturating_sub(KEEP)..].to_vec();
+        Progress { history, new_since_last, fixed_since_last }
+    })
 }
 
 #[cfg(test)]
