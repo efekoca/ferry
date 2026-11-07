@@ -1,6 +1,6 @@
 import type { Api } from "./api";
 import type { Localized } from "../i18n";
-import type { CheckSummary, DockerComparison, DockerStep, DockerSummary, ProjectConfig,
+import type { CheckSummary, DockerComparison, DockerStep, DockerSummary, HistoryEntry, ProjectConfig, ScanCounts,
   CheckRun,
   DependencyReport,
   DiffLine,
@@ -223,16 +223,25 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
     };
     return { findings: [...marked, extra], runtime: { file: runtimeLog, events: 31, confirmed: hit.size, added: 1, outside: runtimeRoots.length ? 9 : 4, outsideFatals: 0, check: runtimeCheck, roots: runtimeRoots } };
   };
-  const history = new Map<string, { at: number; score: number; total: number; ids: string[] }[]>();
+  const history = new Map<string, { at: number; score: number; total: number; counts: ScanCounts; ids: string[] }[]>();
+  const pastScan = (hoursAgo: number, score: number, breaking: number, deprecated: number, behavior: number, files: number): HistoryEntry => ({
+    at: Math.floor(Date.now() / 1000) - hoursAgo * 3600,
+    target: "8.4",
+    score,
+    total: breaking + deprecated + behavior,
+    counts: { breaking, deprecated, behavior, files },
+  });
+  const pastScans = [pastScan(74, 6, 16, 14, 6, 14), pastScan(69, 9, 15, 13, 6, 14), pastScan(50, 13, 14, 12, 5, 13), pastScan(45, 16, 13, 11, 5, 12), pastScan(26, 19, 12, 10, 4, 12), pastScan(21, 22, 11, 9, 4, 11)];
   const track = (scan: ScanResult): ScanResult => {
     const list = history.get(scan.target) ?? [];
     const prev = list[list.length - 1];
     const ids = scan.findings.map((f) => f.id);
     const added = prev ? ids.filter((id) => !prev.ids.includes(id)).length : null;
     const fixed = prev ? prev.ids.filter((id) => !ids.includes(id)).length : null;
-    list.push({ at: Math.floor(Date.now() / 1000), score: scan.summary.score, total: scan.summary.total, ids });
+    const { breaking, deprecated, behavior, score, total } = scan.summary;
+    list.push({ at: Math.floor(Date.now() / 1000) + list.length, score, total, counts: { breaking, deprecated, behavior, files: new Set(scan.findings.map((f) => f.file)).size }, ids });
     history.set(scan.target, list);
-    const entries = list.slice(-30).map(({ at, score, total }) => ({ at, target: scan.target, score, total }));
+    const entries = list.slice(-30).map(({ at, score, total, counts }) => ({ at, target: scan.target, score, total, counts }));
     return { ...scan, progress: { history: entries, newSinceLast: added, fixedSinceLast: fixed } };
   };
   const withIgnores = (scan: ScanResult): ScanResult => {
@@ -470,6 +479,7 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
       return CHANGES.filter((c) => snap.files.some((f) => f.path === c.file));
     },
     snapshotConflicts: async () => [],
+    scanHistory: async () => [...pastScans, ...[...history].flatMap(([target, list]) => list.map(({ at, score, total, counts }) => ({ at, target, score, total, counts })))],
     backupUsage: async () => ({
       snapshots: snapshots.length,
       projects: snapshots.length ? 1 : 0,

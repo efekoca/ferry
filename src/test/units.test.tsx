@@ -1,5 +1,5 @@
 import { touches } from "../lib/fixes";
-import type { DockerEvent, FileChange } from "../lib/types";
+import type { CheckSummary, DockerEvent, DockerSummary, FileChange, HistoryEntry, Snapshot } from "../lib/types";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
@@ -8,6 +8,7 @@ import { DiffViewer, splitRows, wordDiff } from "../components/DiffViewer";
 import { Select, TagInput } from "../components/ui";
 import { DICTS, I18nProvider } from "../i18n";
 import { highlight } from "../lib/code";
+import { columnOf, dayLabels, historyEvents, niceMax, rangeStart, smoothPath, spreadOut } from "../lib/history";
 import { squarify } from "../lib/treemap";
 import { filesHoldingHalf, fileStats } from "../screens/Overview";
 import { commonTitle, dependencyBlockers, formatBytes, formatDuration, formatRelative, joinPath, scoreHeadline, scoreTone } from "../lib/labels";
@@ -469,5 +470,60 @@ describe("splitRows", () => {
 
   it("handles an addition with nothing removed", () => {
     expect(splitRows([line("add", "x")]).map((r) => [r.left?.text, r.right?.text])).toEqual([[undefined, "x"]]);
+  });
+});
+
+describe("history chart helpers", () => {
+  const scan = (at: number) => ({ at, target: "8.4", score: 1, total: 1 }) as HistoryEntry;
+
+  it("rounds the bar axis up to an even, readable top", () => {
+    expect([0, 1, 7, 21, 36, 195, 1234].map(niceMax)).toEqual([2, 2, 8, 22, 36, 200, 1400]);
+  });
+
+  it("never overshoots between two points", () => {
+    const path = smoothPath([0, 10, 20, 30], [100, 100, 0, 0]);
+    const ys = [...path.matchAll(/C[\d.]+ ([\d.-]+) [\d.]+ ([\d.-]+) [\d.]+ ([\d.-]+)/g)].flatMap((m) => m.slice(1).map(Number));
+    expect(Math.max(...ys)).toBeLessThanOrEqual(100);
+    expect(Math.min(...ys)).toBeGreaterThanOrEqual(0);
+    expect(smoothPath([5], [6])).toBe("M5 6");
+    expect(smoothPath([], [])).toBe("");
+  });
+
+  it("places an event between the scans around it", () => {
+    const scans = [scan(100), scan(200), scan(400)];
+    expect(columnOf(150_000, scans)).toBeCloseTo(0.5);
+    expect(columnOf(300_000, scans)).toBeCloseTo(1.5);
+    expect(columnOf(50_000, scans)).toBeLessThan(0);
+    expect(columnOf(900_000, scans)).toBeGreaterThan(2);
+  });
+
+  it("keeps marks apart and inside the chart", () => {
+    expect(spreadOut([10, 10, 50], 3)).toEqual([10, 13, 50]);
+    expect(spreadOut([99, 100, 100], 3)).toEqual([94, 97, 100]);
+    expect(spreadOut([50, 10], 3)).toEqual([50, 10]);
+  });
+
+  it("names each day once and thins labels when scans are dense", () => {
+    const t = DICTS.tr;
+    const noon = new Date(2026, 10, 2, 12).getTime() / 1000;
+    const scans = [noon, noon + 60, noon + 86400, noon + 86460].map(scan);
+    expect(dayLabels(scans, t).filter(Boolean)).toHaveLength(2);
+    const dense = Array.from({ length: 30 }, (_, i) => scan(noon + i * 86400));
+    expect(dayLabels(dense, t).filter(Boolean).length).toBeLessThanOrEqual(8);
+  });
+
+  it("measures ranges from now", () => {
+    expect(rangeStart("all")).toBe(0);
+    expect(rangeStart("7", 8 * 86_400_000)).toBe(86_400_000);
+  });
+
+  it("merges events newest first in milliseconds", () => {
+    const events = historyEvents(
+      [scan(10)],
+      [{ id: "a", createdAt: 30_000, projectRoot: "/", label: "x", files: [] } as Snapshot],
+      [{ at: 20 } as DockerSummary],
+      [{ at: 5 } as CheckSummary],
+    );
+    expect(events.map((e) => [e.kind, e.at])).toEqual([["fix", 30_000], ["real", 20_000], ["scan", 10_000], ["check", 5_000]]);
   });
 });
