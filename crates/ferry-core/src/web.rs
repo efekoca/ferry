@@ -47,7 +47,7 @@ while ($queue && count($seen) < $limit) {
     $seen[$path] = true;
     list($status, $location, $body) = $fetch($path);
     list(, , $again) = $fetch($path);
-    $plain = function ($html) { return preg_replace('/\b(?=[a-f]*\d)(?=\d*[a-f])[a-f0-9]{6,}\b|\d+(?:\.\d+)? ?(?:ms|MiB)|\d{1,2}[:.]\d{2}[:.]\d{2}(?: ?[AP]M)?/i', '', $html); };
+    $plain = function ($html) { return preg_replace('/\b(?=[a-f]*\d)(?=\d*[a-f])[a-f0-9]{12,}\b|\d+(?:\.\d+)? ?(?:ms|MiB)|\d{1,2}[:.]\d{2}[:.]\d{2}(?: ?[AP]M)?/i', '', $html); };
     preg_match_all('/(?:Fatal error|Parse error|Uncaught|Warning|Deprecated|Notice):? [^<\n]{0,200}/', $body, $errors);
     $raw = trim(preg_replace('/\s+/', ' ', $plain($body)));
     echo 'FERRYPAGE ' . json_encode(array(
@@ -60,9 +60,9 @@ while ($queue && count($seen) < $limit) {
         'text' => utf8_clean(substr($raw, 0, 60000)),
     )) . "\n";
     if (!$follow) { continue; }
-    preg_match_all('/href=["\']([^"\'#]+)/i', $body, $links);
+    preg_match_all('/href\s*=\s*(?|"([^#"]*)|\'([^#\']*)|([^\s#"\'>]+))/i', $body, $links);
     foreach (array_merge($location === '' ? array() : array($location), $links[1]) as $link) {
-        $next = same_site($path, $link);
+        $next = same_site($path, html_entity_decode($link, ENT_QUOTES));
         if ($next === null) { continue; }
         $unsafe = preg_match('#logout|logoff|signout|delete|remove|destroy|_profiler|_wdt|_debugbar|telescope|horizon|\.(css|js|png|jpe?g|gif|svg|ico|woff2?|pdf|zip)$#i', (string) strtok($next, '?'));
         if (!$unsafe) { $queue[] = $next; }

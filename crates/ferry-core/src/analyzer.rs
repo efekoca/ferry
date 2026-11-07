@@ -530,7 +530,11 @@ pub fn analyze_source_in(file: &str, src: &str, target: PhpVersion, index: &crat
         function_imports: function_imports(&tokens),
         methods,
         namespaced: tokens.windows(2).any(|w| w[0].is_ident_ci("namespace") && (w[1].kind == TokenKind::Ident || w[1].is_punct("{"))),
-        dead: [crate::guards::dead_spans(&tokens, target), crate::guards::dead_expressions(&tokens, target)].concat(),
+        dead: if index.redefines_checks() {
+            Vec::new()
+        } else {
+            [crate::guards::dead_spans(&tokens, target), crate::guards::dead_expressions(&tokens, target)].concat()
+        },
         index,
         namespaces: crate::index::namespaces(&tokens),
         receivers: Receivers::new(&tokens),
@@ -4071,6 +4075,18 @@ mod bounded_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_version_constant_from_another_file_cant_hide_a_call() {
+        for declaration in ["<?php namespace App; const PHP_VERSION_ID = 70000;", "<?php define('App\\\\PHP_VERSION_ID', 70000);"] {
+            let dir = tempfile::tempdir().unwrap();
+            let (a, b) = (dir.path().join("a.php"), dir.path().join("b.php"));
+            std::fs::write(&a, "<?php namespace App; if (PHP_VERSION_ID < 80000) { \\each($x); }").unwrap();
+            std::fs::write(&b, declaration).unwrap();
+            let scan = analyze_files(dir.path(), &[a, b], PhpVersion::new(8, 4), |_, _, _| {});
+            assert!(scan.findings.iter().any(|f| f.rule_id == "removed.each"), "{declaration}");
+        }
+    }
 
     #[test]
     fn a_file_with_too_many_findings_keeps_the_most_serious_and_says_so() {

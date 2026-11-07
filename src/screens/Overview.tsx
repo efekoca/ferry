@@ -4,7 +4,7 @@ import { ConfirmDialog, Sheet } from "../components/Modal";
 import { usePageTitle } from "../components/Shell";
 import { ActionMenu, Button, Callout, Card, EmptyState, Progress, Segmented, Select, Tooltip } from "../components/ui";
 import { useI18n } from "../i18n";
-import { commonTitle, dependencyBlockers, formatDuration, formatNumber, readiness, scoreHeadline, scoreTone, firstFew } from "../lib/labels";
+import { commonTitle, dependencyBlockers, formatDuration, formatNumber, isSettled, readiness, scoreHeadline, scoreTone, firstFew } from "../lib/labels";
 import { useStore } from "../lib/store";
 import { BLOCKED_TARGETS, PATCHED, PHP2SHELL_CVES, isBlockedTarget } from "../lib/security";
 import { TARGETS, type Finding, type Severity, type Target, type TargetSummary } from "../lib/types";
@@ -159,7 +159,7 @@ export function Overview() {
 
   const s = scan.summary;
   const ready = readiness(scan, deps, dockerHistory);
-  const settled = ready.blockers === 0 && ready.unscanned === 0 && ready.deps.state === "verified" && ready.docker !== "failed" && ready.ignoredBreaking === 0 && (ready.docker === "passed" || (ready.check.state === "passed" && ready.check.kind === "tests"));
+  const settled = isSettled(ready);
   const baseTone = scoreTone(s.score);
   const tone = ready.blockers > 0 && baseTone === "auto" ? "manual" : baseTone;
   const blockers = dependencyBlockers(deps);
@@ -175,6 +175,7 @@ export function Overview() {
     unknown: r.depsUnknown(ready.deps.count),
     verified: r.depsVerified,
     missing: r.depsMissing,
+    unreadable: r.depsUnreadable,
     pending: r.depsPending,
   }[ready.deps.state];
   const steps: { key: string; title: string; state?: "done" | "next" | "blocked"; count?: number; hint: string; onClick: () => void }[] = [
@@ -254,7 +255,7 @@ export function Overview() {
               {t.overview.scorePill(s.score)}
             </span>
           </Tooltip>
-          <h2 className="page-title map-rail__title">{concentrated ? t.overview.concentrated(half) : scoreHeadline(s.score, s.total, t, scan.errors.length > 0, settled)}</h2>
+          <h2 className="page-title map-rail__title">{concentrated ? t.overview.concentrated(half) : scoreHeadline(s.score, s.total, t, scan.errors.length > 0, settled, ready.ignoredBreaking)}</h2>
           <p className="page-lead">
             {heaviest ? (
               <>

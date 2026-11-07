@@ -218,9 +218,34 @@ pub fn stamp(root: &Path, files: &[PathBuf]) -> String {
     stamp_without(root, files, &[])
 }
 
+/// Not PHP, but what a run does depends on them.
+fn run_files(root: &Path) -> Vec<PathBuf> {
+    let skipped = |e: &DirEntry| {
+        let name = e.file_name().to_string_lossy();
+        e.depth() > 0 && e.file_type().is_dir() && (name.starts_with('.') || ALWAYS_SKIP.iter().any(|s| *s == name))
+    };
+    let counts = |name: &str| {
+        let extension = name.rsplit('.').next().unwrap_or_default();
+        name == ".env"
+            || name.starts_with(".env.")
+            || name.starts_with("phpunit.xml")
+            || name.ends_with(".sql.gz")
+            || ["sql", "twig", "tpl", "latte", "mustache"].contains(&extension)
+    };
+    WalkDir::new(root)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|e| !skipped(e))
+        .flatten()
+        .filter(|e| e.file_type().is_file() && counts(&e.file_name().to_string_lossy()))
+        .map(DirEntry::into_path)
+        .collect()
+}
+
 /// The stamp of everything but these files, for telling whether anything else changed.
 pub fn stamp_without(root: &Path, files: &[PathBuf], left_out: &[String]) -> String {
-    let extra = ["composer.json", "composer.lock", ".ferry/config.json"].map(|f| root.join(f));
+    let mut extra = ["composer.json", "composer.lock", ".ferry/config.json"].map(|f| root.join(f)).to_vec();
+    extra.extend(run_files(root));
     let left_out: Vec<PathBuf> = left_out.iter().map(|f| root.join(f)).collect();
     let mut parts: Vec<String> = files
         .iter()
@@ -421,6 +446,26 @@ mod detection_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_stamp_follows_the_files_a_run_depends_on() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("templates")).unwrap();
+        std::fs::create_dir_all(root.join("node_modules")).unwrap();
+        let stamped = || stamp(root, &[]);
+        let empty = stamped();
+        for file in [".env", "templates/a.twig", "dump.sql.gz", "phpunit.xml.dist"] {
+            let before = stamped();
+            std::fs::write(root.join(file), "x").unwrap();
+            assert_ne!(stamped(), before, "{file}");
+        }
+        assert_ne!(stamped(), empty);
+        let before = stamped();
+        std::fs::write(root.join("notes.txt"), "x").unwrap();
+        std::fs::write(root.join("node_modules/a.sql"), "x").unwrap();
+        assert_eq!(stamped(), before);
+    }
     use std::fs;
 
     #[test]

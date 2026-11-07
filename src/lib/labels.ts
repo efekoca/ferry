@@ -55,7 +55,7 @@ export function scoreTone(score: number): "auto" | "manual" | "danger" {
 export interface Readiness {
   blockers: number;
   unscanned: number;
-  deps: { state: "blocked" | "unknown" | "verified" | "missing" | "pending"; count: number };
+  deps: { state: "blocked" | "unknown" | "unreadable" | "verified" | "missing" | "pending"; count: number };
   check: { state: "passed" | "failed" | "none"; kind: "lint" | "tests" | null };
   docker: "passed" | "partial" | "failed" | "none";
   ignoredBreaking: number;
@@ -73,19 +73,28 @@ export function readiness(scan: ScanResult, deps: DependencyReport | null, runs:
       ? { state: "pending", count: 0 }
       : blocked > 0
         ? { state: "blocked", count: blocked }
-        : deps.lockUnreadable || !deps.hasLockFile
-          ? { state: "missing", count: 0 }
-          : unknown > 0
-            ? { state: "unknown", count: unknown }
-            : { state: "verified", count: 0 },
+        : deps.manifestUnreadable
+          ? { state: "unreadable", count: 0 }
+          : deps.lockUnreadable || !deps.hasLockFile
+            ? { state: "missing", count: 0 }
+            : unknown > 0
+              ? { state: "unknown", count: unknown }
+              : { state: "verified", count: 0 },
     check: { state: !check ? "none" : check.passed ? "passed" : "failed", kind: check?.kind ?? null },
     docker: !run ? "none" : run.regressed ? "failed" : run.testsCompared && !run.incomplete ? "passed" : "partial",
     ignoredBreaking: scan.ignored.filter((i) => i.finding.severity === "breaking").length,
   };
 }
 
-export function scoreHeadline(score: number, total: number, t: Dict, incomplete = false, settled = true): string {
-  if (total === 0) return incomplete ? t.overview.headline.incomplete : settled ? t.overview.headline.ready : t.overview.headline.codeClean;
+export function isSettled(ready: Readiness): boolean {
+  const tested = ready.docker === "passed" || (ready.docker === "none" && ready.check.state === "passed" && ready.check.kind === "tests");
+  return ready.blockers === 0 && ready.unscanned === 0 && ready.deps.state === "verified" && ready.ignoredBreaking === 0 && tested;
+}
+
+export function scoreHeadline(score: number, total: number, t: Dict, incomplete = false, settled = true, ignored = 0): string {
+  if (total === 0 && incomplete) return t.overview.headline.incomplete;
+  if (total === 0 && ignored > 0) return t.overview.headline.ignored(ignored);
+  if (total === 0) return settled ? t.overview.headline.ready : t.overview.headline.codeClean;
   if (score >= 80) return t.overview.headline.small;
   if (score >= 50) return t.overview.headline.medium;
   return t.overview.headline.large;

@@ -10,7 +10,7 @@ const BAR_HEIGHT = 84;
 
 export interface ChartMark {
   at: number;
-  tone: "good" | "bad";
+  tone: "good" | "bad" | "warn";
   icon: ReactNode;
   text: string;
 }
