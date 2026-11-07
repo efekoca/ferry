@@ -347,9 +347,9 @@
       await sleep(500);
       await emit(`  deps: ${$("main").innerText.replace(/\n+/g, " / ").slice(0, 500)}`);
       check(text().includes("acme/dev"), "dev package listed");
-      radio("Sadece üretim").click();
+      $("[role=switch]").click();
       check(await settles(() => !text().includes("acme/dev") && text().includes("acme/x")), "production filter hides dev packages");
-      radio("Tümü").click();
+      $("[role=switch]").click();
       const files = await preview();
       await emit(`  preview: ${files.join(", ")}`);
       await emit(`  changes screen: ${$("main").innerText.replace(/\n+/g, " / ").slice(0, 600)}`);
