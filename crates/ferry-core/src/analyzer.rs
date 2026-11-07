@@ -59,6 +59,7 @@ pub fn relative_path(root: &Path, path: &Path) -> String {
 
 const FILE_BUDGET: std::time::Duration = std::time::Duration::from_secs(20);
 const FILE_STACK: usize = 64 * 1024 * 1024;
+const MAX_FINDINGS_PER_FILE: usize = 2_000;
 
 enum FileRun {
     Done(Vec<Finding>),
@@ -151,7 +152,21 @@ pub fn analyze_until(
                 let src = String::from_utf8_lossy(&bytes).into_owned();
                 lines += src.lines().count();
                 match analyze_bounded(rel.clone(), src, target, &index, cancel, FILE_BUDGET) {
-                    FileRun::Done(found) => findings.extend(found),
+                    FileRun::Done(mut found) => {
+                        if found.len() > MAX_FINDINGS_PER_FILE {
+                            let total = found.len();
+                            found.sort_by_key(|f| f.severity);
+                            found.truncate(MAX_FINDINGS_PER_FILE);
+                            errors.push(FileError {
+                                file: rel,
+                                message: crate::t!(
+                                    "{total} bulgu var; yalnızca en önemli {MAX_FINDINGS_PER_FILE} tanesi gösteriliyor.",
+                                    "This file has {total} findings; only the {MAX_FINDINGS_PER_FILE} most serious are shown."
+                                ),
+                            });
+                        }
+                        findings.extend(found);
+                    }
                     FileRun::Cancelled => return None,
                     FileRun::Failed => errors.push(FileError {
                         file: rel,
@@ -4056,6 +4071,18 @@ mod bounded_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_file_with_too_many_findings_keeps_the_most_serious_and_says_so() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.php");
+        std::fs::write(&path, format!("<?php\n{}each($a);\n", "utf8_encode($a);\n".repeat(MAX_FINDINGS_PER_FILE + 100))).unwrap();
+        let scan = analyze_files(dir.path(), &[path], PhpVersion::new(8, 4), |_, _, _| {});
+        assert_eq!(scan.findings.len(), MAX_FINDINGS_PER_FILE);
+        assert_eq!(scan.findings[0].rule_id, "removed.each");
+        assert_eq!(scan.errors.len(), 1);
+        assert!(scan.errors[0].message.contains(&format!("{}", MAX_FINDINGS_PER_FILE + 101)), "{}", scan.errors[0].message);
+    }
 
     fn rule_ids(src: &str) -> Vec<String> {
         analyze_source("a.php", src, PhpVersion::new(8, 4)).into_iter().map(|f| f.rule_id).collect()

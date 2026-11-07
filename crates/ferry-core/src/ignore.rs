@@ -59,7 +59,7 @@ pub fn save(root: &Path, ignores: &[Ignore]) -> std::io::Result<()> {
     json.push(b'\n');
     let mut tmp = tempfile::NamedTempFile::new_in(file.parent().unwrap())?;
     std::io::Write::write_all(&mut tmp, &json)?;
-    tmp.persist(file).map(|_| ()).map_err(|e| e.error)
+    crate::safefs::persist(tmp, &file)
 }
 
 fn hash_line(line: &str) -> String {

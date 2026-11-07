@@ -729,6 +729,32 @@ done
 exec docker-entrypoint.sh "$@"
 "#;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Route {
+    HostNetwork,
+    Gateway,
+}
+
+impl Route {
+    fn host(self) -> &'static str {
+        match self {
+            Route::HostNetwork => LOCAL_ADDRESS,
+            Route::Gateway => "host.docker.internal",
+        }
+    }
+}
+
+/// Docker Desktop forwards `host.docker.internal` to this computer. A Linux engine runs on it
+/// directly, and only the host network reaches a database that listens on 127.0.0.1. Rootless
+/// engines have no such network, so the gateway stays as a second try.
+fn routes(linux: bool, docker_system: &str) -> Vec<Route> {
+    if linux && !docker_system.contains("Docker Desktop") {
+        vec![Route::HostNetwork, Route::Gateway]
+    } else {
+        vec![Route::Gateway]
+    }
+}
+
 fn dump_live(container: &Container, connection: &Connection, file: &Path) -> Result<(), String> {
     if !connection.is_local() {
         let host = &connection.host;
@@ -737,47 +763,57 @@ fn dump_live(container: &Container, connection: &Connection, file: &Path) -> Res
             "{host} isn't on this computer, so a live copy only works with local databases."
         ));
     }
-    let out = std::fs::File::create(file).map_err(|e| e.to_string())?;
     let name = format!("{}-dump", container.prefix);
     let docker = container.docker;
-    let mut cmd = toolchain::command(docker);
-    cmd.args(["run", "--rm", "--name", &name, "--add-host=host.docker.internal:host-gateway"]);
-    cmd.args(["--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--pids-limit", "64", "--memory", "2g"]);
+    let linux = cfg!(target_os = "linux");
+    let system = if linux { toolchain::command(docker).args(["info", "--format", "{{.OperatingSystem}}"]).output().ok() } else { None };
+    let system = system.map_or(String::new(), |out| String::from_utf8_lossy(&out.stdout).into_owned());
     let (port, user, base) = (connection.port.to_string(), &connection.user, &connection.name);
-    match connection.engine {
-        Engine::Mysql => {
-            cmd.args(["-e", "MYSQL_PWD"]).env("MYSQL_PWD", &connection.password).arg(Engine::Mysql.image());
-            cmd.args(["mysqldump", "-hhost.docker.internal", &format!("-P{port}"), &format!("-u{user}")]);
-            cmd.args(["--single-transaction", "--no-tablespaces", "--column-statistics=0", "--set-gtid-purged=OFF", "--", base]);
+    let mut first_failure = None;
+    for route in routes(linux, &system) {
+        let out = std::fs::File::create(file).map_err(|e| e.to_string())?;
+        let mut cmd = toolchain::command(docker);
+        cmd.args(["run", "--rm", "--name", &name]);
+        match route {
+            Route::HostNetwork => cmd.args(["--network", "host"]),
+            Route::Gateway => cmd.arg("--add-host=host.docker.internal:host-gateway"),
+        };
+        cmd.args(["--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--pids-limit", "64", "--memory", "2g"]);
+        match connection.engine {
+            Engine::Mysql => {
+                cmd.args(["-e", "MYSQL_PWD"]).env("MYSQL_PWD", &connection.password).arg(Engine::Mysql.image());
+                cmd.args(["mysqldump", &format!("-h{}", route.host()), &format!("-P{port}"), &format!("-u{user}")]);
+                cmd.args(["--single-transaction", "--no-tablespaces", "--column-statistics=0", "--set-gtid-purged=OFF", "--", base]);
+            }
+            Engine::Postgres | Engine::Sqlite => {
+                cmd.args(["-e", "PGPASSWORD"]).env("PGPASSWORD", &connection.password).arg(Engine::Postgres.image());
+                cmd.args([
+                    "pg_dump",
+                    "--no-owner",
+                    "--no-privileges",
+                    "-h",
+                    route.host(),
+                    "-p",
+                    &port,
+                    "-U",
+                    user,
+                    "-d",
+                    &pg_database(base),
+                ]);
+            }
         }
-        Engine::Postgres | Engine::Sqlite => {
-            cmd.args(["-e", "PGPASSWORD"]).env("PGPASSWORD", &connection.password).arg(Engine::Postgres.image());
-            cmd.args([
-                "pg_dump",
-                "--no-owner",
-                "--no-privileges",
-                "-h",
-                "host.docker.internal",
-                "-p",
-                &port,
-                "-U",
-                user,
-                "-d",
-                &pg_database(base),
-            ]);
+        let done = toolchain::run_process_to(cmd, docker, container.cancel, DUMP_TIMEOUT, out).map_err(|e| e.to_string())?;
+        if done.stopped.is_some() {
+            let _ = toolchain::command(docker).args(["rm", "-f", &name]).output();
+            return Err(crate::t!("Veritabanı kopyalama durduruldu.", "Copying the database was stopped."));
         }
+        if done.status.is_some_and(|s| s.success()) {
+            return Ok(());
+        }
+        first_failure.get_or_insert_with(|| String::from_utf8_lossy(&done.stderr).trim().to_string());
     }
-    let done = toolchain::run_process_to(cmd, docker, container.cancel, DUMP_TIMEOUT, out).map_err(|e| e.to_string())?;
-    if done.stopped.is_some() {
-        let _ = toolchain::command(docker).args(["rm", "-f", &name]).output();
-        return Err(crate::t!("Veritabanı kopyalama durduruldu.", "Copying the database was stopped."));
-    }
-    if done.status.is_some_and(|s| s.success()) {
-        Ok(())
-    } else {
-        let reason = String::from_utf8_lossy(&done.stderr).trim().to_string();
-        Err(crate::t!("Veritabanı kopyalanamadı: {reason}", "Couldn't copy the database: {reason}"))
-    }
+    let reason = first_failure.unwrap_or_default();
+    Err(crate::t!("Veritabanı kopyalanamadı: {reason}", "Couldn't copy the database: {reason}"))
 }
 
 fn dump_engine(file: &Path) -> Engine {
@@ -993,6 +1029,65 @@ mod snapshot_tests {
         assert_eq!(sql_text(r"a'b\c"), r"a''b\\c");
         assert_eq!(pg_database("shop"), "dbname='shop'");
         assert_eq!(pg_database(r"host=evil a'b\"), r"dbname='host=evil a\'b\\'");
+    }
+
+    #[test]
+    fn a_linux_engine_tries_the_host_network_first() {
+        assert_eq!(routes(true, "Ubuntu 24.04 LTS"), [Route::HostNetwork, Route::Gateway]);
+        assert_eq!(routes(true, "Docker Desktop"), [Route::Gateway]);
+        assert_eq!(routes(false, ""), [Route::Gateway]);
+    }
+
+    #[test]
+    fn a_live_copy_reaches_a_database_that_listens_on_localhost() {
+        if std::env::var_os("FERRY_TEST_DOCKER").is_none() {
+            eprintln!("FERRY_TEST_DOCKER ayarlı değil; Docker testi atlandı");
+            return;
+        }
+        let docker = toolchain::find_executable("docker").unwrap();
+        let name = format!("ferry-live-{}", std::process::id());
+        let run = toolchain::command(&docker)
+            .args([
+                "run",
+                "-d",
+                "--rm",
+                "--name",
+                &name,
+                "-e",
+                "POSTGRES_PASSWORD=secret",
+                "-p",
+                "127.0.0.1::5432",
+                &Engine::Postgres.image(),
+            ])
+            .output()
+            .unwrap();
+        assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+        let probe = |args: &[&str]| toolchain::command(&docker).args(args).output().unwrap();
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        let copied = {
+            let ready = (0..120).any(|_| {
+                let up = probe(&["exec", &name, "pg_isready", "-h", "127.0.0.1"]).status.success();
+                if !up {
+                    std::thread::sleep(Duration::from_millis(500));
+                }
+                up
+            });
+            assert!(ready, "the database didn't start");
+            let port = String::from_utf8_lossy(&probe(&["port", &name, "5432"]).stdout).trim().rsplit(':').next().unwrap().parse().unwrap();
+            let container = Container::for_test(&docker, &cancel, name.clone());
+            let connection = Connection {
+                engine: Engine::Postgres,
+                host: "127.0.0.1".into(),
+                port,
+                name: "postgres".into(),
+                user: "postgres".into(),
+                password: "secret".into(),
+            };
+            let dump = tempfile::NamedTempFile::new().unwrap();
+            dump_live(&container, &connection, dump.path()).map(|_| std::fs::metadata(dump.path()).unwrap().len())
+        };
+        probe(&["rm", "-f", &name]);
+        assert!(copied.unwrap() > 0);
     }
 
     #[test]

@@ -185,6 +185,7 @@ pub enum Gap {
     TestsDidNotRun,
     FewerTests,
     ExtensionImage,
+    UnreadFiles,
     /// Pages or tables differ with no error to explain why, so someone has to look.
     Differences,
 }
@@ -455,18 +456,54 @@ pub fn remove_images() -> Result<usize, String> {
     remove(&docker, &built_images(&docker)?)
 }
 
-/// Copies the project without following links: inside a container a link can only reach what was copied.
-fn copy_project(root: &Path, dest: &Path) -> std::io::Result<()> {
+fn project_entries(root: &Path) -> impl Iterator<Item = walkdir::Result<walkdir::DirEntry>> {
     let skipped = |name: &str| name != "vendor" && crate::project::ALWAYS_SKIP.contains(&name);
-    let entries =
-        WalkDir::new(root).follow_links(false).into_iter().filter_entry(|e| e.depth() == 0 || !skipped(&e.file_name().to_string_lossy()));
-    for entry in entries.flatten() {
+    WalkDir::new(root).follow_links(false).into_iter().filter_entry(move |e| e.depth() == 0 || !skipped(&e.file_name().to_string_lossy()))
+}
+
+fn space_error(size: u64, free: u64) -> Option<String> {
+    let need = size.saturating_mul(2);
+    (need > free).then(|| {
+        let gb = |bytes: u64| format!("{:.1} GB", bytes as f64 / 1e9);
+        let (need, free) = (gb(need), gb(free));
+        crate::t!(
+            "Bu test için yaklaşık {need} boş alan gerekiyor, {free} var.",
+            "This test needs about {need} of free space, and {free} is available."
+        )
+    })
+}
+
+/// Each version gets its own copy, so a large project stops here instead of filling the disk.
+fn check_space(root: &Path, temp: &Path) -> Result<(), String> {
+    let Some(free) = crate::safefs::free_space(temp) else { return Ok(()) };
+    let size = project_entries(root).flatten().filter_map(|e| e.metadata().ok()).filter(|m| m.is_file()).map(|m| m.len()).sum();
+    space_error(size, free).map_or(Ok(()), Err)
+}
+
+/// Copies the project without following links: inside a container a link can only reach what was
+/// copied. Returns how many entries couldn't be read, so a partial copy can't pass as a full run.
+fn copy_project(root: &Path, dest: &Path) -> std::io::Result<usize> {
+    let mut unread = 0;
+    for entry in project_entries(root) {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(e) if e.depth() == 0 => return Err(e.into()),
+            Err(_) => {
+                unread += 1;
+                continue;
+            }
+        };
         let Ok(rel) = entry.path().strip_prefix(root) else { continue };
         let to = dest.join(rel);
         if entry.file_type().is_dir() {
             std::fs::create_dir_all(&to)?;
         } else if entry.file_type().is_file() {
-            std::fs::copy(entry.path(), &to)?;
+            match std::fs::copy(entry.path(), &to) {
+                Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => unread += 1,
+                copied => {
+                    copied?;
+                }
+            }
         } else {
             #[cfg(unix)]
             if let Ok(link) = std::fs::read_link(entry.path()) {
@@ -474,7 +511,8 @@ fn copy_project(root: &Path, dest: &Path) -> std::io::Result<()> {
             }
         }
     }
-    drop_outside_links(dest)
+    drop_outside_links(dest)?;
+    Ok(unread)
 }
 
 /// Ferry writes `.env` and database files into the copy from outside the container, so a link
@@ -911,12 +949,10 @@ pub fn compare(
     let php_files = crate::project::scanned_files(root);
     let stamp = crate::project::stamp(root, &php_files);
     let work = tempfile::Builder::new().prefix("ferry-docker-").tempdir().map_err(|e| e.to_string())?;
-    let copy = |name: &str| {
-        let dest = work.path().join(name);
-        copy_project(root, &dest).map_err(|e| crate::t!("Proje kopyalanamadı: {e}", "Couldn't copy the project: {e}"))?;
-        Ok::<PathBuf, String>(dest)
-    };
-    let base = copy("base")?;
+    check_space(root, work.path())?;
+    let copy_failed = |e: std::io::Error| crate::t!("Proje kopyalanamadı: {e}", "Couldn't copy the project: {e}");
+    let base = work.path().join("base");
+    let mut unread = copy_project(root, &base).map_err(copy_failed)?;
     let container = Container {
         docker: &docker,
         cancel,
@@ -1000,7 +1036,7 @@ pub fn compare(
         drop_outside_links(&base).map_err(|e| e.to_string())?;
     }
     let target_dir = work.path().join("target");
-    copy_project(&base, &target_dir).map_err(|e| crate::t!("Proje kopyalanamadı: {e}", "Couldn't copy the project: {e}"))?;
+    unread += copy_project(&base, &target_dir).map_err(copy_failed)?;
     for (file, content) in &options.fixes {
         crate::safefs::resolve(&target_dir, file)
             .and_then(|path| crate::safefs::replace(&path, content.as_bytes()))
@@ -1034,6 +1070,9 @@ pub fn compare(
         stamp,
     };
     comparison.gaps = comparison.gaps(php_files.len());
+    if unread > 0 {
+        comparison.gaps.push(Gap::UnreadFiles);
+    }
     comparison.verdict = match (comparison.regressed(), comparison.gaps.is_empty()) {
         (true, _) => Verdict::Regressed,
         (false, true) => Verdict::Clean,
@@ -1079,6 +1118,39 @@ fn test_total(output: &str) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn what_cant_be_read_is_counted_and_the_rest_is_copied() {
+        use std::os::unix::fs::PermissionsExt;
+        let locked_mode = || std::fs::Permissions::from_mode(0o000);
+        let open_mode = || std::fs::Permissions::from_mode(0o755);
+        let project = tempfile::tempdir().unwrap();
+        std::fs::write(project.path().join("a.php"), "<?php\n").unwrap();
+        std::fs::write(project.path().join("b.php"), "<?php\n").unwrap();
+        let folder = project.path().join("locked");
+        std::fs::create_dir(&folder).unwrap();
+        std::fs::set_permissions(project.path().join("b.php"), locked_mode()).unwrap();
+        std::fs::set_permissions(&folder, locked_mode()).unwrap();
+        let enforced = std::fs::read_dir(&folder).is_err();
+        let work = tempfile::tempdir().unwrap();
+        let dest = work.path().join("copy");
+        let unread = copy_project(project.path(), &dest).unwrap();
+        std::fs::set_permissions(&folder, open_mode()).unwrap();
+        std::fs::set_permissions(project.path().join("b.php"), open_mode()).unwrap();
+        assert!(dest.join("a.php").is_file());
+        if enforced {
+            assert_eq!(unread, 2);
+        }
+    }
+
+    #[test]
+    fn a_project_too_big_for_the_disk_stops_before_copying() {
+        assert_eq!(space_error(10, 20), None);
+        let message = space_error(4_000_000_000, 6_000_000_000).unwrap();
+        assert!(message.contains("8.0 GB") && message.contains("6.0 GB"), "{message}");
+        assert!(check_space(tempfile::tempdir().unwrap().path(), &std::env::temp_dir()).is_ok());
+    }
     use crate::runtime::Level;
 
     fn event(path: &str, line: usize, message: &str) -> Event {

@@ -646,6 +646,7 @@ export const tr = {
       testsDidNotRun: "Test paketi hiç test çalıştırmadı.",
       fewerTests: "Hedef sürümde daha az test çalıştı.",
       extensionImage: "PHP eklentili kalıp oluşturulamadı.",
+      unreadFiles: "Bazı proje dosyaları okunamadı, bu yüzden kopyalar eksik kaldı.",
       differences: "Bazı sayfa ya da tablolar farklı; incelemek gerekiyor.",
     },
     notInstalled: "Bağımlılıklar kurulamadı; testler çalışmamış olabilir.",

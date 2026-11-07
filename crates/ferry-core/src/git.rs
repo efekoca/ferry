@@ -4,13 +4,17 @@ use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 const TIMEOUT: Duration = Duration::from_secs(60);
-const NO_PROJECT_CODE: [&str; 6] = [
+/// Windows can't start a process with a command line over 32,767 characters.
+const MAX_PATHS_LENGTH: usize = 24_000;
+const NO_PROJECT_CODE: [&str; 8] = [
     "-c",
     if cfg!(windows) { "core.hooksPath=NUL" } else { "core.hooksPath=/dev/null" },
     "-c",
     "core.fsmonitor=false",
     "-c",
     "commit.gpgsign=false",
+    "-c",
+    "core.longpaths=true",
 ];
 
 /// Settings that name a program. A project that arrives as a zip brings its own `.git/config`,
@@ -32,6 +36,19 @@ fn runs_a_program(key: &str, value: &str) -> bool {
         || (key.starts_with("diff.") && [".command", ".textconv"].iter().any(|s| key.ends_with(s)))
         || (key.starts_with("merge.") && key.ends_with(".driver"))
         || (key.starts_with("credential.") && key.ends_with(".helper"))
+}
+
+fn parts(paths: &[String]) -> Vec<&[String]> {
+    let (mut out, mut start, mut length) = (Vec::new(), 0, 0);
+    for (at, path) in paths.iter().enumerate() {
+        if at > start && length + path.len() > MAX_PATHS_LENGTH {
+            out.push(&paths[start..at]);
+            (start, length) = (at, 0);
+        }
+        length += path.len() + 3;
+    }
+    out.push(&paths[start..]);
+    out
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -60,8 +77,24 @@ impl Git {
 
     /// Project hooks and terminal prompts stay off: a commit made for the user must not run the
     /// project's code or wait for input that can never come.
+    /// A long list of paths runs in parts, so `args` must be a command that allows that.
     fn run(&self, args: &[&str], paths: &[String]) -> Result<Vec<u8>, String> {
-        self.call(args, paths, false)
+        let mut out = Vec::new();
+        for part in parts(paths) {
+            out.extend(self.call(args, part, false)?);
+        }
+        Ok(out)
+    }
+
+    /// A commit can't run in parts. Only a list too long for the command line needs Git 2.25.
+    fn commit_paths(&self, message: &str, paths: &[String]) -> Result<(), String> {
+        if parts(paths).len() == 1 {
+            return self.run(&["commit", "-m", message, "--"], paths).map(|_| ());
+        }
+        let mut list = tempfile::NamedTempFile::new().map_err(|e| e.to_string())?;
+        std::io::Write::write_all(&mut list, paths.join("\0").as_bytes()).map_err(|e| e.to_string())?;
+        let from = format!("--pathspec-from-file={}", list.path().display());
+        self.run(&["commit", "-m", message, &from, "--pathspec-file-nul"], &[]).map(|_| ())
     }
 
     /// Paths are taken literally, so `a[1].php` can't match `a1.php` too.
@@ -188,7 +221,7 @@ pub fn abort_batch(root: &Path, batch: &Batch) -> bool {
 pub fn commit(root: &Path, files: &[String], message: &str) -> Result<String, String> {
     let git = Git::find(root)?.ok_or_else(|| crate::t!("Git bulunamadı.", "Git wasn't found."))?;
     git.refuse_project_programs()?;
-    if let Err(e) = git.run(&["add", "--"], files).and_then(|_| git.run(&["commit", "-m", message, "--"], files)) {
+    if let Err(e) = git.run(&["add", "--"], files).and_then(|_| git.commit_paths(message, files)) {
         let _ = git.run(&["reset", "-q", "--"], files);
         return Err(e);
     }
@@ -215,6 +248,26 @@ mod tests {
 
     fn files(names: &[&str]) -> Vec<String> {
         names.iter().map(|n| n.to_string()).collect()
+    }
+
+    #[test]
+    fn a_long_list_of_files_fits_the_command_line() {
+        let Some((dir, git)) = repo() else { return };
+        let root = dir.path();
+        let names: Vec<String> = (0..1200).map(|n| format!("a-file-with-a-long-enough-name-{n:04}.php")).collect();
+        for name in &names {
+            std::fs::write(root.join(name), "<?php\n").unwrap();
+        }
+        assert!(parts(&names).len() > 1);
+        std::fs::write(root.join("b.txt"), "someone else's work\n").unwrap();
+        git.run(&["add", "b.txt"], &[]).unwrap();
+        assert_eq!(status(root, &names).unwrap().dirty.len(), names.len());
+        check_committable(root, &names).unwrap();
+        commit(root, &names, "Many").unwrap();
+        let committed = git.text(&["show", "--format=", "--name-only", "HEAD"]).unwrap();
+        assert_eq!(committed.lines().count(), names.len());
+        assert!(!committed.contains("b.txt"));
+        assert_eq!(status(root, &[]).unwrap().dirty, ["b.txt"]);
     }
 
     #[test]

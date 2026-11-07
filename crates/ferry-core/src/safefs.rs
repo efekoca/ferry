@@ -78,7 +78,46 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
     let mut tmp = tempfile::NamedTempFile::new_in(dir)?;
     tmp.write_all(bytes)?;
+    persist(tmp, path)
+}
+
+/// On Windows a rename fails while another program has the file open, which antivirus scanners
+/// and editors often do for a moment.
+pub fn persist(mut tmp: tempfile::NamedTempFile, path: &Path) -> Result<()> {
+    if cfg!(windows) {
+        for wait in [50, 100, 200, 400, 800] {
+            match tmp.persist(path) {
+                Ok(_) => return Ok(()),
+                Err(e) if matches!(e.error.raw_os_error(), Some(5 | 32)) => {
+                    tmp = e.file;
+                    std::thread::sleep(std::time::Duration::from_millis(wait));
+                }
+                Err(e) => return Err(e.error),
+            }
+        }
+    }
     tmp.persist(path).map(|_| ()).map_err(|e| e.error)
+}
+
+#[cfg(unix)]
+#[allow(clippy::unnecessary_cast)]
+pub fn free_space(path: &Path) -> Option<u64> {
+    use std::os::unix::ffi::OsStrExt;
+    let path = std::ffi::CString::new(path.as_os_str().as_bytes()).ok()?;
+    let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
+    (unsafe { libc::statvfs(path.as_ptr(), &mut stat) } == 0).then_some(stat.f_bavail as u64 * stat.f_frsize as u64)
+}
+
+#[cfg(windows)]
+pub fn free_space(path: &Path) -> Option<u64> {
+    use std::os::windows::ffi::OsStrExt;
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetDiskFreeSpaceExW(dir: *const u16, free: *mut u64, total: *mut u64, total_free: *mut u64) -> i32;
+    }
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    let mut free = 0;
+    (unsafe { GetDiskFreeSpaceExW(wide.as_ptr(), &mut free, std::ptr::null_mut(), std::ptr::null_mut()) } != 0).then_some(free)
 }
 
 static LIST_UPDATES: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -155,11 +194,11 @@ pub fn replace(path: &Path, bytes: &[u8]) -> Result<()> {
     if readonly && cfg!(windows) {
         set_readonly(path, false)?;
     }
-    if let Err(e) = tmp.persist(path) {
+    if let Err(e) = persist(tmp, path) {
         if readonly && cfg!(windows) {
             let _ = set_readonly(path, true);
         }
-        return Err(e.error);
+        return Err(e);
     }
     if readonly {
         set_readonly(path, true)?;
@@ -187,6 +226,28 @@ pub fn set_readonly(path: &Path, readonly: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn free_space_is_known_for_a_real_folder() {
+        assert!(free_space(&std::env::temp_dir()).is_some_and(|free| free > 0));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_write_waits_for_a_program_that_has_the_file_open() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.json");
+        std::fs::write(&path, "old").unwrap();
+        let open = std::fs::OpenOptions::new().read(true).share_mode(0).open(&path).unwrap();
+        let holder = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            drop(open);
+        });
+        write_atomic(&path, b"new").unwrap();
+        holder.join().unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "new");
+    }
     use std::fs;
 
     #[test]

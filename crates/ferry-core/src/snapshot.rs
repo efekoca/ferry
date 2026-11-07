@@ -94,7 +94,7 @@ fn write_new(path: &Path, bytes: &[u8]) -> Result<(), SnapshotError> {
     let dir = path.parent().unwrap_or(Path::new("."));
     let mut tmp = tempfile::NamedTempFile::new_in(dir).map_err(io_err(dir))?;
     tmp.write_all(bytes).and_then(|_| tmp.as_file().sync_all()).map_err(io_err(path))?;
-    tmp.persist(path).map_err(|e| io_err(path)(e.error))?;
+    crate::safefs::persist(tmp, path).map_err(io_err(path))?;
     Ok(())
 }
 
