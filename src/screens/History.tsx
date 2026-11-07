@@ -17,6 +17,11 @@ const TIMELINE_LIMIT = 8;
 
 type Tone = "neutral" | "good" | "bad" | "warn";
 
+interface ScanChange {
+  at: number;
+  text: string;
+}
+
 const dockerIssues = (run: DockerSummary) => run.differingPages + run.newFailures + run.dataChanges;
 
 function dockerState(run: DockerSummary, t: Dict): { tone: Tone; text: string } {
@@ -122,10 +127,10 @@ function EventIcon({ event }: { event: HistoryEvent }) {
   return <span className={`badge-icon badge-icon--${tone}`}>{icon}</span>;
 }
 
-function eventText(event: HistoryEvent, t: Dict, since: string): { title: string; sub: string; hint?: string } {
+function eventText(event: HistoryEvent, t: Dict, since: ScanChange | null): { title: string; sub: string; hint?: string } {
   if (event.kind === "scan") {
-    const { target, total, score } = event.entry;
-    return { title: t.history.scan, sub: [t.history.scanLine(target, total, score), since].filter(Boolean).join(" · ") };
+    const { at, target, total, score } = event.entry;
+    return { title: t.history.scan, sub: [t.history.scanLine(target, total, score), at === since?.at && since.text].filter(Boolean).join(" · ") };
   }
   if (event.kind === "fix") return { title: event.snapshot.label, sub: t.history.fileCount(event.snapshot.files.length), hint: event.snapshot.files.map((f) => f.path).join("\n") };
   if (event.kind === "real") {
@@ -135,11 +140,10 @@ function eventText(event: HistoryEvent, t: Dict, since: string): { title: string
   return { title: event.run.kind === "tests" ? t.history.tests : t.history.lint, sub: `PHP ${event.run.target} · ${checkState(event.run, t).text}` };
 }
 
-function Timeline({ events, since, onRestore }: { events: HistoryEvent[]; since: string; onRestore: (snapshot: Snapshot) => void }) {
+function Timeline({ events, since, onRestore }: { events: HistoryEvent[]; since: ScanChange | null; onRestore: (snapshot: Snapshot) => void }) {
   const { t } = useI18n();
   const [all, setAll] = useState(false);
   const shown = all ? events : events.slice(0, TIMELINE_LIMIT);
-  const newestScan = events.find((e) => e.kind === "scan");
   const days = useMemo(() => {
     const groups: { name: string; items: HistoryEvent[] }[] = [];
     for (const event of shown) {
@@ -156,10 +160,10 @@ function Timeline({ events, since, onRestore }: { events: HistoryEvent[]; since:
           <li key={day.name}>
             <div className="timeline__day">{day.name}</div>
             <ol className="timeline__items">
-              {day.items.map((event, i) => {
-                const { title, sub, hint } = eventText(event, t, event === newestScan ? since : "");
+              {day.items.map((event) => {
+                const { title, sub, hint } = eventText(event, t, since);
                 return (
-                  <li key={`${event.kind}-${event.at}-${i}`} className="history-row history-row--soft" title={hint}>
+                  <li key={`${event.kind}-${event.at}`} className="history-row history-row--soft" title={hint}>
                     <EventIcon event={event} />
                     <span className="history-row__main">
                       <span className="history-row__title">{title}</span>
@@ -322,9 +326,11 @@ export function History() {
       }),
     [events, t],
   );
-  const since = useMemo(() => {
+  const since = useMemo((): ScanChange | null => {
     const progress = scan?.target === target ? scan.progress : null;
-    return [progress?.fixedSinceLast && t.progress.resolved(progress.fixedSinceLast), progress?.newSinceLast && t.progress.added(progress.newSinceLast)].filter(Boolean).join(" · ");
+    const at = progress?.history[progress.history.length - 1]?.at;
+    const text = [progress?.fixedSinceLast && t.progress.resolved(progress.fixedSinceLast), progress?.newSinceLast && t.progress.added(progress.newSinceLast)].filter(Boolean).join(" · ");
+    return at !== undefined && text ? { at, text } : null;
   }, [scan, target, t]);
   const nothing = allScans.length === 0 && snapshots.length === 0 && dockerHistory.length === 0 && checkHistory.length === 0;
 
