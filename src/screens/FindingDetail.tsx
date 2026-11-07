@@ -19,7 +19,7 @@ export function relatedFindings(selected: Finding, findings: readonly Finding[],
 
 const looksLikeCode = (text: string) => /[()$[\]=>:]/.test(text) || /^\S+$/.test(text);
 
-function CodeContext({ finding, root, api }: { finding: Finding; root?: string; api: Api | null }) {
+export function CodeContext({ finding, root, api }: { finding: Pick<Finding, "id" | "file" | "line" | "snippet">; root?: string; api: Api | null }) {
   const [loaded, setLoaded] = useState<{ id: string; lines: SourceLine[] } | null>(null);
   useEffect(() => {
     if (!api || !root) return;

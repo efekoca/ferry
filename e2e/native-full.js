@@ -437,7 +437,8 @@
       await until(() => button("Testi başlat"), "start button back after stop", 60000);
       noErrorToast(before);
       check(!text().includes("sürümünde yeni"), "no result after a stop");
-      const clean = $$(".docker-option").find((l) => l.textContent.includes("bitince"));
+      await click("Seçenekler");
+      const clean = await until(() => $$(".real-check").find((l) => /bitince/i.test(l.textContent)), "clean option");
       clean.querySelector("input").click();
       await click("Testi başlat");
       await until(() => text().includes("Kurulan PHP eklentileri"), "extension installed", 600000);
@@ -453,12 +454,13 @@
       await openRecent(projects.unicode);
       await scan();
       await nav("Gerçek test");
+      await click("Seçenekler");
       const select = await until(() => $$('[role="combobox"]').find((s) => s.getAttribute("aria-label") === "Veritabanı"), "database choices");
       select.click();
       const option = await until(() => $$('[role="option"]').find((o) => o.textContent.includes("database/dump.sql")), "database dump");
       option.click();
       await click("Testi başlat");
-      await until(() => text().includes("İstekler sonrası"), "data comparison", 900000);
+      await until(() => text().includes("Farklı tablo"), "data comparison", 900000);
       noErrorToast(before);
     },
 

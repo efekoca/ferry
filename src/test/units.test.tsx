@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { DiffViewer, splitRows, wordDiff } from "../components/DiffViewer";
-import { Select, TagInput } from "../components/ui";
+import { ComboField, Select, TagInput } from "../components/ui";
 import { DICTS, I18nProvider } from "../i18n";
 import { highlight } from "../lib/code";
 import { columnOf, dayLabels, historyEvents, niceMax, rangeStart, smoothPath, spreadOut } from "../lib/history";
@@ -543,5 +543,39 @@ describe("relativeTo", () => {
   it("refuses the root itself and anything outside it", () => {
     expect(relativeTo("/p/app", "/p/app")).toBeNull();
     expect(relativeTo("/p/app", "/p/application/src")).toBeNull();
+  });
+});
+
+describe("ComboField", () => {
+  function Host({ options }: { options: string[] }) {
+    const [value, setValue] = useState("");
+    return (
+      <I18nProvider>
+        <ComboField label="Sunucu" value={value} options={options} onChange={setValue} />
+      </I18nProvider>
+    );
+  }
+
+  it("suggests matches and takes the one chosen with the keyboard", async () => {
+    const user = userEvent.setup();
+    render(<Host options={["prod", "staging", "prod-eu"]} />);
+    const field = screen.getByRole("combobox", { name: "Sunucu" });
+    await user.type(field, "pro");
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["prod", "prod-eu"]);
+    await user.keyboard("{ArrowDown}{ArrowDown}{Enter}");
+    expect(field).toHaveValue("prod-eu");
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  });
+
+  it("accepts a host that is not on the list and closes on Escape", async () => {
+    const user = userEvent.setup();
+    render(<Host options={["prod"]} />);
+    const field = screen.getByRole("combobox", { name: "Sunucu" });
+    await user.click(field);
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    await user.type(field, "example.test");
+    expect(field).toHaveValue("example.test");
   });
 });

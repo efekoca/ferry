@@ -98,7 +98,9 @@ describe("accessibility", { timeout: 30_000 }, () => {
     await screen.findByText("Eşleşen bulgu yok");
     await check("no matching findings");
     await user.click(screen.getByRole("button", { name: /Gerçek test/ }));
-    await check("roadmap");
+    await check("real test");
+    await user.click(await screen.findByRole("button", { name: "Seçenekler" }));
+    await check("real test options");
     await user.click(await screen.findByRole("button", { name: "Testi başlat" }));
     await screen.findByText("PHP 8.4 sürümünde yeni sorunlar var.");
     await check("real test result");

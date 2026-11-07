@@ -632,10 +632,12 @@ describe("Ferry app", () => {
     render(<App api={api} />);
     await openAndScan(user);
     await user.click(nav(/Gerçek test/));
-    const options = document.querySelector("details.docker-options") as HTMLDetailsElement;
-    expect(options.open).toBe(true);
+    const saveOptions = { name: "Seçenekleri projeye kaydet" };
+    expect(screen.queryByRole("button", saveOptions)).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Seçenekler" }));
+    expect(await screen.findByRole("button", saveOptions)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Testi başlat" }));
-    await waitFor(() => expect(options.open).toBe(false));
+    await waitFor(() => expect(screen.queryByRole("button", saveOptions)).not.toBeInTheDocument());
     act(() => emit({ step: "pages", version: "8.4" }));
     const lanes = within(screen.getByRole("region", { name: "Test ilerlemesi" }));
     expect(lanes.getByText("Sayfalar PHP 8.4 ile açılıyor…")).toBeInTheDocument();
@@ -643,9 +645,39 @@ describe("Ferry app", () => {
     expect(states).toEqual(["done", "done", "done", "done", "done", "done", "active", "waiting"]);
     release();
     expect(await screen.findByText("PHP 8.4 sürümünde yeni sorunlar var.")).toBeInTheDocument();
-    expect(options.open).toBe(false);
-    await user.click(screen.getByText("Seçenekler"));
-    expect(options.open).toBe(true);
+    await user.click(screen.getByRole("button", { name: "Yeniden test et" }));
+    expect(await screen.findByRole("button", { name: "Testi başlat" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Sonuca dön" }));
+    expect(await screen.findByText("PHP 8.4 sürümünde yeni sorunlar var.")).toBeInTheDocument();
+  });
+
+  it("turns the database on from the Real test scope", async () => {
+    const user = setup();
+    await openAndScan(user);
+    await user.click(nav(/Gerçek test/));
+    const data = await screen.findByRole("switch", { name: "Veritabanı" });
+    expect(data).not.toBeChecked();
+    await waitFor(async () => {
+      await user.click(data);
+      expect(await screen.findByText("database/dump.sql")).toBeInTheDocument();
+    });
+    expect(data).toBeChecked();
+    await user.click(data);
+    expect(screen.queryByText("database/dump.sql")).not.toBeInTheDocument();
+  });
+
+  it("opens the code behind a new message and each run's output", async () => {
+    const user = setup();
+    await openAndScan(user);
+    await user.click(nav(/Gerçek test/));
+    await user.click(await screen.findByRole("button", { name: "Testi başlat" }));
+    const row = await screen.findByRole("button", { name: /Call to undefined function each/ });
+    expect(row).toHaveAttribute("aria-expanded", "false");
+    await user.click(row);
+    expect(row).toHaveAttribute("aria-expanded", "true");
+    await waitFor(() => expect(document.querySelector(".real-event .code-line--hit")).not.toBeNull());
+    await user.click(screen.getByRole("button", { name: /PHP 7\.4 çıktısı/ }));
+    expect(await screen.findByRole("dialog", { name: "PHP 7.4 çıktısı" })).toBeInTheDocument();
   });
 
   it("compares two versions in Docker and feeds the findings", async () => {
@@ -658,7 +690,7 @@ describe("Ferry app", () => {
     expect(screen.getByText("Error: Call to undefined function each()")).toBeInTheDocument();
     expect(screen.getByText("1 test başarısız")).toBeInTheDocument();
     expect(screen.getByText("CartTest::testTotal")).toBeInTheDocument();
-    expect(screen.getByText("PHP 8.4 sürümünde farklı sayfalar: 1 / 2")).toBeInTheDocument();
+    expect(screen.getByText("Farklı sayfa").nextElementSibling).toHaveTextContent("1 / 2");
     expect(screen.getByText("/cart.php")).toBeInTheDocument();
     expect(screen.getAllByText("mysqli")).toHaveLength(2);
     await user.click(screen.getByRole("button", { name: "Bulgularda göster" }));
@@ -697,10 +729,11 @@ describe("Ferry app", () => {
     render(<App api={mockApi({ delay: 0 })} />);
     await openAndScan(user);
     await user.click(nav(/Gerçek test/));
+    await user.click(await screen.findByRole("button", { name: "Seçenekler" }));
     await pick(user, "Veritabanı", "Canlı kopya: magaza (127.0.0.1)");
     expect(screen.getByText(/Canlı veritabanınıza yazılmaz/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Testi başlat" }));
-    expect(await screen.findByText("İstekler sonrası farklı tablolar: 1")).toBeInTheDocument();
+    expect(await screen.findByText("Farklı tablo")).toBeInTheDocument();
     expect(screen.getByText("orders")).toBeInTheDocument();
   });
 
@@ -711,6 +744,7 @@ describe("Ferry app", () => {
     render(<App api={api} />);
     await openAndScan(user);
     await user.click(nav(/Gerçek test/));
+    await user.click(await screen.findByRole("button", { name: "Seçenekler" }));
     await pick(user, "Veritabanı", "Sunucudan kopyala (SSH)");
     await user.type(screen.getByRole("combobox", { name: "SSH sunucusu" }), "prod");
     await user.type(screen.getByRole("textbox", { name: "Veritabanı adı" }), "magaza");
@@ -794,6 +828,7 @@ describe("Ferry app", () => {
     render(<App api={api} />);
     await openAndScan(user);
     await user.click(nav(/Gerçek test/));
+    await user.click(await screen.findByRole("button", { name: "Seçenekler" }));
     expect(await screen.findByDisplayValue("vendor/bin/pest")).toBeInTheDocument();
     expect(screen.getByDisplayValue("make assets")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Testi başlat" }));
@@ -802,7 +837,8 @@ describe("Ferry app", () => {
     const call = compare.mock.calls[0];
     expect([call[1], call[2], call[3], call[5], call[7], call[8]]).toEqual(["8.0", "8.3", false, ["/shop"], "make assets", "vendor/bin/pest"]);
     await screen.findByText("PHP 8.3 sürümünde yeni sorunlar var.");
-    await user.click(screen.getByText("Seçenekler"));
+    await user.click(screen.getByRole("button", { name: "Yeniden test et" }));
+    await user.click(await screen.findByRole("button", { name: "Seçenekler" }));
     await user.click(await screen.findByRole("button", { name: "Seçenekleri projeye kaydet" }));
     await waitFor(() => expect(save).toHaveBeenCalled());
     expect(save.mock.calls[0][1]).toMatchObject({ target: "8.3", exclude: ["legacy"], docker: { test: "vendor/bin/pest", pages: ["/shop"] } });
@@ -832,6 +868,7 @@ describe("Ferry app", () => {
     render(<App api={api} />);
     await openAndScan(user);
     await user.click(nav(/Gerçek test/));
+    await user.click(await screen.findByRole("button", { name: "Seçenekler" }));
     await pick(user, "Veritabanı", "Sunucudan kopyala (SSH)");
     await user.type(screen.getByRole("combobox", { name: "SSH sunucusu" }), "prod");
     await user.type(screen.getByRole("textbox", { name: "Veritabanı adı" }), "magaza");
