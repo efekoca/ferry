@@ -200,6 +200,7 @@ jobs:
       - name: Native e2e
         env:
           FERRY_E2E_ALLOW_SKIP: "1"
+          FERRY_TEST_DOCKER: "1"
         run: xvfb-run -a pnpm e2e:native
 
   macos:
@@ -238,7 +239,7 @@ jobs:
 
   bundle:
     if: startsWith(github.ref, 'refs/tags/v') || inputs.bundle
-    needs: [windows, macos, linux]
+    needs: [windows, macos, linux, docker]
     strategy:
       fail-fast: false
       matrix:

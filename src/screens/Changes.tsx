@@ -23,6 +23,9 @@ function storedView() {
   }
 }
 
+/** A step picked before calculating stays picked while the app is open. */
+const pickedSteps = new Map<string, string>();
+
 export function Changes() {
   const { t, loc } = useI18n();
   const { toolchain, toolchainFailed, refreshToolchain, installRector, installingRector, preview, previewMode, previewing, loadPreview, clearPreview, cancelPreview, skippedHunks: skipped, skipHunks, applyChanges, applying, target, setView, api, project } =
@@ -42,7 +45,12 @@ export function Changes() {
   const [appliedAll, setAppliedAll] = useState(false);
 
   const steps = useMemo(() => stepsBetween(project?.currentVersion ?? null, target), [project, target]);
-  const [pickedStep, setPickedStep] = useState(() => (preview && preview.target !== target ? preview.target : ""));
+  const pickKey = `${project?.root ?? ""}|${target}`;
+  const [pickedStep, setPicked] = useState(() => (preview && preview.target !== target ? preview.target : (pickedSteps.get(pickKey) ?? "")));
+  const setPickedStep = (value: string) => {
+    pickedSteps.set(pickKey, value);
+    setPicked(value);
+  };
   const step = mode !== "pins" && steps.includes(pickedStep) ? pickedStep : undefined;
   const nextStep = step ? (steps[steps.indexOf(step) + 1] ?? target) : null;
   const goToStep = (value: string) => {

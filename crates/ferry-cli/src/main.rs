@@ -143,7 +143,8 @@ fn parse(args: &[String]) -> Result<Options, String> {
             "--blame" => blame = true,
             "--allow-incomplete" => allow_incomplete = true,
             "--path-prefix" => {
-                path_prefix = Some(value("--path-prefix")?.trim_matches('/').to_string()).filter(|p| !p.is_empty() && p != ".")
+                let base = std::env::var_os("GITHUB_WORKSPACE").map(PathBuf::from).or_else(|| std::env::current_dir().ok());
+                path_prefix = repository_path(&value("--path-prefix")?, base.as_deref())
             }
             "--lang" => {
                 lang = match value("--lang")?.as_str() {
@@ -414,8 +415,28 @@ fn escape_property(s: &str) -> String {
 }
 
 /// XML 1.0 has no way to write most control characters, not even as a reference.
+/// The folder a scanned project sits in, as GitHub shows paths: from the repository root, with
+/// slashes. An absolute path outside the repository gets no prefix.
+fn repository_path(raw: &str, base: Option<&Path>) -> Option<String> {
+    let path = Path::new(raw);
+    let relative = if path.is_absolute() { path.strip_prefix(base?).ok()? } else { path };
+    let mut parts: Vec<String> = Vec::new();
+    for part in relative.components() {
+        match part {
+            std::path::Component::Normal(name) => parts.push(name.to_string_lossy().into_owned()),
+            std::path::Component::ParentDir => {
+                parts.pop();
+            }
+            _ => {}
+        }
+    }
+    (!parts.is_empty()).then(|| parts.join("/"))
+}
+
+/// XML 1.0 can't hold control characters, unpaired surrogates or U+FFFE and U+FFFF.
 fn xml(s: &str) -> String {
-    let s: String = s.chars().filter(|c| !c.is_control() || matches!(c, '\t' | '\n' | '\r')).collect();
+    let allowed = |c: &char| matches!(c, '\t' | '\n' | '\r') || !c.is_control() && !matches!(*c, '\u{FFFE}' | '\u{FFFF}');
+    let s: String = s.chars().filter(allowed).collect();
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&apos;")
 }
 
@@ -704,7 +725,14 @@ fn run(o: &Options) -> Result<Outcome, String> {
     }
     match &o.output {
         Some(path) => write_file(&root, path, rendered.as_bytes())?,
-        None => print!("{rendered}"),
+        None => {
+            use std::io::Write;
+            if let Err(e) = std::io::stdout().write_all(rendered.as_bytes()) {
+                if e.kind() != std::io::ErrorKind::BrokenPipe {
+                    return Err(e.to_string());
+                }
+            }
+        }
     }
     if !scan.errors.is_empty() && !matches!(o.format, Format::Text) {
         eprint!("ferry-cli: {}", render_errors_text(&scan.errors, o));
@@ -1101,6 +1129,17 @@ mod tests {
     #[test]
     fn xml_leaves_out_characters_it_cannot_hold() {
         assert_eq!(xml("a\u{1}b<\n"), "ab&lt;\n");
+        assert_eq!(xml("a\u{FFFE}b\u{FFFF}c"), "abc");
+    }
+
+    #[test]
+    fn the_path_prefix_starts_at_the_repository_root() {
+        let base = Path::new("/home/runner/work/app/app");
+        assert_eq!(repository_path("./site/", Some(base)).as_deref(), Some("site"));
+        assert_eq!(repository_path("site//public", Some(base)).as_deref(), Some("site/public"));
+        assert_eq!(repository_path("/home/runner/work/app/app/site", Some(base)).as_deref(), Some("site"));
+        assert_eq!(repository_path("/tmp/elsewhere", Some(base)), None);
+        assert_eq!(repository_path(".", Some(base)), None);
     }
 
     #[test]

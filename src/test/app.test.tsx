@@ -563,7 +563,7 @@ describe("Ferry app", () => {
     expect(await screen.findByText("Sorun yok")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Diğer" }));
     expect(await screen.findByRole("menuitem", { name: "Log içe aktar" })).toBeInTheDocument();
-    expect(await screen.findByRole("menuitem", { name: "PHP 8.4.27 ile lint et" })).toBeInTheDocument();
+    expect(await screen.findByRole("menuitem", { name: "Sözdizimini PHP 8.4.27 ile denetle" })).toBeInTheDocument();
   });
 
   it("keeps one finding focusable when a filter shrinks a long list", async () => {
@@ -677,9 +677,9 @@ describe("Ferry app", () => {
     const user = setup();
     await openAndScan(user);
     await user.click(nav(/Bulgular/));
-    await more(user, "PHP 8.4.27 ile lint et");
+    await more(user, "Sözdizimini PHP 8.4.27 ile denetle");
     expect(await screen.findByText(/php -l · PHP 8.4: 31 farklı mesaj/)).toBeInTheDocument();
-    expect(screen.getByText("128 dosya lint edildi, sözdizimi hatası yok.")).toBeInTheDocument();
+    expect(screen.getByText("128 dosyanın sözdizimi denetlendi, hata yok.")).toBeInTheDocument();
     await more(user, "Testleri PHP 8.4.27 ile çalıştır");
     const dialog = await screen.findByRole("dialog", { name: "Projenin testleri çalıştırılsın mı?" });
     await user.click(within(dialog).getByRole("button", { name: "Testleri çalıştır" }));
@@ -1602,11 +1602,53 @@ describe("Ferry app", () => {
     render(<App api={api} />);
     await openAndScan(user);
     await user.click(nav(/Bulgular/));
-    await more(user, /lint et/);
+    await more(user, /Sözdizimini/);
     await user.click(nav(/Geçmiş/));
     const card = (await screen.findByText("Son kontroller")).closest(".card") as HTMLElement;
-    expect(within(card).getByText("Lint")).toBeInTheDocument();
+    expect(within(card).getByText("Sözdizimi")).toBeInTheDocument();
     expect(within(card).getByText("Geçti")).toBeInTheDocument();
+  });
+
+  it("doesn't call the dependencies clear when the project's own constraint blocks", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({
+      delay: 0,
+      deps: (d) => ({ ...d, rootStatus: "incompatible", rootConstraint: "^7.4", packages: d.packages.map((p) => ({ ...p, status: "unknown" as const })) }),
+    });
+    render(<App api={api} />);
+    await openAndScan(user);
+    await user.click(nav(/Bağımlılıklar/));
+    expect(await screen.findByText(/uyumlu değil|uyumsuz/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Engel bulunmadı/)).not.toBeInTheDocument();
+  });
+
+  it("keeps a step picked before calculating", async () => {
+    const user = userEvent.setup();
+    render(<App api={mockApi({ delay: 0 })} />);
+    await openAndScan(user);
+    await user.click(nav(/Düzeltmeler/));
+    const picker = await screen.findByRole("combobox", { name: "Adım" });
+    await user.click(picker);
+    const option = (await screen.findAllByRole("option")).find((o) => /düzeltmelerine kadar/.test(o.textContent ?? ""));
+    if (!option) throw new Error("no step option");
+    const chosen = option.textContent ?? "";
+    await user.click(option);
+    await user.click(nav(/Genel bakış/));
+    await user.click(nav(/Düzeltmeler/));
+    expect(await screen.findByRole("combobox", { name: "Adım" })).toHaveTextContent(chosen);
+  });
+
+  it("lets you stop pinning a target from the project settings", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0, config: { target: "8.3", exclude: [], baseline: null, docker: { source: null, extensions: null, pages: null, dump: null, prepare: null, test: null }, git: { requireClean: false, branchPerBatch: false } } });
+    const save = vi.spyOn(api, "saveProjectConfig");
+    render(<App api={api} />);
+    await openAndScan(user);
+    await user.click(await screen.findByRole("button", { name: /Ayarlar/ }));
+    await user.click(await screen.findByRole("button", { name: "Hedef sabitlemesini kaldır" }));
+    await user.click(screen.getByRole("button", { name: "Projeye kaydet" }));
+    await waitFor(() => expect(save).toHaveBeenCalled());
+    expect(save.mock.calls[0][1].target).toBeNull();
   });
 
   it("shows an inconclusive Real test as inconclusive in History", async () => {

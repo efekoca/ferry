@@ -3,6 +3,8 @@ import type { Localized } from "../i18n";
 import type { CheckSummary, DockerComparison, DockerStep, DockerSummary, HistoryEntry, ProjectConfig, ScanCounts,
   CheckRun,
   DependencyReport,
+  DockerGap,
+  SnapshotConflict,
   DiffLine,
   FileChange,
   Finding,
@@ -169,7 +171,17 @@ const DEPS: Omit<DependencyReport, "target" | "rootStatus"> = {
   ],
 };
 
-export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: IgnoreEntry[]; config?: ProjectConfig } = {}): Api {
+export function mockApi(
+  opts: {
+    delay?: number;
+    scale?: number;
+    staleIgnores?: IgnoreEntry[];
+    config?: ProjectConfig;
+    deps?: (report: DependencyReport) => DependencyReport;
+    gaps?: DockerGap[];
+    conflicts?: SnapshotConflict[];
+  } = {},
+): Api {
   const delay = opts.delay ?? 450;
   const listeners = new Set<(p: ScanProgress) => void>();
   let settings: Settings = { phpPath: null, snapshotLimit: 30, editor: null, editorCommand: null };
@@ -202,6 +214,7 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
     };
   };
   let dockerTrial: DockerComparison | null = null;
+  let dockerStopped = false;
   const withRuntime = (findings: Finding[]): { findings: Finding[]; runtime: ScanResult["runtime"] } => {
     if (!runtimeLog) return { findings: findings.map((f) => ({ ...f, runtimeHits: 0 })), runtime: null };
     const hit = new Set(findings.filter((f) => f.ruleId.startsWith("removed.")).slice(0, 3).map((f) => f.id));
@@ -316,9 +329,11 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
         log,
       });
       const event = { path: "/app/includes/class-cart.php", line: 118, level: "fatal" as const, message: "Error: Call to undefined function each()", count: 1 };
+      dockerStopped = false;
       for (const [step, version] of [["lint", source], ["pages", source], ["tests", source], ["lint", target], ["pages", target], ["tests", target]] as const) {
         dockerListener?.({ step, version });
         await new Promise((r) => setTimeout(r, delay));
+        if (dockerStopped) throw new Error("The comparison was stopped.");
       }
       if (fix) {
         const comparison = { verdict: "clean" as const, gaps: [], stamp: "mock", source: run(source, 0, true, "OK (12 tests)"), target: run(target, 0, true, "OK (12 tests)"), dependenciesInstalled: true, installLog: "", newFailures: [], dataChanges: [], databaseUsed: !!database, pages: [], newOnTarget: [], goneOnTarget: [event], origins: [] };
@@ -331,7 +346,7 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
       runtimeLog = `Docker · PHP ${source} → ${target}`;
       runtimeCheck = null;
       return {
-        comparison: { verdict: "regressed" as const, gaps: [], stamp: "mock", source: run(source, 0, true, "OK (12 tests)"), target: { ...run(target, 1, false, "ERRORS!"), events: [event] }, dependenciesInstalled: true, installLog: "", newFailures: ["CartTest::testTotal"], dataChanges: database ? [{ table: "orders", sourceRows: 3, targetRows: 4 }] : [], databaseUsed: !!database, pages: pages.length ? [{ path: "/cart.php", change: "errors" as const, sourceStatus: 200, targetStatus: 200, newErrors: ["Uncaught Error: Call to undefined function each()"], sourceText: "Sepet", targetText: "Fatal error" }, { path: "/", change: "same" as const, sourceStatus: 200, targetStatus: 200, newErrors: [], sourceText: "Mağaza", targetText: "Mağaza" }] : [], newOnTarget: [event], goneOnTarget: [], origins: [{ kind: "project" as const, name: "", version: null, messages: 1, fatal: 1, advice: null }, { kind: "package" as const, name: "acme/mailer", version: "1.4.0", messages: 2, fatal: 0, advice: null }, { kind: "core" as const, name: "WordPress", version: null, messages: 1, fatal: 0, advice: { tr: "Önce WordPress'i güncelleyin.", en: "Update WordPress first." } }] },
+        comparison: { verdict: opts.gaps?.length ? ("incomplete" as const) : ("regressed" as const), gaps: opts.gaps ?? [], stamp: "mock", source: run(source, 0, true, "OK (12 tests)"), target: { ...run(target, 1, false, "ERRORS!"), events: [event] }, dependenciesInstalled: true, installLog: "", newFailures: ["CartTest::testTotal"], dataChanges: database ? [{ table: "orders", sourceRows: 3, targetRows: 4 }] : [], databaseUsed: !!database, pages: pages.length ? [{ path: "/cart.php", change: "errors" as const, sourceStatus: 200, targetStatus: 200, newErrors: ["Uncaught Error: Call to undefined function each()"], sourceText: "Sepet", targetText: "Fatal error" }, { path: "/", change: "same" as const, sourceStatus: 200, targetStatus: 200, newErrors: [], sourceText: "Mağaza", targetText: "Mağaza" }] : [], newOnTarget: [event], goneOnTarget: [], origins: [{ kind: "project" as const, name: "", version: null, messages: 1, fatal: 1, advice: null }, { kind: "package" as const, name: "acme/mailer", version: "1.4.0", messages: 2, fatal: 0, advice: null }, { kind: "core" as const, name: "WordPress", version: null, messages: 1, fatal: 0, advice: { tr: "Önce WordPress'i güncelleyin.", en: "Update WordPress first." } }] },
         scan: withIgnores(lastScan),
         outcome: null,
       };
@@ -340,7 +355,9 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
       if (!dockerTrial) throw new Error("Try the fixes first.");
       return { comparison: dockerTrial, scan: null, outcome: null };
     },
-    cancelDockerCompare: async () => {},
+    cancelDockerCompare: async () => {
+      dockerStopped = true;
+    },
     onDockerStep: async (listener) => {
       dockerListener = listener;
       return () => {
@@ -430,7 +447,8 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
     },
     checkDependencies: async (_path, target) => {
       await sleep(delay / 3);
-      return { ...DEPS, target, rootStatus: "compatible" };
+      const report: DependencyReport = { ...DEPS, target, rootStatus: "compatible" };
+      return opts.deps ? opts.deps(report) : report;
     },
     toolchainStatus: async () => {
       await sleep(delay / 4);
@@ -479,7 +497,7 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
       if (!snap) throw new Error("snapshot not found");
       return CHANGES.filter((c) => snap.files.some((f) => f.path === c.file));
     },
-    snapshotConflicts: async () => [],
+    snapshotConflicts: async () => opts.conflicts ?? [],
     scanHistory: async () => [...pastScans, ...[...history].flatMap(([target, list]) => list.map(({ at, score, total, counts }) => ({ at, target, score, total, counts })))],
     rectorCacheSize: async () => rectorCache,
     clearRectorCache: async () => {

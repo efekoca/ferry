@@ -91,7 +91,7 @@ Ferry, hangi PHP'nin gerçekten çalışacağını belirleyen ve kodun çevresin
 - `.htaccess`: PHP-FPM'de 500 hatası veren ve `<IfModule mod_php.c>` dışında kalan `php_value` ve `php_flag` satırları ile PHP 8'in artık eşleşmediği `<IfModule mod_php5.c>` ya da `mod_php7.c` blokları
 - `.user.ini`, `php.ini` ve `.htaccess` içinde PHP'nin kaldırdığı ya da kullanımdan kaldırdığı ayarlar: `register_globals` (açıkken PHP hiç başlamaz), `track_errors`, `allow_url_include` ve `session.trans_sid_hosts` gibi
 - `platform-check` seçeneği kapatılmış ya da `config.platform.ext-*` değerleri eski sürümde sabitlenmiş bir `composer.json`, Composer 1 ile oluşturulmuş bir `composer.lock` ve yalnızca Composer 1 ile çalışan Composer eklentileri
-- `Dockerfile` (`ARG PHP_VERSION` dahil), Docker Compose (derleme argümanları dahil), GitHub Actions (`container:`, `docker run` ve YAML listeleri dahil), GitLab CI, Travis, Bitbucket Pipelines, DDEV, Lando, Platform.sh, `.conf` dosyaları ve Caddyfile'lardaki PHP-FPM soket yolları, `.tool-versions`, `.php-version` ve `composer.json`'daki `config.platform.php` içinde hedefinizin altında sabitlenmiş PHP sürümleri. Düzeltmeler ekranındaki **Sürüm dosyaları** modu ya da `ferry-cli pins <proje> --write` bunları günceller
+- `Dockerfile` (`ARG PHP_VERSION` dahil), Docker Compose (derleme argümanları dahil), GitHub Actions (`container:`, `docker run` ve YAML listeleri dahil), GitLab CI, Travis, Bitbucket Pipelines, DDEV, Lando, Platform.sh, `.conf` dosyaları ve Caddyfile'lardaki PHP-FPM soket yolları, `.tool-versions`, `.php-version` ve `composer.json`'daki `config.platform.php` içinde hedefinizin altında sabitlenmiş PHP sürümleri. Düzeltmeler ekranındaki **Sürüm dosyaları** modu ya da `ferry-cli pins <proje> --target 8.4 --write` bunları günceller
 
 ### Her değişikliği uygulamadan önce inceleyin
 
@@ -121,7 +121,7 @@ Projenin kendisinin istediği `symfony/polyfill-php80` ya da `paragonie/random_c
 
 Her paket **Uyumlu**, **Uyumsuz** ya da **Belirsiz** (paket bir PHP gereksinimi bildirmiyorsa ya da Ferry bunu okuyamıyorsa) olarak işaretlenir; uyumsuz paketler listenin başında yer alır. Engel yokken bazı paketler belirsizse sayfa her şeyi uyumlu saymaz, bunu ayrıca belirtir. Geliştirme paketleri etiketlidir; **Sadece üretim** seçeneği onları gizler. Listenin üstündeki uyarı, geçişi engelleyen paketleri tek tek adıyla içeren, kopyalamaya hazır bir `composer update` komutu verir.
 
-**Uyumlu sürümleri bul**, engelleyen her paketin hangi sürüme geçmesi gerektiğini Packagist'e sorar. Önerilen sürüm, PHP gereksinimi (ve Ferry'nin bildiği durumlarda framework'ün kendi destek aralığı) hedefe izin veren ilk ana sürümün en yenisidir. İnternete çıkan tek özellik budur ve yalnızca siz tıkladığınızda çalışır.
+**Uyumlu sürümleri bul**, engelleyen her paketin hangi sürüme geçmesi gerektiğini Packagist'e sorar. Önerilen sürüm, PHP gereksinimi (ve Ferry'nin bildiği durumlarda framework'ün kendi destek aralığı) hedefe izin veren ilk ana sürümün en yenisidir. Yalnızca siz tıkladığınızda internete çıkar. İnternete çıkan her özellik [Gizlilik](#gizlilik) bölümünde listelenir.
 
 WordPress projelerinde **WordPress eklentileri ve temaları** her eklentiyi ve temayı kurulu sürümü, `Requires PHP` başlığı ve kendi kodunda bulunan kritik sorunlarla listeler. **En son sürümleri bul** her biri için api.wordpress.org'dan güncel sürümü sorar ve orada kaldırılmış eklentileri işaretler.
 
@@ -375,7 +375,7 @@ Bu README'deki ekran görüntüleri, `pnpm dev` çalışırken `node scripts/rea
 | `src` | React ve TypeScript arayüzü |
 | `demo` | Uygulamayı denemek ve testler için örnek projeler |
 
-CI, her pull request'te ve `main`'e yapılan her push'ta biçimi kontrol eder, arayüz ve motor testlerini (gerçek Rector dahil) Linux ve Windows'ta çalıştırır, ikisinde de gerçek uygulamayı native e2e ile test eder; `v*` etiketlerinde macOS, Windows ve Linux paketlerini oluşturur.
+CI, her pull request'te ve `main`'e yapılan her push'ta biçimi kontrol eder, arayüz ve motor testlerini (gerçek Rector dahil) Linux ve Windows'ta çalıştırır, ikisinde de gerçek uygulamayı native e2e ile test eder (Linux'ta Gerçek test senaryoları dahil), Docker testlerini ve GitHub Action'ı çalıştırır; `v*` etiketlerinde macOS, Windows ve Linux paketlerini oluşturur. Yalnızca belgeleri değiştiren işler testleri atlar.
 
 Hata bildirimlerinizi, pull request'lerinizi ve geri bildirimlerinizi almaktan mutluluk duyarım.
 
