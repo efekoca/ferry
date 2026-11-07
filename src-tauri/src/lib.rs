@@ -1564,6 +1564,18 @@ async fn snapshot_usage(state: State<'_, AppState>) -> CmdResult<ferry_core::sna
 }
 
 #[tauri::command]
+async fn rector_cache_size(state: State<'_, AppState>) -> CmdResult<u64> {
+    let work = state.data_dir.join("rector");
+    blocking(move || Ok(rector::cache_size(&work))).await
+}
+
+#[tauri::command]
+async fn clear_rector_cache(state: State<'_, AppState>) -> CmdResult<()> {
+    let work = state.data_dir.join("rector");
+    blocking(move || rector::clear_cache(&work).map_err(|e| e.to_string())).await
+}
+
+#[tauri::command]
 async fn delete_all_snapshots(state: State<'_, AppState>) -> CmdResult<()> {
     let store = state.snapshots();
     let writes = state.writes.clone();
@@ -1641,6 +1653,8 @@ pub fn with_commands<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R
         snapshot_changes,
         snapshot_conflicts,
         snapshot_usage,
+        rector_cache_size,
+        clear_rector_cache,
         delete_all_snapshots,
         cancel_rector_preview,
         export_report,

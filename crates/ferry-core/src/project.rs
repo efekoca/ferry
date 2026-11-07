@@ -333,7 +333,7 @@ pub fn inspect(root: &Path) -> std::io::Result<ProjectInfo> {
         current_version,
         has_composer_lock: root.join("composer.lock").is_file(),
         has_vendor: root.join("vendor").is_dir(),
-        is_git_repo: root.join(".git").exists(),
+        is_git_repo: root.ancestors().any(|dir| dir.join(".git").exists()),
         excluded_dirs,
         config,
         config_error,
@@ -414,6 +414,15 @@ mod detection_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_folder_inside_a_repository_counts_as_one() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+        std::fs::create_dir_all(dir.path().join("apps/site")).unwrap();
+        std::fs::write(dir.path().join("apps/site/a.php"), "<?php\n").unwrap();
+        assert!(inspect(&dir.path().join("apps/site")).unwrap().is_git_repo);
+    }
     use std::fs;
 
     #[test]

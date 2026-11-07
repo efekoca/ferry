@@ -288,7 +288,7 @@ function FixLoop({ result, preview, onTry }: { result: DockerComparison; preview
               </div>
             ))}
           </div>
-          <Button variant="primary" icon={<Play size={14} />} disabled={chosen.size === 0} onClick={() => onTry(changes.filter((c) => chosen.has(c.file)).map((c) => c.file))}>
+          <Button variant="primary" icon={<Play size={14} />} disabled={chosen.size === 0} title={chosen.size === 0 ? t.changes.pickFileFirst : undefined} onClick={() => onTry(changes.filter((c) => chosen.has(c.file)).map((c) => c.file))}>
             {t.docker.fixTry(chosen.size)}
           </Button>
         </>
@@ -815,7 +815,7 @@ export function DockerCompare() {
             <Button variant="ghost" aria-expanded={showOptions} onClick={() => setShowOptions(!showOptions)}>
               {showOptions ? t.docker.closeOptions : t.docker.options}
             </Button>
-            <Button variant="primary" disabled={incomplete} onClick={() => (dataSource === "ssh" || projectCommands.length > 0 ? setConfirming(true) : start())}>
+            <Button variant="primary" disabled={incomplete} title={incomplete ? (!source ? t.docker.needSource : dataSource === "file" ? t.docker.needDump : t.docker.needServer) : undefined} onClick={() => (dataSource === "ssh" || projectCommands.length > 0 ? setConfirming(true) : start())}>
               {t.docker.start}
             </Button>
           </span>

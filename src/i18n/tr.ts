@@ -48,6 +48,7 @@ export const tr = {
   },
   nav: {
     sidebar: "Kenar çubuğu",
+    needsProject: "Önce bir proje açın",
     sections: "Bölümler",
     overview: "Genel bakış",
     findings: "Bulgular",
@@ -74,6 +75,7 @@ export const tr = {
   },
   overview: {
     title: "Genel bakış",
+    busyRealTest: "Gerçek test sürerken kullanılamaz",
     targetShort: "Hedef",
     more: "Diğer",
     scorePill: (n: number) => `Hazırlık ${n} / 100`,
@@ -333,6 +335,8 @@ export const tr = {
     nextStep: (v: string) => `PHP ${v} adımına geç`,
     pinsInstead: "Sürüm dosyalarını güncelle",
     recalculate: "Yeniden hesapla",
+    pickKind: "En az bir seçenek seçin",
+    pickFileFirst: "Önce en az bir dosya seçin",
     checkingTools: "Araçlar kontrol ediliyor",
     noPhp: "PHP bulunamadı",
     noPhpText: "Otomatik düzeltmeler için bilgisayarınızda PHP 7.4 ya da üstü kurulu olmalı. Kuruluysa yolunu Ayarlar'dan gösterebilirsiniz.",
@@ -543,6 +547,11 @@ export const tr = {
     tools: "Araçlar",
     recheck: "Yeniden kontrol et",
     notFound: "Bulunamadı",
+    needsComposer: "Rector'ı kurmak için Composer gerekiyor",
+    rectorCache: "Rector önbelleği",
+    rectorCacheEmpty: "Önbellek boş.",
+    rectorCacheDelete: "Önbelleği sil",
+    rectorCacheDone: "Rector önbelleği silindi",
     inToolsDir: "Ferry araç klasöründe",
     vulnerablePhp: (version: string, cves: string, patched: string) =>
       `Bu bilgisayardaki PHP ${version}, kimlik doğrulaması olmadan kod çalıştırmaya izin veren ${cves} açıklarından etkileniyor. Bu açık için bilinen bir geçici önlem yok; PHP'yi ${patched} ya da daha yeni bir sürüme güncelleyin.`,
@@ -573,6 +582,9 @@ export const tr = {
   },
   docker: {
     title: "Gerçek test",
+    needSource: "Karşılaştırılacak sürümü seçin",
+    needDump: "Döküm dosyası seçin",
+    needServer: "SSH sunucusu, veritabanı adı ve kullanıcısını girin",
     subtitle: (from: string, to: string) => `PHP ${from} → PHP ${to}`,
     safety: "Container'lar projenizin geçici kopyasında, ağ erişimi olmadan çalışır; projeniz değişmez. Ağa yalnızca kalıp hazırlığı ve composer install çıkar, bu aşamalarda projenizin kodu ve script'leri çalışmaz. İlk çalıştırma birkaç dakika sürebilir.",
     installExtensions: "PHP eklentilerini kur",

@@ -57,7 +57,7 @@ export function Sidebar() {
       aria-current={(project || item.view === "overview") && view === item.view ? "page" : undefined}
       disabled={!project && item.view !== "overview"}
       onClick={() => setView(item.view)}
-      title={item.shortcut ? `${item.label} (${modKey()} ${item.shortcut})` : undefined}
+      title={!project && item.view !== "overview" ? t.nav.needsProject : item.shortcut ? `${item.label} (${modKey()} ${item.shortcut})` : undefined}
     >
       {item.icon}
       <span>{item.label}</span>

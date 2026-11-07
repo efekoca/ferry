@@ -21,6 +21,12 @@ export function formatBytes(bytes: number, locale: string): string {
   return new Intl.NumberFormat(locale, { style: "unit", unit: units[unit], unitDisplay: "short", maximumFractionDigits: unit ? 1 : 0 }).format(value);
 }
 
+/** A long list cut short, saying how many it left out. */
+export const firstFew = (list: string[], limit: number) => list.slice(0, limit).join(", ") + (list.length > limit ? ` +${list.length - limit}` : "");
+
+/** For searching: I, İ and ı all match i, whichever keyboard the query came from. */
+export const fold = (text: string) => text.replace(/[Iİı]/g, "i").toLowerCase();
+
 export function relativeTo(root: string, path: string) {
   const clean = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "");
   const base = `${clean(root)}/`;

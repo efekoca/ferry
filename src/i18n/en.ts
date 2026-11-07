@@ -50,6 +50,7 @@ export const en: Dict = {
   },
   nav: {
     sidebar: "Sidebar",
+    needsProject: "Open a project first",
     sections: "Sections",
     overview: "Overview",
     findings: "Findings",
@@ -76,6 +77,7 @@ export const en: Dict = {
   },
   overview: {
     title: "Overview",
+    busyRealTest: "Not available while a Real test runs",
     targetShort: "Target",
     more: "More",
     scorePill: (n) => `Readiness ${n} / 100`,
@@ -342,6 +344,8 @@ export const en: Dict = {
     nextStep: (v) => `Go to PHP ${v}`,
     pinsInstead: "Update version files",
     recalculate: "Recalculate",
+    pickKind: "Choose at least one option",
+    pickFileFirst: "Select at least one file first",
     checkingTools: "Checking tools",
     noPhp: "PHP not found",
     noPhpText: "Automatic fixes need PHP 7.4 or newer on this computer. If it's installed, point to it in Settings.",
@@ -551,6 +555,11 @@ export const en: Dict = {
     tools: "Tools",
     recheck: "Check again",
     notFound: "Not found",
+    needsComposer: "Installing Rector needs Composer",
+    rectorCache: "Rector cache",
+    rectorCacheEmpty: "The cache is empty.",
+    rectorCacheDelete: "Clear the cache",
+    rectorCacheDone: "Rector cache cleared",
     inToolsDir: "In Ferry's tools folder",
     vulnerablePhp: (version: string, cves: string, patched: string) =>
       `PHP ${version} on this computer is affected by ${cves}, which let attackers run code without authentication. There's no known workaround; update PHP to ${patched} or later.`,
@@ -582,6 +591,9 @@ export const en: Dict = {
   },
   docker: {
     title: "Real test",
+    needSource: "Choose the version to compare with",
+    needDump: "Choose a dump file",
+    needServer: "Enter the SSH server, database name and user",
     subtitle: (from, to) => `PHP ${from} → PHP ${to}`,
     safety: "Containers run on a temporary copy of your project with no network, so your project doesn't change. Only image setup and composer install go online, and your code and scripts don't run during them. The first run can take a few minutes.",
     installExtensions: "Install PHP extensions",

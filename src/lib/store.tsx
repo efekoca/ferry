@@ -118,6 +118,7 @@ interface AppStore {
   deps: DependencyReport | null;
 
   toolchain: ToolchainStatus | null;
+  toolchainFailed: boolean;
   refreshToolchain(): Promise<void>;
   installingRector: boolean;
   installRector(): Promise<void>;
@@ -180,6 +181,7 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
   const [progress, setProgress] = useState<ScanProgress | null>(null);
   const [deps, setDeps] = useState<DependencyReport | null>(null);
   const [toolchain, setToolchain] = useState<ToolchainStatus | null>(null);
+  const [toolchainFailed, setToolchainFailed] = useState(false);
   const [docker, setDocker] = useState<DockerComparison | null>(null);
   const [dockerStep, setDockerStep] = useState<DockerStep | null>(null);
   const [dockerArgs, setDockerArgs] = useState<DockerRunArgs | null>(null);
@@ -240,9 +242,11 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
 
   const refreshToolchain = useCallback(async () => {
     if (!api) return;
+    setToolchainFailed(false);
     try {
       setToolchain(await api.toolchainStatus());
     } catch (e) {
+      setToolchainFailed(true);
       fail(t.toast.toolsFailed, e);
     }
   }, [api, fail, t]);
@@ -601,7 +605,7 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
           toast.push({
             tone: "error",
             title: t.toast.appliedWithErrors(result.written.length, result.lintErrors.length),
-            description: `${result.lintErrors.slice(0, 3).join("\n")}\n${t.toast.lintFailedText}`,
+            description: `${result.lintErrors.slice(0, 3).join("\n")}${result.lintErrors.length > 3 ? ` +${result.lintErrors.length - 3}` : ""}\n${t.toast.lintFailedText}`,
           });
         } else {
           toast.push({
@@ -778,13 +782,13 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
   const value = useMemo<AppStore>(
     () => ({
       api, view, setView, findingsFilter, setFindingsFilter, showFindings, theme, setTheme, recent, forgetRecent, project, opening, openProject, closeProject,
-      target, setTarget, scan, scanning, progress, runScan, cancelScan, deps, toolchain, refreshToolchain, installingRector,
+      target, setTarget, scan, scanning, progress, runScan, cancelScan, deps, toolchain, toolchainFailed, refreshToolchain, installingRector,
       installRector, preview, previewMode, previewing, loadPreview, clearPreview, cancelPreview, skippedHunks, skipHunks, docker, scanHistory, dockerHistory, checkHistory, dockerStep, runDocker, cancelDocker, saveConfig, dockerArgs, dockerTrial, tryFixes, applying, applyChanges, snapshots,
       refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport, ignoreFinding, unignoreFinding, pruneIgnores, importRuntimeLog, setRuntimeRoots, clearRuntimeLog, runLocalCheck, checking, cancelLocalCheck,
     }),
     [
       api, view, findingsFilter, showFindings, theme, setTheme, recent, forgetRecent, project, opening, openProject, closeProject, target,
-      setTarget, scan, scanning, progress, runScan, cancelScan, deps, toolchain, refreshToolchain, installingRector,
+      setTarget, scan, scanning, progress, runScan, cancelScan, deps, toolchain, toolchainFailed, refreshToolchain, installingRector,
       installRector, preview, previewMode, previewing, loadPreview, clearPreview, cancelPreview, skippedHunks, skipHunks, docker, scanHistory, dockerHistory, checkHistory, dockerStep, runDocker, cancelDocker, saveConfig, dockerArgs, dockerTrial, tryFixes, applying, applyChanges, snapshots,
       refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport, ignoreFinding, unignoreFinding, pruneIgnores, importRuntimeLog, setRuntimeRoots, clearRuntimeLog, runLocalCheck, checking, cancelLocalCheck,
     ],

@@ -327,6 +327,56 @@ describe("Ferry app", () => {
     expect(screen.queryByText("Son açılanlar")).not.toBeInTheDocument();
   });
 
+  it("offers a retry when the tools can't be checked", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    const real = api.toolchainStatus;
+    api.toolchainStatus = async () => {
+      throw new Error("no");
+    };
+    render(<App api={api} />);
+    await openAndScan(user);
+    await user.click(nav(/Düzeltmeler/));
+    const retry = await screen.findByRole("button", { name: "Yeniden kontrol et" });
+    api.toolchainStatus = real;
+    await user.click(retry);
+    expect(await screen.findByRole("button", { name: /Önizlemeyi hazırla/ })).toBeInTheDocument();
+  });
+
+  it("forgets a target comparison after a new scan", async () => {
+    const user = setup();
+    await openAndScan(user);
+    await user.click(screen.getByRole("button", { name: "Diğer" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Hedefleri karşılaştır" }));
+    await user.click(await screen.findByRole("button", { name: "Karşılaştır" }));
+    expect(await screen.findByRole("table")).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: /Tekrar tara/ }));
+    await screen.findByRole("img", { name: /Hazırlık puanı/ });
+    await user.click(screen.getByRole("button", { name: "Diğer" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Hedefleri karşılaştır" }));
+    expect(await screen.findByRole("button", { name: "Karşılaştır" })).toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+  });
+
+  it("measures and clears the Rector cache in Settings", async () => {
+    const user = setup();
+    await user.click(await screen.findByRole("button", { name: /Ayarlar/ }));
+    const clear = await screen.findByRole("button", { name: "Önbelleği sil" });
+    await waitFor(() => expect(clear).toBeEnabled());
+    await user.click(clear);
+    expect(await screen.findByText("Önbellek boş.")).toBeInTheDocument();
+    expect(clear).toBeDisabled();
+  });
+
+  it("says why a disabled button can't be used", async () => {
+    const user = setup();
+    await openAndScan(user);
+    await user.click(nav(/Düzeltmeler/));
+    await user.click(await screen.findByRole("checkbox", { name: "Uyumluluk" }));
+    expect(screen.getByRole("button", { name: /Önizlemeyi hazırla/ })).toHaveAttribute("title", "En az bir seçenek seçin");
+  });
+
   it("says what changed since the previous scan", async () => {
     const user = setup();
     await openAndScan(user);

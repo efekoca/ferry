@@ -7,7 +7,7 @@ import { useToast } from "../components/Toast";
 import { ActionMenu, Badge, Button, Callout, EmptyState, RiskBadge, Segmented, Select, SeverityIcon, TextArea, type MenuAction } from "../components/ui";
 import { useI18n } from "../i18n";
 import { errorMessage } from "../lib/api";
-import { commonTitle, joinPath } from "../lib/labels";
+import { commonTitle, joinPath, fold } from "../lib/labels";
 import { NO_FILTER, useStore, type FindingsFilter } from "../lib/store";
 import type { Finding, FixKind, LocalPhp, Severity } from "../lib/types";
 import { FindingDetail } from "./FindingDetail";
@@ -15,8 +15,8 @@ import { FindingDetail } from "./FindingDetail";
 const PAGE = 300;
 
 export function filterFindings(findings: Finding[], { fix, severity, rule, query }: FindingsFilter): Finding[] {
-  const q = query.trim().toLowerCase();
-  const hit = (s: string) => s.toLowerCase().includes(q);
+  const q = fold(query.trim());
+  const hit = (s: string) => fold(s).includes(q);
   return findings.filter(
     (f) =>
       (!fix || f.fix === fix) &&

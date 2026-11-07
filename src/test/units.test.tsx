@@ -11,7 +11,7 @@ import { highlight } from "../lib/code";
 import { columnOf, dayLabels, historyEvents, niceMax, rangeStart, smoothPath, spreadOut } from "../lib/history";
 import { squarify } from "../lib/treemap";
 import { filesHoldingHalf, fileStats } from "../screens/Overview";
-import { commonTitle, dependencyBlockers, formatBytes, formatDuration, formatRelative, joinPath, relativeTo, scoreHeadline, scoreTone } from "../lib/labels";
+import { commonTitle, dependencyBlockers, formatBytes, formatDuration, formatRelative, joinPath, firstFew, fold, relativeTo, scoreHeadline, scoreTone } from "../lib/labels";
 import { NO_FILTER, type FindingsFilter } from "../lib/store";
 import { filterFindings, prioritizeFindings } from "../screens/Findings";
 import { relatedFindings } from "../screens/FindingDetail";
@@ -577,5 +577,25 @@ describe("ComboField", () => {
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
     await user.type(field, "example.test");
     expect(field).toHaveValue("example.test");
+  });
+});
+
+describe("fold", () => {
+  it("lets every form of the Turkish i match", () => {
+    for (const text of ["KARŞILAŞTIRMA", "karşılaştırma", "KARŞILAŞTIRMA".toLocaleLowerCase("tr")]) expect(fold(text)).toBe("karşilaştirma");
+    expect(fold("İndeks")).toBe(fold("indeks"));
+    expect(fold("INCLUDE")).toBe("include");
+  });
+
+  it("finds a code path from a Turkish keyboard", () => {
+    const findings = [{ file: "Includes/db.php", title: { tr: "x", en: "x" }, snippet: "", fix: "auto", severity: "behavior", ruleId: "r" }] as unknown as Finding[];
+    expect(filterFindings(findings, { ...NO_FILTER, query: "ıncludes" })).toHaveLength(1);
+  });
+});
+
+describe("firstFew", () => {
+  it("says how many it left out", () => {
+    expect(firstFew(["a", "b"], 3)).toBe("a, b");
+    expect(firstFew(["a", "b", "c", "d"], 3)).toBe("a, b, c +1");
   });
 });

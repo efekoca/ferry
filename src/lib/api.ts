@@ -79,6 +79,8 @@ export interface Api {
   snapshotChanges(path: string, id: string): Promise<FileChange[]>;
   snapshotConflicts(path: string, id: string): Promise<SnapshotConflict[]>;
   backupUsage(): Promise<BackupUsage>;
+  rectorCacheSize(): Promise<number>;
+  clearRectorCache(): Promise<void>;
   deleteAllBackups(): Promise<void>;
   exportReport(path: string, destination: string): Promise<void>;
   ignoreFinding(path: string, id: string, reason: string): Promise<ScanResult>;
@@ -155,6 +157,8 @@ async function tauriApi(): Promise<Api> {
     snapshotChanges: (path, id) => invoke("snapshot_changes", { path, id }),
     snapshotConflicts: (path, id) => invoke("snapshot_conflicts", { path, id }),
     backupUsage: () => invoke("snapshot_usage"),
+    rectorCacheSize: () => invoke("rector_cache_size"),
+    clearRectorCache: () => invoke("clear_rector_cache"),
     deleteAllBackups: () => invoke("delete_all_snapshots"),
     exportReport: (path, destination) => invoke("export_report", { path, destination }),
     ignoreFinding: (path, id, reason) => invoke("ignore_finding", { path, id, reason }),
