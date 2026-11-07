@@ -495,6 +495,10 @@ export function mockApi(opts: { delay?: number; scale?: number; staleIgnores?: I
       return withIgnores(lastScan);
     },
     openInEditor: async () => {},
+    sourceLines: async (_path, _file, line) => {
+      const code = ["<?php", "$items = load_items();", "$total = mysql_query($sql);", "$rows = array();", "return $rows;"];
+      return code.map((text, i) => ({ number: Math.max(1, line - 2) + i, text }));
+    },
     pruneIgnores: async () => {
       if (!lastScan) throw new Error("Scan the project first.");
       stale = [];

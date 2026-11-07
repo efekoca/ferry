@@ -160,9 +160,14 @@
 
       await nav("Bulgular");
       const all = await until(() => $$(".finding").length, "findings");
-      await click("Elle düzelt");
+      const fixKind = async (label) => {
+        $(".toolbar__select [role=combobox]").click();
+        (await until(() => $$("[role=option]").find((o) => o.textContent.startsWith(label)), label)).click();
+        await sleep(200);
+      };
+      await fixKind("Elle düzelt");
       const manual = $$(".finding").length;
-      await click("Elle düzelt");
+      await fixKind("Tüm türler");
       check($$(".finding").length === all, "filter toggle restores list");
       const search = $('input[type="search"], input[aria-label="Bulgularda ara"]');
       search.focus();

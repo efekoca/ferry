@@ -1,24 +1,18 @@
-import { useDeferredValue, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Activity, ArrowRight, CircleCheck, CircleStop, FileCheck2, FlaskConical, ClipboardList, EyeOff, FileCode2, FolderSearch, Info, Lightbulb, Search, Sparkles, SquareArrowOutUpRight, Undo2, X } from "lucide-react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { Activity, ArrowRight, CircleCheck, CircleStop, ClipboardList, EyeOff, FileCheck2, FileCode2, FlaskConical, FolderSearch, MoreHorizontal, Search, SquareArrowOutUpRight, Undo2, X } from "lucide-react";
 import { ConfirmDialog } from "../components/Modal";
 import { PageHeader } from "../components/Shell";
 import { Splitter } from "../components/Splitter";
 import { useToast } from "../components/Toast";
-import { Badge, Button, Callout, EmptyState, RiskBadge, SeverityBadge, SeverityIcon, TextArea } from "../components/ui";
+import { ActionMenu, Badge, Button, Callout, EmptyState, RiskBadge, Segmented, Select, SeverityIcon, TextArea, type MenuAction } from "../components/ui";
 import { useI18n } from "../i18n";
 import { errorMessage } from "../lib/api";
 import { commonTitle, joinPath } from "../lib/labels";
 import { NO_FILTER, useStore, type FindingsFilter } from "../lib/store";
 import type { Finding, FixKind, LocalPhp, Severity } from "../lib/types";
+import { FindingDetail } from "./FindingDetail";
 
 const PAGE = 300;
-
-const FIX_TONE = { auto: "success", likely: "info", manual: "warn" } as const;
-const FIX_ICON: Record<FixKind, ReactNode> = {
-  auto: <Sparkles size={15} />,
-  likely: <Lightbulb size={15} />,
-  manual: <Info size={15} />,
-};
 
 export function filterFindings(findings: Finding[], { fix, severity, rule, query }: FindingsFilter): Finding[] {
   const q = query.trim().toLowerCase();
@@ -109,7 +103,7 @@ export function Findings() {
       const step = ({ ArrowDown: 1, ArrowUp: -1 } as Record<string, number>)[e.key];
       const jump = inList ? ({ Home: -Infinity, End: Infinity } as Record<string, number>)[e.key] : undefined;
       if (step === undefined && jump === undefined) return;
-      if (target?.closest?.("input, textarea, select, .pane--side, [role=dialog]")) return;
+      if (target?.closest?.("input, textarea, [role=combobox], [role=menu], .pane--side, [role=dialog]")) return;
       if (!visible.length) return;
       e.preventDefault();
       const i = selected ? visible.indexOf(selected) : -1;
@@ -221,28 +215,17 @@ export function Findings() {
     </Callout>
   );
 
-  const checkActions = (
-    <div className="toolbar__actions">
-      <Button variant="ghost" size="sm" icon={<Activity size={13} />} onClick={() => void importRuntimeLog()}>
-        {t.findings.importLog}
-      </Button>
-      {checking === "tests" && (
-        <Button variant="ghost" size="sm" icon={<CircleStop size={13} />} onClick={cancelLocalCheck}>
-          {t.findings.stopTests}
-        </Button>
-      )}
-      {local && (
-        <>
-          <Button variant="ghost" size="sm" icon={<FileCheck2 size={13} />} loading={checking === "lint"} disabled={!!checking} title={local.path} onClick={() => void runLocalCheck("lint")}>
-            {t.findings.lintWith(local.version)}
-          </Button>
-          <Button variant="ghost" size="sm" icon={<FlaskConical size={13} />} loading={checking === "tests"} disabled={!!checking} title={local.path} onClick={() => setConfirmTests(true)}>
-            {t.findings.testWith(local.version)}
-          </Button>
-        </>
-      )}
-    </div>
-  );
+  const moreItems: MenuAction[] = [
+    { label: t.findings.importLog, icon: <Activity size={14} aria-hidden />, onClick: () => void importRuntimeLog() },
+    ...(checking === "tests" ? [{ label: t.findings.stopTests, icon: <CircleStop size={14} aria-hidden />, onClick: cancelLocalCheck }] : []),
+    ...(local
+      ? [
+          { label: t.findings.lintWith(local.version), icon: <FileCheck2 size={14} aria-hidden />, disabled: !!checking, onClick: () => void runLocalCheck("lint") },
+          { label: t.findings.testWith(local.version), icon: <FlaskConical size={14} aria-hidden />, disabled: !!checking, onClick: () => setConfirmTests(true) },
+        ]
+      : []),
+  ];
+  const moreMenu = <ActionMenu label={t.overview.more} icon={checking ? <span className="spinner" aria-hidden /> : <MoreHorizontal size={15} aria-hidden />} items={moreItems} />;
 
   const countFix = (k: FixKind) => findings.filter((f) => f.fix === k).length;
   const countSev = (k: Severity) => findings.filter((f) => f.severity === k).length;
@@ -252,6 +235,30 @@ export function Findings() {
       <PageHeader
         title={t.findings.title}
         subtitle={viewingIgnored ? t.findings.ignoredTitle(findings.length) : t.findings.subtitle(scan.target, findings.length)}
+        actions={
+          <>
+            {findings.length > 0 && (
+              <Segmented<Severity | "all">
+                label={t.findings.severity}
+                value={filter.severity ?? "all"}
+                onChange={(severity) => update({ severity: severity === "all" ? null : severity })}
+                options={[
+                  { value: "all", label: t.findings.all },
+                  ...(["breaking", "deprecated", "behavior"] as const).map((k) => ({
+                    value: k,
+                    label: (
+                      <>
+                        <span className={`dot dot--${k}`} aria-hidden />
+                        {t.severity[k]} <span className="segmented__count">{countSev(k)}</span>
+                      </>
+                    ),
+                  })),
+                ]}
+              />
+            )}
+            {moreMenu}
+          </>
+        }
       />
       {findings.length === 0 ? (
         <div className="findings-empty">
@@ -263,7 +270,6 @@ export function Findings() {
             action={
               <div className="row row--wrap findings-empty__actions">
                 {ignoredToggle}
-                {checkActions}
               </div>
             }
           >
@@ -274,50 +280,50 @@ export function Findings() {
         <div className="split">
           <div className="pane">
             <div className="toolbar">
-              <div className="search">
-                <Search size={14} aria-hidden />
-                <input
-                  className="input"
-                  type="search"
-                  placeholder={t.findings.search}
-                  aria-label={t.findings.searchLabel}
-                  value={filter.query}
-                  onChange={(e) => update({ query: e.target.value })}
+              <div className="toolbar__row">
+                <label className="search">
+                  <Search size={14} aria-hidden />
+                  <input
+                    className="input"
+                    type="search"
+                    placeholder={t.findings.search}
+                    aria-label={t.findings.searchLabel}
+                    value={filter.query}
+                    onChange={(e) => update({ query: e.target.value })}
+                  />
+                </label>
+                <Select<FixKind | "all">
+                  className="toolbar__select"
+                  label={t.findings.fixType}
+                  value={filter.fix ?? "all"}
+                  options={[{ value: "all", label: t.findings.allKinds }, ...(["auto", "likely", "manual"] as const).map((k) => ({ value: k, label: `${t.fix[k]} ${countFix(k)}` }))]}
+                  onChange={(fix) => update({ fix: fix === "all" ? null : fix })}
                 />
               </div>
-              <div className="toolbar__filters">
-                <div className="chip-group" role="group" aria-label={t.findings.fixType}>
-                  {(["auto", "likely", "manual"] as const).map((k) => (
-                    <Chip key={k} pressed={filter.fix === k} onClick={() => update({ fix: filter.fix === k ? null : k })} label={t.fix[k]} count={countFix(k)} />
-                  ))}
+              {(runtimeCount > 0 || ruleTitle) && (
+                <div className="toolbar__filters">
+                  {runtimeCount > 0 && <Chip pressed={runtimeFilter} onClick={() => setOnlyRuntime(!runtimeFilter)} label={t.findings.runtimeOnly} count={runtimeCount} />}
+                  {ruleTitle && (
+                    <button type="button" className="chip chip--removable" onClick={() => update({ rule: null })} aria-label={t.findings.removeRule(ruleTitle)}>
+                      {ruleTitle}
+                      <X size={12} aria-hidden />
+                    </button>
+                  )}
                 </div>
-                <div className="chip-group" role="group" aria-label={t.findings.severity}>
-                  {(["breaking", "deprecated", "behavior"] as const).map((k) => (
-                    <Chip key={k} pressed={filter.severity === k} onClick={() => update({ severity: filter.severity === k ? null : k })} label={t.severity[k]} count={countSev(k)} />
-                  ))}
-                </div>
-                {runtimeCount > 0 && (
-                  <Chip pressed={runtimeFilter} onClick={() => setOnlyRuntime(!runtimeFilter)} label={t.findings.runtimeOnly} count={runtimeCount} />
-                )}
-                {ruleTitle && (
-                  <button type="button" className="chip chip--removable" onClick={() => update({ rule: null })} aria-label={t.findings.removeRule(ruleTitle)}>
-                    {ruleTitle}
-                    <X size={12} aria-hidden />
-                  </button>
-                )}
-              </div>
+              )}
               {staleNotice}
               {runtimeNotice}
-              <div className="toolbar__summary">
-                <span aria-live="polite">{t.findings.showing(visible.length, findings.length)}</span>
-                {filtered && (
-                  <Button variant="ghost" size="sm" onClick={clearFilters}>
-                    {t.findings.clearFilters}
-                  </Button>
-                )}
-                {ignoredToggle}
-              </div>
-              {checkActions}
+              {(filtered || ignoredList.length > 0) && (
+                <div className="toolbar__summary">
+                  <span aria-live="polite">{t.findings.showing(visible.length, findings.length)}</span>
+                  {filtered && (
+                    <Button variant="ghost" size="sm" onClick={clearFilters}>
+                      {t.findings.clearFilters}
+                    </Button>
+                  )}
+                  {ignoredToggle}
+                </div>
+              )}
             </div>
 
             {visible.length === 0 ? (
@@ -345,7 +351,6 @@ export function Findings() {
                   {groups.map(([file, items]) => (
                     <section key={file} className="file-group" role="group" aria-label={file}>
                       <header className="file-group__header">
-                        <FileCode2 size={14} />
                         <span className="file-group__name" title={file}>
                           {file}
                         </span>
@@ -361,17 +366,15 @@ export function Findings() {
                           className="finding"
                           onClick={() => setSelectedId(f.id)}
                         >
-                          <span className="finding__line">
-                            <SeverityIcon severity={f.severity} />
-                            {f.line}
-                          </span>
+                          <SeverityIcon severity={f.severity} />
                           <span className="finding__main">
                             <div className="finding__title">{loc(f.title)}</div>
                             <div className="finding__snippet">{f.snippet}</div>
                           </span>
                           <span className="finding__badges">
                             {f.runtimeHits > 0 && <Badge tone="accent">{t.findings.runtimeSeen(f.runtimeHits)}</Badge>}
-                            <RiskBadge fix={f.fix} />
+                            {f.fix !== "manual" && <RiskBadge fix={f.fix} />}
+                            <span className="finding__line">{f.line}</span>
                           </span>
                         </button>
                       ))}
@@ -392,89 +395,59 @@ export function Findings() {
           <Splitter id="findings" side="end" label={t.common.resizePanes} narrowAt="(max-width: 900px)" />
           <aside className="pane pane--side" aria-label={t.findings.details}>
             {selected && (
-              <div className="detail" key={selected.id}>
-                <div>
-                  <div className="row detail__badges">
-                    <SeverityBadge severity={selected.severity} />
-                    <RiskBadge fix={selected.fix} />
-                    <Badge mono>PHP {selected.since}</Badge>
-                  </div>
-                  <h2 className="selectable">{loc(selected.title)}</h2>
-                  <div className="detail__location selectable">
-                    {selected.file}:{selected.line}:{selected.column}
-                  </div>
-                </div>
-
-                <div className="detail__section">
-                  <h3>{t.findings.code}</h3>
-                  <pre className="code">{selected.snippet}</pre>
-                </div>
-
-                <div className="detail__section">
-                  <h3>{t.findings.why}</h3>
-                  <p className="selectable">{loc(selected.message)}</p>
-                  {selected.runtimeHits > 0 && !selected.ruleId.startsWith("runtime.") && (
-                    <p className="detail__runtime">
-                      <Activity size={13} aria-hidden /> {t.findings.runtimeDetail(selected.runtimeHits)}
-                    </p>
-                  )}
-                </div>
-
-                {selected.replacement && (
-                  <div className="detail__section">
-                    <h3>{t.findings.instead}</h3>
-                    <pre className="code code--suggest">{loc(selected.replacement)}</pre>
-                  </div>
-                )}
-
-                {selectedReason !== undefined ? (
-                  <Callout tone="info" icon={<EyeOff size={15} />}>
-                    <strong>{t.findings.ignoredReason}:</strong> <span className="selectable">{selectedReason || "—"}</span>
-                    {inlineIgnores.has(selected.id) && <div>{t.findings.inlineIgnore}</div>}
-                  </Callout>
-                ) : (
-                  <Callout tone={FIX_TONE[selected.fix]} icon={FIX_ICON[selected.fix]}>
-                    <strong>{t.fix[selected.fix]}:</strong> {t.fixDesc[selected.fix]}
-                  </Callout>
-                )}
-
-                <div className="row row--wrap">
-                  {selectedReason === undefined && selected.fix !== "manual" && (
-                    <Button variant="primary" onClick={() => setView("changes")}>
-                      {t.findings.previewFix} <ArrowRight size={14} />
-                    </Button>
-                  )}
-                  {project && api && (
-                    <Button
-                      variant="secondary"
-                      onClick={() =>
-                        api
-                          .revealPath(joinPath(project.root, selected.file))
-                          .catch((e) => toast.push({ tone: "error", title: t.toast.revealFailed, description: errorMessage(e, t.common.genericError) }))
-                      }
-                    >
-                      {t.findings.reveal}
-                    </Button>
-                  )}
-                  {project && api && (
-                    <Button variant="secondary" icon={<SquareArrowOutUpRight size={13} />} onClick={() => openInEditor(selected)}>
-                      {t.findings.openInEditor}
-                    </Button>
-                  )}
-                  {selectedReason === undefined ? (
-                    <Button variant="ghost" icon={<EyeOff size={13} />} onClick={() => setIgnoring({ id: selected.id, reason: "" })}>
-                      {t.findings.ignore}
-                    </Button>
-                  ) : inlineIgnores.has(selected.id) ? null : (
-                    <Button variant="ghost" icon={<Undo2 size={13} />} onClick={() => void unignoreFinding(selected.id)}>
-                      {t.findings.unignore}
-                    </Button>
-                  )}
-                </div>
-                <div className="detail__rule">
-                  {selected.ruleId}
-                </div>
-              </div>
+              <FindingDetail
+                finding={selected}
+                findings={visible}
+                current={project?.currentVersion ?? null}
+                target={scan.target}
+                root={project?.root}
+                api={api}
+                onSelect={setSelectedId}
+                notice={
+                  selectedReason !== undefined && (
+                    <Callout tone="info" icon={<EyeOff size={15} />}>
+                      <strong>{t.findings.ignoredReason}:</strong> <span className="selectable">{selectedReason || "—"}</span>
+                      {inlineIgnores.has(selected.id) && <div>{t.findings.inlineIgnore}</div>}
+                    </Callout>
+                  )
+                }
+                footer={
+                  <>
+                    {selectedReason === undefined && selected.fix !== "manual" && (
+                      <Button variant="primary" onClick={() => setView("changes")}>
+                        {t.findings.previewFix} <ArrowRight size={14} />
+                      </Button>
+                    )}
+                    {project && api && (
+                      <Button variant="secondary" icon={<SquareArrowOutUpRight size={13} />} onClick={() => openInEditor(selected)}>
+                        {t.findings.openInEditor}
+                      </Button>
+                    )}
+                    {project && api && (
+                      <Button
+                        variant="ghost"
+                        icon={<FileCode2 size={13} />}
+                        onClick={() =>
+                          api
+                            .revealPath(joinPath(project.root, selected.file))
+                            .catch((e) => toast.push({ tone: "error", title: t.toast.revealFailed, description: errorMessage(e, t.common.genericError) }))
+                        }
+                      >
+                        {t.findings.reveal}
+                      </Button>
+                    )}
+                    {selectedReason === undefined ? (
+                      <Button variant="ghost" className="push-end" icon={<EyeOff size={13} />} onClick={() => setIgnoring({ id: selected.id, reason: "" })}>
+                        {t.findings.ignore}
+                      </Button>
+                    ) : inlineIgnores.has(selected.id) ? null : (
+                      <Button variant="ghost" className="push-end" icon={<Undo2 size={13} />} onClick={() => void unignoreFinding(selected.id)}>
+                        {t.findings.unignore}
+                      </Button>
+                    )}
+                  </>
+                }
+              />
             )}
           </aside>
         </div>
