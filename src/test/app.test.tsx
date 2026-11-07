@@ -1051,6 +1051,31 @@ describe("Ferry app", () => {
     expect(await screen.findByText("Geri yüklendi")).toBeInTheDocument();
   });
 
+  it("adds a project folder to the exclude list and refuses one outside it", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    const root = (await api.pickProjectFolder("")) as string;
+    const folders = [`${root}/legacy/old`, "/somewhere/else"];
+    render(<App api={api} />);
+    await user.click(await screen.findByRole("button", { name: "Proje klasörü seçin" }));
+    api.pickProjectFolder = async () => folders.shift() ?? null;
+    await user.click(await screen.findByRole("button", { name: /Ayarlar/ }));
+    await user.click(await screen.findByRole("button", { name: "Klasör seç" }));
+    expect(await screen.findByText("legacy/old")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Klasör seç" }));
+    expect(await screen.findByText("Klasör projenin içinde olmalı.")).toBeInTheDocument();
+  });
+
+  it("offers the automatic PHP only after one has been chosen", async () => {
+    const user = setup();
+    await user.click(await screen.findByRole("button", { name: /Ayarlar/ }));
+    await screen.findByRole("heading", { name: "Araçlar" });
+    expect(screen.queryByRole("button", { name: "Otomatik" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Seç" }));
+    await user.click(await screen.findByRole("button", { name: "Otomatik" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Otomatik" })).not.toBeInTheDocument());
+  });
+
   it("switches theme from settings", async () => {
     const user = setup();
     await user.click(await screen.findByRole("button", { name: /Ayarlar/ }));

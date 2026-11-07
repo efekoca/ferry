@@ -164,15 +164,15 @@ function Timeline({ events, since, onRestore }: { events: HistoryEvent[]; since:
               {day.items.map((event) => {
                 const { title, sub, hint } = eventText(event, t, since);
                 return (
-                  <li key={event.key} className="history-row history-row--soft" title={hint}>
+                  <li key={event.key} className="line line--soft" title={hint}>
                     <EventIcon event={event} />
-                    <span className="history-row__main">
-                      <span className="history-row__title">{title}</span>
-                      <span className="history-row__sub">{sub}</span>
+                    <span className="line__main">
+                      <span className="line__title">{title}</span>
+                      <span className="line__sub">{sub}</span>
                     </span>
-                    <span className="history-row__end">
+                    <span className="line__end">
                       {event.kind === "fix" && (
-                        <Button size="sm" className="history-row__reveal" aria-label={t.history.restoreLabel(event.snapshot.label)} onClick={() => onRestore(event.snapshot)}>
+                        <Button size="sm" className="line__reveal" aria-label={t.history.restoreLabel(event.snapshot.label)} onClick={() => onRestore(event.snapshot)}>
                           {t.history.restore}
                         </Button>
                       )}
@@ -211,24 +211,24 @@ function Backups({
 }) {
   const { t } = useI18n();
   return (
-    <Card title={t.history.backups} bodyClassName="history-card">
+    <Card title={t.history.backups} bodyClassName="lines-card">
       {snapshots.length === 0 ? (
         <div className="history-empty">
           <strong>{t.history.empty}</strong>
           <p>{t.history.emptyText}</p>
         </div>
       ) : (
-        <ul className="history-rows" aria-label={t.history.backups}>
+        <ul className="lines" aria-label={t.history.backups}>
           {snapshots.map((s) => {
             const [name, ...details] = s.label.split(" · ");
             return (
-            <li key={s.id} className="history-row history-backup">
-              <button className="history-row__main history-row__open" aria-label={t.history.reviewLabel(s.label)} title={s.files.map((f) => f.path).join("\n")} onClick={() => onReview(s)}>
-                <span className="history-row__title">{name}</span>
-                <span className="history-row__sub">{[...details, moment(s.createdAt, t), t.history.fileCount(s.files.length)].join(" · ")}</span>
+            <li key={s.id} className="line history-backup">
+              <button className="line__main line__open" aria-label={t.history.reviewLabel(s.label)} title={s.files.map((f) => f.path).join("\n")} onClick={() => onReview(s)}>
+                <span className="line__title">{name}</span>
+                <span className="line__sub">{[...details, moment(s.createdAt, t), t.history.fileCount(s.files.length)].join(" · ")}</span>
               </button>
-              <span className="history-row__end">
-                <Button size="sm" variant="ghost" iconOnly className="history-row__reveal" aria-label={t.history.delete} onClick={() => onDelete(s)}>
+              <span className="line__end">
+                <Button size="sm" variant="ghost" iconOnly className="line__reveal" aria-label={t.history.delete} onClick={() => onDelete(s)}>
                   <Trash2 size={14} />
                 </Button>
                 <Button size="sm" onClick={() => onRestore(s)}>
@@ -241,8 +241,8 @@ function Backups({
         </ul>
       )}
       {snapshots.length > 1 && (
-        <div className="history-card__foot">
-          <Button variant="ghost" size="sm" className="history-danger" onClick={onClear}>
+        <div className="lines-card__foot">
+          <Button variant="ghost" size="sm" className="danger-text" onClick={onClear}>
             {t.history.deleteAll}
           </Button>
         </div>
@@ -271,17 +271,17 @@ function LatestChecks({ real, checks }: { real: DockerSummary[]; checks: CheckSu
           <span tabIndex={0}>{t.history.checks}</span>
         </Tooltip>
       }
-      bodyClassName="history-card history-card--fill"
+      bodyClassName="lines-card lines-card--fill"
     >
-      <ul className="history-rows">
+      <ul className="lines">
         {rows.map((row) => (
-          <li key={row.key} className="history-row">
+          <li key={row.key} className="line">
             <span className={`dot dot--${dots[row.tone]}`} aria-hidden />
-            <span className="history-row__main">
-              <span className="history-row__title">{row.title}</span>
-              <span className="history-row__sub">{row.sub}</span>
+            <span className="line__main">
+              <span className="line__title">{row.title}</span>
+              <span className="line__sub">{row.sub}</span>
             </span>
-            <span className="history-row__end">{row.text}</span>
+            <span className="line__end">{row.text}</span>
           </li>
         ))}
       </ul>

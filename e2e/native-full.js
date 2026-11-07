@@ -200,7 +200,7 @@
 
       await nav("Geçmiş");
       const row = await until(() => $$(".history-backup")[0], "history row");
-      row.querySelector(".history-row__open").click();
+      row.querySelector(".line__open").click();
       const review = await dialog();
       await until(() => review.innerText.includes(`${files.length - 1} dosya`), "review meta");
       key("Escape", false);
@@ -515,7 +515,7 @@
       await until(() => text().includes("Görünüm"), "back to turkish");
       radio("Açık").click();
       const before = seen.length;
-      await click("Yeniden kontrol et");
+      $('button[aria-label="Yeniden kontrol et"]').click();
       await sleep(2500);
       noErrorToast(before);
       await emit(`  tools: ${$("main").innerText.replace(/\n+/g, " / ").slice(0, 500)}`);
