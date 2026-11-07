@@ -123,8 +123,8 @@ await send("Page.enable");
 for (const lang of ["en", "tr"]) {
   const t =
     lang === "tr"
-      ? { pick: "Proje klasörü seçin", scan: "Taramayı başlat", findings: "Bulgular", fixes: "Düzeltmeler", calc: "Önizlemeyi hazırla", deps: "Bağımlılıklar", history: "Geçmiş", applyAll: "Tümünü uygula", apply: "Uygula" }
-      : { pick: "Choose project folder", scan: "Start scan", findings: "Findings", fixes: "Fixes", calc: "Prepare preview", deps: "Dependencies", history: "History", applyAll: "Apply all", apply: "Apply" };
+      ? { pick: "Proje klasörü seçin", scan: "Taramayı başlat", findings: "Bulgular", fixes: "Düzeltmeler", calc: "Önizlemeyi hazırla", deps: "Bağımlılıklar", history: "Geçmiş", applyAll: "Tümünü uygula", apply: "Uygula", real: "Gerçek test", start: "Testi başlat", trial: "geçici kopyada" }
+      : { pick: "Choose project folder", scan: "Start scan", findings: "Findings", fixes: "Fixes", calc: "Prepare preview", deps: "Dependencies", history: "History", applyAll: "Apply all", apply: "Apply", real: "Real test", start: "Start test", trial: "in a temporary copy" };
   await open(lang);
   await click(t.pick);
   await sleep(800);
@@ -153,6 +153,13 @@ for (const lang of ["en", "tr"]) {
   await sleep(800);
   const dependencies = await capture();
 
+  await click(t.real);
+  await click(t.start);
+  await sleep(4000);
+  await click(t.trial);
+  await sleep(4000);
+  const realTest = await capture();
+
   await click(t.fixes);
   await evaluate(`(() => { const all = document.querySelector('.change-list__header input'); if (all && !all.checked) all.click(); return true; })()`);
   await sleep(400);
@@ -168,6 +175,7 @@ for (const lang of ["en", "tr"]) {
   await save("fixes", lang, fixes);
   await save("dependencies", lang, dependencies);
   await save("history", lang, history);
+  await save("real-test", lang, realTest);
 }
 
 ws.close();
