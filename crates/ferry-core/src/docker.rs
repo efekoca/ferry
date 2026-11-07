@@ -515,7 +515,12 @@ pub(crate) struct Container<'a> {
     shared: RefCell<Option<SharedDatabase>>,
 }
 
-impl Container<'_> {
+impl<'a> Container<'a> {
+    #[cfg(test)]
+    pub fn for_test(docker: &'a Path, cancel: &'a AtomicBool, prefix: String) -> Self {
+        Container { docker, cancel, prefix, shared: RefCell::new(None) }
+    }
+
     /// Later runs share the network of `database` and receive its settings.
     pub fn attach(&self, database: Option<&str>, socket: Option<String>, env: Vec<(String, String)>) {
         *self.shared.borrow_mut() = Some((database.map(str::to_string), socket, env));
