@@ -67,12 +67,24 @@ impl Git {
     /// `Ok(None)` means there's no repository to care about. Any other failure, like a folder Git
     /// refuses to trust, is an error: treating it as "no repository" would skip the checks.
     fn find(root: &Path) -> Result<Option<Git>, String> {
-        let Some(program) = toolchain::find_executable("git") else { return Ok(None) };
+        Self::find_with(toolchain::find_executable("git"), root)
+    }
+
+    /// A `.git` that Git can't read, or no Git at all, still means the project is a repository.
+    fn find_with(program: Option<PathBuf>, root: &Path) -> Result<Option<Git>, String> {
+        let repository = root.ancestors().any(|dir| dir.join(".git").symlink_metadata().is_ok());
+        let Some(program) = program else {
+            return if repository {
+                Err(crate::t!("Bu proje bir Git deposu ama Git bulunamadı.", "This project is a Git repository, but Git wasn't found."))
+            } else {
+                Ok(None)
+            };
+        };
         let git = Git { program, root: root.to_path_buf() };
         match git.call(&["rev-parse", "--is-inside-work-tree"], &[], true) {
             Ok(out) => Ok((String::from_utf8_lossy(&out).trim() == "true").then_some(git)),
-            Err(reason) if reason.contains("not a git repository") => Ok(None),
-            Err(reason) => Err(reason),
+            Err(reason) if reason.contains("not a git repository") && !repository => Ok(None),
+            Err(reason) => Err(crate::t!("Git deposu okunamadı: {reason}", "Couldn't read the Git repository: {reason}")),
         }
     }
 
@@ -180,6 +192,19 @@ pub fn blame(root: &Path, file: &str) -> Result<Vec<u8>, String> {
 pub fn check_committable(root: &Path, files: &[String]) -> Result<(), String> {
     let Some(git) = Git::find(root)? else { return Ok(()) };
     git.refuse_project_programs()?;
+    let nested = |file: &&String| {
+        Path::new(file.as_str())
+            .ancestors()
+            .skip(1)
+            .filter(|dir| !dir.as_os_str().is_empty())
+            .any(|dir| root.join(dir).join(".git").symlink_metadata().is_ok())
+    };
+    if let Some(file) = files.iter().find(nested) {
+        return Err(crate::t!(
+            "Bu dosyalar ayrı commit'e alınamıyor: {file} başka bir Git deposunun içinde.\nAyrı dal seçeneğini kapatıp yeniden deneyin.",
+            "These files can't go into a separate commit: {file} is inside another Git repository.\nTurn the separate branch off and try again."
+        ));
+    }
     git.run(&["add", "--dry-run", "--"], files).map(|_| ()).map_err(|reason| {
         crate::t!(
             "Bu dosyalar ayrı commit'e alınamıyor: {reason}\nAyrı dal seçeneğini kapatıp yeniden deneyin.",
@@ -286,6 +311,28 @@ mod tests {
         std::fs::write(root.join(".gitattributes"), "a.txt diff=x\n").unwrap();
         assert!(blame(root, "a.txt").is_err());
         assert!(!marker.exists());
+    }
+
+    #[test]
+    fn a_repository_git_cant_read_is_not_mistaken_for_none() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(Git::find_with(None, dir.path()).unwrap().is_none());
+        std::fs::write(dir.path().join(".git"), "gitdir: /nowhere/at/all\n").unwrap();
+        assert!(Git::find_with(None, dir.path()).is_err());
+        if toolchain::find_executable("git").is_some() {
+            assert!(status(dir.path(), &[]).is_err());
+        }
+    }
+
+    #[test]
+    fn a_file_in_a_nested_repository_cant_go_into_the_commit() {
+        let Some((dir, git)) = repo() else { return };
+        let root = dir.path();
+        std::fs::create_dir(root.join("lib")).unwrap();
+        Git { program: git.program.clone(), root: root.join("lib") }.run(&["init", "-q"], &[]).unwrap();
+        std::fs::write(root.join("lib/a.php"), "<?php\n").unwrap();
+        assert!(check_committable(root, &files(&["lib/a.php"])).is_err());
+        assert!(check_committable(root, &files(&["a.txt"])).is_ok());
     }
 
     #[test]
