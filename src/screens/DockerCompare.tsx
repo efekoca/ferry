@@ -4,7 +4,7 @@ import { DiffViewer } from "../components/DiffViewer";
 import { ConfirmDialog } from "../components/Modal";
 import { PageHeader } from "../components/Shell";
 import { useToast } from "../components/Toast";
-import { Badge, Button, Callout, Card, CommandLine, EmptyState, RiskBadge } from "../components/ui";
+import { Badge, Button, Callout, Card, CommandLine, EmptyState, RiskBadge, Select } from "../components/ui";
 import { useI18n } from "../i18n";
 import { containerPath as shortPath, touches } from "../lib/fixes";
 import { errorMessage } from "../lib/api";
@@ -618,17 +618,18 @@ export function DockerCompare() {
             <section className="docker-setup">
               <div className="docker-hero">
                 <div className="docker-route">
-                  <label className="docker-version">
+                  <div className="docker-version">
                     <span>{t.docker.from}</span>
-                    <select className="input" value={source} disabled={running} onChange={(e) => setPicked(e.target.value)}>
-                      {!source && <option value="">{t.common.unknown}</option>}
-                      {[...new Set([...sources, ...(source ? [source] : [])])].map((v) => (
-                        <option key={v} value={v}>
-                          PHP {v}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                    <Select
+                      block
+                      label={t.docker.from}
+                      value={source}
+                      placeholder={t.common.unknown}
+                      disabled={running}
+                      options={[...new Set([...sources, ...(source ? [source] : [])])].map((v) => ({ value: v, label: `PHP ${v}` }))}
+                      onChange={setPicked}
+                    />
+                  </div>
                   <ArrowRight className="docker-route__arrow" size={18} aria-hidden />
                   <div className="docker-version">
                     <span>{t.docker.to}</span>
@@ -680,22 +681,25 @@ export function DockerCompare() {
                     </label>
                   </OptionGroup>
                   <OptionGroup icon={<Database size={14} aria-hidden />} title={t.docker.groupData}>
-                <label className="docker-field">
+                <div className="docker-field">
                   <span>{t.docker.dataSource}</span>
-                  <select className="input" value={dataSource} disabled={running} onChange={(e) => setDataSource(e.target.value)}>
-                    <option value="none">{t.docker.dataNone}</option>
-                    <option value="file">{t.docker.dataFile}</option>
-                    {saved?.dump && !plan?.dumps.includes(saved.dump) && <option value={`dump:${saved.dump}`}>{t.docker.dataDump(saved.dump)}</option>}
-                    {plan?.dumps.map((d) => (
-                      <option key={d} value={`dump:${d}`}>
-                        {t.docker.dataDump(d)}
-                      </option>
-                    ))}
-                    {plan?.live && <option value="live">{t.docker.dataLive(plan.name ?? "", plan.host ?? "")}</option>}
-                    {plan?.seed && <option value="seed">{t.docker.dataSeed(plan.seed)}</option>}
-                    <option value="ssh">{t.docker.dataSsh}</option>
-                  </select>
-                </label>
+                  <Select
+                    block
+                    label={t.docker.dataSource}
+                    value={dataSource}
+                    disabled={running}
+                    options={[
+                      { value: "none", label: t.docker.dataNone },
+                      { value: "file", label: t.docker.dataFile },
+                      ...(saved?.dump && !plan?.dumps.includes(saved.dump) ? [{ value: `dump:${saved.dump}`, label: t.docker.dataDump(saved.dump) }] : []),
+                      ...(plan?.dumps ?? []).map((d) => ({ value: `dump:${d}`, label: t.docker.dataDump(d) })),
+                      ...(plan?.live ? [{ value: "live", label: t.docker.dataLive(plan.name ?? "", plan.host ?? "") }] : []),
+                      ...(plan?.seed ? [{ value: "seed", label: t.docker.dataSeed(plan.seed) }] : []),
+                      { value: "ssh", label: t.docker.dataSsh },
+                    ]}
+                    onChange={setDataSource}
+                  />
+                </div>
                 {dataSource === "file" && (
                   <Button
                     variant="secondary"
@@ -715,10 +719,17 @@ export function DockerCompare() {
                         <option key={h} value={h} />
                       ))}
                     </datalist>
-                    <select className="input" aria-label={t.docker.sshEngine} value={remote.engine} disabled={running} onChange={(e) => setRemote({ ...remote, engine: e.target.value as "mysql" | "postgres" })}>
-                      <option value="mysql">MySQL / MariaDB</option>
-                      <option value="postgres">PostgreSQL</option>
-                    </select>
+                    <Select
+                      block
+                      label={t.docker.sshEngine}
+                      value={remote.engine}
+                      disabled={running}
+                      options={[
+                        { value: "mysql", label: "MySQL / MariaDB" },
+                        { value: "postgres", label: "PostgreSQL" },
+                      ]}
+                      onChange={(engine) => setRemote({ ...remote, engine })}
+                    />
                     <input className="input" aria-label={t.docker.sshName} placeholder={plan?.name ?? t.docker.sshName} value={remote.name} disabled={running} onChange={(e) => setRemote({ ...remote, name: e.target.value })} />
                     <input className="input" aria-label={t.docker.sshUser} placeholder={plan?.user ?? t.docker.sshUser} value={remote.user} disabled={running} onChange={(e) => setRemote({ ...remote, user: e.target.value })} />
                     <label className="docker-option">

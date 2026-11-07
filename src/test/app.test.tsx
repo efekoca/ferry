@@ -13,6 +13,11 @@ function setup() {
 
 const nav = (name: RegExp) => within(screen.getByRole("navigation", { name: "Bölümler" })).getByRole("button", { name });
 
+async function pick(user: ReturnType<typeof userEvent.setup>, name: string, option: string | RegExp) {
+  await user.click(await screen.findByRole("combobox", { name }));
+  await user.click(await screen.findByRole("option", { name: option }));
+}
+
 async function openAndScan(user: ReturnType<typeof userEvent.setup>) {
   await user.click(await screen.findByRole("button", { name: "Proje klasörü seçin" }));
   await screen.findByRole("heading", { name: "Genel bakış" });
@@ -409,10 +414,10 @@ describe("Ferry app", () => {
     await user.click(nav(/Düzeltmeler/));
     await user.click(await screen.findByRole("button", { name: /Değişiklikleri hesapla/ }));
     await screen.findByRole("list", { name: "Dosyalar" });
-    await user.selectOptions(screen.getByRole("combobox", { name: "Seçimi daralt" }), "Yalnızca otomatik düzeltmeler");
+    await pick(user, "Seçimi daralt", "Yalnızca otomatik düzeltmeler");
     const autoCount = screen.getByText(/ \/ 4 dosya seçili/).textContent;
     expect(autoCount).not.toBe("4 / 4 dosya seçili");
-    await user.selectOptions(screen.getByRole("combobox", { name: "Seçimi daralt" }), "Tüm dosyalar");
+    await pick(user, "Seçimi daralt", "Tüm dosyalar");
     await user.click(screen.getByRole("button", { name: "Tümünü uygula" }));
     const dialog = await screen.findByRole("dialog");
     expect(await within(dialog).findByText("1 dosyada commit edilmemiş değişiklik var")).toBeInTheDocument();
@@ -513,7 +518,7 @@ describe("Ferry app", () => {
     render(<App api={mockApi({ delay: 0 })} />);
     await openAndScan(user);
     await user.click(nav(/Gerçek test/));
-    await user.selectOptions(await screen.findByRole("combobox", { name: "Veritabanı" }), await screen.findByRole("option", { name: "Canlı kopya: magaza (127.0.0.1)" }));
+    await pick(user, "Veritabanı", "Canlı kopya: magaza (127.0.0.1)");
     expect(screen.getByText(/Canlı veritabanınıza yazılmaz/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Testi başlat" }));
     expect(await screen.findByText("İstekler sonrası farklı tablolar: 1")).toBeInTheDocument();
@@ -527,7 +532,7 @@ describe("Ferry app", () => {
     render(<App api={api} />);
     await openAndScan(user);
     await user.click(nav(/Gerçek test/));
-    await user.selectOptions(await screen.findByRole("combobox", { name: "Veritabanı" }), "ssh");
+    await pick(user, "Veritabanı", "Sunucudan kopyala (SSH)");
     await user.type(screen.getByRole("combobox", { name: "SSH sunucusu" }), "prod");
     await user.type(screen.getByRole("textbox", { name: "Veritabanı adı" }), "magaza");
     await user.type(screen.getByRole("textbox", { name: "Veritabanı kullanıcısı" }), "app");
@@ -648,7 +653,7 @@ describe("Ferry app", () => {
     render(<App api={api} />);
     await openAndScan(user);
     await user.click(nav(/Gerçek test/));
-    await user.selectOptions(await screen.findByRole("combobox", { name: "Veritabanı" }), "ssh");
+    await pick(user, "Veritabanı", "Sunucudan kopyala (SSH)");
     await user.type(screen.getByRole("combobox", { name: "SSH sunucusu" }), "prod");
     await user.type(screen.getByRole("textbox", { name: "Veritabanı adı" }), "magaza");
     await user.type(screen.getByRole("textbox", { name: "Veritabanı kullanıcısı" }), "app");
@@ -743,7 +748,7 @@ describe("Ferry app", () => {
     const api = mockApi({ delay: 0 });
     render(<App api={api} />);
     await user.click(await screen.findByRole("button", { name: /Ayarlar/ }));
-    await user.selectOptions(await screen.findByRole("combobox", { name: "Editör" }), "PhpStorm");
+    await pick(user, "Editör", "PhpStorm");
     await waitFor(async () => expect((await api.getSettings()).editor).toBe("phpstorm"));
   });
 
@@ -902,7 +907,7 @@ describe("Ferry app", () => {
     await user.click(await screen.findByRole("button", { name: /Ayarlar/ }));
     const group = await screen.findByRole("radiogroup", { name: "Saklanacak yedek" });
     await user.click(within(group).getByRole("radio", { name: "30" }));
-    await user.selectOptions(screen.getByRole("combobox", { name: "Editör" }), "vscode");
+    await pick(user, "Editör", "Visual Studio Code");
     await waitFor(async () => expect(await api.getSettings()).toEqual({ phpPath: null, snapshotLimit: 30, editor: "vscode", editorCommand: null }));
   });
 
@@ -1209,7 +1214,7 @@ describe("Ferry app", () => {
     render(<App api={api} />);
     await openAndScan(user);
     await user.click(nav(/Düzeltmeler/));
-    await user.selectOptions(await screen.findByRole("combobox", { name: "Adım" }), "8.0");
+    await pick(user, "Adım", /8\.0/);
     await user.click(screen.getByRole("button", { name: "Değişiklikleri hesapla" }));
     await waitFor(() => expect(preview).toHaveBeenCalled());
     expect(preview.mock.calls[0][1]).toBe("8.0");
@@ -1227,7 +1232,7 @@ describe("Ferry app", () => {
     const save = vi.spyOn(api, "saveSettings");
     render(<App api={api} />);
     await user.click(await screen.findByRole("button", { name: /Ayarlar/ }));
-    await user.selectOptions(await screen.findByRole("combobox", { name: "Editör" }), "custom");
+    await pick(user, "Editör", "Özel komut");
     const field = await screen.findByRole("textbox", { name: "Komut ya da adres" });
     await user.type(field, "nvim +{{line}");
     expect(screen.getByText("Komutta {file} olmalı.")).toBeInTheDocument();

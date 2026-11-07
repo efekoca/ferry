@@ -4,7 +4,7 @@ import { ConfirmDialog } from "../components/Modal";
 import { PageHeader } from "../components/Shell";
 import { Splitter } from "../components/Splitter";
 import { useToast } from "../components/Toast";
-import { Badge, Button, Callout, EmptyState, RiskBadge, SeverityBadge, SeverityIcon } from "../components/ui";
+import { Badge, Button, Callout, EmptyState, RiskBadge, SeverityBadge, SeverityIcon, TextArea } from "../components/ui";
 import { useI18n } from "../i18n";
 import { errorMessage } from "../lib/api";
 import { commonTitle, joinPath } from "../lib/labels";
@@ -503,16 +503,14 @@ export function Findings() {
         onCancel={() => setIgnoring(null)}
       >
         <p>{t.findings.ignoreText}</p>
-        <label className="field">
-          <span className="field__label">{t.findings.ignoreReason}</span>
-          <textarea
-            className="input"
-            rows={3}
-            value={ignoring?.reason ?? ""}
-            placeholder={t.findings.ignorePlaceholder}
-            onChange={(e) => setIgnoring((v) => v && { ...v, reason: e.target.value })}
-          />
-        </label>
+        <TextArea
+          className="field"
+          label={t.findings.ignoreReason}
+          rows={3}
+          value={ignoring?.reason ?? ""}
+          placeholder={t.findings.ignorePlaceholder}
+          onChange={(e) => setIgnoring((v) => v && { ...v, reason: e.target.value })}
+        />
       </ConfirmDialog>
     </>
   );
