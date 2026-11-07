@@ -3,7 +3,7 @@ use crate::i18n::Localized;
 use crate::rules::{FixKind, Severity};
 use crate::version::PhpVersion;
 use serde::Serialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
@@ -299,6 +299,27 @@ fn names_symbol(message: &str, name: &str) -> bool {
         .any(|(at, _)| !message[..at].chars().next_back().is_some_and(word) && !message[at + name.len()..].chars().next().is_some_and(word))
 }
 
+#[derive(Default)]
+struct Known {
+    lines: HashMap<String, HashMap<usize, Vec<usize>>>,
+    symbols: HashMap<String, Vec<usize>>,
+    ids: HashSet<String>,
+}
+
+impl Known {
+    fn add(&mut self, f: &Finding, at: usize) {
+        self.lines.entry(f.file.clone()).or_default().entry(f.line).or_default().push(at);
+        if let Some(name) = symbol(f) {
+            self.symbols.entry(name).or_default().push(at);
+        }
+        self.ids.insert(f.id.clone());
+    }
+
+    fn on_line(&self, file: &str, line: usize) -> &[usize] {
+        self.lines.get(file).and_then(|lines| lines.get(&line)).map_or(&[], Vec::as_slice)
+    }
+}
+
 pub struct Merged {
     pub confirmed: usize,
     pub added: usize,
@@ -332,16 +353,20 @@ pub fn merge_from(
     }
     let mut merged = Merged { confirmed: 0, added: 0, outside: 0, outside_fatals: 0 };
     let files = project_files(root, events, remote_roots);
+    let mut known = Known::default();
+    findings.iter().enumerate().for_each(|(at, f)| known.add(f, at));
+    let mut sources: HashMap<String, Vec<String>> = HashMap::new();
     for (e, file) in events.iter().zip(files) {
         if e.path.is_empty() {
             let message = e.message.to_ascii_lowercase();
-            let mut same = findings.iter_mut().filter(|f| symbol(f).is_some_and(|s| names_symbol(&message, &s))).peekable();
-            if same.peek().is_none() {
+            let same: Vec<usize> =
+                known.symbols.iter().filter(|(name, _)| names_symbol(&message, name)).flat_map(|(_, list)| list).copied().collect();
+            if same.is_empty() {
                 merged.outside += 1;
             } else {
                 merged.confirmed += 1;
             }
-            same.for_each(|f| f.runtime_hits += e.count);
+            same.into_iter().for_each(|at| findings[at].runtime_hits += e.count);
             continue;
         }
         let skipped = |rel: &str| rel.split('/').any(|part| crate::project::ALWAYS_SKIP.contains(&part));
@@ -365,8 +390,9 @@ pub fn merge_from(
                     _ => false,
                 }
         };
-        if let Some(f) = findings.iter_mut().find(|f| f.file == file && close(f) && !f.rule_id.starts_with("runtime.")) {
-            f.runtime_hits += e.count;
+        let near = (e.line.saturating_sub(1)..=e.line + 1).flat_map(|line| known.on_line(&file, line)).copied();
+        if let Some(at) = near.filter(|&at| close(&findings[at]) && !findings[at].rule_id.starts_with("runtime.")).min() {
+            findings[at].runtime_hits += e.count;
             merged.confirmed += 1;
             continue;
         }
@@ -376,16 +402,17 @@ pub fn merge_from(
             Level::Deprecated => ("runtime.deprecated", Severity::Deprecated),
         };
         let title = e.message.chars().take(120).collect::<String>();
-        if let Some(f) = findings.iter_mut().find(|f| f.file == file && f.line == e.line && f.rule_id == rule && f.title.en == title) {
-            f.runtime_hits += e.count;
+        let same = known.on_line(&file, e.line).iter().copied().find(|&at| findings[at].rule_id == rule && findings[at].title.en == title);
+        if let Some(at) = same {
+            findings[at].runtime_hits += e.count;
             continue;
         }
-        let snippet = std::fs::read_to_string(root.join(&file))
-            .ok()
-            .and_then(|t| t.lines().nth(e.line.saturating_sub(1)).map(crate::analyzer::clip_snippet))
-            .unwrap_or_default();
+        let source = sources.entry(file.clone()).or_insert_with(|| {
+            crate::safefs::read_text(root.join(&file)).map(|text| text.lines().map(str::to_string).collect()).unwrap_or_default()
+        });
+        let snippet = source.get(e.line.saturating_sub(1)).map(|line| crate::analyzer::clip_snippet(line)).unwrap_or_default();
         let id = format!("{file}:{}:1:{rule}", e.line);
-        let taken = findings.iter().any(|f| f.id == id);
+        let taken = known.ids.contains(&id);
         findings.push(Finding {
             id: if taken { format!("{id}:{:x}", crate::snapshot::fnv1a(title.as_bytes())) } else { id },
             file,
@@ -404,6 +431,7 @@ pub fn merge_from(
             snippet,
             runtime_hits: e.count,
         });
+        known.add(&findings[findings.len() - 1], findings.len() - 1);
         merged.added += 1;
     }
     merged
@@ -412,6 +440,34 @@ pub fn merge_from(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_long_log_on_a_busy_file_stays_linear() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("src")).unwrap();
+        let time = |n: usize| {
+            let src = format!("<?php\n{}", "each($a);\n".repeat(n));
+            std::fs::write(dir.path().join("src/a.php"), &src).unwrap();
+            let mut findings = crate::analyzer::analyze_source("src/a.php", &src, "8.4".parse().unwrap());
+            let events: Vec<Event> = (0..n)
+                .map(|k| Event {
+                    path: "src/a.php".into(),
+                    line: k + 2,
+                    level: Level::Fatal,
+                    message: format!("Other error {k}"),
+                    count: 1,
+                })
+                .collect();
+            let started = std::time::Instant::now();
+            let merged = merge(dir.path(), &mut findings, &events, "8.4".parse().unwrap(), &[]);
+            let spent = started.elapsed().as_secs_f64();
+            assert_eq!(merged.added, n);
+            spent
+        };
+        time(500);
+        let (small, large) = (time(2_000), time(8_000));
+        assert!(large < small * 10.0, "2k: {small:.3}s, 8k: {large:.3}s");
+    }
 
     #[test]
     fn server_log_formats_keep_every_message() {

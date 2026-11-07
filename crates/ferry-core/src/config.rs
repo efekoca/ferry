@@ -104,7 +104,7 @@ pub fn save(root: &Path, config: &Config) -> Result<(), String> {
         json.push(b'\n');
         let mut tmp = tempfile::NamedTempFile::new_in(dir)?;
         std::io::Write::write_all(&mut tmp, &json)?;
-        tmp.persist(&file).map(|_| ()).map_err(|e| e.error)
+        crate::safefs::persist(tmp, &file)
     };
     write().map_err(|e| e.to_string())
 }

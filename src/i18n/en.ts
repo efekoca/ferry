@@ -655,6 +655,7 @@ export const en: Dict = {
       testsDidNotRun: "The test suite didn't run any tests.",
       fewerTests: "Fewer tests ran on the target version.",
       extensionImage: "The image with extensions couldn't be built.",
+      unreadFiles: "Some project files couldn't be read, so the copies weren't complete.",
       differences: "Some pages or tables differ and need a look.",
     },
     notInstalled: "Dependencies couldn't be installed, so tests may not have run.",

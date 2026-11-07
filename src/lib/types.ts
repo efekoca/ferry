@@ -253,7 +253,7 @@ export interface DockerComparison {
   stamp: string;
 }
 
-export type DockerGap = "dependencies" | "noFiles" | "lintStopped" | "pagesStopped" | "pagesLimited" | "testsStopped" | "testsDidNotRun" | "fewerTests" | "extensionImage" | "differences";
+export type DockerGap = "dependencies" | "noFiles" | "lintStopped" | "pagesStopped" | "pagesLimited" | "testsStopped" | "testsDidNotRun" | "fewerTests" | "extensionImage" | "unreadFiles" | "differences";
 
 export interface DockerSummary {
   at: number;
