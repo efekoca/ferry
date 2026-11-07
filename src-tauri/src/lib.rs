@@ -1364,7 +1364,7 @@ async fn apply_changes(
                 });
                 store.clear_writing(&root, &snapshot.id);
                 if let Some(limit) = snapshot_limit {
-                    let _ = store.prune(&root, limit.max(1) as usize);
+                    let _ = store.prune(&root, limit.max(1) as usize, &snapshot.id);
                 }
                 Ok(ApplyResult { snapshot, written, lint_errors, lint_checked, branch, commit, git_error })
             }
@@ -1609,10 +1609,7 @@ fn get_settings(state: State<'_, AppState>) -> Settings {
 fn save_settings(state: State<'_, AppState>, settings: Settings) -> CmdResult<()> {
     let failed = |e: &dyn std::fmt::Display| t!("Ayarlar kaydedilemedi: {e}", "Couldn't save the settings: {e}");
     let json = serde_json::to_vec_pretty(&settings).map_err(|e| failed(&e))?;
-    std::fs::create_dir_all(&state.data_dir).map_err(|e| failed(&e))?;
-    let path = state.settings_path();
-    let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, json).and_then(|_| std::fs::rename(&tmp, &path)).map_err(|e| failed(&e))?;
+    ferry_core::safefs::write_atomic(&state.settings_path(), &json).map_err(|e| failed(&e))?;
     *state.settings.lock().unwrap() = settings;
     Ok(())
 }

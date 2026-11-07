@@ -350,12 +350,12 @@ fn check_release(
     let source_en = "The project publishes no maximum, so this comes from its changelog and CI.";
     let (tr, en, replacement) = match (&needed, official) {
         (Some(n), true) => (
-            format!("{product} {cur} resmi olarak PHP {t_acc} desteklemiyor. PHP {t} için {product}'u en az {n} sürümüne yükseltin."),
+            format!("{product} {cur} resmi olarak PHP {t_acc} desteklemiyor. PHP {t} için en az {product} {n} gerekiyor."),
             format!("{product} {cur} doesn't officially support PHP {t}. PHP {t} needs at least {product} {n}."),
             format!("{product} {n}+"),
         ),
         (Some(n), false) => (
-            format!("{product} {cur} sürümünün PHP {t_acc} desteklediğini gösteren bir kayıt yok. {source_tr} PHP {t} için {product}'u en az {n} sürümüne yükseltin."),
+            format!("{product} {cur} sürümünün PHP {t_acc} desteklediğini gösteren bir kayıt yok. {source_tr} PHP {t} için en az {product} {n} gerekiyor."),
             format!("{product} {cur} isn't known to work on PHP {t}. {source_en} PHP {t} needs at least {product} {n}."),
             format!("{product} {n}+"),
         ),
@@ -477,6 +477,9 @@ fn opencart(root: &Path, target: PhpVersion) -> Option<Finding> {
 }
 
 fn release_parts(v: &str) -> Option<Release> {
+    if v.starts_with("dev-") {
+        return None;
+    }
     let mut parts = v.trim_start_matches(['v', 'V']).split(|c: char| !c.is_ascii_digit()).filter(|p| !p.is_empty());
     let major = parts.next()?.parse().ok()?;
     let minor = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
@@ -585,7 +588,7 @@ fn prestashop(root: &Path, target: PhpVersion) -> Option<Finding> {
 }
 
 fn symfony(root: &Path, target: PhpVersion) -> Option<Finding> {
-    let (package, version) = locked_version(root, &["symfony/framework-bundle", "symfony/http-kernel"])?;
+    let (package, version) = locked_version(root, &["symfony/framework-bundle", "symfony/http-kernel", "symfony/symfony"])?;
     let current = version_parts(&version)?;
     let max = table_lookup(&SYMFONY_MAINTAINED_UNTIL, current)??;
     let since = next_minor(max);
@@ -615,6 +618,9 @@ fn symfony(root: &Path, target: PhpVersion) -> Option<Finding> {
 }
 
 fn version_parts(v: &str) -> Option<(u32, u32)> {
+    if v.starts_with("dev-") {
+        return None;
+    }
     let mut parts = v.trim_start_matches(['v', 'V']).split(|c: char| !c.is_ascii_digit()).filter(|p| !p.is_empty());
     let major = parts.next()?.parse().ok()?;
     let minor = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
@@ -624,6 +630,8 @@ fn version_parts(v: &str) -> Option<(u32, u32)> {
 fn next_minor((major, minor): (u32, u32)) -> PhpVersion {
     if major == 7 && minor == 4 {
         PhpVersion::new(8, 0)
+    } else if major == 5 && minor == 6 {
+        PhpVersion::new(7, 0)
     } else {
         PhpVersion::new(major, minor + 1)
     }
@@ -903,6 +911,31 @@ mod tests {
         assert!(f.message.en.contains("at least Yii 1.1.32"), "{}", f.message.en);
         let f = &check(one.path(), Framework::Yii, PhpVersion::new(8, 5))[0];
         assert!(f.message.en.contains("no release that does"), "{}", f.message.en);
+    }
+
+    #[test]
+    fn a_dev_branch_says_nothing_about_the_version() {
+        assert_eq!(version_parts("dev-php8-fix"), None);
+        assert_eq!(release_parts("dev-php8-fix"), None);
+        assert_eq!(version_parts("8.x-dev"), Some((8, 0)));
+        assert_eq!(version_parts("v8.83.27"), Some((8, 83)));
+    }
+
+    #[test]
+    fn php_5_6_is_followed_by_7_0() {
+        assert_eq!(next_minor((5, 6)), PhpVersion::new(7, 0));
+        assert_eq!(next_minor((7, 4)), PhpVersion::new(8, 0));
+        assert_eq!(next_minor((8, 2)), PhpVersion::new(8, 3));
+    }
+
+    #[test]
+    fn the_full_symfony_package_is_checked_too() {
+        let dir = project(&[
+            ("composer.json", "{\n  \"require\": {\n    \"symfony/symfony\": \"^4.0\"\n  }\n}\n"),
+            ("composer.lock", r#"{"packages":[{"name":"symfony/symfony","version":"v4.0.15"}]}"#),
+        ]);
+        assert_eq!(project::detect_framework(dir.path()), Framework::Symfony);
+        assert!(!check(dir.path(), Framework::Symfony, PhpVersion::new(8, 4)).is_empty());
     }
 
     #[test]
