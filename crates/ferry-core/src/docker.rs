@@ -488,13 +488,51 @@ fn check_space(root: &Path, temp: &Path) -> Result<(), String> {
     space_error(size, free).map_or(Ok(()), Err)
 }
 
+pub(crate) const LABEL: &str = "io.github.efekoca.ferry";
+
+/// The run that made it: `ferry-<process>-...`.
+fn owner(name: &str) -> Option<u32> {
+    name.strip_prefix("ferry-")?.split('-').next()?.parse().ok()
+}
+
+/// A run that was killed, or an app closed before its cleanup finished, leaves containers, volumes
+/// and copies behind. Only those of Ferry processes that have ended are removed.
+fn sweep_leftovers(docker: &Path, cancel: &AtomicBool) {
+    let ended = |name: &&str| owner(name).is_some_and(|pid| pid != std::process::id() && !toolchain::process_alive(pid));
+    let listed = |args: &[&str]| {
+        let mut cmd = toolchain::command(docker);
+        cmd.args(args);
+        let done = toolchain::run_process(cmd, docker, cancel, Duration::from_secs(30)).ok();
+        done.map(|d| String::from_utf8_lossy(&d.stdout).lines().filter(ended).map(String::from).collect::<Vec<_>>()).unwrap_or_default()
+    };
+    let remove = |what: &[&str], names: Vec<String>| {
+        if !names.is_empty() {
+            let mut cmd = toolchain::command(docker);
+            cmd.args(what).args(&names);
+            let _ = toolchain::run_process(cmd, docker, cancel, Duration::from_secs(60));
+        }
+    };
+    remove(&["rm", "-f"], listed(&["ps", "-a", "--filter", &format!("label={LABEL}"), "--format", "{{.Names}}"]));
+    remove(&["volume", "rm", "-f"], listed(&["volume", "ls", "-q", "--filter", "name=ferry-"]));
+    let day = Duration::from_secs(24 * 60 * 60);
+    for entry in std::fs::read_dir(std::env::temp_dir()).into_iter().flatten().flatten() {
+        let stale = entry.metadata().and_then(|m| m.modified()).is_ok_and(|t| t.elapsed().is_ok_and(|age| age > day));
+        if stale && entry.file_name().to_string_lossy().starts_with("ferry-docker-") {
+            let _ = std::fs::remove_dir_all(entry.path());
+        }
+    }
+}
+
 /// Copies the project without following links: inside a container a link can only reach what was
 /// copied. Returns how many entries couldn't be read, so a partial copy can't pass as a full run.
-fn copy_project(root: &Path, dest: &Path) -> std::io::Result<usize> {
+fn copy_project(root: &Path, dest: &Path, cancel: &AtomicBool) -> std::io::Result<usize> {
     let mut unread = 0;
     #[cfg(unix)]
     let mut links = Vec::new();
     for entry in project_entries(root) {
+        if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err(std::io::Error::new(std::io::ErrorKind::Interrupted, "stopped"));
+        }
         let entry = match entry {
             Ok(entry) => entry,
             Err(e) if e.depth() == 0 => return Err(e.into()),
@@ -594,7 +632,7 @@ impl<'a> Container<'a> {
     ) -> Result<toolchain::Finished, String> {
         let name = format!("{}-{name}", self.prefix);
         let mut cmd = toolchain::command(self.docker);
-        cmd.args(["run", "--rm", "--name", &name, "--cap-drop", "ALL", "--security-opt", "no-new-privileges"])
+        cmd.args(["run", "--rm", "--name", &name, "--label", LABEL, "--cap-drop", "ALL", "--security-opt", "no-new-privileges"])
             .args(["--pids-limit", "512", "--memory", "2g", "-e", "HOME=/tmp", "-w", CONTAINER_ROOT])
             .args(owner_flag(dir))
             .arg("-v")
@@ -988,9 +1026,13 @@ pub fn compare(
     let stamp = crate::project::stamp(root, &php_files);
     let work = tempfile::Builder::new().prefix("ferry-docker-").tempdir().map_err(|e| e.to_string())?;
     check_space(root, work.path())?;
-    let copy_failed = |e: std::io::Error| crate::t!("Proje kopyalanamadı: {e}", "Couldn't copy the project: {e}");
+    sweep_leftovers(&docker, cancel);
+    let copy_failed = |e: std::io::Error| match e.kind() {
+        std::io::ErrorKind::Interrupted => crate::t!("Karşılaştırma durduruldu.", "The comparison was stopped."),
+        _ => crate::t!("Proje kopyalanamadı: {e}", "Couldn't copy the project: {e}"),
+    };
     let base = work.path().join("base");
-    let mut unread = copy_project(root, &base).map_err(copy_failed)?;
+    let mut unread = copy_project(root, &base, cancel).map_err(copy_failed)?;
     let container = Container {
         docker: &docker,
         cancel,
@@ -1068,7 +1110,7 @@ pub fn compare(
         drop_outside_links(&base).map_err(|e| e.to_string())?;
     }
     let target_dir = work.path().join("target");
-    unread += copy_project(&base, &target_dir).map_err(copy_failed)?;
+    unread += copy_project(&base, &target_dir, cancel).map_err(copy_failed)?;
     for (file, content) in &options.fixes {
         crate::safefs::resolve(&target_dir, file)
             .and_then(|path| crate::safefs::replace(&path, content.as_bytes()))
@@ -1158,6 +1200,47 @@ fn summary_total(line: &str) -> Option<usize> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn leftovers_belong_to_the_run_that_made_them() {
+        assert_eq!(owner("ferry-4242-3-db-seed"), Some(4242));
+        assert_eq!(owner("ferry-4242-3-db-seed-socket"), Some(4242));
+        assert_eq!(owner("ferry-php:8.4-abc"), None);
+        assert_eq!(owner("web"), None);
+        assert!(toolchain::process_alive(std::process::id()));
+    }
+
+    #[test]
+    fn a_stopped_copy_stops_at_once() {
+        let project = tempfile::tempdir().unwrap();
+        std::fs::write(project.path().join("a.php"), "<?php\n").unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let stopped = AtomicBool::new(true);
+        let err = copy_project(project.path(), &work.path().join("copy"), &stopped).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::Interrupted);
+    }
+
+    #[test]
+    fn a_crashed_run_leaves_nothing_behind_for_the_next_one() {
+        if std::env::var_os("FERRY_TEST_DOCKER").is_none() {
+            eprintln!("FERRY_TEST_DOCKER ayarlı değil; Docker testi atlandı");
+            return;
+        }
+        let docker = available().unwrap();
+        let name = "ferry-999999-0-left";
+        let image = crate::images::pinned("php:8.4-cli");
+        let run = toolchain::command(&docker)
+            .args(["run", "-d", "--name", name, "--label", LABEL, "-v", "ferry-999999-0-left-socket:/s", &image, "sleep", "300"])
+            .output()
+            .unwrap();
+        assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+        sweep_leftovers(&docker, &AtomicBool::new(false));
+        let left = |args: &[&str]| String::from_utf8_lossy(&toolchain::command(&docker).args(args).output().unwrap().stdout).contains(name);
+        let (container, volume) = (left(&["ps", "-a", "--format", "{{.Names}}"]), left(&["volume", "ls", "-q"]));
+        let _ = toolchain::command(&docker).args(["rm", "-f", name]).output();
+        let _ = toolchain::command(&docker).args(["volume", "rm", "-f", "ferry-999999-0-left-socket"]).output();
+        assert!(!container && !volume, "container {container}, volume {volume}");
+    }
+
     #[cfg(unix)]
     #[test]
     fn a_parse_error_doesnt_stop_the_lint_of_the_other_files() {
@@ -1226,7 +1309,7 @@ mod tests {
         std::fs::create_dir(project.path().join("l")).unwrap();
         std::fs::write(project.path().join("l/planted.php"), "<?php\n").unwrap();
         let work = tempfile::tempdir().unwrap();
-        copy_project(project.path(), &work.path().join("copy")).unwrap();
+        copy_project(project.path(), &work.path().join("copy"), &AtomicBool::new(false)).unwrap();
         assert!(!outside.path().join("planted.php").exists());
     }
 
@@ -1246,7 +1329,7 @@ mod tests {
         let enforced = std::fs::read_dir(&folder).is_err();
         let work = tempfile::tempdir().unwrap();
         let dest = work.path().join("copy");
-        let unread = copy_project(project.path(), &dest).unwrap();
+        let unread = copy_project(project.path(), &dest, &AtomicBool::new(false)).unwrap();
         std::fs::set_permissions(&folder, open_mode()).unwrap();
         std::fs::set_permissions(project.path().join("b.php"), open_mode()).unwrap();
         assert!(dest.join("a.php").is_file());
@@ -1449,7 +1532,7 @@ mod tests {
             std::fs::write(path, "x").unwrap();
         }
         let dest = dir.path().join("copy");
-        copy_project(&root, &dest).unwrap();
+        copy_project(&root, &dest, &AtomicBool::new(false)).unwrap();
         assert!(dest.join("a.php").is_file() && dest.join("vendor/x/b.php").is_file());
         assert!(!dest.join(".git").exists() && !dest.join("node_modules").exists());
     }
@@ -1711,7 +1794,7 @@ mod tests {
         symlink("/etc/hosts", project.join("abs")).unwrap();
         symlink("../real.php", project.join("vendor/bin/tool")).unwrap();
         let copy = dir.path().join("copy");
-        copy_project(&project, &copy).unwrap();
+        copy_project(&project, &copy, &AtomicBool::new(false)).unwrap();
         assert!(std::fs::symlink_metadata(copy.join(".env")).is_err());
         assert!(std::fs::symlink_metadata(copy.join(".env.example")).is_err());
         assert!(std::fs::symlink_metadata(copy.join("abs")).is_err());

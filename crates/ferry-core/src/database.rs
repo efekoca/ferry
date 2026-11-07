@@ -647,7 +647,7 @@ pub(crate) fn start<'a>(
     let socket = format!("{name}-socket");
     let engine = connection.engine;
     let mut cmd = toolchain::command(container.docker);
-    cmd.args(["run", "-d", "--name", &name, "--network", "none", "--memory", "2g", "--pids-limit", "512"]);
+    cmd.args(["run", "-d", "--name", &name, "--label", crate::docker::LABEL, "--network", "none", "--memory", "2g", "--pids-limit", "512"]);
     cmd.args(["--security-opt", "no-new-privileges", "--cap-drop", "ALL"]);
     for cap in DATABASE_CAPS {
         cmd.args(["--cap-add", cap]);
@@ -828,7 +828,14 @@ fn dump_live(container: &Container, connection: &Connection, file: &Path) -> Res
 fn dump_engine(file: &Path) -> Engine {
     use std::io::Read;
     let mut bytes = Vec::new();
-    let read = std::fs::File::open(file).and_then(|f| f.take(8192).read_to_end(&mut bytes));
+    let gzipped = std::fs::File::open(file).and_then(|mut f| {
+        let mut magic = [0u8; 2];
+        f.read_exact(&mut magic).map(|_| magic == [0x1f, 0x8b])
+    });
+    let read = std::fs::File::open(file).and_then(|f| match gzipped {
+        Ok(true) => flate2::read::GzDecoder::new(f).take(8192).read_to_end(&mut bytes),
+        _ => f.take(8192).read_to_end(&mut bytes),
+    });
     let head = if read.is_ok() { String::from_utf8_lossy(&bytes).to_string() } else { String::new() };
     if head.contains("PostgreSQL") || head.contains("pg_dump") {
         Engine::Postgres
@@ -918,12 +925,38 @@ foreach ($db->query("select name from sqlite_master where type = 'table' and sub
 }
 "#;
 
+/// A small dump runs in one go. A large one runs statement by statement, so it doesn't have to fit
+/// in memory: a statement ends at a line ending in `;` outside a string, or at `END;` in a trigger.
 const SQLITE_IMPORT: &str = r#"<?php
-$text = file_get_contents($argv[2]);
 $db = new PDO('sqlite:' . $argv[1]);
 $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-$db->exec(substr($text, 0, 2) === "\x1f\x8b" ? gzdecode($text) : $text);
+$in = gzopen($argv[2], 'rb');
+if (filesize($argv[2]) < (int) $argv[3]) {
+    $text = '';
+    while (!gzeof($in)) {
+        $text .= gzread($in, 1048576);
+    }
+    $db->exec($text);
+    exit;
+}
+$sql = '';
+while (($line = gzgets($in)) !== false) {
+    $sql .= $line;
+    if (substr(rtrim($line), -1) !== ';' || substr_count($sql, "'") % 2 === 1) {
+        continue;
+    }
+    if (preg_match('/^\s*CREATE\s+(TEMP\s+|TEMPORARY\s+)?TRIGGER/i', $sql) && !preg_match('/\bEND\s*;\s*$/i', $sql)) {
+        continue;
+    }
+    $db->exec($sql);
+    $sql = '';
+}
+if (trim($sql) !== '') {
+    $db->exec($sql);
+}
 "#;
+
+const STREAM_FROM: u64 = 64 * 1024 * 1024;
 
 fn sqlite_script(php: &str, args: &str) -> String {
     format!("cat > /tmp/ferry.php <<'FERRYEOF'\n{php}\nFERRYEOF\nphp -d memory_limit=-1 /tmp/ferry.php {args}\n")
@@ -976,7 +1009,10 @@ pub(crate) fn prepare(
             point_copy_at(project, &connection).map_err(failed)?;
             step(Step::Database);
             let image = seed_image()?;
-            let script = sqlite_script(SQLITE_IMPORT, &format!("{} /app/{SQLITE_DUMP}", crate::web::quoted(&connection.sqlite_path())));
+            let script = sqlite_script(
+                SQLITE_IMPORT,
+                &format!("{} /app/{SQLITE_DUMP} {STREAM_FROM}", crate::web::quoted(&connection.sqlite_path())),
+            );
             let run = container.run(&format!("import-{}", version.compact()), project, &image, false, &script, SEED_TIMEOUT)?;
             let _ = std::fs::remove_file(project.join(SQLITE_DUMP));
             if !run.status.is_some_and(|s| s.success()) {
@@ -1107,6 +1143,47 @@ mod snapshot_tests {
         assert_eq!(copies.swap(0, Relaxed), 2);
         assert!(copy_while_still(|| state.fetch_add(1, Relaxed), copy).is_err());
         assert_eq!(copies.load(Relaxed), 5);
+    }
+
+    #[test]
+    fn a_gzipped_dump_is_read_for_its_engine() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("a.sql.gz");
+        let mut gz = flate2::write::GzEncoder::new(std::fs::File::create(&file).unwrap(), flate2::Compression::default());
+        gz.write_all(b"-- PostgreSQL database dump\nCREATE TABLE t (a int);\n").unwrap();
+        gz.finish().unwrap();
+        assert_eq!(dump_engine(&file), Engine::Postgres);
+        std::fs::write(dir.path().join("b.sql"), "CREATE TABLE t (a int);\n").unwrap();
+        assert_eq!(dump_engine(&dir.path().join("b.sql")), Engine::Mysql);
+    }
+
+    #[test]
+    fn a_large_sqlite_dump_runs_statement_by_statement() {
+        if std::env::var_os("FERRY_TEST_DOCKER").is_none() {
+            eprintln!("FERRY_TEST_DOCKER ayarlı değil; Docker testi atlandı");
+            return;
+        }
+        let docker = toolchain::find_executable("docker").unwrap();
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        let dir = tempfile::tempdir().unwrap();
+        let dump = "PRAGMA foreign_keys=OFF;\nBEGIN TRANSACTION;\nCREATE TABLE t (a text);\nINSERT INTO t VALUES('ends;\nhere;');\nINSERT INTO t VALUES('it''s;');\nCREATE TABLE log (n int);\nCREATE TRIGGER k AFTER INSERT ON t BEGIN\n  INSERT INTO log VALUES (1);\nEND;\nINSERT INTO t VALUES('x');\nCOMMIT;\n";
+        std::fs::write(dir.path().join(SQLITE_DUMP), dump).unwrap();
+        let container = Container::for_test(&docker, &cancel, format!("ferry-import-{}", std::process::id()));
+        let image = crate::images::pinned("php:8.4-cli");
+        let script = sqlite_script(SQLITE_IMPORT, &format!("/app/a.sqlite /app/{SQLITE_DUMP} 0"));
+        let done = container.run("import", dir.path(), &image, false, &script, Duration::from_secs(120)).unwrap();
+        assert!(done.status.is_some_and(|s| s.success()), "{}", crate::docker::output(&done));
+        let connection = Connection {
+            engine: Engine::Sqlite,
+            host: String::new(),
+            port: 0,
+            name: "a.sqlite".into(),
+            user: String::new(),
+            password: String::new(),
+        };
+        let snapshot = sqlite_snapshot(&container, PhpVersion::new(8, 4), dir.path(), &image, &connection);
+        assert_eq!((snapshot["t"].0, snapshot["log"].0), (3, 1), "{snapshot:?}");
     }
 
     #[test]
