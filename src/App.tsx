@@ -13,7 +13,8 @@ import { Findings } from "./screens/Findings";
 import { DockerCompare } from "./screens/DockerCompare";
 import { Dependencies } from "./screens/Dependencies";
 import { History } from "./screens/History";
-import { Roadmap, SettingsScreen } from "./screens/Other";
+import { Roadmap } from "./screens/Other";
+import { SettingsScreen } from "./screens/Settings";
 import { Overview } from "./screens/Overview";
 import { Welcome } from "./screens/Welcome";
 

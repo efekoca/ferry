@@ -11,7 +11,7 @@ import { highlight } from "../lib/code";
 import { columnOf, dayLabels, historyEvents, niceMax, rangeStart, smoothPath, spreadOut } from "../lib/history";
 import { squarify } from "../lib/treemap";
 import { filesHoldingHalf, fileStats } from "../screens/Overview";
-import { commonTitle, dependencyBlockers, formatBytes, formatDuration, formatRelative, joinPath, scoreHeadline, scoreTone } from "../lib/labels";
+import { commonTitle, dependencyBlockers, formatBytes, formatDuration, formatRelative, joinPath, relativeTo, scoreHeadline, scoreTone } from "../lib/labels";
 import { NO_FILTER, type FindingsFilter } from "../lib/store";
 import { filterFindings, prioritizeFindings } from "../screens/Findings";
 import { relatedFindings } from "../screens/FindingDetail";
@@ -530,5 +530,18 @@ describe("history chart helpers", () => {
       [{ at: 5 } as CheckSummary],
     );
     expect(events.map((e) => [e.kind, e.at])).toEqual([["fix", 30_000], ["real", 20_000], ["scan", 10_000], ["check", 5_000]]);
+  });
+});
+
+describe("relativeTo", () => {
+  it("returns the path inside the root", () => {
+    expect(relativeTo("/p/app", "/p/app/src/old")).toBe("src/old");
+    expect(relativeTo("/p/app/", "/p/app/src/")).toBe("src");
+    expect(relativeTo("C:\\p\\app", "C:\\p\\app\\legacy")).toBe("legacy");
+  });
+
+  it("refuses the root itself and anything outside it", () => {
+    expect(relativeTo("/p/app", "/p/app")).toBeNull();
+    expect(relativeTo("/p/app", "/p/application/src")).toBeNull();
   });
 });
