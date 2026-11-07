@@ -305,6 +305,28 @@ describe("Ferry app", () => {
     await waitFor(() => expect(screen.queryByText(/artık hiçbir kodla eşleşmiyor/)).not.toBeInTheDocument());
   });
 
+  it("counts the manual findings on the AI page and keeps its actions off", async () => {
+    const user = setup();
+    await user.click(await screen.findByRole("button", { name: "Proje klasörü seçin" }));
+    await user.click(await screen.findByRole("button", { name: /AI önerileri/ }));
+    expect(await screen.findByRole("heading", { name: "Elle düzeltmeler için AI önerisi" })).toBeInTheDocument();
+    await user.click(nav(/Genel bakış/));
+    await user.click(await screen.findByRole("button", { name: /Taramayı başlat/ }));
+    await screen.findByRole("img", { name: /Hazırlık puanı/ });
+    await user.click(screen.getByRole("button", { name: /AI önerileri/ }));
+    expect(await screen.findByRole("heading", { name: /^\d+ elle düzeltme için AI önerisi$/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Anahtar ekle" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Modeli kur" })).toBeDisabled();
+  });
+
+  it("lists recent projects on the welcome screen and forgets one", async () => {
+    localStorage.setItem("ferry.recent", JSON.stringify([{ path: "/p/site", name: "site", framework: "generic", openedAt: Date.now() }]));
+    const user = setup();
+    expect(await screen.findByRole("button", { name: /\/p\/site/ })).toHaveAttribute("title", "/p/site");
+    await user.click(screen.getByRole("button", { name: "site projesini listeden kaldır" }));
+    expect(screen.queryByText("Son açılanlar")).not.toBeInTheDocument();
+  });
+
   it("says what changed since the previous scan", async () => {
     const user = setup();
     await openAndScan(user);
