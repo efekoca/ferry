@@ -119,11 +119,89 @@ export interface HunkChoice {
   toggle(hunk: number): void;
 }
 
-export function DiffViewer({ diff, file, choice }: { diff: FileDiff; file: string; choice?: HunkChoice }) {
+type SplitRow = { left?: DiffLine; right?: DiffLine; leftAt: number; rightAt: number };
+
+export function splitRows(lines: DiffLine[]): SplitRow[] {
+  const rows: SplitRow[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    if (lines[i].kind === "context") {
+      rows.push({ left: lines[i], right: lines[i], leftAt: i, rightAt: i });
+      i++;
+      continue;
+    }
+    const start = i;
+    while (i < lines.length && lines[i].kind === "del") i++;
+    const middle = i;
+    while (i < lines.length && lines[i].kind === "add") i++;
+    for (let k = 0; k < Math.max(middle - start, i - middle); k++) {
+      const leftAt = start + k;
+      const rightAt = middle + k;
+      rows.push({ left: leftAt < middle ? lines[leftAt] : undefined, right: rightAt < i ? lines[rightAt] : undefined, leftAt, rightAt });
+    }
+  }
+  return rows;
+}
+
+function SplitDiff({ diff, php, choice }: { diff: FileDiff; php: boolean; choice?: HunkChoice }) {
+  const { t } = useI18n();
+  const side = (line: DiffLine | undefined, number: number | null | undefined, other: string | undefined) => (
+    <>
+      <td className={`num ${line?.kind ?? "gap"}`}>{number ?? ""}</td>
+      <td className={`text ${line?.kind ?? "gap"}`} style={{ "--indent": line ? indentOf(line.text) : 0 } as CSSProperties}>
+        {line ? renderText(line.text, other, php) : " "}
+      </td>
+    </>
+  );
+  return (
+    <table className="diff__split">
+      <colgroup>
+        <col className="diff__num" />
+        <col />
+        <col className="diff__num" />
+        <col />
+      </colgroup>
+      <tbody>
+        {diff.hunks.map((hunk, h) => {
+          const counterpart = pairs(hunk.lines);
+          return (
+            <Fragment key={h}>
+              <tr className="diff__hunk">
+                <td colSpan={4}>
+                  {choice && (
+                    <input type="checkbox" className="checkbox diff__choice" aria-label={t.changes.applyHunk(hunk.oldStart)} checked={choice.isOn(h)} onChange={() => choice.toggle(h)} />
+                  )}
+                  {t.changes.hunkLine(hunk.oldStart)}
+                </td>
+              </tr>
+              {splitRows(hunk.lines).map((row, i) => (
+                <tr key={i}>
+                  {side(row.left, row.left?.oldNo, counterpart.get(row.leftAt))}
+                  {side(row.right, row.right?.newNo, counterpart.get(row.rightAt))}
+                </tr>
+              ))}
+            </Fragment>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
+
+export function DiffViewer({ diff, file, choice, bar, split = false }: { diff: FileDiff; file: string; choice?: HunkChoice; bar?: ReactNode; split?: boolean }) {
   const { t } = useI18n();
   const php = /\.(php|phtml|inc)$/i.test(file);
+  if (split) {
+    return (
+      <div className="diff" role="region" aria-label={t.changes.diffLabel(file)}>
+        {bar && <div className="diff__bar">{bar}</div>}
+        <SplitDiff diff={diff} php={php} choice={choice} />
+      </div>
+    );
+  }
   return (
     <div className="diff" role="region" aria-label={t.changes.diffLabel(file)}>
+      {bar && <div className="diff__bar">{bar}</div>}
       <table>
         <colgroup>
           <col className="diff__num" />

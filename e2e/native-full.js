@@ -105,7 +105,7 @@
   };
   const preview = async () => {
     await nav("Düzeltmeler");
-    await click("Değişiklikleri hesapla", undefined, 10000);
+    await click("Önizlemeyi hazırla", undefined, 10000);
     await until(() => $(".change-item") || text().includes("Yapılacak değişiklik yok"), "preview", 300000);
     const files = $$(".change-item__file").map((e) => e.textContent);
     const all = $(".change-list__header input");
@@ -252,18 +252,18 @@
       await openRecent(projects.wp);
       await scan();
       await nav("Düzeltmeler");
-      await click("Değişiklikleri hesapla", undefined, 10000);
+      await click("Önizlemeyi hazırla", undefined, 10000);
       const before = seen.length;
       const finished = () => $(".change-item") || text().includes("Yapılacak değişiklik yok");
       await until(() => button("Durdur") || finished(), "Stop button or results", 10000);
       const stopped = !!button("Durdur");
       if (stopped) {
         button("Durdur").click();
-        await until(() => button("Değişiklikleri hesapla") || finished(), "calculate button back after stop", 15000);
+        await until(() => button("Önizlemeyi hazırla") || finished(), "calculate button back after stop", 15000);
       }
       await sleep(1000);
       noErrorToast(before);
-      const raced = !button("Değişiklikleri hesapla");
+      const raced = !button("Önizlemeyi hazırla");
       if (raced) await emit("  Rector finished before Stop took effect");
       else check(!$(".change-item"), "no stale results after stop");
       const files = raced ? $$(".change-item__file").map((e) => e.textContent) : await preview();
@@ -279,10 +279,10 @@
       await openRecent(projects.wp);
       await scan();
       const compat = await preview();
-      radio("Modernleştirme").click();
-      if (button("Durdur")) check(button("uygula", $(".apply-bar")) === undefined, "apply is disabled while recalculating");
-      await until(() => !$$("button").some((b) => b.textContent.includes("Durdur")), "modern preview", 300000);
-      check(await settles(() => radio("Modernleştirme").getAttribute("aria-checked") === "true"), "modernize stays selected");
+      await click("Seçimi değiştir");
+      (await until(() => $$(".opt").find((o) => o.textContent.includes("Modernleştirme")), "modernize option")).querySelector("input").click();
+      await click("Önizlemeyi hazırla");
+      await until(() => $(".change-item") && !$$("button").some((b) => b.textContent.includes("Durdur")), "modern preview", 300000);
       const modern = $$(".change-item__file").map((e) => e.textContent);
       await emit(`  compat=${compat.length} modern=${modern.length}: ${modern.join(", ")}`);
       check(modern.length >= compat.length, "modernize covers at least the compat files");

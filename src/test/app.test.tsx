@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import App from "../App";
 import { mockApi } from "../lib/mock";
 import type { DockerStep, SnapshotConflict } from "../lib/types";
@@ -199,7 +199,7 @@ describe("Ferry app", () => {
     const user = setup();
     await openAndScan(user);
     await user.click(nav(/Düzeltmeler/));
-    await user.click(await screen.findByRole("button", { name: /Değişiklikleri hesapla/ }));
+    await user.click(await screen.findByRole("button", { name: /Önizlemeyi hazırla/ }));
     await screen.findByRole("list", { name: "Dosyalar" });
     await user.click(nav(/Genel bakış/));
     await pickTarget(user, "8.3");
@@ -210,7 +210,7 @@ describe("Ferry app", () => {
     await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Hedefi değiştir" }));
     await waitFor(() => expect(targetBox()).toHaveTextContent("PHP 8.3"));
     await user.click(nav(/Düzeltmeler/));
-    expect(await screen.findByRole("button", { name: /Değişiklikleri hesapla/ })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Önizlemeyi hazırla/ })).toBeInTheDocument();
   });
 
   it("opens findings filtered from the overview", async () => {
@@ -310,6 +310,50 @@ describe("Ferry app", () => {
     await user.click(nav(/Geçmiş/));
     expect(await screen.findByText("Değişiklik yok")).toBeInTheDocument();
     expect(screen.getByRole("img", { name: /Hazırlık puanının taramalar boyunca değişimi/ })).toBeInTheDocument();
+  });
+
+  it("lets all three kinds of fix be chosen together", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    const preview = vi.spyOn(api, "rectorPreview");
+    render(<App api={api} />);
+    await openAndScan(user);
+    await user.click(nav(/Düzeltmeler/));
+    const compat = await screen.findByRole("checkbox", { name: "Uyumluluk" });
+    const modern = screen.getByRole("checkbox", { name: "Modernleştirme" });
+    const pins = screen.getByRole("checkbox", { name: "Sürüm dosyaları" });
+    expect(compat).toBeChecked();
+    await user.click(compat);
+    const start = screen.getByRole("button", { name: /Önizlemeyi hazırla/ });
+    expect(start).toBeDisabled();
+    await user.click(modern);
+    expect(compat).toBeChecked();
+    await user.click(compat);
+    expect(modern).not.toBeChecked();
+    await user.click(compat);
+    await user.click(pins);
+    await user.click(start);
+    await waitFor(() => expect(preview).toHaveBeenCalledWith(expect.any(String), "8.4", "compat", true));
+    const list = await screen.findByRole("list", { name: "Dosyalar" });
+    const all = within(list).getAllByRole("listitem").length;
+    expect(within(list).getByRole("checkbox", { name: "Dockerfile dosyasını seçin" })).toBeChecked();
+    const scope = screen.getByRole("radiogroup", { name: "Gösterilen dosyalar" });
+    await user.click(within(scope).getByRole("radio", { name: /Sürüm dosyaları/ }));
+    expect(within(list).getAllByRole("listitem").length).toBeLessThan(all);
+    await user.click(screen.getByRole("button", { name: "Seçimi değiştir" }));
+    expect(await screen.findByRole("checkbox", { name: "Sürüm dosyaları" })).toBeChecked();
+  });
+
+  it("shows a file side by side and remembers the choice", async () => {
+    const user = setup();
+    await openAndScan(user);
+    await user.click(nav(/Düzeltmeler/));
+    await user.click(await screen.findByRole("button", { name: /Önizlemeyi hazırla/ }));
+    await user.click(await screen.findByRole("radio", { name: "Yan yana" }));
+    expect(document.querySelector(".diff__split")).not.toBeNull();
+    expect(localStorage.getItem("ferry.diffView")).toBe("split");
+    await user.click(screen.getByRole("radio", { name: "Birleşik" }));
+    expect(document.querySelector(".diff__split")).toBeNull();
   });
 
   it("explains a finding with its code, history and related findings", async () => {
@@ -459,7 +503,7 @@ describe("Ferry app", () => {
     const user = setup();
     await openAndScan(user);
     await user.click(nav(/Düzeltmeler/));
-    await user.click(await screen.findByRole("button", { name: /Değişiklikleri hesapla/ }));
+    await user.click(await screen.findByRole("button", { name: /Önizlemeyi hazırla/ }));
     const files = await screen.findByRole("list", { name: "Dosyalar" });
     const box = (file: string) => screen.getByRole("checkbox", { name: `${file} dosyasını seçin` });
     expect(box("includes/class-mailer.php")).not.toBeChecked();
@@ -476,7 +520,7 @@ describe("Ferry app", () => {
     const user = setup();
     await openAndScan(user);
     await user.click(nav(/Düzeltmeler/));
-    await user.click(await screen.findByRole("button", { name: /Değişiklikleri hesapla/ }));
+    await user.click(await screen.findByRole("button", { name: /Önizlemeyi hazırla/ }));
     await screen.findByRole("list", { name: "Dosyalar" });
     await pick(user, "Seçimi daralt", "Yalnızca otomatik düzeltmeler");
     const autoCount = screen.getByText(/ \/ 4 dosya seçili/).textContent;
@@ -567,7 +611,7 @@ describe("Ferry app", () => {
     render(<App api={api} />);
     await openAndScan(user);
     await user.click(nav(/Düzeltmeler/));
-    await user.click(await screen.findByRole("button", { name: "Değişiklikleri hesapla" }));
+    await user.click(await screen.findByRole("button", { name: "Önizlemeyi hazırla" }));
     const hunks = await screen.findAllByRole("checkbox", { name: /satırdaki değişikliği uygula/ });
     const file = hunks[0].closest("[role=region]")?.getAttribute("aria-label")?.replace(" değişiklikleri", "") ?? "";
     await user.click(hunks[0]);
@@ -646,7 +690,7 @@ describe("Ferry app", () => {
     render(<App api={api} />);
     await openAndScan(user);
     await user.click(nav(/Düzeltmeler/));
-    await user.click(await screen.findByRole("button", { name: "Değişiklikleri hesapla" }));
+    await user.click(await screen.findByRole("button", { name: "Önizlemeyi hazırla" }));
     const hunks = await screen.findAllByRole("checkbox", { name: /satırdaki değişikliği uygula/ });
     await user.click(hunks[0]);
     await user.click(nav(/Gerçek test/));
@@ -908,7 +952,7 @@ describe("Ferry app", () => {
     const user = setup();
     await openAndScan(user);
     await user.click(nav(/Düzeltmeler/));
-    await user.click(await screen.findByRole("button", { name: /Değişiklikleri hesapla/ }));
+    await user.click(await screen.findByRole("button", { name: /Önizlemeyi hazırla/ }));
     const files = await screen.findByRole("list", { name: "Dosyalar" });
     expect(within(files).getAllByRole("listitem")).toHaveLength(4);
     await user.click(screen.getByRole("checkbox", { name: "Tümünü seç" }));
@@ -1001,7 +1045,7 @@ describe("Ferry app", () => {
     render(<App api={api} />);
     await openAndScan(user);
     await user.click(nav(/Düzeltmeler/));
-    await user.click(await screen.findByRole("button", { name: /Değişiklikleri hesapla/ }));
+    await user.click(await screen.findByRole("button", { name: /Önizlemeyi hazırla/ }));
     await user.click(await screen.findByRole("checkbox", { name: "Tümünü seç" }));
     await user.click(await screen.findByRole("button", { name: "Tümünü uygula" }));
     await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Uygula" }));
@@ -1067,9 +1111,9 @@ describe("Ferry app", () => {
     render(<App api={api} />);
     await openAndScan(user);
     await user.click(nav(/Düzeltmeler/));
-    await user.click(await screen.findByRole("button", { name: /Değişiklikleri hesapla/ }));
+    await user.click(await screen.findByRole("button", { name: /Önizlemeyi hazırla/ }));
     await user.click(await screen.findByRole("button", { name: /Durdur/ }));
-    expect(await screen.findByRole("button", { name: /Değişiklikleri hesapla/ })).toBeEnabled();
+    expect(await screen.findByRole("button", { name: /Önizlemeyi hazırla/ })).toBeEnabled();
     expect(screen.queryByText("Değişiklikler hesaplanamadı")).not.toBeInTheDocument();
   });
 
@@ -1084,7 +1128,7 @@ describe("Ferry app", () => {
     render(<App api={api} />);
     await openAndScan(user);
     await user.click(nav(/Düzeltmeler/));
-    await user.click(await screen.findByRole("button", { name: /Değişiklikleri hesapla/ }));
+    await user.click(await screen.findByRole("button", { name: /Önizlemeyi hazırla/ }));
     await screen.findByRole("button", { name: /Durdur/ });
     const before = cancels;
     await user.click(nav(/Genel bakış/));
@@ -1136,7 +1180,7 @@ describe("Ferry app", () => {
     const user = setup();
     await openAndScan(user);
     await user.click(nav(/Düzeltmeler/));
-    await user.click(await screen.findByRole("button", { name: /Değişiklikleri hesapla/ }));
+    await user.click(await screen.findByRole("button", { name: /Önizlemeyi hazırla/ }));
     await user.click(await screen.findByRole("checkbox", { name: "Tümünü seç" }));
     await user.click(await screen.findByRole("button", { name: "Tümünü uygula" }));
     await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Uygula" }));
@@ -1158,7 +1202,7 @@ describe("Ferry app", () => {
     render(<App api={api} />);
     await openAndScan(user);
     await user.click(nav(/Düzeltmeler/));
-    await user.click(await screen.findByRole("button", { name: /Değişiklikleri hesapla/ }));
+    await user.click(await screen.findByRole("button", { name: /Önizlemeyi hazırla/ }));
     await user.click(nav(/Genel bakış/));
     await user.click(screen.getByRole("button", { name: /Tekrar tara/ }));
     await screen.findByRole("img", { name: /Hazırlık puanı/ });
@@ -1231,7 +1275,7 @@ describe("Ferry app", () => {
     await openAndScan(user);
     await user.click(nav(/Düzeltmeler/));
     await user.click(await screen.findByRole("button", { name: "Sürüm dosyalarını güncelle" }));
-    await user.click(await screen.findByRole("button", { name: "Değişiklikleri hesapla" }));
+    await user.click(await screen.findByRole("button", { name: "Önizlemeyi hazırla" }));
     await user.click(await screen.findByRole("button", { name: "Tümünü uygula" }));
     const dialog = await screen.findByRole("dialog");
     await user.click(within(dialog).getByRole("button", { name: /uygula/i }));
@@ -1248,7 +1292,7 @@ describe("Ferry app", () => {
     render(<App api={api} />);
     await openAndScan(user);
     await user.click(nav(/Düzeltmeler/));
-    await user.click(await screen.findByRole("button", { name: "Değişiklikleri hesapla" }));
+    await user.click(await screen.findByRole("button", { name: "Önizlemeyi hazırla" }));
     await user.click(await screen.findByRole("button", { name: /uygula/ }));
     const dialog = await screen.findByRole("dialog");
     expect(await within(dialog).findByText("Projede commit edilmemiş 1 dosya var")).toBeInTheDocument();
@@ -1263,7 +1307,7 @@ describe("Ferry app", () => {
     render(<App api={api} />);
     await openAndScan(user);
     await user.click(nav(/Düzeltmeler/));
-    await user.click(await screen.findByRole("button", { name: "Değişiklikleri hesapla" }));
+    await user.click(await screen.findByRole("button", { name: "Önizlemeyi hazırla" }));
     await user.click(await screen.findByRole("button", { name: /uygula/ }));
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByRole("checkbox", { name: /Ayrı dal aç/ })).toBeChecked();
@@ -1281,7 +1325,7 @@ describe("Ferry app", () => {
     await openAndScan(user);
     await user.click(nav(/Düzeltmeler/));
     await pick(user, "Adım", /8\.0/);
-    await user.click(screen.getByRole("button", { name: "Değişiklikleri hesapla" }));
+    await user.click(screen.getByRole("button", { name: "Önizlemeyi hazırla" }));
     await waitFor(() => expect(preview).toHaveBeenCalled());
     expect(preview.mock.calls[0][1]).toBe("8.0");
     await user.click(await screen.findByRole("checkbox", { name: "Tümünü seç" }));

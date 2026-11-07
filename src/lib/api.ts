@@ -57,7 +57,7 @@ export interface Api {
   wordpressLatest(items: { kind: string; slug: string }[]): Promise<WpLatest[]>;
   toolchainStatus(): Promise<ToolchainStatus>;
   installRector(): Promise<ToolchainStatus>;
-  rectorPreview(path: string, target: string, mode: RectorMode): Promise<RectorPreview>;
+  rectorPreview(path: string, target: string, mode: RectorMode, withPins: boolean): Promise<RectorPreview>;
   cancelPreview(path?: string): Promise<void>;
   cancelScan(path: string): Promise<void>;
   dockerCompare(path: string, source: string, target: string, extensions: boolean, cleanImages: boolean, pages: string[], database: DatabaseChoice | null, prepare: string | null, test: string | null, fix?: DockerFixChoice): Promise<DockerResponse>;
@@ -129,7 +129,7 @@ async function tauriApi(): Promise<Api> {
     wordpressLatest: (items) => invoke("wordpress_latest", { items }),
     toolchainStatus: () => invoke("toolchain_status"),
     installRector: () => invoke("install_rector"),
-    rectorPreview: (path, target, mode) => invoke("rector_preview", { path, target, mode }),
+    rectorPreview: (path, target, mode, withPins) => invoke("rector_preview", { path, target, mode, withPins }),
     cancelPreview: (path) => invoke("cancel_rector_preview", { path }),
     cancelScan: (path) => invoke("cancel_scan", { path }),
     dockerCompare: (path, source, target, extensions, cleanImages, pages, database, prepare, test, fix) => invoke("docker_compare", { path, source, target, extensions, cleanImages, pages, database, prepare, test, fix: fix ?? null }),
