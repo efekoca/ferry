@@ -37,6 +37,8 @@ const LOG_LIMIT: usize = 64 * 1024;
 const IMAGE_PREFIX: &str = "ferry-php:";
 
 const INSTALLER_URL: &str = "https://github.com/mlocati/docker-php-extension-installer/releases/download/2.12.2/install-php-extensions";
+/// Builds tried before giving up when a download arrives with the wrong content.
+const BUILD_ATTEMPTS: usize = 3;
 const INSTALLER_SHA256: &str = "ed854df3ed4366fa498c5a784e9d2b4c601fa29f5c04c7f21658a427dc151e9a";
 
 /// Extensions the installer builds without vendor downloads such as Oracle's client.
@@ -720,16 +722,30 @@ fn extended_image(
     }
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     std::fs::write(dir.join("Dockerfile"), dockerfile(base, extensions)).map_err(|e| e.to_string())?;
-    let mut cmd = toolchain::command(container.docker);
-    cmd.args(["build", "--quiet", "-t", &tag]).arg(dir);
-    let done = toolchain::run_process(cmd, container.docker, container.cancel, BUILD_TIMEOUT).map_err(|e| e.to_string())?;
-    if done.stopped == Some(Stop::Cancelled) {
-        return Err(crate::t!("Karşılaştırma durduruldu.", "The comparison was stopped."));
+    let mut attempt = 0;
+    loop {
+        let mut cmd = toolchain::command(container.docker);
+        cmd.args(["build", "--quiet", "-t", &tag]).arg(dir);
+        let done = toolchain::run_process(cmd, container.docker, container.cancel, BUILD_TIMEOUT).map_err(|e| e.to_string())?;
+        if done.stopped == Some(Stop::Cancelled) {
+            return Err(crate::t!("Karşılaştırma durduruldu.", "The comparison was stopped."));
+        }
+        if done.status.is_some_and(|s| s.success()) {
+            return Ok(Ok(tag));
+        }
+        let text = output(&done);
+        attempt += 1;
+        if attempt == BUILD_ATTEMPTS || !mangled_download(&text) {
+            return Ok(Err(tail(text.trim())));
+        }
+        std::thread::sleep(Duration::from_secs(3 * attempt as u64));
     }
-    if done.status.is_some_and(|s| s.success()) {
-        return Ok(Ok(tag));
-    }
-    Ok(Err(tail(output(&done).trim())))
+}
+
+/// A download that arrived with the wrong content: the pinned checksum refused it, and a new
+/// request usually gets the right file.
+fn mangled_download(build_output: &str) -> bool {
+    build_output.contains("digest mismatch")
 }
 
 /// Paths the project's config leaves out of the scan stay out of the syntax check too.
@@ -1556,6 +1572,14 @@ mod tests {
         let file = dockerfile("php:8.4-cli", &installable(&missing));
         assert!(file.starts_with("FROM php:8.4-cli\nADD --checksum=sha256:ed854df3"), "{file}");
         assert!(file.contains("for e in gd zip;"), "{file}");
+    }
+
+    #[test]
+    fn only_a_download_with_the_wrong_content_is_tried_again() {
+        let mismatch = "ERROR: failed to build: failed to solve: digest mismatch sha256:bef140a1: sha256:ed854df3";
+        assert!(mangled_download(mismatch));
+        assert!(!mangled_download("ERROR: failed to solve: php:7.4-cli: toomanyrequests: You have reached your pull rate limit"));
+        assert!(!mangled_download("ERROR: failed to solve: process \"/bin/sh -c chmod\" did not complete successfully: exit code: 1"));
     }
 
     #[test]
