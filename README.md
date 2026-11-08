@@ -111,9 +111,9 @@ Ferry handles cases Rector cannot on its own. For example, a file that uses `$st
 
 ### AI suggestions for manual fixes
 
-Findings Ferry can't fix on its own can get a suggestion from an AI model with your own API key: Anthropic (Claude Opus 5.5 by default, or Sonnet 5.5 or Haiku 5.5), or any OpenAI-compatible service, including a server on your own computer such as Ollama or LM Studio. It's off until you turn it on for a project on the **AI suggestions** page.
+Findings Ferry can't fix on its own can get a suggestion from an AI model with your own API key: Anthropic (Claude Opus 5.5 by default, or Sonnet 5.5 or Haiku 5.5), or any OpenAI-compatible service, including a server on your own computer such as Ollama or LM Studio. When Ollama or LM Studio is running, the **AI suggestions** page finds it and lists its models, so a local model is one click away and your code stays on your computer. It's off until you turn it on for a project on that page.
 
-**Suggest with AI** on a manual finding shows exactly what will be sent before anything leaves your computer: the 20 lines on each side of the finding, with passwords, keys and tokens masked. The suggestion comes back as a diff, is checked with `php -l` on the target version when that PHP is installed, and is written only when you apply it, with the same backup and undo as every other fix. A suggestion that changes a masked line is refused, so a placeholder can never end up in your code. The API key is kept in the system keychain: the macOS Keychain, Windows Credential Manager, or the Secret Service on Linux.
+**Suggest with AI** on a manual finding shows exactly what will be sent before anything leaves your computer: the 20 lines on each side of the finding, with passwords, keys and tokens masked. The suggestion comes back as a diff, is checked with `php -l` on the target version when that PHP is installed, and is written only when you apply it, with the same backup and undo as every other fix. A suggestion that changes a masked line is refused, so a placeholder can never end up in your code. The API key is kept in the system keychain: the macOS Keychain, Windows Credential Manager, or the Secret Service on Linux. A key for an OpenAI-compatible service belongs to that service's address, so pointing Ferry at another server never sends it there.
 
 ### Dependencies that block the upgrade
 

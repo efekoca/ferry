@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { HardDrive, KeyRound } from "lucide-react";
 import { usePageTitle } from "../components/Shell";
 import { useToast } from "../components/Toast";
@@ -6,13 +6,21 @@ import { Badge, Button, Card, Segmented, Select, Switch, TextField } from "../co
 import { useI18n } from "../i18n";
 import { errorMessage } from "../lib/api";
 import { useStore } from "../lib/store";
-import type { AiKind, AiView, Settings } from "../lib/types";
+import type { AiKind, AiView, LocalAiServer, Settings } from "../lib/types";
 
 const MODEL_NAMES: Record<string, string> = {
   "claude-opus-5-5": "Claude Opus 5.5",
   "claude-sonnet-5-5": "Claude Sonnet 5.5",
   "claude-haiku-5-5": "Claude Haiku 5.5",
 };
+
+function origin(url: string | null | undefined) {
+  try {
+    return new URL((url ?? "").trim()).origin;
+  } catch {
+    return (url ?? "").trim();
+  }
+}
 
 function Way({ icon, title, text, children }: { icon: ReactNode; title: string; text: string; children: ReactNode }) {
   return (
@@ -38,7 +46,7 @@ function ProviderForm({ view, onSaved }: { view: AiView; onSaved: (view: AiView)
   const [baseUrl, setBaseUrl] = useState(view.baseUrl ?? "");
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState<"save" | "check" | null>(null);
-  const keyStored = view.hasKey && view.kind === kind;
+  const keyStored = view.hasKey && view.kind === kind && (kind === "anthropic" || origin(baseUrl) === origin(view.baseUrl));
   if (!api) return null;
 
   const pick = (next: AiKind) => {
@@ -113,6 +121,66 @@ function ProviderForm({ view, onSaved }: { view: AiView; onSaved: (view: AiView)
   );
 }
 
+function LocalWay({ view, onSaved }: { view: AiView; onSaved: (view: AiView) => void }) {
+  const { t } = useI18n();
+  const { api } = useStore();
+  const toast = useToast();
+  const [servers, setServers] = useState<LocalAiServer[] | null>(null);
+  const [choice, setChoice] = useState("");
+  const [busy, setBusy] = useState(false);
+  const search = useCallback(async () => {
+    if (!api) return;
+    setServers(null);
+    setServers(await api.localAiServers().catch(() => []));
+  }, [api]);
+  useEffect(() => {
+    void search();
+  }, [search]);
+
+  const running = servers?.filter((s) => s.models.length > 0) ?? [];
+  const idle = servers?.filter((s) => s.models.length === 0) ?? [];
+  const options = running.flatMap((s) => s.models.map((m) => ({ value: `${s.baseUrl}\n${m}`, label: running.length > 1 ? `${s.name} · ${m}` : m })));
+  const inUse = (value: string) => {
+    const [baseUrl, model] = value.split("\n");
+    return view.kind === "openai" && origin(view.baseUrl) === origin(baseUrl) && view.model === model;
+  };
+  const selected = choice || options.find((o) => inUse(o.value))?.value || options[0]?.value || "";
+  const text = running.length > 0 ? t.ai.localFound(running.map((s) => s.name)) : idle.length > 0 ? t.ai.localNoModels(idle.map((s) => s.name)) : t.ai.localText;
+
+  const use = async () => {
+    if (!api || !selected) return;
+    const [baseUrl, model] = selected.split("\n");
+    setBusy(true);
+    try {
+      onSaved(await api.saveAiConfig({ kind: "openai", model, baseUrl }, null));
+      toast.push({ tone: "success", title: t.ai.saved });
+    } catch (e) {
+      toast.push({ tone: "error", title: t.ai.saveFailed, description: errorMessage(e, t.common.genericError) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Way icon={<HardDrive size={15} />} title={t.ai.localTitle} text={text}>
+      {running.length > 0 ? (
+        <div className="ai-form">
+          <Select label={t.ai.model} value={selected} options={options} onChange={setChoice} block />
+          <div className="ai-form__actions">
+            <Button loading={busy} disabled={busy || inUse(selected)} onClick={() => void use()}>
+              {inUse(selected) ? t.ai.localInUse : t.ai.localUse}
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <Button loading={servers === null} onClick={() => void search()}>
+          {t.ai.localSearch}
+        </Button>
+      )}
+    </Way>
+  );
+}
+
 export function Ai() {
   const { t } = useI18n();
   const { api, scan, project, aiProvider, refreshAiProvider } = useStore();
@@ -128,6 +196,10 @@ export function Ai() {
     void api.getSettings().then(setSettings).catch(() => setSettings(null));
   }, [api]);
 
+  const saved = (next: AiView) => {
+    setView(next);
+    void refreshAiProvider();
+  };
   const allowed = !!project && !!settings?.aiProjects.includes(project.root);
   const allow = async (on: boolean) => {
     if (!api || !project || !settings) return;
@@ -151,19 +223,9 @@ export function Ai() {
         </div>
         <div className="ai-ways">
           <Way icon={<KeyRound size={15} />} title={t.ai.keyTitle} text={t.ai.keyText}>
-            {view && (
-              <ProviderForm
-                view={view}
-                onSaved={(saved) => {
-                  setView(saved);
-                  void refreshAiProvider();
-                }}
-              />
-            )}
+            {view && <ProviderForm key={[view.kind, view.model, view.baseUrl, view.hasKey].join("\n")} view={view} onSaved={saved} />}
           </Way>
-          <Way icon={<HardDrive size={15} />} title={t.ai.localTitle} text={t.ai.localText}>
-            <Button disabled>{t.common.soon}</Button>
-          </Way>
+          {view && <LocalWay view={view} onSaved={saved} />}
         </div>
         {project && settings && (
           <Card className="ai-project" bodyClassName="lines-card">

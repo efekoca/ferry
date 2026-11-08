@@ -176,6 +176,44 @@ const FALLBACK_BETA: &str = "server-side-fallback-2026-07-01";
 const MAX_TOKENS: u32 = 16_000;
 const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
+/// Servers people often run on their own computer, where Ferry looks before asking for an address.
+pub const LOCAL_SERVERS: [(&str, &str); 2] = [("Ollama", "http://127.0.0.1:11434/v1"), ("LM Studio", "http://127.0.0.1:1234/v1")];
+
+/// `scheme://host[:port]` of an address: the part a key belongs to.
+pub fn origin(url: &str) -> String {
+    let (scheme, rest) = url.trim().split_once("://").unwrap_or(("", url.trim()));
+    let scheme = scheme.to_ascii_lowercase();
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    let authority = authority.rsplit('@').next().unwrap_or(authority).to_ascii_lowercase();
+    let authority = match (scheme.as_str(), authority.rsplit_once(':')) {
+        ("http", Some((host, "80"))) | ("https", Some((host, "443"))) => host.to_string(),
+        _ => authority,
+    };
+    format!("{scheme}://{authority}")
+}
+
+/// A server running on this computer that speaks OpenAI's API, with the chat models it offers.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalServer {
+    pub name: String,
+    pub base_url: String,
+    pub models: Vec<String>,
+}
+
+/// The servers in `candidates` that answer, each asked for its models with a short timeout.
+pub fn local_servers(candidates: &[(&str, &str)], cancel: &AtomicBool) -> Vec<LocalServer> {
+    candidates
+        .iter()
+        .filter_map(|(name, url)| {
+            let remote = Remote { kind: Kind::Openai, model: String::new(), base_url: url.to_string(), key: None };
+            let models = remote.models(cancel, std::time::Duration::from_secs(3)).ok()?;
+            let models = models.into_iter().filter(|m| !m.to_ascii_lowercase().contains("embed")).collect();
+            Some(LocalServer { name: name.to_string(), base_url: url.to_string(), models })
+        })
+        .collect()
+}
+
 /// A provider reached over HTTPS with the system's curl. The key goes to curl on its standard
 /// input, so it never shows on a command line.
 #[derive(Debug, Clone)]
@@ -331,19 +369,23 @@ impl Remote {
         }
     }
 
-    /// Whether the key and address work, without spending tokens: it lists the models.
-    pub fn check(&self, cancel: &AtomicBool) -> Result<(), String> {
+    fn models(&self, cancel: &AtomicBool, timeout: std::time::Duration) -> Result<Vec<String>, String> {
         let url = match self.kind {
             Kind::Anthropic => format!("{}/v1/models", self.base()),
             Kind::Openai => format!("{}/models", self.base()),
         };
-        let (status, body) =
-            self.send(&Request { url, headers: self.headers(), body: None }, cancel, std::time::Duration::from_secs(20))?;
-        if (200..300).contains(&status) {
-            Ok(())
-        } else {
-            Err(failure(status, &body))
+        let (status, body) = self.send(&Request { url, headers: self.headers(), body: None }, cancel, timeout)?;
+        if !(200..300).contains(&status) {
+            return Err(failure(status, &body));
         }
+        let value: serde_json::Value = serde_json::from_str(&body).map_err(|e| e.to_string())?;
+        let models = value["data"].as_array().ok_or_else(|| crate::t!("Model listesi okunamadı.", "Couldn't read the model list."))?;
+        Ok(models.iter().filter_map(|m| m["id"].as_str()).map(str::to_string).collect())
+    }
+
+    /// Whether the key and address work, without spending tokens: it lists the models.
+    pub fn check(&self, cancel: &AtomicBool) -> Result<(), String> {
+        self.models(cancel, std::time::Duration::from_secs(20)).map(|_| ())
     }
 }
 
@@ -351,7 +393,10 @@ impl Provider for Remote {
     fn name(&self) -> String {
         match self.kind {
             Kind::Anthropic => format!("Anthropic ({})", self.model),
-            Kind::Openai => format!("{} ({})", self.host(), self.model),
+            Kind::Openai => {
+                let local = LOCAL_SERVERS.iter().find(|(_, url)| origin(url) == origin(&self.base_url));
+                format!("{} ({})", local.map_or_else(|| self.host(), |(name, _)| name.to_string()), self.model)
+            }
         }
     }
 
@@ -452,6 +497,29 @@ mod tests {
         assert!(seen.contains(r#""fallbacks":"default""#));
         let haiku = Remote::anthropic("claude-haiku-5-5", "k").completion(&sample_prompt());
         assert!(!haiku.body.unwrap().contains("fallbacks") && !haiku.headers.iter().any(|h| h.contains("beta")));
+    }
+
+    #[test]
+    fn running_local_servers_are_found_with_their_chat_models() {
+        if crate::toolchain::find_executable("curl").is_none() {
+            return;
+        }
+        let (url, server) = serve(r#"{"object":"list","data":[{"id":"qwen2.5-coder:7b"},{"id":"nomic-embed-text:latest"}]}"#);
+        let closed = format!("http://{}/v1", std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap());
+        let base = format!("{url}/v1");
+        let found = local_servers(&[("Ollama", base.as_str()), ("LM Studio", closed.as_str())], &AtomicBool::new(false));
+        assert_eq!(found, vec![LocalServer { name: "Ollama".into(), base_url: base, models: vec!["qwen2.5-coder:7b".into()] }]);
+        assert!(server.join().unwrap().starts_with("GET /v1/models"));
+    }
+
+    #[test]
+    fn a_key_belongs_to_the_scheme_host_and_port() {
+        assert_eq!(origin("HTTPS://API.OpenAI.com:443/v1/"), "https://api.openai.com");
+        assert_eq!(origin(" http://127.0.0.1:11434/v1 "), "http://127.0.0.1:11434");
+        assert_ne!(origin("http://127.0.0.1:11434/v1"), origin("http://127.0.0.1:1234/v1"));
+        assert_eq!(origin("https://user@host.example/x?y"), "https://host.example");
+        let ollama = Remote { kind: Kind::Openai, model: "qwen".into(), base_url: "http://127.0.0.1:11434/v1/".into(), key: None };
+        assert_eq!(ollama.name(), "Ollama (qwen)");
     }
 
     #[test]

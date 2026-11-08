@@ -7,6 +7,7 @@ import type { CheckSummary, DockerComparison, DockerStep, DockerSummary, History
   SnapshotConflict,
   AiConfig,
   AiView,
+  LocalAiServer,
   DiffLine,
   FileChange,
   Finding,
@@ -183,6 +184,7 @@ export function mockApi(
     gaps?: DockerGap[];
     conflicts?: SnapshotConflict[];
     aiProvider?: string | null;
+    localAi?: LocalAiServer[];
   } = {},
 ): Api {
   const delay = opts.delay ?? 450;
@@ -190,12 +192,18 @@ export function mockApi(
   let settings: Settings = { phpPath: null, snapshotLimit: 30, editor: null, editorCommand: null, aiProjects: [] };
   let aiSuggestion = 0;
   let aiCfg: AiConfig = { kind: "anthropic", model: "claude-opus-5-5", baseUrl: null };
-  let aiKey = opts.aiProvider !== null;
+  const aiKeys = new Set<string>(opts.aiProvider === null ? [] : ["anthropic"]);
+  const origin = (url: string) => url.trim().toLowerCase().split("/").slice(0, 3).join("/");
+  const keyName = () => (aiCfg.kind === "anthropic" ? "anthropic" : aiCfg.kind === "openai" && aiCfg.baseUrl ? `openai ${origin(aiCfg.baseUrl)}` : null);
+  const hasKey = () => aiKeys.has(keyName() ?? "");
+  const localNames: Record<string, string> = { "http://127.0.0.1:11434": "Ollama", "http://127.0.0.1:1234": "LM Studio" };
   const aiName = () => {
-    if (!aiCfg.kind || !aiCfg.model || (aiCfg.kind === "anthropic" && !aiKey) || (aiCfg.kind === "openai" && !aiCfg.baseUrl)) return null;
-    return aiCfg.kind === "anthropic" ? `Anthropic (${aiCfg.model})` : `${aiCfg.baseUrl?.split("://")[1]?.split("/")[0]} (${aiCfg.model})`;
+    if (!aiCfg.kind || !aiCfg.model || (aiCfg.kind === "anthropic" && !hasKey()) || (aiCfg.kind === "openai" && !aiCfg.baseUrl)) return null;
+    if (aiCfg.kind === "anthropic") return `Anthropic (${aiCfg.model})`;
+    const base = origin(aiCfg.baseUrl ?? "");
+    return `${localNames[base] ?? base.split("://")[1]} (${aiCfg.model})`;
   };
-  const aiView = (): AiView => ({ ...aiCfg, hasKey: aiKey, models: ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"] });
+  const aiView = (): AiView => ({ ...aiCfg, hasKey: hasKey(), models: ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"] });
   let aiStopped = false;
   const ignores = new Map<string, string>();
   let stale = opts.staleIgnores ?? [];
@@ -560,12 +568,20 @@ export function mockApi(
       await sleep(delay / 3);
       if (config.baseUrl && !/^https?:\/\//.test(config.baseUrl)) throw new Error("The address has to start with http:// or https://.");
       aiCfg = config;
-      if (key !== null) aiKey = key.trim() !== "";
+      const name = keyName();
+      if (name && key !== null) {
+        if (key.trim()) aiKeys.add(name);
+        else aiKeys.delete(name);
+      }
       return aiView();
     },
     checkAiConfig: async () => {
       await sleep(delay);
       if (!aiName()) throw new Error("Save the provider, model and key first.");
+    },
+    localAiServers: async () => {
+      await sleep(delay / 3);
+      return opts.localAi ?? [];
     },
     aiPrompt: async (_path, id) => {
       const f = lastScan?.findings.find((x) => x.id === id);

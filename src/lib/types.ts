@@ -523,6 +523,12 @@ export interface AiView extends AiConfig {
   models: string[];
 }
 
+export interface LocalAiServer {
+  name: string;
+  baseUrl: string;
+  models: string[];
+}
+
 export interface AiSuggestion {
   id: number;
   change: FileChange;

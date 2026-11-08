@@ -305,7 +305,7 @@ describe("Ferry app", () => {
     await waitFor(() => expect(screen.queryByText(/artık hiçbir kodla eşleşmiyor/)).not.toBeInTheDocument());
   });
 
-  it("counts the manual findings on the AI page and keeps the local model for later", async () => {
+  it("counts the manual findings on the AI page and looks for a local server", async () => {
     const user = setup();
     await user.click(await screen.findByRole("button", { name: "Proje klasörü seçin" }));
     await user.click(await screen.findByRole("button", { name: /AI önerileri/ }));
@@ -315,7 +315,8 @@ describe("Ferry app", () => {
     await screen.findByRole("img", { name: /Hazırlık puanı/ });
     await user.click(screen.getByRole("button", { name: /AI önerileri/ }));
     expect(await screen.findByRole("heading", { name: /^\d+ elle düzeltme için AI önerisi$/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Yakında" })).toBeDisabled();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Yeniden ara" })).toBeEnabled());
+    expect(screen.getByText(/Ollama ya da LM Studio açıksa Ferry onu burada bulur/)).toBeInTheDocument();
     expect(screen.getByText("Açık: Anthropic (claude-opus-5-5)")).toBeInTheDocument();
   });
 
@@ -1686,6 +1687,23 @@ describe("Ferry app", () => {
     expect(await screen.findByText("Anahtar sistemin anahtar zincirinde.")).toBeInTheDocument();
     await user.click(screen.getByRole("switch", { name: /kuzey-magaza projesinde AI önerileri/ }));
     await waitFor(async () => expect((await api.getSettings()).aiProjects).toHaveLength(1));
+  });
+
+  it("uses a local server it finds, without the key saved for another server", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0, localAi: [{ name: "Ollama", baseUrl: "http://127.0.0.1:11434/v1", models: ["qwen2.5-coder:7b", "qwen3:8b"] }] });
+    await api.saveAiConfig({ kind: "openai", model: "gpt-5", baseUrl: "https://api.openai.com/v1" }, "sk-openai");
+    const save = vi.spyOn(api, "saveAiConfig");
+    render(<App api={api} />);
+    await openAndScan(user);
+    await user.click(nav(/AI önerileri/));
+    expect(await screen.findByText("Ollama bu bilgisayarda çalışıyor. Kod bilgisayarınızdan çıkmaz.")).toBeInTheDocument();
+    expect(screen.getByText("Anahtar sistemin anahtar zincirinde.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Bunu kullan" }));
+    await waitFor(() => expect(save).toHaveBeenCalledWith({ kind: "openai", model: "qwen2.5-coder:7b", baseUrl: "http://127.0.0.1:11434/v1" }, null));
+    expect(await screen.findByRole("button", { name: "Kullanılıyor" })).toBeDisabled();
+    expect(await screen.findByText("Açık: Ollama (qwen2.5-coder:7b)")).toBeInTheDocument();
+    expect(screen.queryByText("Anahtar sistemin anahtar zincirinde.")).not.toBeInTheDocument();
   });
 
   it("offers no AI suggestion without a provider", async () => {

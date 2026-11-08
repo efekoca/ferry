@@ -855,6 +855,20 @@ fn an_ai_key_goes_to_the_keychain_and_never_to_a_file() {
     assert_eq!(h.ok("ai_provider", json!({})), "localhost:11434 (qwen)");
 }
 
+#[test]
+fn an_openai_compatible_key_stays_with_its_server() {
+    let h = harness();
+    let openai = json!({ "kind": "openai", "model": "gpt-5", "baseUrl": "https://api.openai.com/v1" });
+    assert_eq!(h.ok("save_ai_config", json!({ "config": openai, "key": "sk-openai" }))["hasKey"], true);
+    let state = h._app.state::<AppState>();
+    assert_eq!(state.secrets.get("openai-api-key https://api.openai.com").as_deref(), Some("sk-openai"));
+
+    let local = h.ok("save_ai_config", json!({ "config": { "kind": "openai", "model": "qwen", "baseUrl": "http://127.0.0.1:11434/v1" } }));
+    assert_eq!(local["hasKey"], false);
+    assert_eq!(h.ok("ai_provider", json!({})), "Ollama (qwen)");
+    assert_eq!(h.ok("save_ai_config", json!({ "config": openai }))["hasKey"], true);
+}
+
 /// Turns `each()` into `foreach` in whatever window it's shown, like a model would.
 struct Scripted;
 
