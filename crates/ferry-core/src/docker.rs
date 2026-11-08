@@ -705,17 +705,18 @@ fn loaded(container: &Container, version: PhpVersion, project: &Path, image: &st
 }
 
 /// An image with the extensions added, reused between runs. Project code never runs while it's built.
+/// A build that fails gives back the end of Docker's output instead of the tag.
 fn extended_image(
     container: &Container,
     base: &str,
     version: PhpVersion,
     extensions: &[String],
     dir: &Path,
-) -> Result<Option<String>, String> {
+) -> Result<Result<String, String>, String> {
     let tag = format!("{IMAGE_PREFIX}{version}-{:016x}", crate::snapshot::fnv1a(dockerfile(base, extensions).as_bytes()));
     let cached = toolchain::command(container.docker).args(["image", "inspect", &tag]).output();
     if cached.is_ok_and(|o| o.status.success()) {
-        return Ok(Some(tag));
+        return Ok(Ok(tag));
     }
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     std::fs::write(dir.join("Dockerfile"), dockerfile(base, extensions)).map_err(|e| e.to_string())?;
@@ -725,7 +726,10 @@ fn extended_image(
     if done.stopped == Some(Stop::Cancelled) {
         return Err(crate::t!("Karşılaştırma durduruldu.", "The comparison was stopped."));
     }
-    Ok(done.status.is_some_and(|s| s.success()).then_some(tag))
+    if done.status.is_some_and(|s| s.success()) {
+        return Ok(Ok(tag));
+    }
+    Ok(Err(tail(output(&done).trim())))
 }
 
 /// Paths the project's config leaves out of the scan stay out of the syntax check too.
@@ -763,6 +767,7 @@ struct PreparedImage {
     modules: HashSet<String>,
     wanted: Vec<String>,
     image_failed: bool,
+    build_log: String,
 }
 
 fn prepare_image(
@@ -779,18 +784,25 @@ fn prepare_image(
     let needed: Vec<String> = missing.iter().filter(|e| setup.install_extensions || setup.drivers.contains(e)).cloned().collect();
     let wanted = installable(&needed);
     let mut image_failed = false;
+    let mut build_log = String::new();
     if !wanted.is_empty() {
         step(Step::Extensions(version));
         match extended_image(container, &base, version, &wanted, &setup.images.join(version.compact()))? {
-            Some(tag) => {
+            Ok(tag) => {
                 setup.built.borrow_mut().push(tag.clone());
                 modules = loaded(container, version, project, &tag)?;
                 image = tag;
             }
-            None => image_failed = true,
+            Err(output) => {
+                image_failed = true;
+                let lines: Vec<&str> = output.lines().collect();
+                let last = lines[lines.len().saturating_sub(40)..].join("\n");
+                let heading = crate::t!("PHP eklentili kalıp oluşturulamadı:", "Couldn't build the image with PHP extensions:");
+                build_log = format!("{heading}\n{last}\n\n");
+            }
         }
     }
-    Ok(PreparedImage { image, modules, wanted, image_failed })
+    Ok(PreparedImage { image, modules, wanted, image_failed, build_log })
 }
 
 fn run_version(
@@ -802,7 +814,7 @@ fn run_version(
     step: &dyn Fn(Step),
 ) -> Result<VersionRun, String> {
     let used = setup.used;
-    let PreparedImage { image, modules, wanted, image_failed } = prepare_image(container, version, project, setup, step)?;
+    let PreparedImage { image, modules, wanted, image_failed, build_log } = prepare_image(container, version, project, setup, step)?;
     let installed_extensions = wanted.iter().filter(|e| modules.contains(*e)).cloned().collect();
     step(Step::Lint(version));
     let lint = container.run(&format!("lint-{}", version.compact()), project, &image, false, setup.lint, LINT_TIMEOUT)?;
@@ -811,7 +823,7 @@ fn run_version(
     let lint_files = lint_output.lines().find_map(|l| l.trim().strip_prefix("FERRY-FILES ")?.trim().parse().ok()).unwrap_or(0);
     let lint_stopped = lint.stopped.is_some();
     let missing_extensions = used.iter().filter(|e| !modules.contains(*e)).cloned().collect();
-    let mut log = lint_output;
+    let mut log = build_log + &lint_output;
     let sqlite = setup.database.filter(|p| p.connection.engine == crate::database::Engine::Sqlite);
     let database = match setup.database {
         Some(prepared) if sqlite.is_some() => {
