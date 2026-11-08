@@ -5215,3 +5215,23 @@ button.real-row {
   align-items: center;
   gap: 2px;
 }
+
+.ai-suggest {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+}
+
+.ai-suggest .diff {
+  margin: 0;
+}
+
+.ai-prompt {
+  max-height: 46vh;
+  overflow: auto;
+  font-size: 12px;
+}

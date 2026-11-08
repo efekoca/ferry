@@ -1198,12 +1198,12 @@ describe("Ferry app", () => {
   it("keeps the PHP path when the backup limit changes", async () => {
     const user = userEvent.setup();
     const api = mockApi({ delay: 0 });
-    await api.saveSettings({ phpPath: "/opt/php", snapshotLimit: null, editor: null, editorCommand: null });
+    await api.saveSettings({ phpPath: "/opt/php", snapshotLimit: null, editor: null, editorCommand: null, aiProjects: [] });
     render(<App api={api} />);
     await user.click(await screen.findByRole("button", { name: /Ayarlar/ }));
     const group = await screen.findByRole("radiogroup", { name: "Saklanacak yedek" });
     await user.click(within(group).getByRole("radio", { name: "30" }));
-    await waitFor(async () => expect(await api.getSettings()).toEqual({ phpPath: "/opt/php", snapshotLimit: 30, editor: null, editorCommand: null }));
+    await waitFor(async () => expect(await api.getSettings()).toEqual({ phpPath: "/opt/php", snapshotLimit: 30, editor: null, editorCommand: null, aiProjects: [] }));
     expect(within(group).getByRole("radio", { name: "30" })).toHaveAttribute("aria-checked", "true");
   });
 
@@ -1220,7 +1220,7 @@ describe("Ferry app", () => {
     const group = await screen.findByRole("radiogroup", { name: "Saklanacak yedek" });
     await user.click(within(group).getByRole("radio", { name: "30" }));
     await pick(user, "Editör", "Visual Studio Code");
-    await waitFor(async () => expect(await api.getSettings()).toEqual({ phpPath: null, snapshotLimit: 30, editor: "vscode", editorCommand: null }));
+    await waitFor(async () => expect(await api.getSettings()).toEqual({ phpPath: null, snapshotLimit: 30, editor: "vscode", editorCommand: null, aiProjects: [] }));
   });
 
   it("shows backup disk usage and deletes every backup after confirming", async () => {
@@ -1649,6 +1649,37 @@ describe("Ferry app", () => {
     await user.click(screen.getByRole("button", { name: "Projeye kaydet" }));
     await waitFor(() => expect(save).toHaveBeenCalled());
     expect(save.mock.calls[0][1].target).toBeNull();
+  });
+
+  it("suggests a fix with AI only after consent and a look at what is sent", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    const suggest = vi.spyOn(api, "aiSuggest");
+    render(<App api={api} />);
+    await openAndScan(user);
+    await user.click(nav(/Bulgular/));
+    for (const option of await screen.findAllByRole("option")) {
+      await user.click(option);
+      if (screen.queryByRole("button", { name: "AI ile öner" })) break;
+    }
+    await user.click(screen.getByRole("button", { name: "AI ile öner" }));
+    const sheet = await screen.findByRole("dialog", { name: "AI önerisi" });
+    await user.click(await within(sheet).findByRole("button", { name: "Bu projede aç" }));
+    expect(await within(sheet).findByText(/Yalnızca bu metin gönderilir/)).toBeInTheDocument();
+    expect(suggest).not.toHaveBeenCalled();
+    await user.click(within(sheet).getByRole("button", { name: "Gönder" }));
+    await user.click(await within(sheet).findByRole("button", { name: "Uygula" }));
+    await waitFor(async () => expect((await api.listSnapshots("")).some((b) => b.label.startsWith("AI önerisi"))).toBe(true));
+    expect((await api.getSettings()).aiProjects).toHaveLength(1);
+  });
+
+  it("offers no AI suggestion without a provider", async () => {
+    const user = userEvent.setup();
+    render(<App api={mockApi({ delay: 0, aiProvider: null })} />);
+    await openAndScan(user);
+    await user.click(nav(/Bulgular/));
+    for (const option of await screen.findAllByRole("option")) await user.click(option);
+    expect(screen.queryByRole("button", { name: "AI ile öner" })).not.toBeInTheDocument();
   });
 
   it("shows an inconclusive Real test as inconclusive in History", async () => {

@@ -497,6 +497,23 @@ export interface Settings {
   snapshotLimit: number | null;
   editor: string | null;
   editorCommand: string | null;
+  aiProjects: string[];
+}
+
+/** Exactly what an AI suggestion sends, shown before anything leaves the computer. */
+export interface AiPrompt {
+  system: string;
+  user: string;
+  file: string;
+  firstLine: number;
+  lastLine: number;
+}
+
+export interface AiSuggestion {
+  id: number;
+  change: FileChange;
+  lintErrors: string[];
+  lintChecked: boolean;
 }
 
 export interface SourceLine {

@@ -31,6 +31,8 @@ pub struct Settings {
     pub snapshot_limit: Option<u32>,
     pub editor: Option<String>,
     pub editor_command: Option<String>,
+    /// Projects where the user turned AI suggestions on. Their code can leave the computer only there.
+    pub ai_projects: Vec<String>,
 }
 
 pub struct AppState {
@@ -43,6 +45,9 @@ pub struct AppState {
     previews: Mutex<HashMap<String, (u64, RectorPreview)>>,
     writes: Arc<Mutex<()>>,
     rector_cancel: Mutex<HashMap<String, Arc<AtomicBool>>>,
+    ai_provider: Mutex<Option<Arc<dyn ferry_core::ai::Provider>>>,
+    ai_suggestions: Mutex<HashMap<String, (u64, FileChange, PhpVersion)>>,
+    ai_cancel: Mutex<HashMap<String, Arc<AtomicBool>>>,
     scan_cancel: Mutex<HashMap<String, Arc<AtomicBool>>>,
     docker_cancel: Mutex<HashMap<String, Arc<AtomicBool>>>,
     check_cancel: Mutex<HashMap<String, Arc<AtomicBool>>>,
@@ -80,6 +85,9 @@ impl AppState {
             previews: Mutex::new(HashMap::new()),
             writes: Arc::new(Mutex::new(())),
             rector_cancel: Mutex::new(HashMap::new()),
+            ai_provider: Mutex::new(None),
+            ai_suggestions: Mutex::new(HashMap::new()),
+            ai_cancel: Mutex::new(HashMap::new()),
             scan_cancel: Mutex::new(HashMap::new()),
             docker_cancel: Mutex::new(HashMap::new()),
             check_cancel: Mutex::new(HashMap::new()),
@@ -1279,39 +1287,121 @@ fn batch_branch(target: PhpVersion, mode: RectorMode) -> String {
     format!("ferry/php-{target}-{mode}")
 }
 
+/// A PHP that can tell whether code runs on the target: the target itself or newer.
+fn lint_php(php_override: Option<&Path>, target: PhpVersion) -> Option<PathBuf> {
+    toolchain::find_php(php_override)
+        .filter(|php| toolchain::php_version(php).and_then(|v| v.parse::<PhpVersion>().ok()).is_some_and(|v| v >= target))
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AiSuggestion {
+    id: u64,
+    change: FileChange,
+    lint_errors: Vec<String>,
+    lint_checked: bool,
+}
+
+fn presented_finding(state: &AppState, path: &str, root: &Path, id: &str) -> CmdResult<(ferry_core::analyzer::Finding, PhpVersion)> {
+    let scan = state.scans.lock().unwrap().get(path).cloned().ok_or_else(|| t!("Önce projeyi tarayın.", "Scan the project first."))?;
+    let log = state.runtime_log(path);
+    let finding = presented(root, &scan, log.as_ref())
+        .into_iter()
+        .find(|f| f.id == id)
+        .ok_or_else(|| t!("Bulgu bulunamadı; projeyi yeniden tarayın.", "Finding not found; scan the project again."))?;
+    Ok((finding, scan.target))
+}
+
 #[tauri::command]
-async fn apply_changes(
-    state: State<'_, AppState>,
-    path: String,
-    preview_id: u64,
-    files: Vec<String>,
-    skipped: Option<HashMap<String, Vec<usize>>>,
-    label: String,
-    commit_message: Option<String>,
-) -> CmdResult<ApplyResult> {
+fn ai_provider(state: State<'_, AppState>) -> Option<String> {
+    state.ai_provider.lock().unwrap().as_ref().map(|p| p.name())
+}
+
+/// What a suggestion would send, shown before anything leaves the computer.
+#[tauri::command]
+async fn ai_prompt(state: State<'_, AppState>, path: String, id: String) -> CmdResult<ferry_core::ai::Prompt> {
     let path = normalize_path(path);
     let root = project_root(&path)?;
-    let (selected, target, mode): (Vec<FileChange>, PhpVersion, RectorMode) = {
-        let previews = state.previews.lock().unwrap();
-        let (id, preview) = previews.get(&path).ok_or_else(|| t!("Önce değişiklikleri hesaplayın.", "Calculate the changes first."))?;
-        if *id != preview_id {
-            return Err(t!(
-                "Önizleme güncel değil. Değişiklikleri yeniden hesaplayın.",
-                "The preview is out of date. Calculate the changes again."
-            ));
-        }
-        let selected = preview.changes.iter().filter(|c| files.contains(&c.file)).cloned().collect();
-        (selected, preview.target, preview.mode)
-    };
-    if selected.is_empty() {
-        return Err(t!("Uygulanacak dosya seçilmedi.", "No files selected to apply."));
+    let (finding, target) = presented_finding(&state, &path, &root, &id)?;
+    blocking(move || ferry_core::ai::prompt(&root, &finding, target)).await
+}
+
+#[tauri::command]
+async fn ai_suggest(state: State<'_, AppState>, path: String, id: String) -> CmdResult<AiSuggestion> {
+    let path = normalize_path(path);
+    let root = project_root(&path)?;
+    let allowed = state.settings.lock().unwrap().ai_projects.iter().any(|p| normalize_path(p.clone()) == path);
+    if !allowed {
+        return Err(t!("Bu projede AI önerileri kapalı.", "AI suggestions are off for this project."));
     }
+    let provider =
+        state.ai_provider.lock().unwrap().clone().ok_or_else(|| t!("Henüz bir AI sağlayıcısı yok.", "No AI provider is set up yet."))?;
+    let (finding, target) = presented_finding(&state, &path, &root, &id)?;
+    let cancel = Arc::new(AtomicBool::new(false));
+    state.ai_cancel.lock().unwrap().insert(path.clone(), cancel.clone());
+    let php = state.php_override();
+    let made = blocking(move || {
+        let prompt = ferry_core::ai::prompt(&root, &finding, target)?;
+        let reply = provider.complete(&prompt, &cancel)?;
+        if cancel.load(Ordering::Relaxed) {
+            return Err(t!("AI önerisi durduruldu.", "The AI suggestion was stopped."));
+        }
+        let change = ferry_core::ai::suggestion(&finding, &prompt, &reply)?;
+        let original = ferry_core::safefs::read_text(root.join(&change.file)).ok();
+        let lint = lint_php(php.as_deref(), target)
+            .map(|php| toolchain::new_syntax_errors(&php, [(change.file.as_str(), original.as_deref(), change.new_content.as_str())]));
+        let checked = lint.as_ref().is_some_and(|l| l.not_run.is_empty());
+        Ok((change, lint.map(|l| l.errors).unwrap_or_default(), checked))
+    })
+    .await;
+    state.ai_cancel.lock().unwrap().remove(&path);
+    let (change, lint_errors, lint_checked) = made?;
+    let id = state.next_preview.fetch_add(1, Ordering::Relaxed);
+    state.ai_suggestions.lock().unwrap().insert(path, (id, change.clone(), target));
+    Ok(AiSuggestion { id, change, lint_errors, lint_checked })
+}
+
+#[tauri::command]
+fn cancel_ai(state: State<'_, AppState>, path: String) {
+    if let Some(cancel) = state.ai_cancel.lock().unwrap().get(&normalize_path(path)) {
+        cancel.store(true, Ordering::Relaxed);
+    }
+}
+
+/// A suggestion is written like any other change: backed up first, then linted.
+#[tauri::command]
+async fn apply_ai_suggestion(state: State<'_, AppState>, path: String, id: u64, label: String) -> CmdResult<ApplyResult> {
+    let path = normalize_path(path);
+    let root = project_root(&path)?;
+    let (change, target) = match state.ai_suggestions.lock().unwrap().get(&path) {
+        Some((known, change, target)) if *known == id => (change.clone(), *target),
+        _ => return Err(t!("Öneri güncel değil; yeniden isteyin.", "The suggestion is out of date; ask for it again.")),
+    };
+    let result = write_with_backup(&state, root, vec![change], target, RectorMode::Compat, label, None, None).await?;
+    state.ai_suggestions.lock().unwrap().remove(&path);
+    state.forget_check(&path);
+    Ok(result)
+}
+
+/// Every change the app writes goes through here: a fresh check, a backup, the write, a lint
+/// with the target PHP, and an optional commit. A failed write is rolled back.
+#[allow(clippy::too_many_arguments)]
+async fn write_with_backup(
+    state: &AppState,
+    root: PathBuf,
+    selected: Vec<FileChange>,
+    target: PhpVersion,
+    mode: RectorMode,
+    label: String,
+    skipped: Option<HashMap<String, Vec<usize>>>,
+    commit_message: Option<String>,
+) -> CmdResult<ApplyResult> {
     let store = state.snapshots();
     let applied_files: Vec<String> = selected.iter().map(|c| c.file.clone()).collect();
     let writes = state.writes.clone();
     let php_override = state.php_override();
     let snapshot_limit = state.settings.lock().unwrap().snapshot_limit;
-    let result = blocking(move || {
+    blocking(move || {
         let _guard = writes.lock().unwrap_or_else(|e| e.into_inner());
         let refs: Vec<&FileChange> = selected.iter().collect();
         rector::check_fresh(&root, &refs).map_err(|e| e.to_string())?;
@@ -1351,9 +1441,7 @@ async fn apply_changes(
         let outcome = rector::write_changes(&root, &refs, &mut written);
         match outcome {
             Ok(()) => {
-                let lint = toolchain::find_php(php_override.as_deref())
-                    .filter(|php| toolchain::php_version(php).and_then(|v| v.parse::<PhpVersion>().ok()).is_some_and(|v| v >= target))
-                    .map(|php| {
+                let lint = lint_php(php_override.as_deref(), target).map(|php| {
                         let files =
                             selected.iter().map(|c| (c.file.as_str(), originals.get(&c.file).map(String::as_str), c.new_content.as_str()));
                         toolchain::new_syntax_errors(&php, files)
@@ -1414,7 +1502,37 @@ async fn apply_changes(
             }
         }
     })
-    .await?;
+    .await
+}
+
+#[tauri::command]
+async fn apply_changes(
+    state: State<'_, AppState>,
+    path: String,
+    preview_id: u64,
+    files: Vec<String>,
+    skipped: Option<HashMap<String, Vec<usize>>>,
+    label: String,
+    commit_message: Option<String>,
+) -> CmdResult<ApplyResult> {
+    let path = normalize_path(path);
+    let root = project_root(&path)?;
+    let (selected, target, mode): (Vec<FileChange>, PhpVersion, RectorMode) = {
+        let previews = state.previews.lock().unwrap();
+        let (id, preview) = previews.get(&path).ok_or_else(|| t!("Önce değişiklikleri hesaplayın.", "Calculate the changes first."))?;
+        if *id != preview_id {
+            return Err(t!(
+                "Önizleme güncel değil. Değişiklikleri yeniden hesaplayın.",
+                "The preview is out of date. Calculate the changes again."
+            ));
+        }
+        let selected = preview.changes.iter().filter(|c| files.contains(&c.file)).cloned().collect();
+        (selected, preview.target, preview.mode)
+    };
+    if selected.is_empty() {
+        return Err(t!("Uygulanacak dosya seçilmedi.", "No files selected to apply."));
+    }
+    let result = write_with_backup(&state, root, selected, target, mode, label, skipped, commit_message).await?;
     if let Some((_, preview)) = state.previews.lock().unwrap().get_mut(&path) {
         preview.changes.retain(|c| !result.written.contains(&c.file));
     }
@@ -1671,6 +1789,11 @@ pub fn with_commands<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R
         install_rector,
         rector_preview,
         apply_changes,
+        ai_provider,
+        ai_prompt,
+        ai_suggest,
+        cancel_ai,
+        apply_ai_suggestion,
         list_snapshots,
         restore_snapshot,
         delete_snapshot,

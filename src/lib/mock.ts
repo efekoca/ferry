@@ -180,11 +180,14 @@ export function mockApi(
     deps?: (report: DependencyReport) => DependencyReport;
     gaps?: DockerGap[];
     conflicts?: SnapshotConflict[];
+    aiProvider?: string | null;
   } = {},
 ): Api {
   const delay = opts.delay ?? 450;
   const listeners = new Set<(p: ScanProgress) => void>();
-  let settings: Settings = { phpPath: null, snapshotLimit: 30, editor: null, editorCommand: null };
+  let settings: Settings = { phpPath: null, snapshotLimit: 30, editor: null, editorCommand: null, aiProjects: [] };
+  let aiSuggestion = 0;
+  let aiStopped = false;
   const ignores = new Map<string, string>();
   let stale = opts.staleIgnores ?? [];
   let lastScan: ScanResult | null = null;
@@ -542,6 +545,47 @@ export function mockApi(
     dismissInterrupted: async () => {},
     checkHistory: async () => checkRuns,
     getSettings: async () => settings,
+    aiProvider: async () => opts.aiProvider === undefined ? "Sample model" : opts.aiProvider,
+    aiPrompt: async (_path, id) => {
+      const f = lastScan?.findings.find((x) => x.id === id);
+      if (!f) throw new Error("Finding not found; scan the project again.");
+      const first = Math.max(1, f.line - 20);
+      return {
+        system: "You fix PHP code for an upgrade to a newer PHP version.",
+        user: `Ferry found this problem in a project moving to PHP ${lastScan?.target}:\n${f.title.en}: ${f.message.en}\n\nFile ${f.file}, lines ${first}-${f.line + 20}. The problem is on line ${f.line}.\n\`\`\`php\n${f.snippet}\n\`\`\``,
+        file: f.file,
+        firstLine: first,
+        lastLine: f.line + 20,
+      };
+    },
+    aiSuggest: async (path, id) => {
+      if (!settings.aiProjects.includes(path)) throw new Error("AI suggestions are off for this project.");
+      const f = lastScan?.findings.find((x) => x.id === id);
+      if (!f) throw new Error("Finding not found; scan the project again.");
+      aiStopped = false;
+      await sleep(delay * 2);
+      if (aiStopped) throw new Error("The AI suggestion was stopped.");
+      aiSuggestion += 1;
+      const fixedLine = f.snippet.replace(/\bmysql_(\w+)\(/, "mysqli_$1(");
+      return {
+        id: aiSuggestion,
+        change: change(f.file, "manual", [[f.ruleId, f.title, f.since, "manual"]], [{ old: f.line, spec: [["del", f.snippet], ["add", fixedLine === f.snippet ? `${f.snippet} // ${f.ruleId}` : fixedLine]] }]),
+        lintErrors: [],
+        lintChecked: true,
+      };
+    },
+    cancelAi: async () => {
+      aiStopped = true;
+    },
+    applyAiSuggestion: async (path, id, label) => {
+      await sleep(delay);
+      if (id !== aiSuggestion) throw new Error("The suggestion is out of date; ask for it again.");
+      const f = lastScan?.findings.find((x) => x.id);
+      const files = [f?.file ?? "includes/helpers.php"];
+      const snapshot: Snapshot = { id: String(Date.now()), createdAt: Date.now(), projectRoot: path, label, files: files.map((p) => ({ path: p, existed: true })) };
+      snapshots = [snapshot, ...snapshots];
+      return { snapshot, written: files, lintErrors: [], lintChecked: true, branch: null, commit: null, gitError: null };
+    },
     saveSettings: async (s) => {
       settings = s;
     },

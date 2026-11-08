@@ -1,6 +1,6 @@
 //! Masks what shouldn't leave a run: page text and logs can hold visitors' addresses and credentials.
 
-const MASK: &str = "[redacted]";
+pub(crate) const MASK: &str = "[redacted]";
 const KEYS: [&str; 11] =
     ["password", "passwd", "pwd", "secret", "token", "api_key", "apikey", "access_key", "authorization", "client_secret", "cookie"];
 
