@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { errorMessage, getApi, type Api } from "./api";
 import type {
+  ApplyResult,
   CheckSummary,
   SnapshotConflict,
   DependencyReport,
@@ -144,6 +145,8 @@ interface AppStore {
   skipHunks(file: string, hunks: number[]): void;
   applying: boolean;
   applyChanges(files: string[], skipped?: Record<string, number[]>, keepTrial?: boolean, commitMessage?: string): Promise<boolean>;
+  aiProvider: string | null;
+  applyAiSuggestion(id: number, label: string): Promise<boolean>;
 
   snapshots: Snapshot[];
   refreshSnapshots(): Promise<void>;
@@ -200,6 +203,7 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
   const [previewMode, setPreviewMode] = useState<RectorMode>("compat");
   const [previewing, setPreviewing] = useState(false);
   const [applying, setApplying] = useState(false);
+  const [aiProvider, setAiProvider] = useState<string | null>(null);
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [checking, setChecking] = useState<"lint" | "tests" | null>(null);
   const generation = useRef(0);
@@ -254,6 +258,10 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
   useEffect(() => {
     refreshToolchain();
   }, [refreshToolchain]);
+
+  useEffect(() => {
+    if (api) void api.aiProvider().then(setAiProvider).catch(() => setAiProvider(null));
+  }, [api]);
 
   /** A long run belongs to its project, so leaving that project ends it. */
   const leaveRuns = useCallback(
@@ -589,6 +597,50 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
     api?.cancelDockerCompare(run.root).catch(() => {});
   }, [api]);
 
+  /** What every write tells the user: written files, lint results and any commit. */
+  const announce = useCallback(
+    (result: ApplyResult) => {
+    if (result.lintErrors.length > 0) {
+      toast.push({
+        tone: "error",
+        title: t.toast.appliedWithErrors(result.written.length, result.lintErrors.length),
+        description: `${result.lintErrors.slice(0, 3).join("\n")}${result.lintErrors.length > 3 ? ` +${result.lintErrors.length - 3}` : ""}\n${t.toast.lintFailedText}`,
+      });
+    } else {
+      toast.push({
+        tone: result.lintChecked ? "success" : "info",
+        title: t.toast.applied(result.written.length),
+        description: result.lintChecked ? t.toast.appliedText : `${t.toast.lintSkippedText}\n${t.toast.appliedText}`,
+      });
+    }
+    if (result.commit && result.branch) toast.push({ tone: "success", title: t.git.committed(result.branch, result.commit) });
+    if (result.gitError) toast.push({ tone: "error", title: t.git.commitFailed, description: result.gitError });
+    },
+    [toast, t],
+  );
+
+  const applyAiSuggestion = useCallback(
+    async (id: number, label: string) => {
+      if (!api || !project) return false;
+      setApplying(true);
+      const root = project.root;
+      try {
+        const result = await api.applyAiSuggestion(root, id, label);
+        if (rootRef.current !== root) return true;
+        announce(result);
+        void refreshSnapshots();
+        if (scan && rootRef.current === root) void runScan();
+        return true;
+      } catch (e) {
+        if (rootRef.current === root) fail(t.toast.applyFailed, e);
+        return false;
+      } finally {
+        setApplying(false);
+      }
+    },
+    [api, project, announce, refreshSnapshots, scan, runScan, fail, t],
+  );
+
   const applyChanges = useCallback(
     async (files: string[], skipped?: Record<string, number[]>, keepTrial = false, commitMessage?: string) => {
       if (!api || !project || files.length === 0) return false;
@@ -601,21 +653,7 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
         const result = await api.applyChanges(root, preview.id, files, label, skipped, commitMessage);
         if (rootRef.current !== root) return true;
         setPreview((p) => (p ? { ...p, changes: p.changes.filter((c) => !result.written.includes(c.file)) } : p));
-        if (result.lintErrors.length > 0) {
-          toast.push({
-            tone: "error",
-            title: t.toast.appliedWithErrors(result.written.length, result.lintErrors.length),
-            description: `${result.lintErrors.slice(0, 3).join("\n")}${result.lintErrors.length > 3 ? ` +${result.lintErrors.length - 3}` : ""}\n${t.toast.lintFailedText}`,
-          });
-        } else {
-          toast.push({
-            tone: result.lintChecked ? "success" : "info",
-            title: t.toast.applied(result.written.length),
-            description: result.lintChecked ? t.toast.appliedText : `${t.toast.lintSkippedText}\n${t.toast.appliedText}`,
-          });
-        }
-        if (result.commit && result.branch) toast.push({ tone: "success", title: t.git.committed(result.branch, result.commit) });
-        if (result.gitError) toast.push({ tone: "error", title: t.git.commitFailed, description: result.gitError });
+        announce(result);
         void refreshSnapshots();
         if (keepTrial) {
           const kept = await api.keepDockerTrial(root).catch((e) => {
@@ -783,13 +821,13 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
     () => ({
       api, view, setView, findingsFilter, setFindingsFilter, showFindings, theme, setTheme, recent, forgetRecent, project, opening, openProject, closeProject,
       target, setTarget, scan, scanning, progress, runScan, cancelScan, deps, toolchain, toolchainFailed, refreshToolchain, installingRector,
-      installRector, preview, previewMode, previewing, loadPreview, clearPreview, cancelPreview, skippedHunks, skipHunks, docker, scanHistory, dockerHistory, checkHistory, dockerStep, runDocker, cancelDocker, saveConfig, dockerArgs, dockerTrial, tryFixes, applying, applyChanges, snapshots,
+      installRector, preview, previewMode, previewing, loadPreview, clearPreview, cancelPreview, skippedHunks, skipHunks, docker, scanHistory, dockerHistory, checkHistory, dockerStep, runDocker, cancelDocker, saveConfig, dockerArgs, dockerTrial, tryFixes, aiProvider, applyAiSuggestion, applying, applyChanges, snapshots,
       refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport, ignoreFinding, unignoreFinding, pruneIgnores, importRuntimeLog, setRuntimeRoots, clearRuntimeLog, runLocalCheck, checking, cancelLocalCheck,
     }),
     [
       api, view, findingsFilter, showFindings, theme, setTheme, recent, forgetRecent, project, opening, openProject, closeProject, target,
       setTarget, scan, scanning, progress, runScan, cancelScan, deps, toolchain, toolchainFailed, refreshToolchain, installingRector,
-      installRector, preview, previewMode, previewing, loadPreview, clearPreview, cancelPreview, skippedHunks, skipHunks, docker, scanHistory, dockerHistory, checkHistory, dockerStep, runDocker, cancelDocker, saveConfig, dockerArgs, dockerTrial, tryFixes, applying, applyChanges, snapshots,
+      installRector, preview, previewMode, previewing, loadPreview, clearPreview, cancelPreview, skippedHunks, skipHunks, docker, scanHistory, dockerHistory, checkHistory, dockerStep, runDocker, cancelDocker, saveConfig, dockerArgs, dockerTrial, tryFixes, aiProvider, applyAiSuggestion, applying, applyChanges, snapshots,
       refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport, ignoreFinding, unignoreFinding, pruneIgnores, importRuntimeLog, setRuntimeRoots, clearRuntimeLog, runLocalCheck, checking, cancelLocalCheck,
     ],
   );

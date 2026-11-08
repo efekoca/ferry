@@ -1,5 +1,6 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
-import { Activity, ArrowRight, CircleCheck, CircleStop, ClipboardList, EyeOff, FileCheck2, FileCode2, FlaskConical, FolderSearch, MoreHorizontal, Search, SquareArrowOutUpRight, Undo2, X } from "lucide-react";
+import { Activity, ArrowRight, Sparkles, CircleCheck, CircleStop, ClipboardList, EyeOff, FileCheck2, FileCode2, FlaskConical, FolderSearch, MoreHorizontal, Search, SquareArrowOutUpRight, Undo2, X } from "lucide-react";
+import { AiSuggest } from "../components/AiSuggest";
 import { ConfirmDialog } from "../components/Modal";
 import { PageHeader } from "../components/Shell";
 import { Splitter } from "../components/Splitter";
@@ -39,7 +40,7 @@ export function prioritizeFindings(findings: Finding[]): Finding[] {
 
 export function Findings() {
   const { t, loc } = useI18n();
-  const { scan, setView, project, api, runScan, scanning, findingsFilter: filter, setFindingsFilter, ignoreFinding, unignoreFinding, pruneIgnores, importRuntimeLog, setRuntimeRoots, clearRuntimeLog, runLocalCheck, checking, cancelLocalCheck, target } = useStore();
+  const { scan, setView, project, api, aiProvider, runScan, scanning, findingsFilter: filter, setFindingsFilter, ignoreFinding, unignoreFinding, pruneIgnores, importRuntimeLog, setRuntimeRoots, clearRuntimeLog, runLocalCheck, checking, cancelLocalCheck, target } = useStore();
   const [localPhp, setLocalPhp] = useState<LocalPhp[]>([]);
   const [confirmTests, setConfirmTests] = useState(false);
   useEffect(() => {
@@ -50,6 +51,7 @@ export function Findings() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showIgnored, setShowIgnored] = useState(false);
   const [ignoring, setIgnoring] = useState<{ id: string; reason: string } | null>(null);
+  const [suggesting, setSuggesting] = useState<Finding | null>(null);
   const [busy, setBusy] = useState(false);
   const toast = useToast();
 
@@ -418,6 +420,11 @@ export function Findings() {
                         {t.findings.previewFix} <ArrowRight size={14} />
                       </Button>
                     )}
+                    {selectedReason === undefined && selected.fix === "manual" && !selected.ruleId.startsWith("framework.") && aiProvider && (
+                      <Button variant="primary" icon={<Sparkles size={13} />} onClick={() => setSuggesting(selected)}>
+                        {t.ai.suggest}
+                      </Button>
+                    )}
                     {project && api && (
                       <Button variant="secondary" icon={<SquareArrowOutUpRight size={13} />} onClick={() => openInEditor(selected)}>
                         {t.findings.openInEditor}
@@ -452,6 +459,7 @@ export function Findings() {
           </aside>
         </div>
       )}
+      <AiSuggest finding={suggesting} onClose={() => setSuggesting(null)} />
       <ConfirmDialog
         open={confirmTests}
         icon={<FlaskConical size={20} />}

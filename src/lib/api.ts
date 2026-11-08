@@ -27,6 +27,8 @@ import type {
   ToolchainStatus,
   VersionSuggestion,
   WpLatest,
+  AiPrompt,
+  AiSuggestion,
 } from "./types";
 import { mockApi } from "./mock";
 import type { Lang } from "../i18n";
@@ -90,6 +92,11 @@ export interface Api {
   sourceLines(path: string, file: string, line: number): Promise<SourceLine[]>;
   revealPath(path: string): Promise<void>;
   getSettings(): Promise<Settings>;
+  aiProvider(): Promise<string | null>;
+  aiPrompt(path: string, id: string): Promise<AiPrompt>;
+  aiSuggest(path: string, id: string): Promise<AiSuggestion>;
+  cancelAi(path: string): Promise<void>;
+  applyAiSuggestion(path: string, id: number, label: string): Promise<ApplyResult>;
   setLanguage(lang: Lang): Promise<void>;
   setWindowTheme(theme: "light" | "dark" | null): Promise<void>;
   saveSettings(settings: Settings): Promise<void>;
@@ -168,6 +175,11 @@ async function tauriApi(): Promise<Api> {
     openInEditor: (path, file, line, column) => invoke("open_in_editor", { path, file, line, column }),
     revealPath: (path) => opener.revealItemInDir(path),
     getSettings: () => invoke("get_settings"),
+    aiProvider: () => invoke("ai_provider"),
+    aiPrompt: (path, id) => invoke("ai_prompt", { path, id }),
+    aiSuggest: (path, id) => invoke("ai_suggest", { path, id }),
+    cancelAi: (path) => invoke("cancel_ai", { path }),
+    applyAiSuggestion: (path, id, label) => invoke("apply_ai_suggestion", { path, id, label }),
     saveSettings: (settings) => invoke("save_settings", { settings }),
     setLanguage: (language) => invoke("set_language", { language }),
     setWindowTheme: (theme) => getCurrentWindow().setTheme(theme),

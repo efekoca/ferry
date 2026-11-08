@@ -1,3 +1,4 @@
+pub mod ai;
 pub mod analyzer;
 pub mod arguments;
 mod calls;
