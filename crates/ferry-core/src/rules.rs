@@ -495,7 +495,7 @@ pub const FUNCTIONS: &[SymbolRule] = &[
         "utf8_encode() kullanımdan kalktı. Kaynak metnin gerçekten ISO-8859-1 olduğundan emin olun.",
         "utf8_encode() is deprecated. Make sure the source text really is ISO-8859-1.")),
     rule!("deprecated.utf8_decode", "utf8_decode", D, (8, 2), code("mb_convert_encoding($s, 'ISO-8859-1', 'UTF-8')"), L, DEPRECATED_FN),
-    rule!("deprecated.lcg_value", "lcg_value", D, (8, 4), code("Random\\Randomizer::getFloat()"), M, DEPRECATED_FN),
+    rule!("deprecated.lcg_value", "lcg_value", D, (8, 4), code("(new \\Random\\Randomizer())->getFloat(0, 1, \\Random\\IntervalBoundary::OpenOpen)"), M, DEPRECATED_FN),
     rule!("deprecated.mysqli_ping", "mysqli_ping", D, (8, 4), None, M, Text::new(
         "mysqli_ping() kullanımdan kalktı; kopan bağlantı artık kendiliğinden yeniden kurulmuyor.",
         "mysqli_ping() is deprecated; dropped connections are no longer reconnected automatically.")),
@@ -592,9 +592,12 @@ pub const CONSTANTS: &[SymbolRule] = &[
         "filter_sanitize_stripped",
         D,
         (8, 1),
-        code("htmlspecialchars()"),
+        tx("strip_tags() ya da htmlspecialchars(), ihtiyaca göre", "strip_tags() or htmlspecialchars(), depending on what you need"),
         M,
-        Text::new("FILTER_SANITIZE_STRIPPED kullanımdan kalktı.", "FILTER_SANITIZE_STRIPPED is deprecated.")
+        Text::new(
+            "FILTER_SANITIZE_STRIPPED, FILTER_SANITIZE_STRING'in diğer adı ve kullanımdan kalktı. Etiketleri silmek için strip_tags(), tırnakları ve etiketleri kodlamak için htmlspecialchars() kullanın.",
+            "FILTER_SANITIZE_STRIPPED is another name for FILTER_SANITIZE_STRING and is deprecated. Use strip_tags() to remove tags, or htmlspecialchars() to encode quotes and tags."
+        )
     ),
     rule!(
         "deprecated.e_strict",
@@ -689,8 +692,8 @@ pub const CONSTANTS: &[SymbolRule] = &[
         M,
         Text::new("PGSQL_LIBPQ_VERSION_STR PHP 8.0'da kaldırıldı.", "PGSQL_LIBPQ_VERSION_STR was removed in PHP 8.0.")
     ),
-    rule!("deprecated.file_binary", "file_binary", D, (8, 1), tx("bayrağı silin", "remove the flag"), M, NO_EFFECT),
-    rule!("deprecated.file_text", "file_text", D, (8, 1), tx("bayrağı silin", "remove the flag"), M, NO_EFFECT),
+    rule!("deprecated.file_binary", "file_binary", D, (8, 1), tx("bayrağı çıkarın; tek başına kullanılıyorsa 0 yazın", "take the flag out; where it stands alone, write 0"), M, NO_EFFECT),
+    rule!("deprecated.file_text", "file_text", D, (8, 1), tx("bayrağı çıkarın; tek başına kullanılıyorsa 0 yazın", "take the flag out; where it stands alone, write 0"), M, NO_EFFECT),
     rule!(
         "deprecated.assert_constants",
         "assert_*",
@@ -766,7 +769,7 @@ pub const CONSTANTS: &[SymbolRule] = &[
         "date_rfc7231",
         D,
         (8, 5),
-        code("DATE_RFC1123"),
+        tx("UTC'de 'D, d M Y H:i:s \\G\\M\\T' biçimi", "the 'D, d M Y H:i:s \\G\\M\\T' format in UTC"),
         M,
         Text::new(
             "DATE_RFC7231 saat dilimini yok sayıyordu ve 8.5'te kullanımdan kalktı.",
@@ -774,9 +777,9 @@ pub const CONSTANTS: &[SymbolRule] = &[
         )
     ),
     rule!("deprecated.mhash_constant", "mhash_*", D, (8, 5), code("hash_*"), M, DEPRECATED_FN),
-    rule!("deprecated.curlpipe_http1", "curlpipe_http1", D, (7, 4), code("CURLPIPE_MULTIPLEX"), M, Text::new(
-        "CURLPIPE_HTTP1 curl 7.62'den beri hiçbir şey yapmıyor ve PHP 7.4'te kullanımdan kalktı.",
-        "CURLPIPE_HTTP1 has done nothing since curl 7.62 and is deprecated since PHP 7.4.")),
+    rule!("deprecated.curlpipe_http1", "curlpipe_http1", D, (7, 4), code("CURLPIPE_NOTHING"), M, Text::new(
+        "CURLPIPE_HTTP1 curl 7.62'den beri hiçbir şey yapmıyor ve PHP 7.4'te kullanımdan kalktı. Bugünkü davranışı CURLPIPE_NOTHING korur; CURLPIPE_MULTIPLEX ise HTTP/2 çoğullamayı açar.",
+        "CURLPIPE_HTTP1 has done nothing since curl 7.62 and is deprecated since PHP 7.4. CURLPIPE_NOTHING keeps today's behavior; CURLPIPE_MULTIPLEX turns on HTTP/2 multiplexing.")),
     rule!("removed.ai_idn_constant", "ai_idn_*", R, (8, 0), None, M, AI_IDN),
     rule!("deprecated.mysqli_update_max_length", "mysqli_stmt_attr_update_max_length", D, (8, 1), REMOVE_USE, M, Text::new(
         "Bu sabit PHP 8.1'den beri hiçbir şey yapmıyor; max_length artık her zaman 0.",
@@ -786,7 +789,7 @@ pub const CONSTANTS: &[SymbolRule] = &[
         "filter_flag_scheme_required",
         R,
         (8, 0),
-        tx("bayrağı silin", "remove the flag"),
+        tx("bayrağı çıkarın; tek başına kullanılıyorsa 0 yazın", "take the flag out; where it stands alone, write 0"),
         M,
         Text::new(
             "Bu bayrak PHP 8.0'da kaldırıldı; FILTER_VALIDATE_URL şemayı zaten zorunlu tutuyor.",
@@ -798,7 +801,7 @@ pub const CONSTANTS: &[SymbolRule] = &[
         "filter_flag_host_required",
         R,
         (8, 0),
-        tx("bayrağı silin", "remove the flag"),
+        tx("bayrağı çıkarın; tek başına kullanılıyorsa 0 yazın", "take the flag out; where it stands alone, write 0"),
         M,
         Text::new(
             "Bu bayrak PHP 8.0'da kaldırıldı; FILTER_VALIDATE_URL host'u zaten zorunlu tutuyor.",
@@ -970,10 +973,10 @@ pub const MEMBERS: &[MemberRule] = &[
             )
         ),
     ),
-    member(Mt, "datetime", rule!("deprecated.date_wakeup", "__wakeup", D, (8, 5), code("__unserialize()"), M, WAKEUP)),
-    member(Mt, "dateinterval", rule!("deprecated.date_wakeup", "__wakeup", D, (8, 5), code("__unserialize()"), M, WAKEUP)),
-    member(Mt, "dateperiod", rule!("deprecated.date_wakeup", "__wakeup", D, (8, 5), code("__unserialize()"), M, WAKEUP)),
-    member(Mt, "splfixedarray", rule!("deprecated.splfixedarray_wakeup", "__wakeup", D, (8, 4), code("__unserialize()"), M, WAKEUP)),
+    member(Mt, "datetime", rule!("deprecated.date_wakeup", "__wakeup", D, (8, 5), tx("çağrıyı silin; alt sınıfta mantığı __unserialize()'a taşıyın", "delete the call; in a subclass, move the logic to __unserialize()"), M, WAKEUP)),
+    member(Mt, "dateinterval", rule!("deprecated.date_wakeup", "__wakeup", D, (8, 5), tx("çağrıyı silin; alt sınıfta mantığı __unserialize()'a taşıyın", "delete the call; in a subclass, move the logic to __unserialize()"), M, WAKEUP)),
+    member(Mt, "dateperiod", rule!("deprecated.date_wakeup", "__wakeup", D, (8, 5), tx("çağrıyı silin; alt sınıfta mantığı __unserialize()'a taşıyın", "delete the call; in a subclass, move the logic to __unserialize()"), M, WAKEUP)),
+    member(Mt, "splfixedarray", rule!("deprecated.splfixedarray_wakeup", "__wakeup", D, (8, 4), tx("çağrıyı silin; alt sınıfta mantığı __unserialize()'a taşıyın", "delete the call; in a subclass, move the logic to __unserialize()"), M, WAKEUP)),
     member(Mt, "splfileinfo", rule!("deprecated.splfileinfo_bad_state_ex", "_bad_state_ex", D, (8, 2), REMOVE_CALL, M, DEPRECATED_FN)),
     member(
         Mt,
@@ -1110,7 +1113,10 @@ const UNUSED_CONSTANT: Text = Text::new(
     "Bu sabit hiçbir yerde kullanılmadığı için 8.1'de kullanımdan kalktı; kullanımı silinebilir.",
     "This constant was never used by PHP and is deprecated in 8.1; its use can be removed.",
 );
-const REMOVE_USE: Option<Text> = tx("kullanımı silin", "remove its use");
+const REMOVE_USE: Option<Text> = tx(
+    "kullanımı silin; | ile birleştirilmişse yalnızca bu sabiti çıkarın",
+    "remove its use; in a | combination, take out only this constant",
+);
 const WAKEUP: Text = Text::new(
     "Bu sınıfın __wakeup() metodu kullanımdan kalktı; serileştirme artık __unserialize() ile yapılıyor. Alt sınıfta parent::__wakeup() çağrısını kaldırın ya da __unserialize()'a taşıyın.",
     "This class's __wakeup() method is deprecated; unserialization now goes through __unserialize(). In a subclass, drop the parent::__wakeup() call or move it to __unserialize().",
@@ -1723,8 +1729,8 @@ pub mod patterns {
         severity: Severity::Deprecated,
         since: (8, 2),
         replacement: tx(
-            "htmlspecialchars(), base64_encode() ya da quoted_printable_encode()",
-            "htmlspecialchars(), base64_encode() or quoted_printable_encode()",
+            "HTML-ENTITIES için mb_encode_numericentity(), BASE64 için base64_encode(), QPrint için quoted_printable_encode(), UUENCODE için convert_uuencode()",
+            "mb_encode_numericentity() for HTML-ENTITIES, base64_encode() for BASE64, quoted_printable_encode() for QPrint, convert_uuencode() for UUENCODE",
         ),
         fix: FixKind::Manual,
         note: Text::new(

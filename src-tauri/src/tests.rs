@@ -886,6 +886,29 @@ fn the_local_model_is_offered_by_memory_and_used_only_once_installed() {
     h.ok("cancel_local_model", json!({}));
 }
 
+#[test]
+fn ferrys_local_model_is_offered_only_for_rules_it_was_checked_on() {
+    let _lang = turkish();
+    let h = harness();
+    let root = h.root.clone();
+    let scan = h.ok("scan_project", json!({ "path": root, "target": "8.4", "run": 1 }));
+    let manual: Vec<Value> = scan["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|f| f["fix"] == "manual" && !f["ruleId"].as_str().unwrap().starts_with("framework."))
+        .cloned()
+        .collect();
+    let outside = manual.iter().find(|f| !ferry_core::ai::local_supports(f["ruleId"].as_str().unwrap())).unwrap();
+    assert!(h.invoke("ai_prompt", json!({ "path": root, "id": outside["id"] })).is_ok());
+    h.ok("save_ai_config", json!({ "config": { "kind": "local", "model": "qwen3.5-9b" } }));
+    let err = h.invoke("ai_prompt", json!({ "path": root, "id": outside["id"] })).unwrap_err();
+    assert!(err.as_str().unwrap().contains("yerel modeli"), "{err}");
+    if let Some(inside) = manual.iter().find(|f| ferry_core::ai::local_supports(f["ruleId"].as_str().unwrap())) {
+        assert!(h.invoke("ai_prompt", json!({ "path": root, "id": inside["id"] })).is_ok());
+    }
+}
+
 /// Turns `each()` into `foreach` in whatever window it's shown, like a model would.
 struct Scripted;
 

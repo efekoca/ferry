@@ -9,6 +9,7 @@ mod builtin;
 mod arity;
 pub mod compare;
 pub mod config;
+pub mod constants;
 pub mod database;
 mod declarations;
 pub mod deps;

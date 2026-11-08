@@ -1552,12 +1552,24 @@ fn ai_provider(state: State<'_, AppState>) -> Option<String> {
     state.ai_provider.lock().unwrap().as_ref().map(|p| p.name())
 }
 
+/// Ferry's own local model is offered only for the rules where it gave correct fixes.
+fn local_allows(state: &AppState, rule: &str) -> CmdResult<()> {
+    if state.ai_config.lock().unwrap().kind == Some(ferry_core::ai::Kind::Local) && !ferry_core::ai::local_supports(rule) {
+        return Err(t!(
+            "Ferry'nin yerel modeli bu tür bulgularda denendi ama güvenilir düzeltmeler vermedi. Bir bulut sağlayıcıyla deneyin ya da elle düzeltin.",
+            "Ferry's local model was tried on this kind of finding and didn't give reliable fixes. Try a cloud provider or fix it by hand."
+        ));
+    }
+    Ok(())
+}
+
 /// What a suggestion would send, shown before anything leaves the computer.
 #[tauri::command]
 async fn ai_prompt(state: State<'_, AppState>, path: String, id: String) -> CmdResult<ferry_core::ai::Prompt> {
     let path = normalize_path(path);
     let root = project_root(&path)?;
     let (finding, target) = presented_finding(&state, &path, &root, &id)?;
+    local_allows(&state, &finding.rule_id)?;
     blocking(move || ferry_core::ai::prompt(&root, &finding, target)).await
 }
 
@@ -1572,6 +1584,7 @@ async fn ai_suggest(state: State<'_, AppState>, path: String, id: String) -> Cmd
     let provider =
         state.ai_provider.lock().unwrap().clone().ok_or_else(|| t!("Henüz bir AI sağlayıcısı yok.", "No AI provider is set up yet."))?;
     let (finding, target) = presented_finding(&state, &path, &root, &id)?;
+    local_allows(&state, &finding.rule_id)?;
     let cancel = Arc::new(AtomicBool::new(false));
     state.ai_cancel.lock().unwrap().insert(path.clone(), cancel.clone());
     let php = state.php_override();
