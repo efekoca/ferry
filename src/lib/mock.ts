@@ -5,6 +5,8 @@ import type { CheckSummary, DockerComparison, DockerStep, DockerSummary, History
   DependencyReport,
   DockerGap,
   SnapshotConflict,
+  AiConfig,
+  AiView,
   DiffLine,
   FileChange,
   Finding,
@@ -187,6 +189,13 @@ export function mockApi(
   const listeners = new Set<(p: ScanProgress) => void>();
   let settings: Settings = { phpPath: null, snapshotLimit: 30, editor: null, editorCommand: null, aiProjects: [] };
   let aiSuggestion = 0;
+  let aiCfg: AiConfig = { kind: "anthropic", model: "claude-opus-5-5", baseUrl: null };
+  let aiKey = opts.aiProvider !== null;
+  const aiName = () => {
+    if (!aiCfg.kind || !aiCfg.model || (aiCfg.kind === "anthropic" && !aiKey) || (aiCfg.kind === "openai" && !aiCfg.baseUrl)) return null;
+    return aiCfg.kind === "anthropic" ? `Anthropic (${aiCfg.model})` : `${aiCfg.baseUrl?.split("://")[1]?.split("/")[0]} (${aiCfg.model})`;
+  };
+  const aiView = (): AiView => ({ ...aiCfg, hasKey: aiKey, models: ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"] });
   let aiStopped = false;
   const ignores = new Map<string, string>();
   let stale = opts.staleIgnores ?? [];
@@ -545,7 +554,19 @@ export function mockApi(
     dismissInterrupted: async () => {},
     checkHistory: async () => checkRuns,
     getSettings: async () => settings,
-    aiProvider: async () => opts.aiProvider === undefined ? "Sample model" : opts.aiProvider,
+    aiProvider: async () => (opts.aiProvider === null ? null : aiName()),
+    aiConfig: async () => aiView(),
+    saveAiConfig: async (config, key) => {
+      await sleep(delay / 3);
+      if (config.baseUrl && !/^https?:\/\//.test(config.baseUrl)) throw new Error("The address has to start with http:// or https://.");
+      aiCfg = config;
+      if (key !== null) aiKey = key.trim() !== "";
+      return aiView();
+    },
+    checkAiConfig: async () => {
+      await sleep(delay);
+      if (!aiName()) throw new Error("Save the provider, model and key first.");
+    },
     aiPrompt: async (_path, id) => {
       const f = lastScan?.findings.find((x) => x.id === id);
       if (!f) throw new Error("Finding not found; scan the project again.");

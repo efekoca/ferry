@@ -146,6 +146,7 @@ interface AppStore {
   applying: boolean;
   applyChanges(files: string[], skipped?: Record<string, number[]>, keepTrial?: boolean, commitMessage?: string): Promise<boolean>;
   aiProvider: string | null;
+  refreshAiProvider(): Promise<void>;
   applyAiSuggestion(id: number, label: string): Promise<boolean>;
 
   snapshots: Snapshot[];
@@ -259,9 +260,14 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
     refreshToolchain();
   }, [refreshToolchain]);
 
-  useEffect(() => {
-    if (api) void api.aiProvider().then(setAiProvider).catch(() => setAiProvider(null));
+  const refreshAiProvider = useCallback(async () => {
+    if (!api) return;
+    setAiProvider(await api.aiProvider().catch(() => null));
   }, [api]);
+
+  useEffect(() => {
+    void refreshAiProvider();
+  }, [refreshAiProvider]);
 
   /** A long run belongs to its project, so leaving that project ends it. */
   const leaveRuns = useCallback(
@@ -821,13 +827,13 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
     () => ({
       api, view, setView, findingsFilter, setFindingsFilter, showFindings, theme, setTheme, recent, forgetRecent, project, opening, openProject, closeProject,
       target, setTarget, scan, scanning, progress, runScan, cancelScan, deps, toolchain, toolchainFailed, refreshToolchain, installingRector,
-      installRector, preview, previewMode, previewing, loadPreview, clearPreview, cancelPreview, skippedHunks, skipHunks, docker, scanHistory, dockerHistory, checkHistory, dockerStep, runDocker, cancelDocker, saveConfig, dockerArgs, dockerTrial, tryFixes, aiProvider, applyAiSuggestion, applying, applyChanges, snapshots,
+      installRector, preview, previewMode, previewing, loadPreview, clearPreview, cancelPreview, skippedHunks, skipHunks, docker, scanHistory, dockerHistory, checkHistory, dockerStep, runDocker, cancelDocker, saveConfig, dockerArgs, dockerTrial, tryFixes, aiProvider, refreshAiProvider, applyAiSuggestion, applying, applyChanges, snapshots,
       refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport, ignoreFinding, unignoreFinding, pruneIgnores, importRuntimeLog, setRuntimeRoots, clearRuntimeLog, runLocalCheck, checking, cancelLocalCheck,
     }),
     [
       api, view, findingsFilter, showFindings, theme, setTheme, recent, forgetRecent, project, opening, openProject, closeProject, target,
       setTarget, scan, scanning, progress, runScan, cancelScan, deps, toolchain, toolchainFailed, refreshToolchain, installingRector,
-      installRector, preview, previewMode, previewing, loadPreview, clearPreview, cancelPreview, skippedHunks, skipHunks, docker, scanHistory, dockerHistory, checkHistory, dockerStep, runDocker, cancelDocker, saveConfig, dockerArgs, dockerTrial, tryFixes, aiProvider, applyAiSuggestion, applying, applyChanges, snapshots,
+      installRector, preview, previewMode, previewing, loadPreview, clearPreview, cancelPreview, skippedHunks, skipHunks, docker, scanHistory, dockerHistory, checkHistory, dockerStep, runDocker, cancelDocker, saveConfig, dockerArgs, dockerTrial, tryFixes, aiProvider, refreshAiProvider, applyAiSuggestion, applying, applyChanges, snapshots,
       refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport, ignoreFinding, unignoreFinding, pruneIgnores, importRuntimeLog, setRuntimeRoots, clearRuntimeLog, runLocalCheck, checking, cancelLocalCheck,
     ],
   );

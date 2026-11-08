@@ -158,9 +158,312 @@ pub fn suggestion(finding: &Finding, prompt: &Prompt, reply: &str) -> Result<Fil
     })
 }
 
+/// The providers Ferry can call with the user's own key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Kind {
+    Anthropic,
+    /// Anything that speaks OpenAI's chat completions: OpenAI itself, or a local server such as
+    /// Ollama or LM Studio.
+    Openai,
+}
+
+pub const ANTHROPIC_MODELS: [&str; 3] = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"];
+const ANTHROPIC_URL: &str = "https://api.anthropic.com";
+const ANTHROPIC_VERSION: &str = "2026-10-21";
+/// A declined request runs again on a model chosen for the reason it was declined.
+const FALLBACK_BETA: &str = "server-side-fallback-2026-07-01";
+const MAX_TOKENS: u32 = 16_000;
+const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// A provider reached over HTTPS with the system's curl. The key goes to curl on its standard
+/// input, so it never shows on a command line.
+#[derive(Debug, Clone)]
+pub struct Remote {
+    pub kind: Kind,
+    pub model: String,
+    pub base_url: String,
+    pub key: Option<String>,
+}
+
+struct Request {
+    url: String,
+    headers: Vec<String>,
+    body: Option<String>,
+}
+
+fn quoted(value: &str) -> String {
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\"").replace(['\n', '\r'], ""))
+}
+
+fn curl_config(request: &Request, body_file: Option<&Path>) -> String {
+    let mut config = format!("url = {}\n", quoted(&request.url));
+    for header in &request.headers {
+        config.push_str(&format!("header = {}\n", quoted(header)));
+    }
+    if let Some(file) = body_file {
+        config.push_str(&format!("data-binary = {}\n", quoted(&format!("@{}", file.display()))));
+    }
+    config.push_str("write-out = \"\\n%{http_code}\"\n");
+    config
+}
+
+fn error_message(body: &str) -> String {
+    let value: serde_json::Value = serde_json::from_str(body).unwrap_or_default();
+    let message = value["error"]["message"].as_str().or_else(|| value["error"].as_str()).or_else(|| value["message"].as_str());
+    message.map_or_else(|| body.trim().chars().take(300).collect(), str::to_string)
+}
+
+fn failure(status: u16, body: &str) -> String {
+    let message = error_message(body);
+    match status {
+        401 | 403 => crate::t!("API anahtarı kabul edilmedi: {message}", "The API key wasn't accepted: {message}"),
+        404 => crate::t!("Model ya da adres bulunamadı: {message}", "The model or address wasn't found: {message}"),
+        429 | 500..=599 => crate::t!(
+            "Sağlayıcı şu anda yanıt veremiyor ({message}). Biraz sonra yeniden deneyin.",
+            "The provider can't answer right now ({message}). Try again a little later."
+        ),
+        _ => crate::t!("Sağlayıcı isteği reddetti: {message}", "The provider refused the request: {message}"),
+    }
+}
+
+fn anthropic_reply(body: &str) -> Result<String, String> {
+    let value: serde_json::Value = serde_json::from_str(body).map_err(|e| e.to_string())?;
+    if value["stop_reason"] == "refusal" {
+        return Err(crate::t!("Model bu isteği reddetti.", "The model declined this request."));
+    }
+    let text: String =
+        value["content"].as_array().into_iter().flatten().filter(|b| b["type"] == "text").filter_map(|b| b["text"].as_str()).collect();
+    if text.trim().is_empty() {
+        return Err(crate::t!("Yanıt boş geldi.", "The reply was empty."));
+    }
+    Ok(text)
+}
+
+fn openai_reply(body: &str) -> Result<String, String> {
+    let value: serde_json::Value = serde_json::from_str(body).map_err(|e| e.to_string())?;
+    let text = value["choices"][0]["message"]["content"].as_str().unwrap_or_default();
+    if text.trim().is_empty() {
+        return Err(crate::t!("Yanıt boş geldi.", "The reply was empty."));
+    }
+    Ok(text.to_string())
+}
+
+impl Remote {
+    pub fn anthropic(model: &str, key: &str) -> Self {
+        Remote { kind: Kind::Anthropic, model: model.to_string(), base_url: ANTHROPIC_URL.to_string(), key: Some(key.to_string()) }
+    }
+
+    fn host(&self) -> String {
+        let rest = self.base_url.split("://").nth(1).unwrap_or(&self.base_url);
+        rest.split('/').next().unwrap_or(rest).to_string()
+    }
+
+    fn headers(&self) -> Vec<String> {
+        let key = self.key.as_deref().filter(|k| !k.is_empty());
+        match self.kind {
+            Kind::Anthropic => {
+                let mut headers = vec![format!("anthropic-version: {ANTHROPIC_VERSION}")];
+                headers.extend(key.map(|k| format!("x-api-key: {k}")));
+                headers
+            }
+            Kind::Openai => key.map(|k| format!("Authorization: Bearer {k}")).into_iter().collect(),
+        }
+    }
+
+    fn base(&self) -> &str {
+        self.base_url.trim_end_matches('/')
+    }
+
+    fn completion(&self, prompt: &Prompt) -> Request {
+        let mut headers = self.headers();
+        headers.push("content-type: application/json".to_string());
+        let (url, body) = match self.kind {
+            Kind::Anthropic => {
+                let mut body = serde_json::json!({
+                    "model": self.model,
+                    "max_tokens": MAX_TOKENS,
+                    "system": prompt.system,
+                    "messages": [{ "role": "user", "content": prompt.user }],
+                });
+                if !self.model.starts_with("claude-haiku") {
+                    body["fallbacks"] = "default".into();
+                    headers.push(format!("anthropic-beta: {FALLBACK_BETA}"));
+                }
+                (format!("{}/v1/messages", self.base()), body)
+            }
+            Kind::Openai => {
+                let messages = [("system", &prompt.system), ("user", &prompt.user)];
+                let messages: Vec<_> = messages.iter().map(|(role, text)| serde_json::json!({ "role": role, "content": text })).collect();
+                (format!("{}/chat/completions", self.base()), serde_json::json!({ "model": self.model, "messages": messages }))
+            }
+        };
+        Request { url, headers, body: Some(body.to_string()) }
+    }
+
+    fn send(&self, request: &Request, cancel: &AtomicBool, timeout: std::time::Duration) -> Result<(u16, String), String> {
+        let curl = crate::toolchain::find_executable("curl").ok_or_else(|| crate::t!("curl bulunamadı.", "curl wasn't found."))?;
+        let body = match &request.body {
+            Some(text) => {
+                let mut file = tempfile::NamedTempFile::new().map_err(|e| e.to_string())?;
+                std::io::Write::write_all(&mut file, text.as_bytes()).map_err(|e| e.to_string())?;
+                Some(file)
+            }
+            None => None,
+        };
+        let config = curl_config(request, body.as_ref().map(|f| f.path()));
+        let mut cmd = crate::toolchain::command(&curl);
+        cmd.args(["-sS", "--max-time", &timeout.as_secs().to_string(), "-K", "-"]);
+        let done =
+            crate::toolchain::run_process_with_input(cmd, &curl, cancel, timeout + std::time::Duration::from_secs(10), config.into_bytes())
+                .map_err(|e| e.to_string())?;
+        if done.stopped.is_some() {
+            return Err(crate::t!("AI önerisi durduruldu.", "The AI suggestion was stopped."));
+        }
+        let out = String::from_utf8_lossy(&done.stdout).into_owned();
+        let (body, status) = out.rsplit_once('\n').unwrap_or(("", &out));
+        match status.trim().parse::<u16>() {
+            Ok(status) if status > 0 => Ok((status, body.to_string())),
+            _ => {
+                let reason = String::from_utf8_lossy(&done.stderr).trim().to_string();
+                Err(crate::t!("Sağlayıcıya ulaşılamadı: {reason}", "Couldn't reach the provider: {reason}"))
+            }
+        }
+    }
+
+    /// Whether the key and address work, without spending tokens: it lists the models.
+    pub fn check(&self, cancel: &AtomicBool) -> Result<(), String> {
+        let url = match self.kind {
+            Kind::Anthropic => format!("{}/v1/models", self.base()),
+            Kind::Openai => format!("{}/models", self.base()),
+        };
+        let (status, body) =
+            self.send(&Request { url, headers: self.headers(), body: None }, cancel, std::time::Duration::from_secs(20))?;
+        if (200..300).contains(&status) {
+            Ok(())
+        } else {
+            Err(failure(status, &body))
+        }
+    }
+}
+
+impl Provider for Remote {
+    fn name(&self) -> String {
+        match self.kind {
+            Kind::Anthropic => format!("Anthropic ({})", self.model),
+            Kind::Openai => format!("{} ({})", self.host(), self.model),
+        }
+    }
+
+    fn complete(&self, prompt: &Prompt, cancel: &AtomicBool) -> Result<String, String> {
+        let (status, body) = self.send(&self.completion(prompt), cancel, TIMEOUT)?;
+        if !(200..300).contains(&status) {
+            return Err(failure(status, &body));
+        }
+        match self.kind {
+            Kind::Anthropic => anthropic_reply(&body),
+            Kind::Openai => openai_reply(&body),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Answers one request with `reply` and hands back what it received.
+    fn serve(reply: &'static str) -> (String, std::thread::JoinHandle<String>) {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut seen = Vec::new();
+            let mut chunk = [0u8; 4096];
+            loop {
+                let n = stream.read(&mut chunk).unwrap();
+                seen.extend_from_slice(&chunk[..n]);
+                let text = String::from_utf8_lossy(&seen).to_string();
+                if let Some((head, body)) = text.split_once("\r\n\r\n") {
+                    let length = head
+                        .lines()
+                        .find_map(|l| l.to_ascii_lowercase().strip_prefix("content-length:").map(|v| v.trim().parse::<usize>().unwrap()))
+                        .unwrap_or(0);
+                    if body.len() >= length {
+                        break;
+                    }
+                }
+                if n == 0 {
+                    break;
+                }
+            }
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{reply}",
+                reply.len()
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+            String::from_utf8_lossy(&seen).to_string()
+        });
+        (url, handle)
+    }
+
+    fn sample_prompt() -> Prompt {
+        Prompt {
+            system: "fix it".into(),
+            user: "say \"hi\"".into(),
+            file: "a.php".into(),
+            first_line: 1,
+            last_line: 1,
+            original: String::new(),
+            masked: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn an_openai_compatible_server_gets_the_prompt_and_the_key_stays_off_the_command_line() {
+        if crate::toolchain::find_executable("curl").is_none() {
+            return;
+        }
+        let (url, server) = serve(r#"{"choices":[{"message":{"content":"```php\necho 1;\n```"}}]}"#);
+        let remote = Remote { kind: Kind::Openai, model: "local-coder".into(), base_url: format!("{url}/v1"), key: Some("sk-test".into()) };
+        let reply = remote.complete(&sample_prompt(), &AtomicBool::new(false)).unwrap();
+        assert!(reply.contains("echo 1;"));
+        let seen = server.join().unwrap();
+        assert!(seen.starts_with("POST /v1/chat/completions"), "{seen}");
+        assert!(seen.contains("Authorization: Bearer sk-test"), "{seen}");
+        assert!(seen.contains(r#""model":"local-coder""#) && seen.contains(r#"say \"hi\""#), "{seen}");
+        assert_eq!(remote.name(), format!("{} (local-coder)", url.trim_start_matches("http://")));
+    }
+
+    #[test]
+    fn anthropic_requests_carry_the_version_and_a_fallback_except_on_haiku() {
+        if crate::toolchain::find_executable("curl").is_none() {
+            return;
+        }
+        let (url, server) =
+            serve(r#"{"content":[{"type":"thinking","thinking":""},{"type":"text","text":"done"}],"stop_reason":"end_turn"}"#);
+        let remote = Remote { base_url: url, ..Remote::anthropic("claude-opus-5-5", "sk-ant-test") };
+        assert_eq!(remote.complete(&sample_prompt(), &AtomicBool::new(false)).unwrap(), "done");
+        let seen = server.join().unwrap().to_ascii_lowercase();
+        assert!(seen.starts_with("post /v1/messages"), "{seen}");
+        for header in ["x-api-key: sk-ant-test", "anthropic-version: 2026-10-21", "anthropic-beta: server-side-fallback-2026-07-01"] {
+            assert!(seen.contains(header), "{header}: {seen}");
+        }
+        assert!(seen.contains(r#""fallbacks":"default""#));
+        let haiku = Remote::anthropic("claude-haiku-5-5", "k").completion(&sample_prompt());
+        assert!(!haiku.body.unwrap().contains("fallbacks") && !haiku.headers.iter().any(|h| h.contains("beta")));
+    }
+
+    #[test]
+    fn replies_and_errors_read_like_the_providers_send_them() {
+        assert!(anthropic_reply(r#"{"content":[],"stop_reason":"refusal"}"#).is_err());
+        assert!(openai_reply(r#"{"choices":[{"message":{"content":""}}]}"#).is_err());
+        let auth = failure(401, r#"{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}"#);
+        assert!(auth.contains("invalid x-api-key"));
+        assert!(failure(529, "{}").contains("{}") || failure(529, "{}").contains("later") || failure(529, "{}").contains("sonra"));
+        let config = curl_config(&Request { url: "http://h/\"x".into(), headers: vec!["a: b\\c".into()], body: None }, None);
+        assert!(config.contains(r#"url = "http://h/\"x""#) && config.contains(r#"header = "a: b\\c""#), "{config}");
+    }
 
     fn finding(root: &Path, src: &str) -> Finding {
         std::fs::write(root.join("a.php"), src).unwrap();

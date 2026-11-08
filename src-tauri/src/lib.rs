@@ -22,6 +22,68 @@ use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 const CHANGES_FILE: &str = "changes.json";
 const WRITTEN_FILE: &str = "written.json";
 const SETTINGS_FILE: &str = "settings.json";
+const AI_FILE: &str = "ai.json";
+const KEYCHAIN_SERVICE: &str = "io.github.efekoca.ferry";
+
+/// Which provider AI suggestions use. The key isn't here: it lives in the system keychain.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct AiConfig {
+    pub kind: Option<ferry_core::ai::Kind>,
+    pub model: Option<String>,
+    pub base_url: Option<String>,
+}
+
+pub trait Secrets: Send + Sync {
+    fn get(&self, name: &str) -> Option<String>;
+    fn set(&self, name: &str, value: &str) -> Result<(), String>;
+    fn delete(&self, name: &str) -> Result<(), String>;
+}
+
+/// The macOS Keychain, Windows Credential Manager or the Secret Service on Linux.
+struct Keychain;
+
+impl Secrets for Keychain {
+    fn get(&self, name: &str) -> Option<String> {
+        keyring::Entry::new(KEYCHAIN_SERVICE, name).ok()?.get_password().ok()
+    }
+
+    fn set(&self, name: &str, value: &str) -> Result<(), String> {
+        keyring::Entry::new(KEYCHAIN_SERVICE, name).and_then(|e| e.set_password(value)).map_err(|e| e.to_string())
+    }
+
+    fn delete(&self, name: &str) -> Result<(), String> {
+        match keyring::Entry::new(KEYCHAIN_SERVICE, name).and_then(|e| e.delete_credential()) {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+}
+
+fn key_name(kind: ferry_core::ai::Kind) -> &'static str {
+    match kind {
+        ferry_core::ai::Kind::Anthropic => "anthropic-api-key",
+        ferry_core::ai::Kind::Openai => "openai-api-key",
+    }
+}
+
+fn remote(config: &AiConfig, secrets: &dyn Secrets) -> Option<ferry_core::ai::Remote> {
+    use ferry_core::ai::{Kind, Remote};
+    let kind = config.kind?;
+    let model = config.model.clone().filter(|m| !m.trim().is_empty())?;
+    let key = secrets.get(key_name(kind));
+    match kind {
+        Kind::Anthropic => Some(Remote::anthropic(&model, &key?)),
+        Kind::Openai => {
+            let base_url = config.base_url.clone().filter(|u| !u.trim().is_empty())?;
+            Some(Remote { kind, model, base_url, key })
+        }
+    }
+}
+
+fn provider(config: &AiConfig, secrets: &dyn Secrets) -> Option<Arc<dyn ferry_core::ai::Provider>> {
+    remote(config, secrets).map(|r| Arc::new(r) as Arc<dyn ferry_core::ai::Provider>)
+}
 const DEFAULT_BACKUPS: u32 = 30;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -46,6 +108,8 @@ pub struct AppState {
     writes: Arc<Mutex<()>>,
     rector_cancel: Mutex<HashMap<String, Arc<AtomicBool>>>,
     ai_provider: Mutex<Option<Arc<dyn ferry_core::ai::Provider>>>,
+    ai_config: Mutex<AiConfig>,
+    secrets: Box<dyn Secrets>,
     ai_suggestions: Mutex<HashMap<String, (u64, FileChange, PhpVersion)>>,
     ai_cancel: Mutex<HashMap<String, Arc<AtomicBool>>>,
     scan_cancel: Mutex<HashMap<String, Arc<AtomicBool>>>,
@@ -75,6 +139,10 @@ impl AppState {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => first_settings(&data_dir),
             read => read.ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default(),
         };
+        let ai_config: AiConfig =
+            ferry_core::safefs::read_bytes(data_dir.join(AI_FILE)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        let secrets: Box<dyn Secrets> = Box::new(Keychain);
+        let ai_provider = provider(&ai_config, secrets.as_ref());
         Self {
             tools_dir: data_dir.join("tools"),
             data_dir,
@@ -85,7 +153,9 @@ impl AppState {
             previews: Mutex::new(HashMap::new()),
             writes: Arc::new(Mutex::new(())),
             rector_cancel: Mutex::new(HashMap::new()),
-            ai_provider: Mutex::new(None),
+            ai_provider: Mutex::new(ai_provider),
+            ai_config: Mutex::new(ai_config),
+            secrets,
             ai_suggestions: Mutex::new(HashMap::new()),
             ai_cancel: Mutex::new(HashMap::new()),
             scan_cancel: Mutex::new(HashMap::new()),
@@ -1312,6 +1382,62 @@ fn presented_finding(state: &AppState, path: &str, root: &Path, id: &str) -> Cmd
     Ok((finding, scan.target))
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AiView {
+    kind: Option<ferry_core::ai::Kind>,
+    model: Option<String>,
+    base_url: Option<String>,
+    has_key: bool,
+    models: Vec<&'static str>,
+}
+
+fn ai_view(state: &AppState) -> AiView {
+    let config = state.ai_config.lock().unwrap().clone();
+    let has_key = config.kind.is_some_and(|k| state.secrets.get(key_name(k)).is_some());
+    AiView { kind: config.kind, model: config.model, base_url: config.base_url, has_key, models: ferry_core::ai::ANTHROPIC_MODELS.to_vec() }
+}
+
+#[tauri::command]
+fn ai_config(state: State<'_, AppState>) -> AiView {
+    ai_view(&state)
+}
+
+/// `key`: a new key, an empty string to delete the stored one, or nothing to keep it.
+#[tauri::command]
+fn save_ai_config(state: State<'_, AppState>, config: AiConfig, key: Option<String>) -> CmdResult<AiView> {
+    let failed = |e: &dyn std::fmt::Display| t!("AI ayarları kaydedilemedi: {e}", "Couldn't save the AI settings: {e}");
+    let config = AiConfig {
+        model: config.model.map(|m| m.trim().to_string()).filter(|m| !m.is_empty()),
+        base_url: config.base_url.map(|u| u.trim().to_string()).filter(|u| !u.is_empty()),
+        ..config
+    };
+    if let Some(url) = &config.base_url {
+        if !(url.starts_with("https://") || url.starts_with("http://")) {
+            return Err(t!("Adres http:// ya da https:// ile başlamalı.", "The address has to start with http:// or https://."));
+        }
+    }
+    if let (Some(kind), Some(key)) = (config.kind, key) {
+        let key = key.trim();
+        if key.is_empty() { state.secrets.delete(key_name(kind)) } else { state.secrets.set(key_name(kind), key) }
+            .map_err(|e| failed(&e))?;
+    }
+    let json = serde_json::to_vec_pretty(&config).map_err(|e| failed(&e))?;
+    ferry_core::safefs::write_atomic(&state.data_dir.join(AI_FILE), &json).map_err(|e| failed(&e))?;
+    *state.ai_provider.lock().unwrap() = provider(&config, state.secrets.as_ref());
+    *state.ai_config.lock().unwrap() = config;
+    Ok(ai_view(&state))
+}
+
+/// Lists the provider's models, which proves the key and address without spending tokens.
+#[tauri::command]
+async fn check_ai_config(state: State<'_, AppState>) -> CmdResult<()> {
+    let config = state.ai_config.lock().unwrap().clone();
+    let remote = remote(&config, state.secrets.as_ref())
+        .ok_or_else(|| t!("Önce sağlayıcıyı, modeli ve anahtarı kaydedin.", "Save the provider, model and key first."))?;
+    blocking(move || remote.check(&AtomicBool::new(false))).await
+}
+
 #[tauri::command]
 fn ai_provider(state: State<'_, AppState>) -> Option<String> {
     state.ai_provider.lock().unwrap().as_ref().map(|p| p.name())
@@ -1790,6 +1916,9 @@ pub fn with_commands<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R
         rector_preview,
         apply_changes,
         ai_provider,
+        ai_config,
+        save_ai_config,
+        check_ai_config,
         ai_prompt,
         ai_suggest,
         cancel_ai,
