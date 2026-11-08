@@ -60,10 +60,12 @@ impl Secrets for Keychain {
     }
 }
 
-fn key_name(kind: ferry_core::ai::Kind) -> &'static str {
-    match kind {
-        ferry_core::ai::Kind::Anthropic => "anthropic-api-key",
-        ferry_core::ai::Kind::Openai => "openai-api-key",
+/// Where the key for this provider is kept. An OpenAI-compatible key belongs to its server, so
+/// pointing the address somewhere else never sends it there.
+fn key_name(config: &AiConfig) -> Option<String> {
+    match config.kind? {
+        ferry_core::ai::Kind::Anthropic => Some("anthropic-api-key".into()),
+        ferry_core::ai::Kind::Openai => config.base_url.as_deref().map(|u| format!("openai-api-key {}", ferry_core::ai::origin(u))),
     }
 }
 
@@ -71,7 +73,7 @@ fn remote(config: &AiConfig, secrets: &dyn Secrets) -> Option<ferry_core::ai::Re
     use ferry_core::ai::{Kind, Remote};
     let kind = config.kind?;
     let model = config.model.clone().filter(|m| !m.trim().is_empty())?;
-    let key = secrets.get(key_name(kind));
+    let key = key_name(config).and_then(|name| secrets.get(&name));
     match kind {
         Kind::Anthropic => Some(Remote::anthropic(&model, &key?)),
         Kind::Openai => {
@@ -1394,7 +1396,7 @@ struct AiView {
 
 fn ai_view(state: &AppState) -> AiView {
     let config = state.ai_config.lock().unwrap().clone();
-    let has_key = config.kind.is_some_and(|k| state.secrets.get(key_name(k)).is_some());
+    let has_key = key_name(&config).is_some_and(|name| state.secrets.get(&name).is_some());
     AiView { kind: config.kind, model: config.model, base_url: config.base_url, has_key, models: ferry_core::ai::ANTHROPIC_MODELS.to_vec() }
 }
 
@@ -1417,10 +1419,9 @@ fn save_ai_config(state: State<'_, AppState>, config: AiConfig, key: Option<Stri
             return Err(t!("Adres http:// ya da https:// ile başlamalı.", "The address has to start with http:// or https://."));
         }
     }
-    if let (Some(kind), Some(key)) = (config.kind, key) {
+    if let (Some(name), Some(key)) = (key_name(&config), key) {
         let key = key.trim();
-        if key.is_empty() { state.secrets.delete(key_name(kind)) } else { state.secrets.set(key_name(kind), key) }
-            .map_err(|e| failed(&e))?;
+        if key.is_empty() { state.secrets.delete(&name) } else { state.secrets.set(&name, key) }.map_err(|e| failed(&e))?;
     }
     let json = serde_json::to_vec_pretty(&config).map_err(|e| failed(&e))?;
     ferry_core::safefs::write_atomic(&state.data_dir.join(AI_FILE), &json).map_err(|e| failed(&e))?;
@@ -1436,6 +1437,12 @@ async fn check_ai_config(state: State<'_, AppState>) -> CmdResult<()> {
     let remote = remote(&config, state.secrets.as_ref())
         .ok_or_else(|| t!("Önce sağlayıcıyı, modeli ve anahtarı kaydedin.", "Save the provider, model and key first."))?;
     blocking(move || remote.check(&AtomicBool::new(false))).await
+}
+
+/// Ollama or LM Studio, when one is running on this computer.
+#[tauri::command]
+async fn local_ai_servers() -> CmdResult<Vec<ferry_core::ai::LocalServer>> {
+    blocking(|| Ok(ferry_core::ai::local_servers(&ferry_core::ai::LOCAL_SERVERS, &AtomicBool::new(false)))).await
 }
 
 #[tauri::command]
@@ -1919,6 +1926,7 @@ pub fn with_commands<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R
         ai_config,
         save_ai_config,
         check_ai_config,
+        local_ai_servers,
         ai_prompt,
         ai_suggest,
         cancel_ai,

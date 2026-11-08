@@ -31,6 +31,7 @@ import type {
   AiPrompt,
   AiSuggestion,
   AiView,
+  LocalAiServer,
 } from "./types";
 import { mockApi } from "./mock";
 import type { Lang } from "../i18n";
@@ -99,6 +100,8 @@ export interface Api {
   /** `key`: a new key, "" to delete the stored one, or null to keep it. */
   saveAiConfig(config: AiConfig, key: string | null): Promise<AiView>;
   checkAiConfig(): Promise<void>;
+  /** Ollama or LM Studio, when one is running on this computer. */
+  localAiServers(): Promise<LocalAiServer[]>;
   aiPrompt(path: string, id: string): Promise<AiPrompt>;
   aiSuggest(path: string, id: string): Promise<AiSuggestion>;
   cancelAi(path: string): Promise<void>;
@@ -185,6 +188,7 @@ async function tauriApi(): Promise<Api> {
     aiConfig: () => invoke("ai_config"),
     saveAiConfig: (config, key) => invoke("save_ai_config", { config, key }),
     checkAiConfig: () => invoke("check_ai_config"),
+    localAiServers: () => invoke("local_ai_servers"),
     aiPrompt: (path, id) => invoke("ai_prompt", { path, id }),
     aiSuggest: (path, id) => invoke("ai_suggest", { path, id }),
     cancelAi: (path) => invoke("cancel_ai", { path }),
@@ -198,8 +202,10 @@ async function tauriApi(): Promise<Api> {
 let instance: Promise<Api> | null = null;
 
 export function getApi(): Promise<Api> {
-  const scale = Number(new URLSearchParams(window.location.search).get("mockScale")) || 1;
-  instance ??= isTauri() ? tauriApi() : Promise.resolve(mockApi({ scale }));
+  const params = new URLSearchParams(window.location.search);
+  const scale = Number(params.get("mockScale")) || 1;
+  const localAi = params.has("mockLocalAi") ? [{ name: "Ollama", baseUrl: "http://127.0.0.1:11434/v1", models: ["qwen2.5-coder:7b", "qwen3:8b"] }] : undefined;
+  instance ??= isTauri() ? tauriApi() : Promise.resolve(mockApi({ scale, localAi }));
   return instance;
 }
 
