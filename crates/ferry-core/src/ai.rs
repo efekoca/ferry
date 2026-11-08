@@ -14,8 +14,14 @@ use std::sync::atomic::AtomicBool;
 const AROUND: usize = 20;
 
 const SYSTEM: &str = "You fix PHP code for an upgrade to a newer PHP version. Change only what the problem needs, \
-and keep the behavior, style and indentation. A value shown as [redacted] was hidden before sending; leave any \
-line that holds one exactly as it is.";
+and keep the behavior, style, indentation and blank lines. Don't add or change type declarations, return types, \
+visibility or names, and don't add checks, comments or other code the problem doesn't need. A value shown as \
+[redacted] was hidden before sending; leave any line that holds one exactly as it is. If the problem can't be fixed \
+safely with only the lines you're given, reply with them unchanged.";
+
+/// Lines on each side of the finding where a reply may change anything. Further away, only a change
+/// the fix plainly needs is kept.
+const NEAR: usize = 2;
 
 /// Exactly what goes to a provider, so it can be shown before anything is sent.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -30,6 +36,10 @@ pub struct Prompt {
     original: String,
     #[serde(skip)]
     masked: Vec<(usize, String)>,
+    #[serde(skip)]
+    line: usize,
+    #[serde(skip)]
+    target: Option<PhpVersion>,
 }
 
 /// Anything that turns a prompt into a reply: a cloud model with the user's key, or a local one.
@@ -49,7 +59,15 @@ impl Prompt {
             last_line: 1,
             original: String::new(),
             masked: Vec::new(),
+            line: 1,
+            target: None,
         }
+    }
+
+    /// The same request with the reason the previous reply wasn't used.
+    fn again(&self, reason: &str) -> Prompt {
+        let user = format!("{}\n\nYour previous reply wasn't used: {reason} Reply again, changing only what the problem needs.", self.user);
+        Prompt { user, ..self.clone() }
     }
 }
 
@@ -96,17 +114,29 @@ pub fn prompt(root: &Path, finding: &Finding, target: PhpVersion) -> Result<Prom
         })
         .collect();
     let hint = finding.replacement.as_ref().map_or(String::new(), |r| format!("\nSuggested direction: {}", r.en));
+    let problem = excerpt[finding.line - first].trim();
     let user = format!(
         "Ferry found this problem in a project moving to PHP {target}:\n{}: {}{hint}\n\nFile {}, lines {first}-{last}. \
-         The problem is on line {}.\n```php\n{}\n```\n\nReply with lines {first}-{last} corrected, as one ```php block and \
-         nothing else. Keep every line that doesn't need to change exactly as it is.",
+         The problem is on line {}:\n{problem}\n\n```php\n{}\n```\n\nReply with lines {first}-{last} corrected, as one ```php \
+         block and nothing else. Keep every line that doesn't need to change exactly as it is, and use only syntax and \
+         functions that PHP {target} has.",
         finding.title.en,
         finding.message.en,
         finding.file,
         finding.line,
         excerpt.join("\n"),
     );
-    Ok(Prompt { system: SYSTEM.to_string(), user, file: finding.file.clone(), first_line: first, last_line: last, original, masked })
+    Ok(Prompt {
+        system: SYSTEM.to_string(),
+        user,
+        file: finding.file.clone(),
+        first_line: first,
+        last_line: last,
+        original,
+        masked,
+        line: finding.line,
+        target: Some(target),
+    })
 }
 
 pub fn code_block(reply: &str) -> Option<&str> {
@@ -117,11 +147,79 @@ pub fn code_block(reply: &str) -> Option<&str> {
     Some(body[..close].strip_suffix('\n').unwrap_or(&body[..close]))
 }
 
+/// Why a reply wasn't used: in the user's language, and in English for the model when it's asked
+/// again. A reply that changes nothing isn't asked again: the model found no safe fix.
+#[derive(Debug)]
+enum Rejected {
+    Unchanged,
+    Retry { user: String, model: &'static str },
+}
+
+impl Rejected {
+    fn retry(user: String, model: &'static str) -> Rejected {
+        Rejected::Retry { user, model }
+    }
+
+    fn message(self) -> String {
+        match self {
+            Rejected::Unchanged => crate::t!(
+                "Model bu satırlarla güvenli bir düzeltme bulamadı; düzeltme büyük olasılıkla gösterilen satırların dışındaki koda bağlı. Elle düzeltin ya da başka bir modelle deneyin.",
+                "The model found no safe fix within these lines; the fix likely depends on code outside them. Fix it by hand or try another model."
+            ),
+            Rejected::Retry { user, .. } => user,
+        }
+    }
+}
+
+/// Puts back changes that only move whitespace or blank lines away from the finding: noise a model
+/// adds that would otherwise show up in the diff.
+fn without_noise(old: &[String], new: Vec<String>, near: std::ops::RangeInclusive<usize>) -> Vec<String> {
+    let squash = |lines: &[String]| lines.concat().split_whitespace().collect::<String>();
+    let mut out = Vec::new();
+    for op in similar::capture_diff_slices(similar::Algorithm::Myers, old, &new) {
+        let (tag, before, after) = op.as_tag_tuple();
+        let close = before.start <= *near.end() && before.end.max(before.start + 1) > *near.start();
+        if tag != similar::DiffTag::Equal && !close && squash(&old[before.clone()]) == squash(&new[after.clone()]) {
+            out.extend_from_slice(&old[before]);
+        } else {
+            out.extend_from_slice(&new[after]);
+        }
+    }
+    out
+}
+
+/// A function declaration changed away from the finding: models like to add types there, and PHP
+/// may refuse to load the file for it.
+fn touches_far_signature(old: &[String], new: &[String], near: std::ops::RangeInclusive<usize>) -> bool {
+    let declares = |l: &String| {
+        let t = l.trim_start();
+        (t.starts_with("function ") || t.contains(" function ")) && t.contains('(') && !t.starts_with("//") && !t.starts_with('*')
+    };
+    similar::capture_diff_slices(similar::Algorithm::Myers, old, new).iter().any(|op| {
+        let (tag, before, _) = op.as_tag_tuple();
+        tag != similar::DiffTag::Equal
+            && old[before.clone()].iter().enumerate().any(|(i, l)| !near.contains(&(before.start + i)) && declares(l))
+    })
+}
+
+fn counts(findings: &[Finding]) -> std::collections::HashMap<&str, usize> {
+    let mut counts = std::collections::HashMap::new();
+    for f in findings {
+        *counts.entry(f.rule_id.as_str()).or_insert(0) += 1;
+    }
+    counts
+}
+
 /// The reply as a change to the file. A line the model was shown masked has to come back
 /// unchanged, and then gets its real value back.
 pub fn suggestion(finding: &Finding, prompt: &Prompt, reply: &str) -> Result<FileChange, String> {
-    let code =
-        code_block(reply).ok_or_else(|| crate::t!("Yanıtta kod bulunamadı.", "The reply had no code in it."))?.trim_end_matches('\r');
+    checked(finding, prompt, reply).map_err(Rejected::message)
+}
+
+fn checked(finding: &Finding, prompt: &Prompt, reply: &str) -> Result<FileChange, Rejected> {
+    let code = code_block(reply)
+        .ok_or_else(|| Rejected::retry(crate::t!("Yanıtta kod bulunamadı.", "The reply had no code in it."), "It had no ```php block."))?
+        .trim_end_matches('\r');
     let lines: Vec<&str> = prompt.original.lines().collect();
     let window = prompt.last_line - prompt.first_line + 1;
     let mut replaced = Vec::new();
@@ -129,9 +227,12 @@ pub fn suggestion(finding: &Finding, prompt: &Prompt, reply: &str) -> Result<Fil
         let line = line.trim_end_matches('\r');
         if line.contains(crate::redact::MASK) {
             let Some(&(n, _)) = prompt.masked.iter().find(|(_, shown)| shown == line) else {
-                return Err(crate::t!(
-                    "Öneri gizlenmiş bir değeri içeren satırı değiştirdi; uygulanmadı.",
-                    "The suggestion changed a line that held a hidden value, so it wasn't used."
+                return Err(Rejected::retry(
+                    crate::t!(
+                        "Öneri gizlenmiş bir değeri içeren satırı değiştirdi; uygulanmadı.",
+                        "The suggestion changed a line that held a hidden value, so it wasn't used."
+                    ),
+                    "It changed a line that holds [redacted]; those lines must stay exactly as they are.",
                 ));
             };
             replaced.push(lines[n - 1].to_string());
@@ -140,9 +241,22 @@ pub fn suggestion(finding: &Finding, prompt: &Prompt, reply: &str) -> Result<Fil
         }
     }
     if replaced.len() > window * 3 + 20 {
-        return Err(crate::t!(
-            "Öneri beklenenden çok uzun; uygulanmadı.",
-            "The suggestion was much longer than expected, so it wasn't used."
+        return Err(Rejected::retry(
+            crate::t!("Öneri beklenenden çok uzun; uygulanmadı.", "The suggestion was much longer than expected, so it wasn't used."),
+            "It was much longer than the lines you were given.",
+        ));
+    }
+    let shown: Vec<String> = lines[prompt.first_line - 1..prompt.last_line].iter().map(|l| l.to_string()).collect();
+    let at = prompt.line.clamp(prompt.first_line, prompt.last_line) - prompt.first_line;
+    let near = at.saturating_sub(NEAR)..=at + NEAR;
+    let replaced = without_noise(&shown, replaced, near.clone());
+    if touches_far_signature(&shown, &replaced, near) {
+        return Err(Rejected::retry(
+            crate::t!(
+                "Öneri, bulgudan uzaktaki bir fonksiyon tanımını değiştirdi; uygulanmadı.",
+                "The suggestion changed a function declaration away from the finding, so it wasn't used."
+            ),
+            "It changed a function declaration that the problem doesn't involve.",
         ));
     }
     let mut out: Vec<String> = lines[..prompt.first_line - 1].iter().map(|l| l.to_string()).collect();
@@ -154,7 +268,34 @@ pub fn suggestion(finding: &Finding, prompt: &Prompt, reply: &str) -> Result<Fil
         new_content.push_str(newline);
     }
     if new_content == prompt.original {
-        return Err(crate::t!("Öneri kodu değiştirmedi.", "The suggestion didn't change the code."));
+        return Err(Rejected::Unchanged);
+    }
+    if let Some(target) = prompt.target {
+        let before = crate::analyzer::analyze_source(&finding.file, &prompt.original, target);
+        let after = crate::analyzer::analyze_source(&finding.file, &new_content, target);
+        let (before_counts, after_counts) = (counts(&before), counts(&after));
+        let had = before_counts.get(finding.rule_id.as_str()).copied().unwrap_or(0);
+        if had > 0 && after_counts.get(finding.rule_id.as_str()).copied().unwrap_or(0) >= had {
+            return Err(Rejected::retry(
+                crate::t!(
+                    "Öneri bu sorunu çözmedi: Ferry düzeltilmiş kodda aynı bulguyu yine buldu.",
+                    "The suggestion didn't solve the problem: Ferry still finds it in the changed code."
+                ),
+                "Ferry still finds the same problem in the changed code.",
+            ));
+        }
+        if let Some(new) =
+            after.iter().find(|f| after_counts[f.rule_id.as_str()] > before_counts.get(f.rule_id.as_str()).copied().unwrap_or(0))
+        {
+            let title = new.title.get(crate::i18n::lang()).to_string();
+            return Err(Rejected::retry(
+                crate::t!(
+                    "Öneri yeni bir sorun ekledi ({title}); uygulanmadı.",
+                    "The suggestion added a new problem ({title}), so it wasn't used."
+                ),
+                "It added a new PHP compatibility problem.",
+            ));
+        }
     }
     let rule = AppliedRule {
         class: "ai".to_string(),
@@ -171,6 +312,39 @@ pub fn suggestion(finding: &Finding, prompt: &Prompt, reply: &str) -> Result<Fil
         original_hash: crate::snapshot::fnv1a(prompt.original.as_bytes()),
         new_content,
     })
+}
+
+/// Asks the provider, and when the reply is rejected or `syntax` finds errors in it, asks once more
+/// with the reason. Gives the change with the syntax errors and whether the syntax was checked.
+pub fn suggest(
+    provider: &dyn Provider,
+    finding: &Finding,
+    prompt: &Prompt,
+    cancel: &AtomicBool,
+    syntax: &dyn Fn(&FileChange) -> (Vec<String>, bool),
+) -> Result<(FileChange, Vec<String>, bool), String> {
+    let stopped = || crate::t!("AI önerisi durduruldu.", "The AI suggestion was stopped.");
+    let mut current = prompt.clone();
+    for attempt in 0..2 {
+        let reply = provider.complete(&current, cancel)?;
+        if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err(stopped());
+        }
+        let last = attempt == 1;
+        match checked(finding, prompt, &reply) {
+            Ok(change) => {
+                let (errors, ran) = syntax(&change);
+                if errors.is_empty() || last {
+                    return Ok((change, errors, ran));
+                }
+                current = prompt.again(&format!("PHP reported a syntax error in it: {}", errors.join("; ")));
+            }
+            Err(Rejected::Retry { user, .. }) if last => return Err(user),
+            Err(Rejected::Retry { model, .. }) => current = prompt.again(model),
+            Err(unchanged) => return Err(unchanged.message()),
+        }
+    }
+    unreachable!("the loop returns on its second attempt")
 }
 
 /// The providers Ferry can call with the user's own key.
@@ -462,6 +636,7 @@ impl Provider for Remote {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
 
     /// Answers one request with `reply` and hands back what it received.
     fn serve(reply: &'static str) -> (String, std::thread::JoinHandle<String>) {
@@ -508,6 +683,8 @@ mod tests {
             last_line: 1,
             original: String::new(),
             masked: Vec::new(),
+            line: 1,
+            target: None,
         }
     }
 
@@ -641,6 +818,95 @@ mod tests {
         assert!(suggestion(&f, &p, "No code, sorry.").is_err());
         let same = "```php\n<?php\n$password = '[redacted]';\nwhile (list($k, $v) = each($a)) {}\n```";
         assert!(suggestion(&f, &p, same).is_err());
+    }
+
+    const LOOP: &str = "<?php\nfunction total($a, $b) {\n    $sum = 0;\n\n    $x = 1;\n    $y = 2;\n    $z = 3;\n\n    while (list($k, $v) = each($a)) {\n        $sum += $v;\n    }\n    return $sum;\n}\n";
+    const FIXED: &str = "    foreach ($a as $k => $v) {";
+
+    fn reply_with(edit: impl Fn(&str) -> String) -> String {
+        let window: Vec<String> = LOOP.lines().map(|l| if l.contains("each($a)") { FIXED.to_string() } else { l.to_string() }).collect();
+        format!("```php\n{}\n```", edit(&window.join("\n")))
+    }
+
+    #[test]
+    fn a_reply_that_leaves_the_problem_or_adds_one_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = finding(dir.path(), LOOP);
+        let p = prompt(dir.path(), &f, PhpVersion::new(8, 4)).unwrap();
+        assert!(p.user.contains("The problem is on line 9:\nwhile (list($k, $v) = each($a)) {"), "{}", p.user);
+        let unsolved = LOOP.replace("$sum = 0;", "$sum = 0.0;");
+        assert!(
+            matches!(checked(&f, &p, &format!("```php\n{}```", unsolved)), Err(Rejected::Retry { model, .. }) if model.contains("still"))
+        );
+        let worse = reply_with(|w| w.replace("$sum += $v;", "$sum += create_function('', 'return 1;');"));
+        assert!(matches!(checked(&f, &p, &worse), Err(Rejected::Retry { model, .. }) if model.contains("new")));
+        assert!(checked(&f, &p, &reply_with(str::to_string)).is_ok());
+    }
+
+    #[test]
+    fn whitespace_moved_away_from_the_finding_is_put_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = finding(dir.path(), LOOP);
+        let p = prompt(dir.path(), &f, PhpVersion::new(8, 4)).unwrap();
+        let noisy = reply_with(|w| w.replacen("$sum = 0;\n\n", "$sum = 0;\n", 1).replace("    $x = 1;", "  $x = 1;"));
+        let change = checked(&f, &p, &noisy).unwrap();
+        assert_eq!(change.new_content, LOOP.replace("    while (list($k, $v) = each($a)) {", FIXED));
+    }
+
+    #[test]
+    fn a_function_declaration_away_from_the_finding_stays_as_it_is() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = finding(dir.path(), LOOP);
+        let p = prompt(dir.path(), &f, PhpVersion::new(8, 4)).unwrap();
+        let typed = reply_with(|w| w.replace("function total($a, $b) {", "function total(array $a, $b): int {"));
+        assert!(matches!(checked(&f, &p, &typed), Err(Rejected::Retry { model, .. }) if model.contains("declaration")));
+    }
+
+    /// Answers with each reply in turn and keeps the prompts it was sent.
+    struct Replies(Mutex<Vec<String>>, Mutex<Vec<String>>);
+
+    impl Provider for Replies {
+        fn name(&self) -> String {
+            "replies".into()
+        }
+
+        fn complete(&self, prompt: &Prompt, _: &AtomicBool) -> Result<String, String> {
+            self.1.lock().unwrap().push(prompt.user.clone());
+            Ok(self.0.lock().unwrap().remove(0))
+        }
+    }
+
+    #[test]
+    fn a_refused_reply_is_asked_again_once_with_the_reason() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = finding(dir.path(), LOOP);
+        let p = prompt(dir.path(), &f, PhpVersion::new(8, 4)).unwrap();
+        let clean = |_: &FileChange| (Vec::new(), true);
+        let unsolved = format!("```php\n{}```", LOOP.replace("$sum = 0;", "$sum = 0.0;"));
+        let provider = Replies(Mutex::new(vec![unsolved.clone(), reply_with(str::to_string)]), Mutex::default());
+        let (change, errors, ran) = suggest(&provider, &f, &p, &AtomicBool::new(false), &clean).unwrap();
+        assert!(change.new_content.contains(FIXED) && errors.is_empty() && ran);
+        let sent = provider.1.lock().unwrap();
+        assert!(!sent[0].contains("wasn't used") && sent[1].contains("wasn't used: Ferry still finds the same problem"), "{sent:?}");
+        drop(sent);
+
+        let provider = Replies(Mutex::new(vec![unsolved.clone(), unsolved]), Mutex::default());
+        assert!(suggest(&provider, &f, &p, &AtomicBool::new(false), &clean).is_err());
+        assert_eq!(provider.1.lock().unwrap().len(), 2);
+
+        let provider = Replies(Mutex::new(vec![format!("```php\n{LOOP}```")]), Mutex::default());
+        assert!(suggest(&provider, &f, &p, &AtomicBool::new(false), &clean).is_err());
+        assert_eq!(provider.1.lock().unwrap().len(), 1, "a reply that changes nothing isn't asked again");
+
+        let lint =
+            |c: &FileChange| (if c.new_content.contains("$sum += $v;") { vec!["syntax error".to_string()] } else { Vec::new() }, true);
+        let provider = Replies(
+            Mutex::new(vec![reply_with(str::to_string), reply_with(|w| w.replace("$sum += $v;", "$sum = $sum + $v;"))]),
+            Mutex::default(),
+        );
+        let (change, errors, _) = suggest(&provider, &f, &p, &AtomicBool::new(false), &lint).unwrap();
+        assert!(errors.is_empty() && change.new_content.contains("$sum = $sum + $v;"));
+        assert!(provider.1.lock().unwrap()[1].contains("PHP reported a syntax error in it: syntax error"));
     }
 
     #[test]

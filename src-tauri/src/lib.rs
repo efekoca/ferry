@@ -1577,16 +1577,16 @@ async fn ai_suggest(state: State<'_, AppState>, path: String, id: String) -> Cmd
     let php = state.php_override();
     let made = blocking(move || {
         let prompt = ferry_core::ai::prompt(&root, &finding, target)?;
-        let reply = provider.complete(&prompt, &cancel)?;
-        if cancel.load(Ordering::Relaxed) {
-            return Err(t!("AI önerisi durduruldu.", "The AI suggestion was stopped."));
-        }
-        let change = ferry_core::ai::suggestion(&finding, &prompt, &reply)?;
-        let original = ferry_core::safefs::read_text(root.join(&change.file)).ok();
-        let lint = lint_php(php.as_deref(), target)
-            .map(|php| toolchain::new_syntax_errors(&php, [(change.file.as_str(), original.as_deref(), change.new_content.as_str())]));
-        let checked = lint.as_ref().is_some_and(|l| l.not_run.is_empty());
-        Ok((change, lint.map(|l| l.errors).unwrap_or_default(), checked))
+        let php = lint_php(php.as_deref(), target);
+        let syntax = |change: &FileChange| {
+            let original = ferry_core::safefs::read_text(root.join(&change.file)).ok();
+            php.as_ref().map_or((Vec::new(), false), |php| {
+                let lint = toolchain::new_syntax_errors(php, [(change.file.as_str(), original.as_deref(), change.new_content.as_str())]);
+                let checked = lint.not_run.is_empty();
+                (lint.errors, checked)
+            })
+        };
+        ferry_core::ai::suggest(provider.as_ref(), &finding, &prompt, &cancel, &syntax)
     })
     .await;
     state.ai_cancel.lock().unwrap().remove(&path);
