@@ -475,9 +475,11 @@ fn get(port: u16, path: &str, key: Option<&str>) -> Option<(u16, String)> {
     let mut stream = std::net::TcpStream::connect_timeout(&address, Duration::from_secs(1)).ok()?;
     stream.set_read_timeout(Some(Duration::from_secs(5))).ok()?;
     let auth = key.map(|k| format!("Authorization: Bearer {k}\r\n")).unwrap_or_default();
-    write!(stream, "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{auth}Connection: close\r\n\r\n").ok()?;
-    let mut text = String::new();
-    stream.read_to_string(&mut text).ok()?;
+    let request = format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{auth}Connection: close\r\n\r\n");
+    stream.write_all(request.as_bytes()).ok()?;
+    let mut bytes = Vec::new();
+    let _ = stream.read_to_end(&mut bytes);
+    let text = String::from_utf8_lossy(&bytes);
     let status = text.split_whitespace().nth(1)?.parse().ok()?;
     Some((status, text.split_once("\r\n\r\n").map(|(_, body)| body.to_string()).unwrap_or_default()))
 }
@@ -667,8 +669,14 @@ mod tests {
         let url = format!("http://{}", listener.local_addr().unwrap());
         std::thread::spawn(move || {
             for mut stream in listener.incoming().flatten() {
-                let mut head = [0u8; 4096];
-                let _ = stream.read(&mut head);
+                let mut seen = Vec::new();
+                let mut chunk = [0u8; 1024];
+                while !seen.windows(4).any(|w| w == b"\r\n\r\n") {
+                    match stream.read(&mut chunk) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => seen.extend_from_slice(&chunk[..n]),
+                    }
+                }
                 let _ = write!(stream, "HTTP/1.1 200 OK\r\ncontent-length: {}\r\nconnection: close\r\n\r\n", body.len());
                 let _ = stream.write_all(body);
             }
