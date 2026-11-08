@@ -89,6 +89,9 @@ pub struct Model {
     sha256: &'static str,
     #[serde(skip)]
     min_memory: u64,
+    /// Rules of `ai::LOCAL_RULES` this model got wrong when it was tried on them.
+    #[serde(skip)]
+    skip: &'static [&'static str],
 }
 
 /// Biggest first: a computer gets the first one its memory holds.
@@ -103,6 +106,7 @@ pub const MODELS: [Model; 3] = [
         file: "Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf",
         sha256: "f6050b4da22869aa3fb9d94bb3314e9fc5a027d4741c1f97761c387d6b2b2335",
         min_memory: 28 * GIB,
+        skip: &[],
     },
     Model {
         id: "qwen3.5-9b",
@@ -114,6 +118,7 @@ pub const MODELS: [Model; 3] = [
         file: "Qwen3.5-9B-Q4_K_M.gguf",
         sha256: "03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8",
         min_memory: 12 * GIB,
+        skip: &[],
     },
     Model {
         id: "qwen3.5-4b",
@@ -125,11 +130,18 @@ pub const MODELS: [Model; 3] = [
         file: "Qwen3.5-4B-Q4_K_M.gguf",
         sha256: "00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4",
         min_memory: 6 * GIB,
+        skip: &["deprecated.assert_constants", "deprecated.partial_callable", "removed.reflection_export"],
     },
 ];
 
 pub fn model(id: &str) -> Option<&'static Model> {
     MODELS.iter().find(|m| m.id == id)
+}
+
+/// Whether this model is offered for a rule: it's on the checked list and the model didn't get
+/// it wrong.
+pub fn offers(model: &Model, rule: &str) -> bool {
+    crate::ai::local_supports(rule) && !model.skip.contains(&rule)
 }
 
 /// The model for a computer with this much memory, if it has enough for any and llama.cpp has a
@@ -652,6 +664,17 @@ mod tests {
     }
 
     #[test]
+    fn a_model_is_offered_only_for_checked_rules_it_got_right() {
+        let small = model("qwen3.5-4b").unwrap();
+        let medium = model("qwen3.5-9b").unwrap();
+        assert!(offers(medium, "deprecated.partial_callable") && !offers(small, "deprecated.partial_callable"));
+        assert!(offers(small, "deprecated.file_binary") && !offers(medium, "removed.mssql"));
+        for m in &MODELS {
+            assert!(m.skip.iter().all(|r| crate::ai::local_supports(r)), "{}", m.id);
+        }
+    }
+
+    #[test]
     fn every_download_is_pinned_by_commit_size_and_hash() {
         for m in &MODELS {
             assert_eq!(m.commit.len(), 40, "{}", m.id);
@@ -727,6 +750,7 @@ mod tests {
         file: "SmolLM2-135M-Instruct-Q2_K.gguf",
         sha256: "c53fe6626c7165ebfd8de5db22edc3f719b813da001e662bc5cb453f2540a076",
         min_memory: 0,
+        skip: &[],
     };
 
     /// Downloads the pinned llama.cpp build for this system and a tiny model, starts the server

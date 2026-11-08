@@ -1554,7 +1554,9 @@ fn ai_provider(state: State<'_, AppState>) -> Option<String> {
 
 /// Ferry's own local model is offered only for the rules where it gave correct fixes.
 fn local_allows(state: &AppState, rule: &str) -> CmdResult<()> {
-    if state.ai_config.lock().unwrap().kind == Some(ferry_core::ai::Kind::Local) && !ferry_core::ai::local_supports(rule) {
+    let config = state.ai_config.lock().unwrap().clone();
+    let offered = config.model.as_deref().and_then(local_ai::model).is_some_and(|m| local_ai::offers(m, rule));
+    if config.kind == Some(ferry_core::ai::Kind::Local) && !offered {
         return Err(t!(
             "Ferry'nin yerel modeli bu tür bulgularda denendi ama güvenilir düzeltmeler vermedi. Bir bulut sağlayıcıyla deneyin ya da elle düzeltin.",
             "Ferry's local model was tried on this kind of finding and didn't give reliable fixes. Try a cloud provider or fix it by hand."
