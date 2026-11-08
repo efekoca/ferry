@@ -27,8 +27,10 @@ import type {
   ToolchainStatus,
   VersionSuggestion,
   WpLatest,
+  AiConfig,
   AiPrompt,
   AiSuggestion,
+  AiView,
 } from "./types";
 import { mockApi } from "./mock";
 import type { Lang } from "../i18n";
@@ -93,6 +95,10 @@ export interface Api {
   revealPath(path: string): Promise<void>;
   getSettings(): Promise<Settings>;
   aiProvider(): Promise<string | null>;
+  aiConfig(): Promise<AiView>;
+  /** `key`: a new key, "" to delete the stored one, or null to keep it. */
+  saveAiConfig(config: AiConfig, key: string | null): Promise<AiView>;
+  checkAiConfig(): Promise<void>;
   aiPrompt(path: string, id: string): Promise<AiPrompt>;
   aiSuggest(path: string, id: string): Promise<AiSuggestion>;
   cancelAi(path: string): Promise<void>;
@@ -176,6 +182,9 @@ async function tauriApi(): Promise<Api> {
     revealPath: (path) => opener.revealItemInDir(path),
     getSettings: () => invoke("get_settings"),
     aiProvider: () => invoke("ai_provider"),
+    aiConfig: () => invoke("ai_config"),
+    saveAiConfig: (config, key) => invoke("save_ai_config", { config, key }),
+    checkAiConfig: () => invoke("check_ai_config"),
     aiPrompt: (path, id) => invoke("ai_prompt", { path, id }),
     aiSuggest: (path, id) => invoke("ai_suggest", { path, id }),
     cancelAi: (path) => invoke("cancel_ai", { path }),

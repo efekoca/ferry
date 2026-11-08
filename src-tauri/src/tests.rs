@@ -42,6 +42,7 @@ fn harness() -> Harness {
     let data = tempfile::tempdir().unwrap();
     let (project_dir, root) = fixture();
     let mut state = AppState::new(data.path().to_path_buf());
+    state.secrets = Box::new(Memory::default());
     if let Some(tools) = std::env::var_os("FERRY_TEST_TOOLS") {
         state.tools_dir = PathBuf::from(tools);
     }
@@ -806,6 +807,52 @@ fn backup_usage_and_delete_all_over_ipc() {
     h.ok("delete_all_snapshots", json!({}));
     assert_eq!(h.ok("snapshot_usage", json!({}))["snapshots"], 0);
     assert_eq!(h.ok("list_snapshots", json!({ "path": h.root })), json!([]));
+}
+
+#[derive(Default)]
+struct Memory(std::sync::Mutex<HashMap<String, String>>);
+
+impl Secrets for Memory {
+    fn get(&self, name: &str) -> Option<String> {
+        self.0.lock().unwrap().get(name).cloned()
+    }
+
+    fn set(&self, name: &str, value: &str) -> Result<(), String> {
+        self.0.lock().unwrap().insert(name.into(), value.into());
+        Ok(())
+    }
+
+    fn delete(&self, name: &str) -> Result<(), String> {
+        self.0.lock().unwrap().remove(name);
+        Ok(())
+    }
+}
+
+#[test]
+fn an_ai_key_goes_to_the_keychain_and_never_to_a_file() {
+    let _lang = turkish();
+    let h = harness();
+    assert_eq!(h.ok("ai_config", json!({}))["hasKey"], false);
+    let saved = h.ok(
+        "save_ai_config",
+        json!({ "config": { "kind": "anthropic", "model": "claude-opus-5-5", "baseUrl": null }, "key": " sk-ant-secret " }),
+    );
+    assert_eq!(saved["hasKey"], true);
+    assert_eq!(h.ok("ai_provider", json!({})), "Anthropic (claude-opus-5-5)");
+    let state = h._app.state::<AppState>();
+    assert_eq!(state.secrets.get("anthropic-api-key").as_deref(), Some("sk-ant-secret"));
+    let file = std::fs::read_to_string(state.data_dir.join("ai.json")).unwrap();
+    assert!(file.contains("claude-opus-5-5") && !file.contains("sk-ant"));
+    for path in walkdir::WalkDir::new(&state.data_dir).into_iter().flatten().filter(|e| e.file_type().is_file()) {
+        assert!(!std::fs::read_to_string(path.path()).unwrap_or_default().contains("sk-ant-secret"), "{}", path.path().display());
+    }
+
+    h.ok("save_ai_config", json!({ "config": { "kind": "anthropic", "model": "claude-opus-5-5" }, "key": "" }));
+    assert_eq!(h.ok("ai_provider", json!({})), Value::Null);
+    let err = h.invoke("save_ai_config", json!({ "config": { "kind": "openai", "model": "m", "baseUrl": "ftp://x" } })).unwrap_err();
+    assert!(err.as_str().unwrap().contains("http"));
+    h.ok("save_ai_config", json!({ "config": { "kind": "openai", "model": "qwen", "baseUrl": "http://localhost:11434/v1" } }));
+    assert_eq!(h.ok("ai_provider", json!({})), "localhost:11434 (qwen)");
 }
 
 /// Turns `each()` into `foreach` in whatever window it's shown, like a model would.

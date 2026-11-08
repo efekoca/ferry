@@ -109,6 +109,12 @@ Ferry, hangi PHP'nin gerçekten çalışacağını belirleyen ve kodun çevresin
 
 Ferry, Rector'ın tek başına çözemediği durumları da ele alır. Örneğin `$str{0}` yazımı içeren bir dosyayı Rector tamamen atlar. Ferry bu yazımları önce `$str[0]` olarak düzeltir, aynısını `= &new`, `= &func_get_args()` ve `default;` için de yapar; böylece dosyanın geri kalanı da düzeltilir.
 
+### Elle düzeltmeler için AI önerileri
+
+Ferry'nin kendisinin düzeltemediği bulgular için kendi API anahtarınızla bir AI modelinden öneri alabilirsiniz: Anthropic (varsayılan Claude Opus 5.5, ya da Sonnet 5.5 veya Haiku 5.5) ya da Ollama veya LM Studio gibi kendi bilgisayarınızdaki bir sunucu dahil, OpenAI uyumlu herhangi bir servis. **AI önerileri** sayfasından bir proje için açana kadar kapalıdır.
+
+Elle düzeltilecek bir bulgudaki **AI ile öner**, bilgisayarınızdan bir şey çıkmadan önce tam olarak neyin gönderileceğini gösterir: bulgunun iki yanındaki 20'şer satır, parola, anahtar ve token'lar maskelenmiş hâlde. Öneri bir fark olarak gelir, hedef sürümde PHP kuruluysa `php -l` ile denetlenir ve yalnızca siz uyguladığınızda yazılır; yedek ve geri alma diğer düzeltmelerle aynıdır. Maskelenmiş bir satırı değiştiren öneri reddedilir, böylece kodunuza asla yer tutucu yazılmaz. API anahtarı sistemin anahtar zincirinde durur: macOS'ta Anahtar Zinciri, Windows'ta Kimlik Bilgisi Yöneticisi, Linux'ta Secret Service.
+
 ### Geçişi engelleyen bağımlılıklar
 
 **Bağımlılıklar** sayfası, kilitli her paketi `composer.lock`'ta bildirdiği PHP gereksinimine göre hedef sürümle karşılaştırır. Projenin `composer.json`'daki kendi PHP kısıtı da kontrol edilir. `composer.json`'da ya da kilitli bir pakette `php` için yazılmış bir `conflict` kaydı da hesaba katılır.
@@ -299,13 +305,14 @@ Eksik bir şey olduğunda **Düzeltmeler** sayfası neyin eksik olduğunu söyle
 
 - **Okunanlar:** seçtiğiniz proje klasöründeki PHP dosyaları; ayrıca `composer.json`, `composer.lock` ve hangi PHP'nin çalışacağını belirleyen dosyalar: `.htaccess`, `.user.ini`, `php.ini`, Dockerfile'lar, Docker Compose, CI ve barındırma yapılandırması, web sunucusu `.conf` dosyaları. **Gerçek test** ekranı veritabanı ayarları için projenin `.env` ve `wp-config.php` dosyalarını (parola dahil), SSH sunucu listesi için de `~/.ssh/config` dosyasını okur. Ferry SSH anahtarlarını okumaz.
 - **Yazılanlar:** yalnızca değişiklik uyguladığınız dosyalar, bir bulguyu yok saydığınızda `.ferry/ignore.json` ve proje ayarlarını kaydettiğinizde `.ferry/config.json`. Commit etmeyi seçerseniz Ferry projede Git commit'i oluşturur; isterseniz ayrı dalda. Gerçek test geçici kopyalarda çalışır, projeye dokunmaz.
-- **Saklananlar:** her uygulamadan önceki dosya yedekleri (yeni kurulumda her projede en yeni 30 yedek ya da sizin belirlediğiniz sınır), neyin uygulandığının kaydı, her hedef için son 30 taramanın özeti, geçmiş kontrollerin ve Gerçek testlerin özetleri, Rector'ın önbelleği ve ayarlarınız (`settings.json`; belirlediyseniz PHP dosyasının yolu dahil). Hepsi uygulamanın veri klasöründe durur: macOS'ta `~/Library/Application Support/io.github.efekoca.ferry`, Windows'ta `%APPDATA%\io.github.efekoca.ferry`, Linux'ta `~/.local/share/io.github.efekoca.ferry`.
+- **Saklananlar:** her uygulamadan önceki dosya yedekleri (yeni kurulumda her projede en yeni 30 yedek ya da sizin belirlediğiniz sınır), neyin uygulandığının kaydı, her hedef için son 30 taramanın özeti, geçmiş kontrollerin ve Gerçek testlerin özetleri, Rector'ın önbelleği ayarlarınız (`settings.json`; belirlediyseniz PHP dosyasının yolu ve AI önerilerinin açık olduğu projeler dahil) ve AI sağlayıcısıyla modeli (`ai.json`; API anahtarı sistemin anahtar zincirinde kalır). Hepsi uygulamanın veri klasöründe durur: macOS'ta `~/Library/Application Support/io.github.efekoca.ferry`, Windows'ta `%APPDATA%\io.github.efekoca.ferry`, Linux'ta `~/.local/share/io.github.efekoca.ferry`.
 - **Proje kodu:** Tarama kodunuzu hiçbir zaman çalıştırmaz. Düzeltmeleri hesaplarken Rector proje klasöründe çalışır ve projenin `vendor/autoload.php` dosyasını yükler; bu yüzden Composer'ın `autoload.files` listesindeki dosyalar çalıştırılır. `vendor/autoload.php` içindeki her şey, Gerçek test ekranı dahil, bu bilgisayarda çalışır, çünkü Rector konteynerde çalışmaz. Düzeltmeleri yalnızca güvendiğiniz projeler için hesaplayın.
 - **Ağ:** Şunlardan birini başlatmadığınız sürece Ferry ağa çıkmaz:
   - **Rector'ı kur:** Composer, Rector'ı Packagist'ten indirir.
   - **Uyumlu sürümleri bul:** engelleyen paketlerin adları ve sürümleri `repo.packagist.org`'a gider.
   - **En son sürümleri bul:** WordPress eklenti ve tema adları `api.wordpress.org`'a gider.
   - **Gerçek test:** Docker; PHP, Composer ve veritabanı kalıplarını indirir, Composer ve paket yöneticisi de bağımlılıkları ve PHP eklentilerini indirir. Projenin kendi kodu ağsız çalışır; kendiniz eklediğiniz hazırlık komutu bunun dışındadır.
+  - **AI önerileri:** Bir proje için açtıktan ve her isteği onayladıktan sonra, bir bulgunun çevresindeki satırlar gizli değerleri maskelenmiş hâlde kurduğunuz sağlayıcıya gider.
   - **Sunucudan kopyala:** kendi `ssh` komutunuz belirttiğiniz sunucuya bağlanır. Döküm kişisel veri içerebilir; çalışmanın geçici klasöründe durur ve onunla birlikte silinir.
 - **Gerçek test verisi:** Sayfa metinleri ve loglar sonuç ekranı için bellekte tutulur, yalnızca özet kaydedilir. E-posta adresleri, URL'deki parolalar, bearer token'lar ve bilinen gizli alanlar önce maskelenir. Maskeleme kalıplara dayanır; ad, telefon ve serbest metin olduğu gibi kalır.
 

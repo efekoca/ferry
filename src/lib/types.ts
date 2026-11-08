@@ -509,6 +509,20 @@ export interface AiPrompt {
   lastLine: number;
 }
 
+export type AiKind = "anthropic" | "openai";
+
+/** Which provider AI suggestions use. The key isn't part of it: it stays in the system keychain. */
+export interface AiConfig {
+  kind: AiKind | null;
+  model: string | null;
+  baseUrl: string | null;
+}
+
+export interface AiView extends AiConfig {
+  hasKey: boolean;
+  models: string[];
+}
+
 export interface AiSuggestion {
   id: number;
   change: FileChange;

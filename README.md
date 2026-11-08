@@ -109,6 +109,12 @@ The **Fixes** page runs Rector on your project in dry-run mode. No files change.
 
 Ferry handles cases Rector cannot on its own. For example, a file that uses `$str{0}` makes Rector skip the whole file. Ferry rewrites those offsets to `$str[0]` first, and does the same for `= &new`, `= &func_get_args()` and `default;`, so the rest of the file is still fixed.
 
+### AI suggestions for manual fixes
+
+Findings Ferry can't fix on its own can get a suggestion from an AI model with your own API key: Anthropic (Claude Opus 5.5 by default, or Sonnet 5.5 or Haiku 5.5), or any OpenAI-compatible service, including a server on your own computer such as Ollama or LM Studio. It's off until you turn it on for a project on the **AI suggestions** page.
+
+**Suggest with AI** on a manual finding shows exactly what will be sent before anything leaves your computer: the 20 lines on each side of the finding, with passwords, keys and tokens masked. The suggestion comes back as a diff, is checked with `php -l` on the target version when that PHP is installed, and is written only when you apply it, with the same backup and undo as every other fix. A suggestion that changes a masked line is refused, so a placeholder can never end up in your code. The API key is kept in the system keychain: the macOS Keychain, Windows Credential Manager, or the Secret Service on Linux.
+
 ### Dependencies that block the upgrade
 
 The **Dependencies** page checks every locked package against the target version, using the PHP requirement each package declares in `composer.lock`. The project's own PHP constraint in `composer.json` is checked too. A `conflict` entry for `php`, in `composer.json` or in a locked package, is taken into account as well.
@@ -299,13 +305,14 @@ When something is missing, the **Fixes** page says what and offers **Install Rec
 
 - **Read:** the PHP files in the project folder you choose, plus `composer.json`, `composer.lock`, and the files that decide which PHP runs: `.htaccess`, `.user.ini`, `php.ini`, Dockerfiles, Docker Compose, CI and hosting configuration, and web server `.conf` files. The **Real test** screen also reads the project's `.env` and `wp-config.php` for its database settings, password included, and `~/.ssh/config` for the list of SSH hosts. Ferry doesn't read SSH keys.
 - **Written:** only the files you apply changes to, `.ferry/ignore.json` when you ignore a finding, and `.ferry/config.json` when you save project settings. If you choose to commit, Ferry creates Git commits in the project, on a separate branch if you ask for one. Real test works on temporary copies and leaves the project as it is.
-- **Stored:** backups of the files before each apply (the newest 30 per project on a new install, or the limit you set), a record of what was applied, the last 30 scan summaries per target, summaries of past checks and Real tests, Rector's cache, and your settings (`settings.json`, including the path to a PHP binary if you set one), in the app's data folder: `~/Library/Application Support/io.github.efekoca.ferry` on macOS, `%APPDATA%\io.github.efekoca.ferry` on Windows, and `~/.local/share/io.github.efekoca.ferry` on Linux.
+- **Stored:** backups of the files before each apply (the newest 30 per project on a new install, or the limit you set), a record of what was applied, the last 30 scan summaries per target, summaries of past checks and Real tests, Rector's cache, your settings (`settings.json`, including the path to a PHP binary if you set one and the projects where AI suggestions are on), and the AI provider and model (`ai.json`; the API key stays in the system keychain), in the app's data folder: `~/Library/Application Support/io.github.efekoca.ferry` on macOS, `%APPDATA%\io.github.efekoca.ferry` on Windows, and `~/.local/share/io.github.efekoca.ferry` on Linux.
 - **Project code:** scanning never runs your code. Calculating fixes runs Rector in the project folder, and Rector loads the project's `vendor/autoload.php`, so files listed under Composer's `autoload.files` are executed. Everything in `vendor/autoload.php` runs on this computer, including on the Real test screen, because Rector isn't containerized. Only calculate fixes for projects you trust.
 - **Network:** Ferry makes no network requests until you start one of these:
   - **Install Rector:** Composer downloads Rector from Packagist.
   - **Find compatible versions:** the names and versions of the blocking packages go to `repo.packagist.org`.
   - **Find latest versions:** WordPress plugin and theme names go to `api.wordpress.org`.
   - **Real test:** Docker downloads PHP, Composer and database images, and Composer and the package manager download dependencies and extensions. The project's own code runs with no network, except a prepare command you add yourself.
+  - **AI suggestions:** after you turn them on for a project and confirm each request, the lines around one finding, with secrets masked, go to the provider you set up.
   - **Copy from a server:** your own `ssh` connects to the server you name. The dump may hold personal data; it stays in the run's temporary folder and is deleted with it.
 - **Real test data:** page text and logs are kept in memory for the results screen, and only a summary is saved. Email addresses, URL credentials, bearer tokens and common secret fields are masked first. That masking follows patterns, so names, phone numbers and free text stay as they are.
 

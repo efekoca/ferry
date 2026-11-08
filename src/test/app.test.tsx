@@ -305,7 +305,7 @@ describe("Ferry app", () => {
     await waitFor(() => expect(screen.queryByText(/artık hiçbir kodla eşleşmiyor/)).not.toBeInTheDocument());
   });
 
-  it("counts the manual findings on the AI page and keeps its actions off", async () => {
+  it("counts the manual findings on the AI page and keeps the local model for later", async () => {
     const user = setup();
     await user.click(await screen.findByRole("button", { name: "Proje klasörü seçin" }));
     await user.click(await screen.findByRole("button", { name: /AI önerileri/ }));
@@ -315,8 +315,8 @@ describe("Ferry app", () => {
     await screen.findByRole("img", { name: /Hazırlık puanı/ });
     await user.click(screen.getByRole("button", { name: /AI önerileri/ }));
     expect(await screen.findByRole("heading", { name: /^\d+ elle düzeltme için AI önerisi$/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Anahtar ekle" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Modeli kur" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Yakında" })).toBeDisabled();
+    expect(screen.getByText("Açık: Anthropic (claude-opus-5-5)")).toBeInTheDocument();
   });
 
   it("lists recent projects on the welcome screen and forgets one", async () => {
@@ -1671,6 +1671,21 @@ describe("Ferry app", () => {
     await user.click(await within(sheet).findByRole("button", { name: "Uygula" }));
     await waitFor(async () => expect((await api.listSnapshots("")).some((b) => b.label.startsWith("AI önerisi"))).toBe(true));
     expect((await api.getSettings()).aiProjects).toHaveLength(1);
+  });
+
+  it("keeps the AI key out of everything but the keychain call", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0, aiProvider: null });
+    const save = vi.spyOn(api, "saveAiConfig");
+    render(<App api={api} />);
+    await openAndScan(user);
+    await user.click(nav(/AI önerileri/));
+    await user.type(await screen.findByLabelText("API anahtarı"), "sk-ant-test");
+    await user.click(screen.getByRole("button", { name: "Kaydet" }));
+    await waitFor(() => expect(save).toHaveBeenCalledWith({ kind: "anthropic", model: "claude-opus-5-5", baseUrl: null }, "sk-ant-test"));
+    expect(await screen.findByText("Anahtar sistemin anahtar zincirinde.")).toBeInTheDocument();
+    await user.click(screen.getByRole("switch", { name: /kuzey-magaza projesinde AI önerileri/ }));
+    await waitFor(async () => expect((await api.getSettings()).aiProjects).toHaveLength(1));
   });
 
   it("offers no AI suggestion without a provider", async () => {

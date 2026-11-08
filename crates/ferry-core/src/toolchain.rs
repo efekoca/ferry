@@ -415,7 +415,19 @@ pub fn run_process(
     cancel: &std::sync::atomic::AtomicBool,
     timeout: std::time::Duration,
 ) -> Result<Finished, ToolError> {
-    run_with_output(cmd, program, cancel, timeout, std::process::Stdio::piped())
+    run_with_output(cmd, program, cancel, timeout, std::process::Stdio::piped(), None)
+}
+
+/// The same, with `input` on the program's standard input. A secret given this way never shows in
+/// the process list, unlike one on the command line.
+pub fn run_process_with_input(
+    cmd: Command,
+    program: &Path,
+    cancel: &std::sync::atomic::AtomicBool,
+    timeout: std::time::Duration,
+    input: Vec<u8>,
+) -> Result<Finished, ToolError> {
+    run_with_output(cmd, program, cancel, timeout, std::process::Stdio::piped(), Some(input))
 }
 
 /// The same, for output too large to hold in memory.
@@ -426,7 +438,7 @@ pub fn run_process_to(
     timeout: std::time::Duration,
     file: std::fs::File,
 ) -> Result<Finished, ToolError> {
-    run_with_output(cmd, program, cancel, timeout, file.into())
+    run_with_output(cmd, program, cancel, timeout, file.into(), None)
 }
 
 fn run_with_output(
@@ -435,12 +447,19 @@ fn run_with_output(
     cancel: &std::sync::atomic::AtomicBool,
     timeout: std::time::Duration,
     output: std::process::Stdio,
+    input: Option<Vec<u8>>,
 ) -> Result<Finished, ToolError> {
     use std::process::Stdio;
-    cmd.stdin(Stdio::null()).stdout(output).stderr(Stdio::piped());
+    cmd.stdin(if input.is_some() { Stdio::piped() } else { Stdio::null() }).stdout(output).stderr(Stdio::piped());
     #[cfg(unix)]
     std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
     let mut child = cmd.spawn().map_err(|source| ToolError::Spawn { program: program.display().to_string(), source })?;
+    if let (Some(input), Some(mut stdin)) = (input, child.stdin.take()) {
+        std::thread::spawn(move || {
+            use std::io::Write;
+            let _ = stdin.write_all(&input);
+        });
+    }
     let read = |pipe: Option<Box<dyn std::io::Read + Send>>| {
         let buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let sink = buf.clone();
