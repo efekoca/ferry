@@ -305,7 +305,7 @@ describe("Ferry app", () => {
     await waitFor(() => expect(screen.queryByText(/artık hiçbir kodla eşleşmiyor/)).not.toBeInTheDocument());
   });
 
-  it("counts the manual findings on the AI page and looks for a local server", async () => {
+  it("counts the manual findings on the AI page and offers a local model", async () => {
     const user = setup();
     await user.click(await screen.findByRole("button", { name: "Proje klasörü seçin" }));
     await user.click(await screen.findByRole("button", { name: /AI önerileri/ }));
@@ -315,8 +315,9 @@ describe("Ferry app", () => {
     await screen.findByRole("img", { name: /Hazırlık puanı/ });
     await user.click(screen.getByRole("button", { name: /AI önerileri/ }));
     expect(await screen.findByRole("heading", { name: /^\d+ elle düzeltme için AI önerisi$/ })).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByRole("button", { name: "Yeniden ara" })).toBeEnabled());
-    expect(screen.getByText(/Ollama ya da LM Studio açıksa Ferry onu burada bulur/)).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "İndir ve kur" })).toBeEnabled();
+    expect(screen.getByText(/Ferry bu bilgisayar için Qwen3.5 9B modelini önerir\. 5,3 GB indirilir/)).toBeInTheDocument();
+    expect(screen.getByText("Apache-2.0 lisanslı · Hugging Face: unsloth/Qwen3.5-9B-GGUF")).toBeInTheDocument();
     expect(screen.getByText("Açık: Anthropic (claude-opus-5-5)")).toBeInTheDocument();
   });
 
@@ -1704,6 +1705,53 @@ describe("Ferry app", () => {
     expect(await screen.findByRole("button", { name: "Kullanılıyor" })).toBeDisabled();
     expect(await screen.findByText("Açık: Ollama (qwen2.5-coder:7b)")).toBeInTheDocument();
     expect(screen.queryByText("Anahtar sistemin anahtar zincirinde.")).not.toBeInTheDocument();
+  });
+
+  it("installs the local model with progress, uses it and removes it", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 400 });
+    const save = vi.spyOn(api, "saveAiConfig");
+    render(<App api={api} />);
+    await openAndScan(user);
+    await user.click(nav(/AI önerileri/));
+    await user.click(await screen.findByRole("button", { name: "İndir ve kur" }));
+    expect(await screen.findByRole("progressbar")).toBeInTheDocument();
+    expect(await screen.findByText("Model indiriliyor")).toBeInTheDocument();
+    expect(await screen.findByText(/^[\d,]+ GB \/ 5,3 GB$/)).toBeInTheDocument();
+    expect(await screen.findByText("Qwen3.5 9B kuruldu")).toBeInTheDocument();
+    expect(await screen.findByText("Qwen3.5 9B bu bilgisayarda kurulu. Kod bilgisayarınızdan çıkmaz.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Bunu kullan" }));
+    await waitFor(() => expect(save).toHaveBeenCalledWith({ kind: "local", model: "qwen3.5-9b", baseUrl: null }, null));
+    expect(await screen.findByText("Açık: Local model (Qwen3.5 9B)")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Kullanılıyor" })).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "Modeli kaldır" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/yaklaşık 5,3 GB yer açılır/)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Modeli kaldır" }));
+    expect(await screen.findByRole("button", { name: "İndir ve kur" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText(/Açık: Local model/)).not.toBeInTheDocument());
+  });
+
+  it("stops a local model download without calling it a failure", async () => {
+    const user = userEvent.setup();
+    render(<App api={mockApi({ delay: 200 })} />);
+    await openAndScan(user);
+    await user.click(nav(/AI önerileri/));
+    await user.click(await screen.findByRole("button", { name: "İndir ve kur" }));
+    await user.click(await screen.findByRole("button", { name: "Durdur" }));
+    expect(await screen.findByRole("button", { name: "İndir ve kur" }, { timeout: 3000 })).toBeInTheDocument();
+    expect(screen.queryByText("Yerel model kurulamadı")).not.toBeInTheDocument();
+  });
+
+  it("says when the computer is too small for a local model", async () => {
+    const user = userEvent.setup();
+    render(<App api={mockApi({ delay: 0, localModel: null })} />);
+    await openAndScan(user);
+    await user.click(nav(/AI önerileri/));
+    expect(await screen.findByText(/belleği Ferry'nin yerel modeli için yetmiyor/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Yeniden ara" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "İndir ve kur" })).not.toBeInTheDocument();
   });
 
   it("offers no AI suggestion without a provider", async () => {

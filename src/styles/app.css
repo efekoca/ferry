@@ -5256,6 +5256,16 @@ button.real-row {
   gap: var(--space-2);
 }
 
+.ai-local__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  color: var(--text-3);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
 .ai-project {
   width: 100%;
   max-width: 680px;

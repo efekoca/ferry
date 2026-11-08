@@ -4,6 +4,7 @@ use ferry_core::git;
 use ferry_core::history;
 use ferry_core::i18n::{self, Lang};
 use ferry_core::ignore::{self, Ignore, IgnoredFinding};
+use ferry_core::local_ai;
 use ferry_core::project::{self, ProjectInfo};
 use ferry_core::rector::{self, FileChange, RectorError, RectorMode, RectorPreview};
 use ferry_core::rules::FixKind;
@@ -66,6 +67,7 @@ fn key_name(config: &AiConfig) -> Option<String> {
     match config.kind? {
         ferry_core::ai::Kind::Anthropic => Some("anthropic-api-key".into()),
         ferry_core::ai::Kind::Openai => config.base_url.as_deref().map(|u| format!("openai-api-key {}", ferry_core::ai::origin(u))),
+        ferry_core::ai::Kind::Local => None,
     }
 }
 
@@ -80,10 +82,24 @@ fn remote(config: &AiConfig, secrets: &dyn Secrets) -> Option<ferry_core::ai::Re
             let base_url = config.base_url.clone().filter(|u| !u.trim().is_empty())?;
             Some(Remote { kind, model, base_url, key })
         }
+        Kind::Local => None,
     }
 }
 
-fn provider(config: &AiConfig, secrets: &dyn Secrets) -> Option<Arc<dyn ferry_core::ai::Provider>> {
+/// The model Ferry runs itself, with the one server slot every provider shares.
+struct Local {
+    install: local_ai::Install,
+    slot: Arc<local_ai::Slot>,
+    cancel: Mutex<Option<Arc<AtomicBool>>>,
+}
+
+fn provider(config: &AiConfig, secrets: &dyn Secrets, local: &Local) -> Option<Arc<dyn ferry_core::ai::Provider>> {
+    if config.kind == Some(ferry_core::ai::Kind::Local) {
+        let model = local_ai::model(config.model.as_deref()?)?;
+        return local.install.installed(model).then(|| {
+            Arc::new(local_ai::LocalModel::new(local.install.clone(), model, local.slot.clone())) as Arc<dyn ferry_core::ai::Provider>
+        });
+    }
     remote(config, secrets).map(|r| Arc::new(r) as Arc<dyn ferry_core::ai::Provider>)
 }
 const DEFAULT_BACKUPS: u32 = 30;
@@ -112,6 +128,7 @@ pub struct AppState {
     ai_provider: Mutex<Option<Arc<dyn ferry_core::ai::Provider>>>,
     ai_config: Mutex<AiConfig>,
     secrets: Box<dyn Secrets>,
+    local: Local,
     ai_suggestions: Mutex<HashMap<String, (u64, FileChange, PhpVersion)>>,
     ai_cancel: Mutex<HashMap<String, Arc<AtomicBool>>>,
     scan_cancel: Mutex<HashMap<String, Arc<AtomicBool>>>,
@@ -144,7 +161,9 @@ impl AppState {
         let ai_config: AiConfig =
             ferry_core::safefs::read_bytes(data_dir.join(AI_FILE)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
         let secrets: Box<dyn Secrets> = Box::new(Keychain);
-        let ai_provider = provider(&ai_config, secrets.as_ref());
+        let local =
+            Local { install: local_ai::Install::new(data_dir.join("tools").join("llama")), slot: Arc::default(), cancel: Mutex::new(None) };
+        let ai_provider = provider(&ai_config, secrets.as_ref(), &local);
         Self {
             tools_dir: data_dir.join("tools"),
             data_dir,
@@ -158,6 +177,7 @@ impl AppState {
             ai_provider: Mutex::new(ai_provider),
             ai_config: Mutex::new(ai_config),
             secrets,
+            local,
             ai_suggestions: Mutex::new(HashMap::new()),
             ai_cancel: Mutex::new(HashMap::new()),
             scan_cancel: Mutex::new(HashMap::new()),
@@ -1425,9 +1445,91 @@ fn save_ai_config(state: State<'_, AppState>, config: AiConfig, key: Option<Stri
     }
     let json = serde_json::to_vec_pretty(&config).map_err(|e| failed(&e))?;
     ferry_core::safefs::write_atomic(&state.data_dir.join(AI_FILE), &json).map_err(|e| failed(&e))?;
-    *state.ai_provider.lock().unwrap() = provider(&config, state.secrets.as_ref());
+    *state.ai_provider.lock().unwrap() = provider(&config, state.secrets.as_ref(), &state.local);
     *state.ai_config.lock().unwrap() = config;
     Ok(ai_view(&state))
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalModelView {
+    /// The model for this computer, or none when its memory is too small or llama.cpp has no build.
+    model: Option<&'static local_ai::Model>,
+    installed: bool,
+    installing: bool,
+    /// Bytes still to download.
+    remaining: u64,
+    memory: u64,
+}
+
+fn local_view(state: &AppState) -> LocalModelView {
+    let memory = local_ai::total_memory();
+    let model = local_ai::recommended(memory);
+    LocalModelView {
+        model,
+        installed: model.is_some_and(|m| state.local.install.installed(m)),
+        installing: state.local.cancel.lock().unwrap().is_some(),
+        remaining: model.map_or(0, |m| state.local.install.remaining(m)),
+        memory,
+    }
+}
+
+#[tauri::command]
+fn local_model(state: State<'_, AppState>) -> LocalModelView {
+    local_view(&state)
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalProgress {
+    phase: local_ai::Phase,
+    done: u64,
+    total: u64,
+}
+
+/// Downloads llama.cpp and the model for this computer, checks both, and runs the model once.
+#[tauri::command]
+async fn install_local_model<R: Runtime>(app: AppHandle<R>, state: State<'_, AppState>) -> CmdResult<LocalModelView> {
+    let model = local_ai::recommended(local_ai::total_memory())
+        .ok_or_else(|| t!("Bu bilgisayar için uygun bir yerel model yok.", "There's no local model that suits this computer."))?;
+    let cancel = Arc::new(AtomicBool::new(false));
+    {
+        let mut current = state.local.cancel.lock().unwrap();
+        if current.is_some() {
+            return Err(t!("Yerel model zaten kuruluyor.", "The local model is already being set up."));
+        }
+        *current = Some(cancel.clone());
+    }
+    let install = state.local.install.clone();
+    let result = blocking(move || {
+        let progress = |phase, done, total| {
+            let _ = app.emit("local-model://progress", LocalProgress { phase, done, total });
+        };
+        install.install(model, &cancel, &progress)
+    })
+    .await;
+    state.local.cancel.lock().unwrap().take();
+    result.map(|()| local_view(&state))
+}
+
+#[tauri::command]
+fn cancel_local_model(state: State<'_, AppState>) {
+    if let Some(cancel) = state.local.cancel.lock().unwrap().as_ref() {
+        cancel.store(true, Ordering::Relaxed);
+    }
+}
+
+/// Deletes llama.cpp and the model. AI suggestions that used it stop until another provider is set.
+#[tauri::command]
+fn remove_local_model(state: State<'_, AppState>) -> CmdResult<LocalModelView> {
+    if state.local.cancel.lock().unwrap().is_some() {
+        return Err(t!("Önce kurulumu durdurun.", "Stop the setup first."));
+    }
+    state.local.slot.stop();
+    state.local.install.remove().map_err(|e| t!("Yerel model silinemedi: {e}", "Couldn't delete the local model: {e}"))?;
+    let config = state.ai_config.lock().unwrap().clone();
+    *state.ai_provider.lock().unwrap() = provider(&config, state.secrets.as_ref(), &state.local);
+    Ok(local_view(&state))
 }
 
 /// Lists the provider's models, which proves the key and address without spending tokens.
@@ -1927,6 +2029,10 @@ pub fn with_commands<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R
         save_ai_config,
         check_ai_config,
         local_ai_servers,
+        local_model,
+        install_local_model,
+        cancel_local_model,
+        remove_local_model,
         ai_prompt,
         ai_suggest,
         cancel_ai,
@@ -1987,7 +2093,15 @@ pub fn run() {
             if let Some(tools) = std::env::var_os("FERRY_TOOLS_DIR") {
                 state.tools_dir = PathBuf::from(tools);
             }
+            let (install, slot, shutdown) = (state.local.install.clone(), state.local.slot.clone(), state.shutdown.clone());
             app.manage(state);
+            std::thread::spawn(move || {
+                install.reap();
+                while !shutdown.load(Ordering::Relaxed) {
+                    std::thread::sleep(Duration::from_secs(15));
+                    slot.stop_if_idle(Duration::from_secs(600));
+                }
+            });
             #[cfg(debug_assertions)]
             if std::env::var_os("FERRY_E2E").is_some() {
                 use tauri::Listener;
@@ -2014,6 +2128,11 @@ pub fn run() {
             state.rector_cancel.lock().unwrap().values().for_each(|t| t.store(true, Ordering::Relaxed));
             state.docker_cancel.lock().unwrap().values().for_each(|t| t.store(true, Ordering::Relaxed));
             state.check_cancel.lock().unwrap().values().for_each(|t| t.store(true, Ordering::Relaxed));
+            state.ai_cancel.lock().unwrap().values().for_each(|t| t.store(true, Ordering::Relaxed));
+            if let Some(cancel) = state.local.cancel.lock().unwrap().as_ref() {
+                cancel.store(true, Ordering::Relaxed);
+            }
+            state.local.slot.stop();
             let started = Instant::now();
             while state.rector_running.load(Ordering::SeqCst) > 0 && started.elapsed() < Duration::from_secs(3) {
                 std::thread::sleep(Duration::from_millis(50));

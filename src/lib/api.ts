@@ -32,6 +32,8 @@ import type {
   AiSuggestion,
   AiView,
   LocalAiServer,
+  LocalModelView,
+  LocalProgress,
 } from "./types";
 import { mockApi } from "./mock";
 import type { Lang } from "../i18n";
@@ -102,6 +104,12 @@ export interface Api {
   checkAiConfig(): Promise<void>;
   /** Ollama or LM Studio, when one is running on this computer. */
   localAiServers(): Promise<LocalAiServer[]>;
+  localModel(): Promise<LocalModelView>;
+  /** Downloads llama.cpp and the model for this computer, checks both and runs the model once. */
+  installLocalModel(): Promise<LocalModelView>;
+  cancelLocalModel(): Promise<void>;
+  removeLocalModel(): Promise<LocalModelView>;
+  onLocalModelProgress(handler: (p: LocalProgress) => void): Promise<() => void>;
   aiPrompt(path: string, id: string): Promise<AiPrompt>;
   aiSuggest(path: string, id: string): Promise<AiSuggestion>;
   cancelAi(path: string): Promise<void>;
@@ -189,6 +197,11 @@ async function tauriApi(): Promise<Api> {
     saveAiConfig: (config, key) => invoke("save_ai_config", { config, key }),
     checkAiConfig: () => invoke("check_ai_config"),
     localAiServers: () => invoke("local_ai_servers"),
+    localModel: () => invoke("local_model"),
+    installLocalModel: () => invoke("install_local_model"),
+    cancelLocalModel: () => invoke("cancel_local_model"),
+    removeLocalModel: () => invoke("remove_local_model"),
+    onLocalModelProgress: (handler) => listen<LocalProgress>("local-model://progress", (e) => handler(e.payload)),
     aiPrompt: (path, id) => invoke("ai_prompt", { path, id }),
     aiSuggest: (path, id) => invoke("ai_suggest", { path, id }),
     cancelAi: (path) => invoke("cancel_ai", { path }),

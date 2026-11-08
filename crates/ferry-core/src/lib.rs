@@ -26,6 +26,7 @@ pub mod ignore;
 pub mod images;
 pub mod index;
 pub mod lexer;
+pub mod local_ai;
 pub mod localcheck;
 mod objects;
 pub mod origin;

@@ -38,6 +38,21 @@ pub trait Provider: Send + Sync {
     fn complete(&self, prompt: &Prompt, cancel: &AtomicBool) -> Result<String, String>;
 }
 
+impl Prompt {
+    /// A prompt that isn't about a file, such as the check after a local model is installed.
+    pub fn plain(system: &str, user: &str) -> Prompt {
+        Prompt {
+            system: system.into(),
+            user: user.into(),
+            file: String::new(),
+            first_line: 1,
+            last_line: 1,
+            original: String::new(),
+            masked: Vec::new(),
+        }
+    }
+}
+
 fn line_break(text: &str) -> &'static str {
     if text.contains("\r\n") {
         "\r\n"
@@ -94,7 +109,7 @@ pub fn prompt(root: &Path, finding: &Finding, target: PhpVersion) -> Result<Prom
     Ok(Prompt { system: SYSTEM.to_string(), user, file: finding.file.clone(), first_line: first, last_line: last, original, masked })
 }
 
-fn code_block(reply: &str) -> Option<&str> {
+pub fn code_block(reply: &str) -> Option<&str> {
     let open = reply.find("```")?;
     let body = &reply[open + 3..];
     let body = &body[body.find('\n')? + 1..];
@@ -166,6 +181,8 @@ pub enum Kind {
     /// Anything that speaks OpenAI's chat completions: OpenAI itself, or a local server such as
     /// Ollama or LM Studio.
     Openai,
+    /// The model Ferry downloads and runs itself with llama.cpp.
+    Local,
 }
 
 pub const ANTHROPIC_MODELS: [&str; 3] = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"];
@@ -278,13 +295,38 @@ fn anthropic_reply(body: &str) -> Result<String, String> {
     Ok(text)
 }
 
+/// Drops the reasoning some local models put before the answer, which can hold code of its own.
+fn without_thinking(text: &str) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(start) = rest.find("<think>") {
+        out.push_str(&rest[..start]);
+        match rest[start..].find("</think>") {
+            Some(end) => rest = &rest[start + end + "</think>".len()..],
+            None => return out,
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 fn openai_reply(body: &str) -> Result<String, String> {
     let value: serde_json::Value = serde_json::from_str(body).map_err(|e| e.to_string())?;
-    let text = value["choices"][0]["message"]["content"].as_str().unwrap_or_default();
+    let text = without_thinking(value["choices"][0]["message"]["content"].as_str().unwrap_or_default());
     if text.trim().is_empty() {
         return Err(crate::t!("Yanıt boş geldi.", "The reply was empty."));
     }
-    Ok(text.to_string())
+    Ok(text)
+}
+
+/// Whether an address is this computer, where Ferry can choose the decoding settings: a server
+/// in the cloud may reject some of them.
+fn is_loopback(url: &str) -> bool {
+    let origin = origin(url);
+    let host = origin.split("://").nth(1).unwrap_or_default();
+    let host =
+        host.rsplit_once(':').filter(|(h, port)| !h.ends_with(':') && port.chars().all(|c| c.is_ascii_digit())).map_or(host, |(h, _)| h);
+    matches!(host, "127.0.0.1" | "localhost" | "[::1]")
 }
 
 impl Remote {
@@ -305,7 +347,7 @@ impl Remote {
                 headers.extend(key.map(|k| format!("x-api-key: {k}")));
                 headers
             }
-            Kind::Openai => key.map(|k| format!("Authorization: Bearer {k}")).into_iter().collect(),
+            Kind::Openai | Kind::Local => key.map(|k| format!("Authorization: Bearer {k}")).into_iter().collect(),
         }
     }
 
@@ -330,10 +372,15 @@ impl Remote {
                 }
                 (format!("{}/v1/messages", self.base()), body)
             }
-            Kind::Openai => {
+            Kind::Openai | Kind::Local => {
                 let messages = [("system", &prompt.system), ("user", &prompt.user)];
                 let messages: Vec<_> = messages.iter().map(|(role, text)| serde_json::json!({ "role": role, "content": text })).collect();
-                (format!("{}/chat/completions", self.base()), serde_json::json!({ "model": self.model, "messages": messages }))
+                let mut body = serde_json::json!({ "model": self.model, "messages": messages });
+                if is_loopback(&self.base_url) {
+                    body["temperature"] = 0.into();
+                    body["max_tokens"] = 2048.into();
+                }
+                (format!("{}/chat/completions", self.base()), body)
             }
         };
         Request { url, headers, body: Some(body.to_string()) }
@@ -372,7 +419,7 @@ impl Remote {
     fn models(&self, cancel: &AtomicBool, timeout: std::time::Duration) -> Result<Vec<String>, String> {
         let url = match self.kind {
             Kind::Anthropic => format!("{}/v1/models", self.base()),
-            Kind::Openai => format!("{}/models", self.base()),
+            Kind::Openai | Kind::Local => format!("{}/models", self.base()),
         };
         let (status, body) = self.send(&Request { url, headers: self.headers(), body: None }, cancel, timeout)?;
         if !(200..300).contains(&status) {
@@ -393,7 +440,7 @@ impl Provider for Remote {
     fn name(&self) -> String {
         match self.kind {
             Kind::Anthropic => format!("Anthropic ({})", self.model),
-            Kind::Openai => {
+            Kind::Openai | Kind::Local => {
                 let local = LOCAL_SERVERS.iter().find(|(_, url)| origin(url) == origin(&self.base_url));
                 format!("{} ({})", local.map_or_else(|| self.host(), |(name, _)| name.to_string()), self.model)
             }
@@ -407,7 +454,7 @@ impl Provider for Remote {
         }
         match self.kind {
             Kind::Anthropic => anthropic_reply(&body),
-            Kind::Openai => openai_reply(&body),
+            Kind::Openai | Kind::Local => openai_reply(&body),
         }
     }
 }
@@ -520,6 +567,24 @@ mod tests {
         assert_eq!(origin("https://user@host.example/x?y"), "https://host.example");
         let ollama = Remote { kind: Kind::Openai, model: "qwen".into(), base_url: "http://127.0.0.1:11434/v1/".into(), key: None };
         assert_eq!(ollama.name(), "Ollama (qwen)");
+    }
+
+    #[test]
+    fn a_server_on_this_computer_gets_steady_decoding_and_a_cloud_one_its_defaults() {
+        let local = Remote { kind: Kind::Openai, model: "m".into(), base_url: "http://127.0.0.1:11434/v1".into(), key: None };
+        let body: serde_json::Value = serde_json::from_str(&local.completion(&sample_prompt()).body.unwrap()).unwrap();
+        assert_eq!((body["temperature"].as_i64(), body["max_tokens"].as_i64()), (Some(0), Some(2048)));
+        let cloud = Remote { base_url: "https://api.openai.com/v1".into(), ..local.clone() };
+        let body: serde_json::Value = serde_json::from_str(&cloud.completion(&sample_prompt()).body.unwrap()).unwrap();
+        assert!(body.get("temperature").is_none() && body.get("max_tokens").is_none());
+        assert!(
+            is_loopback("http://localhost:1234/v1")
+                && is_loopback("http://[::1]:8080/v1")
+                && !is_loopback("http://127.0.0.1.example.com/v1")
+        );
+        let reply =
+            openai_reply(r#"{"choices":[{"message":{"content":"<think>maybe ```php\nx\n```</think>```php\necho 1;\n```"}}]}"#).unwrap();
+        assert_eq!(code_block(&reply), Some("echo 1;"));
     }
 
     #[test]

@@ -1077,9 +1077,11 @@ name = "ferry-core"
 version = "0.1.0"
 dependencies = [
  "flate2",
+ "getrandom 0.2.17",
  "libc",
  "serde",
  "serde_json",
+ "sha2",
  "similar",
  "tempfile",
  "walkdir",
