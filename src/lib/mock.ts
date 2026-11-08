@@ -8,6 +8,9 @@ import type { CheckSummary, DockerComparison, DockerStep, DockerSummary, History
   AiConfig,
   AiView,
   LocalAiServer,
+  LocalModelInfo,
+  LocalModelView,
+  LocalProgress,
   DiffLine,
   FileChange,
   Finding,
@@ -185,6 +188,8 @@ export function mockApi(
     conflicts?: SnapshotConflict[];
     aiProvider?: string | null;
     localAi?: LocalAiServer[];
+    /** null: the computer's memory is too small for a local model. */
+    localModel?: null;
   } = {},
 ): Api {
   const delay = opts.delay ?? 450;
@@ -196,10 +201,22 @@ export function mockApi(
   const origin = (url: string) => url.trim().toLowerCase().split("/").slice(0, 3).join("/");
   const keyName = () => (aiCfg.kind === "anthropic" ? "anthropic" : aiCfg.kind === "openai" && aiCfg.baseUrl ? `openai ${origin(aiCfg.baseUrl)}` : null);
   const hasKey = () => aiKeys.has(keyName() ?? "");
+  const localInfo: LocalModelInfo = { id: "qwen3.5-9b", name: "Qwen3.5 9B", license: "Apache-2.0", repo: "unsloth/Qwen3.5-9B-GGUF", size: 5_680_522_464 };
+  const localListeners = new Set<(p: LocalProgress) => void>();
+  let localInstalled = false;
+  let localStopped = false;
+  const localView = (): LocalModelView => ({
+    model: opts.localModel === null ? null : localInfo,
+    installed: localInstalled,
+    installing: false,
+    remaining: localInstalled ? 0 : localInfo.size + 35_858_360,
+    memory: 16 * 2 ** 30,
+  });
   const localNames: Record<string, string> = { "http://127.0.0.1:11434": "Ollama", "http://127.0.0.1:1234": "LM Studio" };
   const aiName = () => {
     if (!aiCfg.kind || !aiCfg.model || (aiCfg.kind === "anthropic" && !hasKey()) || (aiCfg.kind === "openai" && !aiCfg.baseUrl)) return null;
     if (aiCfg.kind === "anthropic") return `Anthropic (${aiCfg.model})`;
+    if (aiCfg.kind === "local") return localInstalled ? `Local model (${localInfo.name})` : null;
     const base = origin(aiCfg.baseUrl ?? "");
     return `${localNames[base] ?? base.split("://")[1]} (${aiCfg.model})`;
   };
@@ -582,6 +599,30 @@ export function mockApi(
     localAiServers: async () => {
       await sleep(delay / 3);
       return opts.localAi ?? [];
+    },
+    localModel: async () => localView(),
+    installLocalModel: async () => {
+      localStopped = false;
+      for (const [phase, total] of [["runtime", 35_858_360], ["model", localInfo.size], ["verify", localInfo.size], ["check", 1]] as const) {
+        for (let step = 1; step <= 4; step++) {
+          await sleep(delay / 8);
+          if (localStopped) throw new Error("The local model setup was stopped.");
+          localListeners.forEach((l) => l({ phase, done: (total * step) / 4, total }));
+        }
+      }
+      localInstalled = true;
+      return localView();
+    },
+    cancelLocalModel: async () => {
+      localStopped = true;
+    },
+    removeLocalModel: async () => {
+      localInstalled = false;
+      return localView();
+    },
+    onLocalModelProgress: async (handler) => {
+      localListeners.add(handler);
+      return () => localListeners.delete(handler);
     },
     aiPrompt: async (_path, id) => {
       const f = lastScan?.findings.find((x) => x.id === id);

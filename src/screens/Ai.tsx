@@ -1,12 +1,14 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { HardDrive, KeyRound } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { HardDrive, KeyRound, Trash2 } from "lucide-react";
+import { ConfirmDialog } from "../components/Modal";
 import { usePageTitle } from "../components/Shell";
 import { useToast } from "../components/Toast";
-import { Badge, Button, Card, Segmented, Select, Switch, TextField } from "../components/ui";
+import { Badge, Button, Card, Progress, Segmented, Select, Switch, TextField } from "../components/ui";
 import { useI18n } from "../i18n";
 import { errorMessage } from "../lib/api";
+import { formatBytes } from "../lib/labels";
 import { useStore } from "../lib/store";
-import type { AiKind, AiView, LocalAiServer, Settings } from "../lib/types";
+import type { AiKind, AiView, LocalAiServer, LocalModelView, LocalProgress, Settings } from "../lib/types";
 
 const MODEL_NAMES: Record<string, string> = {
   "claude-opus-5-5": "Claude Opus 5.5",
@@ -41,8 +43,9 @@ function ProviderForm({ view, onSaved }: { view: AiView; onSaved: (view: AiView)
   const { t } = useI18n();
   const { api } = useStore();
   const toast = useToast();
-  const [kind, setKind] = useState<AiKind>(view.kind ?? "anthropic");
-  const [model, setModel] = useState(view.model ?? view.models[0]);
+  const savedKind: AiKind = view.kind === "openai" ? "openai" : "anthropic";
+  const [kind, setKind] = useState<AiKind>(savedKind);
+  const [model, setModel] = useState(view.kind === savedKind && view.model ? view.model : savedKind === "anthropic" ? view.models[0] : "");
   const [baseUrl, setBaseUrl] = useState(view.baseUrl ?? "");
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState<"save" | "check" | null>(null);
@@ -113,7 +116,7 @@ function ProviderForm({ view, onSaved }: { view: AiView; onSaved: (view: AiView)
         <Button variant="primary" loading={busy === "save"} disabled={!!busy || !model} onClick={() => void save(key ? key : null)}>
           {t.ai.save}
         </Button>
-        <Button loading={busy === "check"} disabled={!!busy || !view.kind} onClick={() => void check()}>
+        <Button loading={busy === "check"} disabled={!!busy || view.kind !== kind} onClick={() => void check()}>
           {t.ai.check}
         </Button>
       </div>
@@ -126,8 +129,13 @@ function LocalWay({ view, onSaved }: { view: AiView; onSaved: (view: AiView) => 
   const { api } = useStore();
   const toast = useToast();
   const [servers, setServers] = useState<LocalAiServer[] | null>(null);
+  const [local, setLocal] = useState<LocalModelView | null>(null);
+  const [progress, setProgress] = useState<LocalProgress | null>(null);
   const [choice, setChoice] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<"use" | "install" | "remove" | null>(null);
+  const [stopping, setStopping] = useState(false);
+  const stopped = useRef(false);
+  const [confirmRemove, setConfirmRemove] = useState(false);
   const search = useCallback(async () => {
     if (!api) return;
     setServers(null);
@@ -135,40 +143,131 @@ function LocalWay({ view, onSaved }: { view: AiView; onSaved: (view: AiView) => 
   }, [api]);
   useEffect(() => {
     void search();
-  }, [search]);
+    if (!api) return;
+    void api.localModel().then(setLocal).catch(() => setLocal(null));
+    const off = api.onLocalModelProgress((p) => setProgress(p));
+    return () => void off.then((stop) => stop());
+  }, [api, search]);
 
+  const size = (bytes: number) => formatBytes(bytes, t.locale);
+  const offered = local?.model ?? null;
+  const ferry = offered && local?.installed ? offered : null;
+  const installing = busy === "install" || !!local?.installing;
   const running = servers?.filter((s) => s.models.length > 0) ?? [];
   const idle = servers?.filter((s) => s.models.length === 0) ?? [];
-  const options = running.flatMap((s) => s.models.map((m) => ({ value: `${s.baseUrl}\n${m}`, label: running.length > 1 ? `${s.name} · ${m}` : m })));
+  const options = [
+    ...(ferry ? [{ value: `local\n${ferry.id}`, label: ferry.name }] : []),
+    ...running.flatMap((s) => s.models.map((m) => ({ value: `${s.baseUrl}\n${m}`, label: running.length > 1 || ferry ? `${s.name} · ${m}` : m }))),
+  ];
   const inUse = (value: string) => {
-    const [baseUrl, model] = value.split("\n");
-    return view.kind === "openai" && origin(view.baseUrl) === origin(baseUrl) && view.model === model;
+    const [where, model] = value.split("\n");
+    if (where === "local") return view.kind === "local" && view.model === model;
+    return view.kind === "openai" && origin(view.baseUrl) === origin(where) && view.model === model;
   };
   const selected = choice || options.find((o) => inUse(o.value))?.value || options[0]?.value || "";
-  const text = running.length > 0 ? t.ai.localFound(running.map((s) => s.name)) : idle.length > 0 ? t.ai.localNoModels(idle.map((s) => s.name)) : t.ai.localText;
+  const text = installing
+    ? t.ai.localPhase[progress?.phase ?? "runtime"]
+    : ferry
+      ? t.ai.localReady(ferry.name)
+      : running.length > 0
+        ? t.ai.localFound(running.map((s) => s.name))
+        : offered
+          ? t.ai.localOffer(offered.name, size(local?.remaining ?? offered.size))
+          : idle.length > 0
+            ? t.ai.localNoModels(idle.map((s) => s.name))
+            : local
+              ? t.ai.localSmall
+              : t.ai.localText;
 
   const use = async () => {
     if (!api || !selected) return;
-    const [baseUrl, model] = selected.split("\n");
-    setBusy(true);
+    const [where, model] = selected.split("\n");
+    setBusy("use");
     try {
-      onSaved(await api.saveAiConfig({ kind: "openai", model, baseUrl }, null));
+      onSaved(await api.saveAiConfig(where === "local" ? { kind: "local", model, baseUrl: null } : { kind: "openai", model, baseUrl: where }, null));
       toast.push({ tone: "success", title: t.ai.saved });
     } catch (e) {
       toast.push({ tone: "error", title: t.ai.saveFailed, description: errorMessage(e, t.common.genericError) });
     } finally {
-      setBusy(false);
+      setBusy(null);
+    }
+  };
+  const install = async () => {
+    if (!api || !offered) return;
+    setBusy("install");
+    setStopping(false);
+    stopped.current = false;
+    setProgress(null);
+    try {
+      setLocal(await api.installLocalModel());
+      setChoice(`local\n${offered.id}`);
+      toast.push({ tone: "success", title: t.ai.localInstalled(offered.name) });
+    } catch (e) {
+      setLocal(await api.localModel().catch(() => local));
+      if (!stopped.current) toast.push({ tone: "error", title: t.ai.localInstallFailed, description: errorMessage(e, t.common.genericError) });
+    } finally {
+      setBusy(null);
+      setProgress(null);
+    }
+  };
+  const stop = () => {
+    stopped.current = true;
+    setStopping(true);
+    void api?.cancelLocalModel();
+  };
+  const remove = async () => {
+    if (!api) return;
+    setBusy("remove");
+    try {
+      setLocal(await api.removeLocalModel());
+      setChoice("");
+      setConfirmRemove(false);
+      onSaved(await api.aiConfig());
+    } catch (e) {
+      toast.push({ tone: "error", title: t.toast.saveFailed, description: errorMessage(e, t.common.genericError) });
+    } finally {
+      setBusy(null);
     }
   };
 
+  const percent = progress && progress.total > 0 ? (progress.done / progress.total) * 100 : null;
   return (
     <Way icon={<HardDrive size={15} />} title={t.ai.localTitle} text={text}>
-      {running.length > 0 ? (
+      {installing ? (
+        <div className="ai-form">
+          <Progress value={progress?.phase === "check" ? null : percent} label={text} />
+          <div className="ai-local__meta">
+            <span>{progress && progress.phase !== "check" ? t.ai.localProgress(size(progress.done), size(progress.total)) : ""}</span>
+            <Button size="sm" variant="ghost" disabled={stopping} onClick={stop}>
+              {t.ai.localStop}
+            </Button>
+          </div>
+        </div>
+      ) : options.length > 0 ? (
         <div className="ai-form">
           <Select label={t.ai.model} value={selected} options={options} onChange={setChoice} block />
           <div className="ai-form__actions">
-            <Button loading={busy} disabled={busy || inUse(selected)} onClick={() => void use()}>
+            <Button loading={busy === "use"} disabled={!!busy || inUse(selected)} onClick={() => void use()}>
               {inUse(selected) ? t.ai.localInUse : t.ai.localUse}
+            </Button>
+            {offered && !ferry && (
+              <Button variant="ghost" disabled={!!busy} onClick={() => void install()}>
+                {t.ai.localInstall}
+              </Button>
+            )}
+            {ferry && (
+              <Button variant="ghost" className="danger-text" disabled={!!busy} onClick={() => setConfirmRemove(true)}>
+                {t.ai.localRemove}
+              </Button>
+            )}
+          </div>
+        </div>
+      ) : offered ? (
+        <div className="ai-form">
+          <p className="hint">{t.ai.localSource(offered.license, offered.repo)}</p>
+          <div className="ai-form__actions">
+            <Button disabled={!!busy} onClick={() => void install()}>
+              {t.ai.localInstall}
             </Button>
           </div>
         </div>
@@ -176,6 +275,20 @@ function LocalWay({ view, onSaved }: { view: AiView; onSaved: (view: AiView) => 
         <Button loading={servers === null} onClick={() => void search()}>
           {t.ai.localSearch}
         </Button>
+      )}
+      {ferry && (
+        <ConfirmDialog
+          open={confirmRemove}
+          icon={<Trash2 size={20} />}
+          tone="danger"
+          title={t.ai.localRemoveTitle(ferry.name)}
+          confirmLabel={t.ai.localRemove}
+          loading={busy === "remove"}
+          onConfirm={() => void remove()}
+          onCancel={() => setConfirmRemove(false)}
+        >
+          <p>{t.ai.localRemoveText(size(ferry.size))}</p>
+        </ConfirmDialog>
       )}
     </Way>
   );

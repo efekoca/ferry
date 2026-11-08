@@ -509,7 +509,7 @@ export interface AiPrompt {
   lastLine: number;
 }
 
-export type AiKind = "anthropic" | "openai";
+export type AiKind = "anthropic" | "openai" | "local";
 
 /** Which provider AI suggestions use. The key isn't part of it: it stays in the system keychain. */
 export interface AiConfig {
@@ -521,6 +521,31 @@ export interface AiConfig {
 export interface AiView extends AiConfig {
   hasKey: boolean;
   models: string[];
+}
+
+export interface LocalModelInfo {
+  id: string;
+  name: string;
+  license: string;
+  repo: string;
+  size: number;
+}
+
+export interface LocalModelView {
+  /** The model for this computer, or null when its memory is too small. */
+  model: LocalModelInfo | null;
+  installed: boolean;
+  installing: boolean;
+  remaining: number;
+  memory: number;
+}
+
+export type LocalPhase = "runtime" | "model" | "verify" | "check";
+
+export interface LocalProgress {
+  phase: LocalPhase;
+  done: number;
+  total: number;
 }
 
 export interface LocalAiServer {

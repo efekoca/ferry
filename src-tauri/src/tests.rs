@@ -869,6 +869,23 @@ fn an_openai_compatible_key_stays_with_its_server() {
     assert_eq!(h.ok("save_ai_config", json!({ "config": openai }))["hasKey"], true);
 }
 
+#[test]
+fn the_local_model_is_offered_by_memory_and_used_only_once_installed() {
+    let h = harness();
+    let view = h.ok("local_model", json!({}));
+    assert_eq!((view["installed"].as_bool(), view["installing"].as_bool()), (Some(false), Some(false)));
+    assert!(view["memory"].as_u64().unwrap() > 0);
+    if let Some(size) = view["model"]["size"].as_u64() {
+        assert!(view["remaining"].as_u64().unwrap() > size);
+        assert_eq!(view["model"]["license"], "Apache-2.0");
+    }
+    let saved = h.ok("save_ai_config", json!({ "config": { "kind": "local", "model": "qwen3.5-9b" } }));
+    assert_eq!((saved["kind"].as_str(), saved["hasKey"].as_bool()), (Some("local"), Some(false)));
+    assert_eq!(h.ok("ai_provider", json!({})), Value::Null);
+    assert_eq!(h.ok("remove_local_model", json!({}))["installed"], false);
+    h.ok("cancel_local_model", json!({}));
+}
+
 /// Turns `each()` into `foreach` in whatever window it's shown, like a model would.
 struct Scripted;
 
