@@ -716,6 +716,56 @@ mod tests {
         assert!(!short.is_empty());
     }
 
+    /// A tiny chat model, enough to see the server answer.
+    static TINY: Model = Model {
+        id: "smollm2-135m",
+        name: "SmolLM2 135M",
+        license: "Apache-2.0",
+        repo: "unsloth/SmolLM2-135M-Instruct-GGUF",
+        size: 88_201_792,
+        commit: "9e6855bc4be717fca1ef21360a1db4b29d5c559a",
+        file: "SmolLM2-135M-Instruct-Q2_K.gguf",
+        sha256: "c53fe6626c7165ebfd8de5db22edc3f719b813da001e662bc5cb453f2540a076",
+        min_memory: 0,
+    };
+
+    /// Downloads the pinned llama.cpp build for this system and a tiny model, starts the server
+    /// and asks it something: the whole path Ferry takes. It needs the network, so it runs only
+    /// with FERRY_TEST_LLAMA set, in the "Local model" workflow.
+    #[test]
+    fn the_real_runtime_starts_and_answers_on_this_system() {
+        if std::env::var_os("FERRY_TEST_LLAMA").is_none() || runtime().is_none() {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let install = Install::new(dir.path().to_path_buf());
+        let phases = Mutex::new(Vec::new());
+        let progress = |phase: Phase, _: u64, _: u64| {
+            let mut seen = phases.lock().unwrap();
+            if seen.last() != Some(&phase) {
+                seen.push(phase);
+            }
+        };
+        let cancel = AtomicBool::new(false);
+        install.install_runtime(&cancel, &progress).unwrap();
+        let path = install.model_path(&TINY);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let url = format!("https://huggingface.co/{}/resolve/{}/{}", TINY.repo, TINY.commit, TINY.file);
+        fetch(&url, &path, TINY.size, TINY.sha256, &cancel, &progress, Phase::Model).unwrap();
+        assert!(install.installed(&TINY));
+        assert_eq!(*phases.lock().unwrap(), [Phase::Runtime, Phase::Verify, Phase::Model, Phase::Verify]);
+
+        let server =
+            Server::start(&install, &TINY, &cancel).unwrap_or_else(|e| panic!("{e}\n{}", log_tail(&install.dir.join("server.log"))));
+        assert!(install.record().exists());
+        let started = Instant::now();
+        let reply = server.remote(&TINY).complete(&Prompt::plain("Answer in one short sentence.", "Say hello."), &cancel);
+        println!("reply in {:.1?}: {reply:?}", started.elapsed());
+        assert!(reply.is_ok_and(|r| !r.trim().is_empty()));
+        drop(server);
+        assert!(!install.record().exists());
+    }
+
     #[test]
     fn a_leftover_server_is_stopped_only_when_it_proves_its_ours() {
         let dir = tempfile::tempdir().unwrap();

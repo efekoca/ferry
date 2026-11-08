@@ -1,0 +1,30 @@
+name: Local model
+
+# Downloads the pinned llama.cpp build for each system and a tiny model, starts the server and
+# asks it something: the path Ferry's local model takes, on real Linux, Windows and macOS.
+on:
+  pull_request:
+    paths:
+      - crates/ferry-core/src/local_ai.rs
+      - .github/workflows/local-model.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  runtime:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ github.event_name == 'workflow_dispatch' && fromJSON('["ubuntu-latest", "windows-latest", "macos-latest"]') || fromJSON('["ubuntu-latest", "windows-latest"]') }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - name: Real llama.cpp runtime
+        env:
+          FERRY_TEST_LLAMA: "1"
+        run: cargo test -p ferry-core --lib local_ai::tests::the_real_runtime_starts_and_answers_on_this_system -- --nocapture

@@ -15,9 +15,79 @@ const AROUND: usize = 20;
 
 const SYSTEM: &str = "You fix PHP code for an upgrade to a newer PHP version. Change only what the problem needs, \
 and keep the behavior, style, indentation and blank lines. Don't add or change type declarations, return types, \
-visibility or names, and don't add checks, comments or other code the problem doesn't need. A value shown as \
-[redacted] was hidden before sending; leave any line that holds one exactly as it is. If the problem can't be fixed \
-safely with only the lines you're given, reply with them unchanged.";
+visibility or names, and don't add checks, comments or other code the problem doesn't need. Don't delete a \
+statement, an array element or an argument unless the problem requires it: when a deprecated constant or flag has no \
+effect, take it out of a | combination or write 0 in its place. Never replace a function call, a connection or another \
+value the code uses with a placeholder such as 0, null or ''; when the code needs a migration these lines can't hold, \
+reply with them unchanged. Prefer a fix that keeps the program's output the same. \
+A hint written as Class::method() names a method; call it the way the class defines it. A value shown as [redacted] \
+was hidden before sending; leave any line that holds one exactly as it is. If the problem can't be fixed safely with \
+only the lines you're given, reply with them unchanged.";
+
+/// Rules where Ferry's own local model gave a correct fix when every manual rule in
+/// demo/kuzey-magaza was tried with Qwen3.5 9B and each accepted reply was reviewed. For the others
+/// it isn't offered; a cloud provider still is.
+pub const LOCAL_RULES: &[&str] = &[
+    "behavior.concat_precedence",
+    "behavior.html_default_flags",
+    "behavior.indirect_access_order",
+    "behavior.substr_false",
+    "deprecated.assert_constants",
+    "deprecated.assert_options",
+    "deprecated.curlopt_binarytransfer",
+    "deprecated.curlpipe_http1",
+    "deprecated.date_wakeup",
+    "deprecated.dom_php_err",
+    "deprecated.dynamic_property",
+    "deprecated.e_strict",
+    "deprecated.e_user_error",
+    "deprecated.false_to_array",
+    "deprecated.file_binary",
+    "deprecated.file_text",
+    "deprecated.filter_sanitize_stripped",
+    "deprecated.http_response_header",
+    "deprecated.implicit_argument",
+    "deprecated.ini_setting",
+    "deprecated.intlgregcal_create_instance",
+    "deprecated.lcg_value",
+    "deprecated.libxml_disable_entity_loader",
+    "deprecated.mt_rand_php",
+    "deprecated.mysqli_is_mariadb",
+    "deprecated.mysqli_refresh",
+    "deprecated.mysqli_store_result_copy_data",
+    "deprecated.mysqli_store_result_mode",
+    "deprecated.mysqli_update_max_length",
+    "deprecated.null_offset",
+    "deprecated.null_to_internal",
+    "deprecated.openssl_x509_free",
+    "deprecated.partial_callable",
+    "deprecated.shmop_close",
+    "deprecated.splfixedarray_wakeup",
+    "deprecated.u_multiple_decimal_seperators",
+    "deprecated.xml_handler_string",
+    "deprecated.zip_fl_recompress",
+    "removed.__autoload",
+    "removed.ai_idn_constant",
+    "removed.break_outside_loop",
+    "removed.datefmt_set_timezone_id",
+    "removed.filter_flag_host_required",
+    "removed.filter_flag_scheme_required",
+    "removed.filter_sanitize_magic_quotes",
+    "removed.get_magic_quotes_gpc",
+    "removed.get_magic_quotes_runtime",
+    "removed.gzgetss",
+    "removed.intl_idna_variant_2003",
+    "removed.magic_quotes_runtime",
+    "removed.mysqli_embedded_server",
+    "removed.pgsql_libpq_version_str",
+    "removed.reflection_export",
+    "removed.set_magic_quotes_runtime",
+    "removed.unset_this",
+];
+
+pub fn local_supports(rule: &str) -> bool {
+    LOCAL_RULES.contains(&rule)
+}
 
 /// Lines on each side of the finding where a reply may change anything. Further away, only a change
 /// the fix plainly needs is kept.
@@ -152,12 +222,12 @@ pub fn code_block(reply: &str) -> Option<&str> {
 #[derive(Debug)]
 enum Rejected {
     Unchanged,
-    Retry { user: String, model: &'static str },
+    Retry { user: String, model: String },
 }
 
 impl Rejected {
-    fn retry(user: String, model: &'static str) -> Rejected {
-        Rejected::Retry { user, model }
+    fn retry(user: String, model: impl Into<String>) -> Rejected {
+        Rejected::Retry { user, model: model.into() }
     }
 
     fn message(self) -> String {
@@ -200,6 +270,186 @@ fn touches_far_signature(old: &[String], new: &[String], near: std::ops::RangeIn
         tag != similar::DiffTag::Equal
             && old[before.clone()].iter().enumerate().any(|(i, l)| !near.contains(&(before.start + i)) && declares(l))
     })
+}
+
+/// Words that look like a function or a constant but are part of PHP itself.
+const KEYWORDS: &[&str] = &[
+    "__class__",
+    "__dir__",
+    "__file__",
+    "__function__",
+    "__halt_compiler",
+    "__line__",
+    "__method__",
+    "__namespace__",
+    "__property__",
+    "__trait__",
+    "abstract",
+    "and",
+    "array",
+    "as",
+    "break",
+    "callable",
+    "case",
+    "catch",
+    "class",
+    "clone",
+    "const",
+    "continue",
+    "declare",
+    "default",
+    "die",
+    "do",
+    "echo",
+    "else",
+    "elseif",
+    "empty",
+    "enddeclare",
+    "endfor",
+    "endforeach",
+    "endif",
+    "endswitch",
+    "endwhile",
+    "enum",
+    "eval",
+    "exit",
+    "extends",
+    "false",
+    "final",
+    "finally",
+    "fn",
+    "for",
+    "foreach",
+    "function",
+    "global",
+    "goto",
+    "if",
+    "implements",
+    "include",
+    "include_once",
+    "instanceof",
+    "insteadof",
+    "interface",
+    "isset",
+    "list",
+    "match",
+    "namespace",
+    "new",
+    "null",
+    "or",
+    "parent",
+    "print",
+    "private",
+    "protected",
+    "public",
+    "readonly",
+    "require",
+    "require_once",
+    "return",
+    "self",
+    "static",
+    "switch",
+    "throw",
+    "trait",
+    "true",
+    "try",
+    "unset",
+    "use",
+    "var",
+    "while",
+    "xor",
+    "yield",
+];
+
+/// Words after which a name is declared or names a class, not used as a function or constant.
+const DECLARERS: &[&str] = &[
+    "function",
+    "const",
+    "class",
+    "interface",
+    "trait",
+    "enum",
+    "new",
+    "extends",
+    "implements",
+    "instanceof",
+    "insteadof",
+    "use",
+    "namespace",
+    "case",
+    "goto",
+    "as",
+];
+
+#[derive(Default)]
+struct Symbols {
+    calls: std::collections::HashSet<String>,
+    constants: std::collections::HashSet<String>,
+    declared: std::collections::HashSet<String>,
+}
+
+/// The global functions a file calls and the constants it uses, with the names it declares
+/// itself. Functions are lowercased; constants keep their case.
+fn symbols(src: &str) -> Symbols {
+    use crate::lexer::TokenKind;
+    let tokens = crate::lexer::tokenize(src);
+    let mut found = Symbols::default();
+    for (i, token) in tokens.iter().enumerate() {
+        if token.kind != TokenKind::Ident {
+            continue;
+        }
+        let prev = i.checked_sub(1).map(|j| &tokens[j]);
+        let next = tokens.get(i + 1);
+        if token.text.eq_ignore_ascii_case("define") && next.is_some_and(|n| n.is_punct("(")) {
+            if let Some(TokenKind::Str { .. }) = tokens.get(i + 2).map(|t| &t.kind) {
+                found.declared.insert(tokens[i + 2].text.trim_matches(|c| c == '\'' || c == '"').to_string());
+            }
+        }
+        let name = token.text.trim_start_matches('\\');
+        let lower = name.to_ascii_lowercase();
+        if name.contains('\\') || KEYWORDS.contains(&lower.as_str()) {
+            continue;
+        }
+        if prev.is_some_and(|p| p.kind == TokenKind::Ident && DECLARERS.contains(&p.text.to_ascii_lowercase().as_str())) {
+            found.declared.insert(name.to_string());
+            found.declared.insert(lower);
+            continue;
+        }
+        if prev.is_some_and(|p| p.is_punct("->") || p.is_punct("?->") || p.is_punct("::"))
+            || next.is_some_and(|n| n.is_punct("::") || n.is_punct(":") || n.kind == TokenKind::Variable)
+        {
+            continue;
+        }
+        if next.is_some_and(|n| n.is_punct("(")) {
+            found.calls.insert(lower);
+        } else if name.starts_with(|c: char| c.is_ascii_uppercase() || c == '_')
+            && name.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+        {
+            found.constants.insert(name.to_string());
+        }
+    }
+    found
+}
+
+/// A function or constant the changed code uses that PHP doesn't define, the file didn't use before
+/// and doesn't declare: a name the model made up.
+fn invented(original: &str, changed: &str, target: PhpVersion) -> Option<String> {
+    let (before, after) = (symbols(original), symbols(changed));
+    let known_function = |f: &str| crate::arity::ARITY.iter().any(|(name, _, _)| name.eq_ignore_ascii_case(f));
+    let mut calls: Vec<&String> = after.calls.difference(&before.calls).collect();
+    calls.sort();
+    if let Some(call) = calls.into_iter().find(|f| !known_function(f) && !after.declared.contains(*f)) {
+        return Some(format!("{call}()"));
+    }
+    let removed_later = |c: &str| {
+        crate::symbols::REMOVED_CONSTANTS.iter().any(|(name, (major, minor), _)| *name == c && PhpVersion::new(*major, *minor) > target)
+    };
+    let mut constants: Vec<&String> = after.constants.difference(&before.constants).collect();
+    constants.sort();
+    constants
+        .into_iter()
+        .find(|c| crate::constants::CONSTANTS.binary_search(&c.as_str()).is_err() && !removed_later(c) && !after.declared.contains(*c))
+        .cloned()
 }
 
 fn counts(findings: &[Finding]) -> std::collections::HashMap<&str, usize> {
@@ -271,6 +521,15 @@ fn checked(finding: &Finding, prompt: &Prompt, reply: &str) -> Result<FileChange
         return Err(Rejected::Unchanged);
     }
     if let Some(target) = prompt.target {
+        if let Some(name) = invented(&prompt.original, &new_content, target) {
+            return Err(Rejected::retry(
+                crate::t!(
+                    "Öneri PHP'nin tanımadığı bir ad kullanıyor ({name}); uygulanmadı.",
+                    "The suggestion uses a name PHP doesn't define ({name}), so it wasn't used."
+                ),
+                format!("It uses {name}, which PHP {target} doesn't define."),
+            ));
+        }
         let before = crate::analyzer::analyze_source(&finding.file, &prompt.original, target);
         let after = crate::analyzer::analyze_source(&finding.file, &new_content, target);
         let (before_counts, after_counts) = (counts(&before), counts(&after));
@@ -340,7 +599,7 @@ pub fn suggest(
                 current = prompt.again(&format!("PHP reported a syntax error in it: {}", errors.join("; ")));
             }
             Err(Rejected::Retry { user, .. }) if last => return Err(user),
-            Err(Rejected::Retry { model, .. }) => current = prompt.again(model),
+            Err(Rejected::Retry { model, .. }) => current = prompt.again(&model),
             Err(unchanged) => return Err(unchanged.message()),
         }
     }
@@ -838,7 +1097,7 @@ mod tests {
         assert!(
             matches!(checked(&f, &p, &format!("```php\n{}```", unsolved)), Err(Rejected::Retry { model, .. }) if model.contains("still"))
         );
-        let worse = reply_with(|w| w.replace("$sum += $v;", "$sum += create_function('', 'return 1;');"));
+        let worse = reply_with(|w| w.replace("$sum += $v;", "$sum += strlen(utf8_encode('a'));"));
         assert!(matches!(checked(&f, &p, &worse), Err(Rejected::Retry { model, .. }) if model.contains("new")));
         assert!(checked(&f, &p, &reply_with(str::to_string)).is_ok());
     }
@@ -851,6 +1110,37 @@ mod tests {
         let noisy = reply_with(|w| w.replacen("$sum = 0;\n\n", "$sum = 0;\n", 1).replace("    $x = 1;", "  $x = 1;"));
         let change = checked(&f, &p, &noisy).unwrap();
         assert_eq!(change.new_content, LOOP.replace("    while (list($k, $v) = each($a)) {", FIXED));
+    }
+
+    #[test]
+    fn names_are_read_as_calls_constants_or_declarations() {
+        let src =
+            "<?php\nnamespace App;\nuse Foo\\Bar;\ndefine('LIMIT', 3);\nconst SIZE = 2;\nfunction helper(int $a): int { return $a; }\n\
+                   class Box { const MAX = 1; public function run(Bar $b) { $b->go(PHP_EOL); self::MAX; \\strlen('x'); new Bar(E_ALL); \
+                   helper(a: LIMIT); goto done; done: return Box::MAX + SIZE; } }\n";
+        let found = symbols(src);
+        let mut calls: Vec<_> = found.calls.iter().map(String::as_str).collect();
+        calls.sort();
+        assert_eq!(calls, ["define", "helper", "strlen"]);
+        let mut constants: Vec<_> = found.constants.iter().map(String::as_str).collect();
+        constants.sort();
+        assert_eq!(constants, ["E_ALL", "LIMIT", "PHP_EOL", "SIZE"]);
+        for name in ["LIMIT", "SIZE", "helper", "MAX", "Box"] {
+            assert!(found.declared.contains(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_reply_that_uses_a_name_php_doesnt_have_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = finding(dir.path(), LOOP);
+        let p = prompt(dir.path(), &f, PhpVersion::new(8, 4)).unwrap();
+        let constant = reply_with(|w| w.replace("$sum += $v;", "$sum += $v * ZEND_SCALE;"));
+        assert!(matches!(checked(&f, &p, &constant), Err(Rejected::Retry { model, .. }) if model.contains("ZEND_SCALE")));
+        let function = reply_with(|w| w.replace("$sum += $v;", "$sum += array_sum_fast($v);"));
+        assert!(matches!(checked(&f, &p, &function), Err(Rejected::Retry { model, .. }) if model.contains("array_sum_fast()")));
+        let known = reply_with(|w| w.replace("$sum += $v;", "$sum += intdiv($v, PHP_INT_SIZE);"));
+        assert!(checked(&f, &p, &known).is_ok());
     }
 
     #[test]
