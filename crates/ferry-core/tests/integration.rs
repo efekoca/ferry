@@ -261,3 +261,61 @@ fn a_polyfill_behind_a_dead_version_check_does_not_hide_a_removed_function() {
         scan.findings.iter().map(|f| &f.rule_id).collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn rector_leaves_alone_what_it_would_break() {
+    let Some(tools) = ferry_core::toolchain::test_tools() else {
+        eprintln!("FERRY_TEST_TOOLS ayarlı değil; Rector testi atlandı");
+        return;
+    };
+    let php = toolchain::find_php(None).expect("php gerekli");
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let files = [
+        (
+            "parse.php",
+            "<?php\nclass Report\n{\n    function page($query)\n    {\n        parse_str($query);\n        return isset($page) ? (int) $page : 1;\n    }\n}\n",
+            "parse_str($query);",
+        ),
+        ("export.php", "<?php\nfunction dump() {\n    ReflectionFunction::export('strlen');\n}\n", "ReflectionFunction::export('strlen');"),
+        (
+            "quotes.php",
+            "<?php\nfunction quote($a) {\n    return filter_var($a, FILTER_SANITIZE_MAGIC_QUOTES, FILTER_REQUIRE_ARRAY);\n}\n",
+            "filter_var($a, FILTER_SANITIZE_MAGIC_QUOTES, FILTER_REQUIRE_ARRAY)",
+        ),
+        ("money.php", "<?php\nfunction price($v) {\n    return money_format('%i', $v);\n}\n", "money_format('%i', $v)"),
+        ("stop.php", "<?php\necho 'a';\nbreak;\necho 'b';\n", "break;"),
+        (
+            "wbmp.php",
+            "<?php\nfunction thumb($png) {\n    png2wbmp($png, 'png.wbmp', 32, 32, 7);\n    return read_exif_data($png);\n}\n",
+            "png2wbmp($png, 'png.wbmp', 32, 32, 7);",
+        ),
+        ("exif.php", "<?php\nfunction meta($f) {\n    return read_exif_data($f);\n}\n", "exif_read_data($f)"),
+    ];
+    for (name, src, _) in &files {
+        std::fs::write(root.join(name), src).unwrap();
+    }
+    let work = tempfile::tempdir().unwrap();
+    let preview = rector::preview(
+        &php,
+        &toolchain::rector_entry(&tools),
+        root,
+        PhpVersion::new(8, 4),
+        rector::RectorMode::Compat,
+        &[],
+        work.path(),
+        &std::sync::atomic::AtomicBool::new(false),
+    )
+    .unwrap();
+    assert!(preview.errors.is_empty(), "{:?}", preview.errors);
+    let broken: Vec<String> = files
+        .iter()
+        .filter_map(|(name, src, kept)| {
+            let after = preview.changes.iter().find(|c| c.file == *name).map_or(*src, |c| c.new_content.as_str());
+            (!after.contains(kept)).then(|| format!("{name}:\n{after}"))
+        })
+        .collect();
+    assert!(broken.is_empty(), "{}", broken.join("\n"));
+    let wbmp = preview.changes.iter().find(|c| c.file == "wbmp.php").expect("wbmp.php keeps its other renames");
+    assert!(wbmp.new_content.contains("exif_read_data($png)"), "{}", wbmp.new_content);
+}
