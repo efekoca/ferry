@@ -281,7 +281,7 @@ fn rector_leaves_alone_what_it_would_break() {
         (
             "quotes.php",
             "<?php\nfunction quote($a) {\n    return filter_var($a, FILTER_SANITIZE_MAGIC_QUOTES, FILTER_REQUIRE_ARRAY);\n}\n",
-            "filter_var($a, FILTER_SANITIZE_MAGIC_QUOTES, FILTER_REQUIRE_ARRAY)",
+            "filter_var($a, FILTER_SANITIZE_ADD_SLASHES, FILTER_REQUIRE_ARRAY)",
         ),
         ("money.php", "<?php\nfunction price($v) {\n    return money_format('%i', $v);\n}\n", "money_format('%i', $v)"),
         ("stop.php", "<?php\necho 'a';\nbreak;\necho 'b';\n", "break;"),

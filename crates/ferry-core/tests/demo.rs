@@ -1,6 +1,6 @@
 use ferry_core::deps::{self, DependencyStatus};
 use ferry_core::project::{self, Framework};
-use ferry_core::rules::{patterns, CONSTANTS, FUNCTIONS, MEMBERS, TYPE_CURRENCY_CALL};
+use ferry_core::rules::{patterns, FixKind, CONSTANTS, FUNCTIONS, MEMBERS, TYPE_CURRENCY_CALL};
 use ferry_core::{analyzer, report, PhpVersion};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -79,6 +79,21 @@ fn kuzey_magaza_triggers_every_rule() {
         .filter(|id| !found.contains(id))
         .collect();
     assert!(missing.is_empty(), "demo never triggers: {missing:?}");
+    let own_fixes = [
+        "deprecated.mysqli_no_data",
+        "deprecated.mysqli_is_mariadb",
+        "deprecated.mysqli_update_max_length",
+        "deprecated.dom_php_err",
+        "deprecated.pgsql_transaction_constant",
+        "deprecated.pgsql_libpq_version_str",
+        "deprecated.u_multiple_decimal_seperators",
+        "deprecated.oci8_alias",
+        "removed.mb_overload",
+        "removed.filter_sanitize_magic_quotes",
+    ];
+    for id in own_fixes {
+        assert!(result.findings.iter().any(|f| f.rule_id == id && f.fix == FixKind::Auto), "{id} isn't automatic in the demo");
+    }
 
     let summary = report::summarize(&result.findings);
     assert!(summary.score < 50, "score {}", summary.score);

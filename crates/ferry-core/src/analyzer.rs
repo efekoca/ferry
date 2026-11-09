@@ -102,6 +102,20 @@ fn analyze_bounded(
     }
 }
 
+/// The findings Ferry's own fixes start from, with the same limits as a scan.
+pub(crate) fn findings_for_fixes(
+    rel: &str,
+    src: &str,
+    target: PhpVersion,
+    index: &std::sync::Arc<crate::index::ProjectIndex>,
+) -> Vec<Finding> {
+    let never = std::sync::atomic::AtomicBool::new(false);
+    match analyze_bounded(rel.to_string(), src.to_string(), target, index, &never, FILE_BUDGET) {
+        FileRun::Done(found) => found,
+        _ => Vec::new(),
+    }
+}
+
 pub fn analyze_files(root: &Path, files: &[PathBuf], target: PhpVersion, progress: impl FnMut(usize, usize, &str)) -> ScanResult {
     let never = std::sync::atomic::AtomicBool::new(false);
     analyze_until(root, files, target, &never, progress).expect("the scan can't be cancelled")
@@ -741,6 +755,7 @@ pub fn analyze_source_in(file: &str, src: &str, target: PhpVersion, index: &crat
             _ => {}
         }
     }
+    crate::fixes::mark(&tokens, &mut ctx.out);
     ctx.out
 }
 
@@ -6116,7 +6131,7 @@ mod suspect_rule_tests {
         assert_eq!(
             ids,
             [
-                ("deprecated.pgsql_transaction_constant", crate::rules::FixKind::Manual),
+                ("deprecated.pgsql_transaction_constant", crate::rules::FixKind::Auto),
                 ("deprecated.pdo_driver_constant", crate::rules::FixKind::Auto)
             ]
         );

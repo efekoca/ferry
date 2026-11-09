@@ -109,6 +109,8 @@ Ferry, hangi PHP'nin gerçekten çalışacağını belirleyen ve kodun çevresin
 
 Ferry, Rector'ın tek başına çözemediği durumları da ele alır. Örneğin `$str{0}` yazımı içeren bir dosyayı Rector tamamen atlar. Ferry bu yazımları önce `$str[0]` olarak düzeltir, aynısını `= &new`, `= &func_get_args()` ve `default;` için de yapar; böylece dosyanın geri kalanı da düzeltilir.
 
+Rector'da kuralı olmayan bazı bulguları Ferry aynı önizlemede kendisi düzeltir: PHP'nin hiç kullanmadığı sabitlerin yerine değerleri yazılır (`MYSQLI_NO_DATA` → `100`), adı değişen sabitler yeni adını alır (`PGSQL_LIBPQ_VERSION_STR` → `PGSQL_LIBPQ_VERSION`), eski OCI8 takma adları da `oci_` adlarına çevrilir (`ocilogon()` → `oci_connect()`). Her düzeltme yalnızca tanıdığı kalıba dokunur; bir bulgu ancak bunlardan biri uygulanabiliyorsa otomatik olarak işaretlenir.
+
 ### Geçişi engelleyen bağımlılıklar
 
 **Bağımlılıklar** sayfası, kilitli her paketi `composer.lock`'ta bildirdiği PHP gereksinimine göre hedef sürümle karşılaştırır. Projenin `composer.json`'daki kendi PHP kısıtı da kontrol edilir. `composer.json`'da ya da kilitli bir pakette `php` için yazılmış bir `conflict` kaydı da hesaba katılır.
