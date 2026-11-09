@@ -704,7 +704,7 @@ pub fn analyze_source_in(file: &str, src: &str, target: PhpVersion, index: &crat
             TokenKind::Ident => ctx.ident(&tokens, i),
             TokenKind::Punct if tok.text == "$" => {
                 if let Some(next) = tokens.get(i + 1) {
-                    if next.start == tok.end && (next.kind == TokenKind::Variable || next.is_punct("{")) {
+                    if next.start == tok.end && next.kind == TokenKind::Variable && tokens.get(i + 2).is_some_and(|t| t.is_punct("[")) {
                         ctx.pattern(&patterns::VARIABLE_VARIABLE, tok, None);
                     }
                 }
@@ -1437,7 +1437,11 @@ impl<'a> Ctx<'a> {
             }
             return;
         };
-        if !self.applies(m.rule.since()) {
+        let currency_type = m.rule.id == "deprecated.numberformatter_type_currency"
+            && enclosing_call(tokens, i)
+                .is_some_and(|f| ["format", "parse", "numfmt_format", "numfmt_parse"].iter().any(|n| f.eq_ignore_ascii_case(n)));
+        let rule = if currency_type { &crate::rules::TYPE_CURRENCY_CALL } else { &m.rule };
+        if !self.applies(rule.since()) {
             return;
         }
         let title = match (kind, class) {
@@ -1447,13 +1451,13 @@ impl<'a> Ctx<'a> {
         };
         let guessed = known.as_ref().is_some_and(|types| types.contains(GUESSED));
         let hit = Hit {
-            rule_id: m.rule.id,
+            rule_id: rule.id,
             title: Localized::same(title),
-            message: m.rule.note,
-            since: m.rule.since(),
-            severity: m.rule.severity(),
-            fix: if guessed && m.rule.fix == FixKind::Auto { FixKind::Likely } else { m.rule.fix },
-            replacement: m.rule.replacement.map(Into::into),
+            message: rule.note,
+            since: rule.since(),
+            severity: rule.severity(),
+            fix: if guessed && rule.fix == FixKind::Auto { FixKind::Likely } else { rule.fix },
+            replacement: rule.replacement.map(Into::into),
         };
         self.push(hit, tok.line, tok.column);
     }
@@ -1501,14 +1505,15 @@ impl<'a> Ctx<'a> {
 
     fn arity(&mut self, tok: &Token, given: usize, required: u8, max: u8) {
         let name = tok.text.trim_start_matches('\\');
+        let noun = |n: usize| if n == 1 { "argument" } else { "arguments" };
         let expects = match (required, max) {
-            (r, 255) => Localized { tr: format!("en az {r} argüman"), en: format!("at least {r} arguments") },
-            (r, m) if r == m => Localized { tr: format!("tam {r} argüman"), en: format!("exactly {r} arguments") },
+            (r, 255) => Localized { tr: format!("en az {r} argüman"), en: format!("at least {r} {}", noun(r.into())) },
+            (r, m) if r == m => Localized { tr: format!("tam {r} argüman"), en: format!("exactly {r} {}", noun(r.into())) },
             (r, m) => Localized { tr: format!("{r}–{m} argüman"), en: format!("{r} to {m} arguments") },
         };
         let hit = Hit {
             rule_id: patterns::BUILTIN_ARITY.id,
-            title: Localized { tr: format!("{name}() {given} argümanla"), en: format!("{name}() with {given} arguments") },
+            title: Localized { tr: format!("{name}() {given} argümanla"), en: format!("{name}() with {given} {}", noun(given)) },
             message: patterns::BUILTIN_ARITY.note,
             since: PhpVersion::new(8, 0),
             severity: Severity::Breaking,
@@ -4656,7 +4661,7 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
         for src in ["<?php $r = new ReflectionClass($x); $definition->getClass();", "<?php use ReflectionParameter; $element->isArray();"] {
             assert!(ids(src).is_empty(), "{src}");
         }
-        assert_eq!(ids("<?php $db = new mysqli(); $db->init();"), ["deprecated.mysqli_method"]);
+        assert_eq!(ids("<?php $db = new mysqli(); $db->init();"), ["deprecated.mysqli_init"]);
         assert!(ids("<?php class Rs { function f() { $c = new mysqli(); $this->init(); } }").is_empty());
     }
 
@@ -4769,6 +4774,12 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
             ("<?php mysqli_stmt_attr_set($s, MYSQLI_STMT_ATTR_UPDATE_MAX_LENGTH, true);", "deprecated.mysqli_update_max_length", 1),
             ("<?php mysqli_embedded_server_start(1, [], []); mysqli_embedded_server_end();", "removed.mysqli_embedded_server", 2),
             ("<?php $c = ocilogon('u', 'p'); $s = ociparse($c, 'x'); oci_parse($c, 'x'); ocinotafunction();", "deprecated.oci8_alias", 2),
+            (
+                "<?php ocipasswordchange($c, 'u', 'a', 'b'); ocicloselob($l); ocicollassign($c, $d); ociwritetemporarylob($l, 'x');",
+                "deprecated.oci8_alias",
+                1,
+            ),
+            ("<?php ociinternaldebug(true); oci_internal_debug(false);", "removed.oci_internal_debug", 2),
             (
                 "<?php com_load_typelib('Word.Application', false); com_load_typelib('Word.Application');",
                 "deprecated.com_typelib_case_insensitive",
@@ -5646,8 +5657,11 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
         assert_eq!(count85("<?php mb_stripos($ct, 'html'); mb_strlen($s, 'BASE64');", "deprecated.mb_encoding"), 1);
         assert!(at("<?php $r = $res->fetch_assoc(MYSQLI_ASSOC); $redis->ping(); $user->refresh();", (8, 5))
             .iter()
-            .all(|(r, _)| r != "deprecated.mysqli_method"));
-        assert_eq!(count85("<?php function f(mysqli $db) { $db->ping(); }", "deprecated.mysqli_method"), 1);
+            .all(|(r, _)| !r.starts_with("deprecated.mysqli_")));
+        assert_eq!(count85("<?php function f(mysqli $db) { $db->ping(); }", "deprecated.mysqli_ping"), 1);
+        assert_eq!(count85("<?php function f(mysqli $db) { $db->kill(1); $db->refresh(1); }", "deprecated.mysqli_kill"), 1);
+        assert_eq!(count85("<?php function f(mysqli $db) { $db->kill(1); $db->refresh(1); }", "deprecated.mysqli_refresh"), 1);
+        assert_eq!(count85("<?php function f(mysqli $db) { return $db->get_client_info(); }", "deprecated.mysqli_get_client_info"), 1);
         assert_eq!(
             count85("<?php [$body, $http_response_header] = fetch($u); echo $http_response_header[0];", "deprecated.http_response_header"),
             0
@@ -5975,8 +5989,34 @@ $x = 'self::create';";
 
     #[test]
     fn review_patterns() {
-        let src = "<?php eval($code); $$name = 1; extract($_POST);";
+        let src = "<?php eval($code); $$name['k'] = 1; extract($_POST);";
         assert_eq!(rules(src, "8.1"), vec!["review.eval", "review.variable_variable", "review.extract"]);
+        assert!(rules("<?php $$name = 1; echo ${$name}['k'], $$obj->p; global $$g;", "8.1").is_empty());
+    }
+
+    #[test]
+    fn member_rules_follow_what_php_does() {
+        let src = "<?php $f->format($n, NumberFormatter::TYPE_CURRENCY); numfmt_parse($f, $s, \\NumberFormatter::TYPE_CURRENCY); $types = [NumberFormatter::TYPE_CURRENCY];";
+        let currency: Vec<_> =
+            analyze_source("t.php", src, PhpVersion::new(8, 5)).into_iter().filter(|f| f.rule_id.contains("type_currency")).collect();
+        let got: Vec<_> = currency.iter().map(|f| (f.rule_id.as_str(), f.severity, f.since.to_string())).collect();
+        assert_eq!(
+            got,
+            [
+                ("removed.numberformatter_type_currency", Severity::Breaking, "8.0".to_string()),
+                ("removed.numberformatter_type_currency", Severity::Breaking, "8.0".to_string()),
+                ("deprecated.numberformatter_type_currency", Severity::Deprecated, "8.3".to_string()),
+            ]
+        );
+        assert_eq!(rules("<?php $f->format($n, NumberFormatter::TYPE_CURRENCY);", "8.1"), ["removed.numberformatter_type_currency"]);
+        assert_eq!(
+            count85("<?php echo DateTimeInterface::RFC7231, DateTimeImmutable::RFC7231, DateTime::RFC7231;", "deprecated.date_rfc7231"),
+            3
+        );
+        let wakeup =
+            "<?php (new DateTimeImmutable())->__wakeup(); (new DateTimeZone('UTC'))->__wakeup(); (new DateInterval('P1D'))->__wakeup();";
+        assert_eq!(count85(wakeup, "deprecated.date_wakeup"), 3);
+        assert_eq!(count85("<?php class D extends mysqli { function __construct() { parent::init(); } }", "deprecated.builtin_method"), 1);
     }
 }
 
@@ -6098,7 +6138,7 @@ mod call_tests {
         assert_eq!(found(src, "8.0"), [(2, r.clone()), (3, r.clone()), (4, r.clone())]);
         assert!(found(src, "7.4").is_empty());
         let f = &analyze_source("t.php", "<?php\ncrypt($pw);", "8.0".parse().unwrap())[0];
-        assert_eq!((f.title.en.as_str(), f.replacement.as_ref().unwrap().en.as_str()), ("crypt() with 1 arguments", "exactly 2 arguments"));
+        assert_eq!((f.title.en.as_str(), f.replacement.as_ref().unwrap().en.as_str()), ("crypt() with 1 argument", "exactly 2 arguments"));
     }
 
     #[test]

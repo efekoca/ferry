@@ -84,7 +84,7 @@ Ferry has its own PHP lexer and rule set, so it reads code the way PHP does: met
 - methods that override a built-in class or interface without a return type, such as `PDO::query()` or `Iterator::current()`, which need `#[\ReturnTypeWillChange]` from PHP 8.1
 - code that stops working on a newer version, such as a function or class PHP added later (`str_contains()`, `JsonException`) declared without a `function_exists()` check, `Class::method()` on a non-static method, calls with too few arguments to your functions, methods and constructors, built-in functions called with the wrong number of arguments (`mktime()`, `crypt($pw)`), error handlers that require a fifth `$errcontext` parameter, exception handlers typed `Exception`, `parent::` in a class without a parent, the `preg_replace()` `/e` modifier, and `is_resource()` on curl, GD or pgsql handles that are now objects
 - `error_reporting() == 0` checks for `@`, which no longer match in PHP 8
-- code worth a manual check, such as `eval()`, `extract()`, and variable variables
+- code worth a manual check, such as `eval()`, `extract()`, and `$$name[...]`, which PHP 5 and PHP 7 read differently
 
 Ferry also reads the files around the code that decide which PHP actually runs:
 

@@ -1,6 +1,6 @@
 use ferry_core::deps::{self, DependencyStatus};
 use ferry_core::project::{self, Framework};
-use ferry_core::rules::{patterns, CONSTANTS, FUNCTIONS, MEMBERS};
+use ferry_core::rules::{patterns, CONSTANTS, FUNCTIONS, MEMBERS, TYPE_CURRENCY_CALL};
 use ferry_core::{analyzer, report, PhpVersion};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -74,6 +74,7 @@ fn kuzey_magaza_triggers_every_rule() {
         .chain(CONSTANTS)
         .map(|r| r.id)
         .chain(MEMBERS.iter().map(|m| m.rule.id))
+        .chain([TYPE_CURRENCY_CALL.id])
         .chain(pattern_ids)
         .filter(|id| !found.contains(id))
         .collect();
