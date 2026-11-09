@@ -16,6 +16,7 @@ pub mod docker;
 pub mod extensions;
 #[rustfmt::skip]
 mod ext_map;
+pub mod fixes;
 pub mod framework;
 pub mod git;
 mod guards;

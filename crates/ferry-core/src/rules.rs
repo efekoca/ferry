@@ -748,16 +748,27 @@ pub const CONSTANTS: &[SymbolRule] = &[
     ),
     rule!("deprecated.sunfuncs_ret", "sunfuncs_ret_*", D, (8, 4), code("date_sun_info()"), M, DEPRECATED_FN),
     rule!("deprecated.mysqli_refresh_constant", "mysqli_refresh_*", D, (8, 4), tx("FLUSH sorguları", "FLUSH queries"), M, DEPRECATED_FN),
-    rule!("deprecated.mysqli_no_data", "mysqli_no_data", D, (8, 1), REMOVE_USE, M, UNUSED_CONSTANT),
-    rule!("deprecated.mysqli_data_truncated", "mysqli_data_truncated", D, (8, 1), REMOVE_USE, M, UNUSED_CONSTANT),
-    rule!("deprecated.mysqli_server_query", "mysqli_server_query_*", D, (8, 1), REMOVE_USE, M, UNUSED_CONSTANT),
-    rule!("deprecated.mysqli_server_ps_out_params", "mysqli_server_ps_out_params", D, (8, 1), REMOVE_USE, M, UNUSED_CONSTANT),
+    rule!("deprecated.mysqli_no_data", "mysqli_no_data", D, (8, 1), code("100"), M, UNUSED_CONSTANT),
+    rule!("deprecated.mysqli_data_truncated", "mysqli_data_truncated", D, (8, 1), code("101"), M, UNUSED_CONSTANT),
+    rule!(
+        "deprecated.mysqli_server_query",
+        "mysqli_server_query_*",
+        D,
+        (8, 1),
+        tx(
+            "değeri: WAS_SLOW 2048, NO_GOOD_INDEX_USED 16, NO_INDEX_USED 32",
+            "its value: WAS_SLOW 2048, NO_GOOD_INDEX_USED 16, NO_INDEX_USED 32"
+        ),
+        M,
+        UNUSED_CONSTANT
+    ),
+    rule!("deprecated.mysqli_server_ps_out_params", "mysqli_server_ps_out_params", D, (8, 1), code("4096"), M, UNUSED_CONSTANT),
     rule!(
         "deprecated.mysqli_is_mariadb",
         "mysqli_is_mariadb",
         D,
         (8, 2),
-        None,
+        code("false"),
         M,
         Text::new(
             "MYSQLI_IS_MARIADB 8.2'de kullanımdan kalktı; değeri her zaman false olduğu için güvenilir değil. Sunucu türünü SELECT VERSION() ile kontrol edin.",
@@ -785,7 +796,9 @@ pub const CONSTANTS: &[SymbolRule] = &[
         M,
         Text::new("Yazım hatalı bu sabit 8.3'te kullanımdan kalktı; doğru yazılmış adını kullanın.", "This misspelled constant is deprecated in 8.3; use the correctly spelled name.")
     ),
-    rule!("deprecated.dom_php_err", "dom_php_err", D, (8, 4), None, M, DEPRECATED_FN),
+    rule!("deprecated.dom_php_err", "dom_php_err", D, (8, 4), code("0"), M, Text::new(
+        "DOM_PHP_ERR artık hiçbir yerde kullanılmadığı için 8.4'te kullanımdan kalktı; yerine değeri olan 0'ı yazmak kodu aynı bırakır.",
+        "DOM_PHP_ERR is no longer used anywhere and is deprecated in 8.4; writing its value, 0, keeps the code the same.")),
     rule!(
         "deprecated.soap_functions_all",
         "soap_functions_all",
@@ -812,9 +825,9 @@ pub const CONSTANTS: &[SymbolRule] = &[
         "CURLPIPE_HTTP1 curl 7.62'den beri hiçbir şey yapmıyor ve PHP 7.4'te kullanımdan kalktı. Bugünkü davranışı CURLPIPE_NOTHING korur; CURLPIPE_MULTIPLEX ise HTTP/2 çoğullamayı açar.",
         "CURLPIPE_HTTP1 has done nothing since curl 7.62 and is deprecated since PHP 7.4. CURLPIPE_NOTHING keeps today's behavior; CURLPIPE_MULTIPLEX turns on HTTP/2 multiplexing.")),
     rule!("removed.ai_idn_constant", "ai_idn_*", R, (8, 0), None, M, AI_IDN),
-    rule!("deprecated.mysqli_update_max_length", "mysqli_stmt_attr_update_max_length", D, (8, 1), REMOVE_USE, M, Text::new(
-        "Bu sabit PHP 8.1'den beri hiçbir şey yapmıyor; max_length artık her zaman 0.",
-        "This constant has done nothing since PHP 8.1; max_length is now always 0.")),
+    rule!("deprecated.mysqli_update_max_length", "mysqli_stmt_attr_update_max_length", D, (8, 1), code("0"), M, Text::new(
+        "Bu sabit PHP 8.1'den beri hiçbir şey yapmıyor; max_length artık her zaman 0. Değeri de 0 olduğu için yerine 0 yazmak attr_set() çağrılarını aynı bırakır.",
+        "This constant has done nothing since PHP 8.1; max_length is now always 0. Its value is 0 too, so writing 0 keeps attr_set() calls the same.")),
     rule!(
         "removed.filter_flag_scheme_required",
         "filter_flag_scheme_required",
@@ -957,7 +970,7 @@ pub const MEMBERS: &[MemberRule] = &[
             "transaction_*",
             D,
             (8, 5),
-            REMOVE_USE,
+            TRANSACTION_VALUES,
             M,
             PGSQL_TRANSACTION
         ),
@@ -1058,7 +1071,7 @@ pub const MEMBERS: &[MemberRule] = &[
     member(Mt, "reflectionparameter", rule!("deprecated.reflection_method", "getclass", D, (8, 0), code("getType()"), M, REFLECTION_TYPE)),
     member(Mt, "reflectionparameter", rule!("deprecated.reflection_method", "isarray", D, (8, 0), code("getType()"), M, REFLECTION_TYPE)),
     member(Mt, "reflectionparameter", rule!("deprecated.reflection_method", "iscallable", D, (8, 0), code("getType()"), M, REFLECTION_TYPE)),
-    member(K, "pdo", rule!("deprecated.pgsql_transaction_constant", "pgsql_transaction_*", D, (8, 5), REMOVE_USE, M, PGSQL_TRANSACTION)),
+    member(K, "pdo", rule!("deprecated.pgsql_transaction_constant", "pgsql_transaction_*", D, (8, 5), TRANSACTION_VALUES, M, PGSQL_TRANSACTION)),
     member(K, "pdo", rule!("deprecated.pdo_driver_constant", "pgsql_*", D, (8, 5), code("Pdo\\Pgsql::*"), A, PDO_DRIVER)),
     member(K, "pdo", rule!("deprecated.pdo_driver_constant", "sqlite_*", D, (8, 5), code("Pdo\\Sqlite::*"), A, PDO_DRIVER)),
     member(K, "pdo", rule!("deprecated.pdo_driver_constant", "odbc_*", D, (8, 5), code("Pdo\\Odbc::*"), A, PDO_DRIVER)),
@@ -1148,9 +1161,11 @@ pub const LARAVEL_INPUT: SymbolRule = rule!(
 );
 
 const UNUSED_CONSTANT: Text = Text::new(
-    "Bu sabit hiçbir yerde kullanılmadığı için 8.1'de kullanımdan kalktı; kullanımı silinebilir.",
-    "This constant was never used by PHP and is deprecated in 8.1; its use can be removed.",
+    "PHP bu sabiti hiç kullanmadığı için 8.1'de kullanımdan kalktı; yerine değerini yazmak kodu aynı bırakır.",
+    "PHP never used this constant, so it's deprecated in 8.1; writing its value instead keeps the code the same.",
 );
+const TRANSACTION_VALUES: Option<Text> =
+    tx("değeri: IDLE 0, ACTIVE 1, INTRANS 2, INERROR 3, UNKNOWN 4", "its value: IDLE 0, ACTIVE 1, INTRANS 2, INERROR 3, UNKNOWN 4");
 const REMOVE_USE: Option<Text> = tx(
     "kullanımı silin; | ile birleştirilmişse yalnızca bu sabiti çıkarın",
     "remove its use; in a | combination, take out only this constant",
@@ -1204,8 +1219,8 @@ const REFLECTION_TYPE: Text = Text::new(
     "This ReflectionParameter method is deprecated in 8.0; read the parameter type with getType() and ReflectionNamedType.",
 );
 const PGSQL_TRANSACTION: Text = Text::new(
-    "PDO'nun PostgreSQL işlem durumu sabitleri hiçbir işe yaramadığı için 8.5'te kullanımdan kalktı. Pdo\\Pgsql::TRANSACTION_* da kullanımdan kalktığı için yerine geçen bir sabit yok; kullanımı silin, işlem durumunu PDO::inTransaction() ile kontrol edin.",
-    "PDO's PostgreSQL transaction state constants have no effect and are deprecated in 8.5. Pdo\\Pgsql::TRANSACTION_* is deprecated too, so there is no replacement; remove the use and check the state with PDO::inTransaction().",
+    "PDO'nun PostgreSQL işlem durumu sabitleri hiçbir işe yaramadığı için 8.5'te kullanımdan kalktı. Pdo\\Pgsql::TRANSACTION_* da kullanımdan kalktığı için yerine geçen bir sabit yok; yerine sayı değerini yazmak kodu aynı bırakır. İşlem durumunu PDO::inTransaction() ile kontrol edin.",
+    "PDO's PostgreSQL transaction state constants have no effect and are deprecated in 8.5. Pdo\\Pgsql::TRANSACTION_* is deprecated too, so there is no replacement constant; writing the integer keeps the code the same. Check the state with PDO::inTransaction().",
 );
 const PDO_DRIVER: Text = Text::new(
     "PDO'nun sürücüye özel sabitleri 8.5'te kullanımdan kalktı; sürücünün kendi sınıfındaki sabiti kullanın.",

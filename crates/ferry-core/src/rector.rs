@@ -176,6 +176,9 @@ const RULE_TITLES: &[(&str, Text)] = &[
     ("BooleanComparatorToSpaceship", Text::same("usort: $a > $b → $a <=> $b")),
     ("StringIncrementToFunction", Text::same("$s++ → str_increment($s)")),
     ("AssignBuiltinResultWithoutReference", Text::same("= &func_get_args() → = func_get_args()")),
+    ("ConstantToValue", Text::new("Sabit değeriyle değiştirilir", "Replace constants with their value")),
+    ("RenameConstant", Text::new("Sabit yeni adıyla değiştirilir", "Rename constants")),
+    ("RenameOciAlias", Text::same("ocilogon() → oci_connect()")),
     (
         "ParenthesizeNestedTernaryRector",
         Text::new("İç içe ternary paranteze alınır (eski davranış korunur)", "Parenthesize nested ternaries (keeps the old behaviour)"),
@@ -368,7 +371,8 @@ impl Staging {
         let mut scope = std::collections::HashSet::new();
         let mut constants = std::collections::HashSet::new();
         let mut candidates = Vec::new();
-        for path in crate::project::collect_php_files(root, excluded_dirs) {
+        let php_files = crate::project::collect_php_files(root, excluded_dirs);
+        for path in php_files.iter().cloned() {
             scope.insert(crate::analyzer::relative_path(root, &path));
             if std::fs::metadata(&path).is_ok_and(|m| m.len() > crate::project::MAX_FILE_BYTES) {
                 continue;
@@ -382,7 +386,7 @@ impl Staging {
                 }
             };
             constants.extend(crate::analyzer::constant_names(&text));
-            if crate::analyzer::fix_legacy_syntax_with(&text, &no_constants, target, source).is_some() {
+            if crate::analyzer::fix_legacy_syntax_with(&text, &no_constants, target, source).is_some() || crate::fixes::mentions(&text) {
                 candidates.push((path, text));
             }
         }
@@ -391,11 +395,21 @@ impl Staging {
                 constants.extend(crate::analyzer::constant_names(&String::from_utf8_lossy(&bytes)));
             }
         }
+        let index = candidates
+            .iter()
+            .any(|(_, text)| crate::fixes::mentions(text))
+            .then(|| std::sync::Arc::new(crate::index::ProjectIndex::build_for(root, &php_files, Some(target))));
         for (path, text) in candidates {
-            let Some((fixed, applied)) = crate::analyzer::fix_legacy_syntax_with(&text, &constants, target, source) else {
-                continue;
-            };
             let rel = crate::analyzer::relative_path(root, &path);
+            let (mut fixed, mut applied) =
+                crate::analyzer::fix_legacy_syntax_with(&text, &constants, target, source).unwrap_or_else(|| (text.clone(), Vec::new()));
+            if let Some((out, classes)) = index.as_ref().and_then(|index| crate::fixes::apply(&rel, &fixed, target, index)) {
+                fixed = out;
+                applied.extend(classes.into_iter().filter(|c| !applied.contains(c)).collect::<Vec<_>>());
+            }
+            if applied.is_empty() {
+                continue;
+            }
             let dest = dir.join(&rel);
             if let Some(parent) = dest.parent() {
                 std::fs::create_dir_all(parent).map_err(|e| RectorError::Io(parent.display().to_string(), e))?;
@@ -934,6 +948,27 @@ mod tests {
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].new_content, "<?php\nrequire 'config.php';\necho $a[active] . $a[other_key] . $a['missing'];\n");
         assert_eq!(changes[0].fix, FixKind::Likely, "a staged-only file keeps its riskiest rule");
+    }
+
+    #[test]
+    fn own_fixes_follow_the_project_scan() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.php"), "<?php\necho MYSQLI_NO_DATA, ocilogon('u', 'p');\n").unwrap();
+        std::fs::write(
+            root.join("polyfill.php"),
+            "<?php\nif (!defined('MB_OVERLOAD_STRING')) {\n    define('MB_OVERLOAD_STRING', 2);\n}\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("b.php"), "<?php\necho MB_OVERLOAD_STRING;\n").unwrap();
+        let staging = Staging::prepare(root, &[], root.join(".ferry-staged"), PhpVersion::new(8, 5)).unwrap();
+        let (changes, errors) = parse_output(root, r#"{"file_diffs": []}"#, &staging).unwrap();
+        assert!(errors.is_empty(), "{errors:?}");
+        let files: Vec<_> = changes.iter().map(|c| (c.file.as_str(), c.new_content.as_str())).collect();
+        assert_eq!(files, [("a.php", "<?php\necho 100, oci_connect('u', 'p');\n")]);
+        assert_eq!(changes[0].fix, FixKind::Auto);
+        let rules: Vec<_> = changes[0].rules.iter().map(|r| r.name.as_str()).collect();
+        assert_eq!(rules, ["ConstantToValue", "RenameOciAlias"]);
     }
 
     #[test]
