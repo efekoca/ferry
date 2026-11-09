@@ -109,7 +109,7 @@ The **Fixes** page runs Rector on your project in dry-run mode. No files change.
 
 Ferry handles cases Rector cannot on its own. For example, a file that uses `$str{0}` makes Rector skip the whole file. Ferry rewrites those offsets to `$str[0]` first, and does the same for `= &new`, `= &func_get_args()` and `default;`, so the rest of the file is still fixed.
 
-Some findings Rector has no rule for are fixed by Ferry itself, in the same preview: constants PHP never used are replaced by their value (`MYSQLI_NO_DATA` becomes `100`), renamed constants get their new name (`PGSQL_LIBPQ_VERSION_STR` becomes `PGSQL_LIBPQ_VERSION`), and the old OCI8 aliases become their `oci_` names (`ocilogon()` becomes `oci_connect()`). Each fix only touches the pattern it knows, and a finding is marked automatic only where one of them applies.
+Some findings Rector has no rule for are fixed by Ferry itself, in the same preview: constants PHP never used are replaced by their value (`MYSQLI_NO_DATA` becomes `100`), renamed constants get their new name (`PGSQL_LIBPQ_VERSION_STR` becomes `PGSQL_LIBPQ_VERSION`), the old OCI8 aliases become their `oci_` names (`ocilogon()` becomes `oci_connect()`), calls that do nothing on the new version, such as `openssl_free_key($key);`, are removed, and flags that change nothing leave their mask (`E_ALL | E_STRICT` becomes `E_ALL`). Each fix only touches the pattern it knows, and a finding is marked automatic only where one of them applies.
 
 ### Dependencies that block the upgrade
 

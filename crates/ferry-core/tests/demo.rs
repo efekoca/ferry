@@ -90,6 +90,21 @@ fn kuzey_magaza_triggers_every_rule() {
         "deprecated.oci8_alias",
         "removed.mb_overload",
         "removed.filter_sanitize_magic_quotes",
+        "deprecated.openssl_x509_free",
+        "deprecated.openssl_pkey_free",
+        "deprecated.openssl_free_key",
+        "deprecated.shmop_close",
+        "removed.oci_internal_debug",
+        "removed.set_magic_quotes_runtime",
+        "removed.magic_quotes_runtime",
+        "deprecated.curlopt_binarytransfer",
+        "deprecated.file_binary",
+        "deprecated.file_text",
+        "removed.filter_flag_scheme_required",
+        "removed.filter_flag_host_required",
+        "deprecated.curlpipe_http1",
+        "deprecated.e_strict",
+        "removed.unset_this",
     ];
     for id in own_fixes {
         assert!(result.findings.iter().any(|f| f.rule_id == id && f.fix == FixKind::Auto), "{id} isn't automatic in the demo");
