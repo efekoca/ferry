@@ -305,22 +305,6 @@ describe("Ferry app", () => {
     await waitFor(() => expect(screen.queryByText(/artık hiçbir kodla eşleşmiyor/)).not.toBeInTheDocument());
   });
 
-  it("counts the manual findings on the AI page and offers a local model", async () => {
-    const user = setup();
-    await user.click(await screen.findByRole("button", { name: "Proje klasörü seçin" }));
-    await user.click(await screen.findByRole("button", { name: /AI önerileri/ }));
-    expect(await screen.findByRole("heading", { name: "Elle düzeltmeler için AI önerisi" })).toBeInTheDocument();
-    await user.click(nav(/Genel bakış/));
-    await user.click(await screen.findByRole("button", { name: /Taramayı başlat/ }));
-    await screen.findByRole("img", { name: /Hazırlık puanı/ });
-    await user.click(screen.getByRole("button", { name: /AI önerileri/ }));
-    expect(await screen.findByRole("heading", { name: /^\d+ elle düzeltme için AI önerisi$/ })).toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: "İndir ve kur" })).toBeEnabled();
-    expect(screen.getByText(/Ferry bu bilgisayar için Qwen3.5 9B modelini önerir\. 5,3 GB indirilir/)).toBeInTheDocument();
-    expect(screen.getByText("Apache-2.0 lisanslı · Hugging Face: unsloth/Qwen3.5-9B-GGUF")).toBeInTheDocument();
-    expect(screen.getByText("Açık: Anthropic (claude-opus-5-5)")).toBeInTheDocument();
-  });
-
   it("lists recent projects on the welcome screen and forgets one", async () => {
     localStorage.setItem("ferry.recent", JSON.stringify([{ path: "/p/site", name: "site", framework: "generic", openedAt: Date.now() }]));
     const user = setup();
@@ -1200,12 +1184,12 @@ describe("Ferry app", () => {
   it("keeps the PHP path when the backup limit changes", async () => {
     const user = userEvent.setup();
     const api = mockApi({ delay: 0 });
-    await api.saveSettings({ phpPath: "/opt/php", snapshotLimit: null, editor: null, editorCommand: null, aiProjects: [] });
+    await api.saveSettings({ phpPath: "/opt/php", snapshotLimit: null, editor: null, editorCommand: null });
     render(<App api={api} />);
     await user.click(await screen.findByRole("button", { name: /Ayarlar/ }));
     const group = await screen.findByRole("radiogroup", { name: "Saklanacak yedek" });
     await user.click(within(group).getByRole("radio", { name: "30" }));
-    await waitFor(async () => expect(await api.getSettings()).toEqual({ phpPath: "/opt/php", snapshotLimit: 30, editor: null, editorCommand: null, aiProjects: [] }));
+    await waitFor(async () => expect(await api.getSettings()).toEqual({ phpPath: "/opt/php", snapshotLimit: 30, editor: null, editorCommand: null }));
     expect(within(group).getByRole("radio", { name: "30" })).toHaveAttribute("aria-checked", "true");
   });
 
@@ -1222,7 +1206,7 @@ describe("Ferry app", () => {
     const group = await screen.findByRole("radiogroup", { name: "Saklanacak yedek" });
     await user.click(within(group).getByRole("radio", { name: "30" }));
     await pick(user, "Editör", "Visual Studio Code");
-    await waitFor(async () => expect(await api.getSettings()).toEqual({ phpPath: null, snapshotLimit: 30, editor: "vscode", editorCommand: null, aiProjects: [] }));
+    await waitFor(async () => expect(await api.getSettings()).toEqual({ phpPath: null, snapshotLimit: 30, editor: "vscode", editorCommand: null }));
   });
 
   it("shows backup disk usage and deletes every backup after confirming", async () => {
@@ -1651,116 +1635,6 @@ describe("Ferry app", () => {
     await user.click(screen.getByRole("button", { name: "Projeye kaydet" }));
     await waitFor(() => expect(save).toHaveBeenCalled());
     expect(save.mock.calls[0][1].target).toBeNull();
-  });
-
-  it("suggests a fix with AI only after consent and a look at what is sent", async () => {
-    const user = userEvent.setup();
-    const api = mockApi({ delay: 0 });
-    const suggest = vi.spyOn(api, "aiSuggest");
-    render(<App api={api} />);
-    await openAndScan(user);
-    await user.click(nav(/Bulgular/));
-    for (const option of await screen.findAllByRole("option")) {
-      await user.click(option);
-      if (screen.queryByRole("button", { name: "AI ile öner" })) break;
-    }
-    await user.click(screen.getByRole("button", { name: "AI ile öner" }));
-    const sheet = await screen.findByRole("dialog", { name: "AI önerisi" });
-    await user.click(await within(sheet).findByRole("button", { name: "Bu projede aç" }));
-    expect(await within(sheet).findByText(/Yalnızca bu metin gönderilir/)).toBeInTheDocument();
-    expect(suggest).not.toHaveBeenCalled();
-    await user.click(within(sheet).getByRole("button", { name: "Gönder" }));
-    await user.click(await within(sheet).findByRole("button", { name: "Uygula" }));
-    await waitFor(async () => expect((await api.listSnapshots("")).some((b) => b.label.startsWith("AI önerisi"))).toBe(true));
-    expect((await api.getSettings()).aiProjects).toHaveLength(1);
-  });
-
-  it("keeps the AI key out of everything but the keychain call", async () => {
-    const user = userEvent.setup();
-    const api = mockApi({ delay: 0, aiProvider: null });
-    const save = vi.spyOn(api, "saveAiConfig");
-    render(<App api={api} />);
-    await openAndScan(user);
-    await user.click(nav(/AI önerileri/));
-    await user.type(await screen.findByLabelText("API anahtarı"), "sk-ant-test");
-    await user.click(screen.getByRole("button", { name: "Kaydet" }));
-    await waitFor(() => expect(save).toHaveBeenCalledWith({ kind: "anthropic", model: "claude-opus-5-5", baseUrl: null }, "sk-ant-test"));
-    expect(await screen.findByText("Anahtar sistemin anahtar zincirinde.")).toBeInTheDocument();
-    await user.click(screen.getByRole("switch", { name: /kuzey-magaza projesinde AI önerileri/ }));
-    await waitFor(async () => expect((await api.getSettings()).aiProjects).toHaveLength(1));
-  });
-
-  it("uses a local server it finds, without the key saved for another server", async () => {
-    const user = userEvent.setup();
-    const api = mockApi({ delay: 0, localAi: [{ name: "Ollama", baseUrl: "http://127.0.0.1:11434/v1", models: ["qwen2.5-coder:7b", "qwen3:8b"] }] });
-    await api.saveAiConfig({ kind: "openai", model: "gpt-5", baseUrl: "https://api.openai.com/v1" }, "sk-openai");
-    const save = vi.spyOn(api, "saveAiConfig");
-    render(<App api={api} />);
-    await openAndScan(user);
-    await user.click(nav(/AI önerileri/));
-    expect(await screen.findByText("Ollama bu bilgisayarda çalışıyor. Kod bilgisayarınızdan çıkmaz.")).toBeInTheDocument();
-    expect(screen.getByText("Anahtar sistemin anahtar zincirinde.")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Bunu kullan" }));
-    await waitFor(() => expect(save).toHaveBeenCalledWith({ kind: "openai", model: "qwen2.5-coder:7b", baseUrl: "http://127.0.0.1:11434/v1" }, null));
-    expect(await screen.findByRole("button", { name: "Kullanılıyor" })).toBeDisabled();
-    expect(await screen.findByText("Açık: Ollama (qwen2.5-coder:7b)")).toBeInTheDocument();
-    expect(screen.queryByText("Anahtar sistemin anahtar zincirinde.")).not.toBeInTheDocument();
-  });
-
-  it("installs the local model with progress, uses it and removes it", async () => {
-    const user = userEvent.setup();
-    const api = mockApi({ delay: 400 });
-    const save = vi.spyOn(api, "saveAiConfig");
-    render(<App api={api} />);
-    await openAndScan(user);
-    await user.click(nav(/AI önerileri/));
-    await user.click(await screen.findByRole("button", { name: "İndir ve kur" }));
-    expect(await screen.findByRole("progressbar")).toBeInTheDocument();
-    expect(await screen.findByText("Model indiriliyor")).toBeInTheDocument();
-    expect(await screen.findByText(/^[\d,]+ GB \/ 5,3 GB$/)).toBeInTheDocument();
-    expect(await screen.findByText("Qwen3.5 9B kuruldu")).toBeInTheDocument();
-    expect(await screen.findByText("Qwen3.5 9B bu bilgisayarda kurulu. Kod bilgisayarınızdan çıkmaz.")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Bunu kullan" }));
-    await waitFor(() => expect(save).toHaveBeenCalledWith({ kind: "local", model: "qwen3.5-9b", baseUrl: null }, null));
-    expect(await screen.findByText("Açık: Local model (Qwen3.5 9B)")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Kullanılıyor" })).toBeDisabled();
-
-    await user.click(screen.getByRole("button", { name: "Modeli kaldır" }));
-    const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByText(/yaklaşık 5,3 GB yer açılır/)).toBeInTheDocument();
-    await user.click(within(dialog).getByRole("button", { name: "Modeli kaldır" }));
-    expect(await screen.findByRole("button", { name: "İndir ve kur" })).toBeInTheDocument();
-    await waitFor(() => expect(screen.queryByText(/Açık: Local model/)).not.toBeInTheDocument());
-  });
-
-  it("stops a local model download without calling it a failure", async () => {
-    const user = userEvent.setup();
-    render(<App api={mockApi({ delay: 200 })} />);
-    await openAndScan(user);
-    await user.click(nav(/AI önerileri/));
-    await user.click(await screen.findByRole("button", { name: "İndir ve kur" }));
-    await user.click(await screen.findByRole("button", { name: "Durdur" }));
-    expect(await screen.findByRole("button", { name: "İndir ve kur" }, { timeout: 3000 })).toBeInTheDocument();
-    expect(screen.queryByText("Yerel model kurulamadı")).not.toBeInTheDocument();
-  });
-
-  it("says when the computer is too small for a local model", async () => {
-    const user = userEvent.setup();
-    render(<App api={mockApi({ delay: 0, localModel: null })} />);
-    await openAndScan(user);
-    await user.click(nav(/AI önerileri/));
-    expect(await screen.findByText(/belleği Ferry'nin yerel modeli için yetmiyor/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Yeniden ara" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "İndir ve kur" })).not.toBeInTheDocument();
-  });
-
-  it("offers no AI suggestion without a provider", async () => {
-    const user = userEvent.setup();
-    render(<App api={mockApi({ delay: 0, aiProvider: null })} />);
-    await openAndScan(user);
-    await user.click(nav(/Bulgular/));
-    for (const option of await screen.findAllByRole("option")) await user.click(option);
-    expect(screen.queryByRole("button", { name: "AI ile öner" })).not.toBeInTheDocument();
   });
 
   it("shows an inconclusive Real test as inconclusive in History", async () => {

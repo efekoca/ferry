@@ -130,7 +130,7 @@ export function SettingsScreen() {
   const { theme, setTheme, toolchain, refreshToolchain, installRector, installingRector, previewing, api, project, refreshSnapshots } = useStore();
   const toast = useToast();
   const [checking, setChecking] = useState(false);
-  const [settings, setSettings] = useState<Settings>({ phpPath: null, snapshotLimit: null, editor: null, editorCommand: null, aiProjects: [] });
+  const [settings, setSettings] = useState<Settings>({ phpPath: null, snapshotLimit: null, editor: null, editorCommand: null });
   const [usage, setUsage] = useState<BackupUsage | null>(null);
   const [clearing, setClearing] = useState(false);
   const [deleting, setDeleting] = useState(false);

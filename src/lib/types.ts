@@ -497,68 +497,6 @@ export interface Settings {
   snapshotLimit: number | null;
   editor: string | null;
   editorCommand: string | null;
-  aiProjects: string[];
-}
-
-/** Exactly what an AI suggestion sends, shown before anything leaves the computer. */
-export interface AiPrompt {
-  system: string;
-  user: string;
-  file: string;
-  firstLine: number;
-  lastLine: number;
-}
-
-export type AiKind = "anthropic" | "openai" | "local";
-
-/** Which provider AI suggestions use. The key isn't part of it: it stays in the system keychain. */
-export interface AiConfig {
-  kind: AiKind | null;
-  model: string | null;
-  baseUrl: string | null;
-}
-
-export interface AiView extends AiConfig {
-  hasKey: boolean;
-  models: string[];
-}
-
-export interface LocalModelInfo {
-  id: string;
-  name: string;
-  license: string;
-  repo: string;
-  size: number;
-}
-
-export interface LocalModelView {
-  /** The model for this computer, or null when its memory is too small. */
-  model: LocalModelInfo | null;
-  installed: boolean;
-  installing: boolean;
-  remaining: number;
-  memory: number;
-}
-
-export type LocalPhase = "runtime" | "model" | "verify" | "check";
-
-export interface LocalProgress {
-  phase: LocalPhase;
-  done: number;
-  total: number;
-}
-
-export interface LocalAiServer {
-  name: string;
-  baseUrl: string;
-  models: string[];
-}
-
-export interface AiSuggestion {
-  id: number;
-  change: FileChange;
-  lintErrors: string[];
-  lintChecked: boolean;
 }
 
 export interface SourceLine {

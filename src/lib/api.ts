@@ -27,13 +27,6 @@ import type {
   ToolchainStatus,
   VersionSuggestion,
   WpLatest,
-  AiConfig,
-  AiPrompt,
-  AiSuggestion,
-  AiView,
-  LocalAiServer,
-  LocalModelView,
-  LocalProgress,
 } from "./types";
 import { mockApi } from "./mock";
 import type { Lang } from "../i18n";
@@ -97,23 +90,6 @@ export interface Api {
   sourceLines(path: string, file: string, line: number): Promise<SourceLine[]>;
   revealPath(path: string): Promise<void>;
   getSettings(): Promise<Settings>;
-  aiProvider(): Promise<string | null>;
-  aiConfig(): Promise<AiView>;
-  /** `key`: a new key, "" to delete the stored one, or null to keep it. */
-  saveAiConfig(config: AiConfig, key: string | null): Promise<AiView>;
-  checkAiConfig(): Promise<void>;
-  /** Ollama or LM Studio, when one is running on this computer. */
-  localAiServers(): Promise<LocalAiServer[]>;
-  localModel(): Promise<LocalModelView>;
-  /** Downloads llama.cpp and the model for this computer, checks both and runs the model once. */
-  installLocalModel(): Promise<LocalModelView>;
-  cancelLocalModel(): Promise<void>;
-  removeLocalModel(): Promise<LocalModelView>;
-  onLocalModelProgress(handler: (p: LocalProgress) => void): Promise<() => void>;
-  aiPrompt(path: string, id: string): Promise<AiPrompt>;
-  aiSuggest(path: string, id: string): Promise<AiSuggestion>;
-  cancelAi(path: string): Promise<void>;
-  applyAiSuggestion(path: string, id: number, label: string): Promise<ApplyResult>;
   setLanguage(lang: Lang): Promise<void>;
   setWindowTheme(theme: "light" | "dark" | null): Promise<void>;
   saveSettings(settings: Settings): Promise<void>;
@@ -192,20 +168,6 @@ async function tauriApi(): Promise<Api> {
     openInEditor: (path, file, line, column) => invoke("open_in_editor", { path, file, line, column }),
     revealPath: (path) => opener.revealItemInDir(path),
     getSettings: () => invoke("get_settings"),
-    aiProvider: () => invoke("ai_provider"),
-    aiConfig: () => invoke("ai_config"),
-    saveAiConfig: (config, key) => invoke("save_ai_config", { config, key }),
-    checkAiConfig: () => invoke("check_ai_config"),
-    localAiServers: () => invoke("local_ai_servers"),
-    localModel: () => invoke("local_model"),
-    installLocalModel: () => invoke("install_local_model"),
-    cancelLocalModel: () => invoke("cancel_local_model"),
-    removeLocalModel: () => invoke("remove_local_model"),
-    onLocalModelProgress: (handler) => listen<LocalProgress>("local-model://progress", (e) => handler(e.payload)),
-    aiPrompt: (path, id) => invoke("ai_prompt", { path, id }),
-    aiSuggest: (path, id) => invoke("ai_suggest", { path, id }),
-    cancelAi: (path) => invoke("cancel_ai", { path }),
-    applyAiSuggestion: (path, id, label) => invoke("apply_ai_suggestion", { path, id, label }),
     saveSettings: (settings) => invoke("save_settings", { settings }),
     setLanguage: (language) => invoke("set_language", { language }),
     setWindowTheme: (theme) => getCurrentWindow().setTheme(theme),
@@ -215,10 +177,8 @@ async function tauriApi(): Promise<Api> {
 let instance: Promise<Api> | null = null;
 
 export function getApi(): Promise<Api> {
-  const params = new URLSearchParams(window.location.search);
-  const scale = Number(params.get("mockScale")) || 1;
-  const localAi = params.has("mockLocalAi") ? [{ name: "Ollama", baseUrl: "http://127.0.0.1:11434/v1", models: ["qwen2.5-coder:7b", "qwen3:8b"] }] : undefined;
-  instance ??= isTauri() ? tauriApi() : Promise.resolve(mockApi({ scale, localAi }));
+  const scale = Number(new URLSearchParams(window.location.search).get("mockScale")) || 1;
+  instance ??= isTauri() ? tauriApi() : Promise.resolve(mockApi({ scale }));
   return instance;
 }
 

@@ -1,6 +1,5 @@
 import { useEffect, type ReactNode } from "react";
 import {
-  Bot,
   ClipboardList,
   Container,
   GitCompareArrows,
@@ -47,7 +46,6 @@ export function Sidebar() {
     { view: "runtime", label: t.nav.runtime, icon: <Container size={16} /> },
   ];
   const upcoming: NavItem[] = [
-    { view: "ai", label: t.nav.ai, icon: <Bot size={16} /> },
   ];
 
   const renderItem = (item: NavItem) => (

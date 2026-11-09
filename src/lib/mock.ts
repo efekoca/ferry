@@ -5,12 +5,6 @@ import type { CheckSummary, DockerComparison, DockerStep, DockerSummary, History
   DependencyReport,
   DockerGap,
   SnapshotConflict,
-  AiConfig,
-  AiView,
-  LocalAiServer,
-  LocalModelInfo,
-  LocalModelView,
-  LocalProgress,
   DiffLine,
   FileChange,
   Finding,
@@ -186,42 +180,11 @@ export function mockApi(
     deps?: (report: DependencyReport) => DependencyReport;
     gaps?: DockerGap[];
     conflicts?: SnapshotConflict[];
-    aiProvider?: string | null;
-    localAi?: LocalAiServer[];
-    /** null: the computer's memory is too small for a local model. */
-    localModel?: null;
   } = {},
 ): Api {
   const delay = opts.delay ?? 450;
   const listeners = new Set<(p: ScanProgress) => void>();
-  let settings: Settings = { phpPath: null, snapshotLimit: 30, editor: null, editorCommand: null, aiProjects: [] };
-  let aiSuggestion = 0;
-  let aiCfg: AiConfig = { kind: "anthropic", model: "claude-opus-5-5", baseUrl: null };
-  const aiKeys = new Set<string>(opts.aiProvider === null ? [] : ["anthropic"]);
-  const origin = (url: string) => url.trim().toLowerCase().split("/").slice(0, 3).join("/");
-  const keyName = () => (aiCfg.kind === "anthropic" ? "anthropic" : aiCfg.kind === "openai" && aiCfg.baseUrl ? `openai ${origin(aiCfg.baseUrl)}` : null);
-  const hasKey = () => aiKeys.has(keyName() ?? "");
-  const localInfo: LocalModelInfo = { id: "qwen3.5-9b", name: "Qwen3.5 9B", license: "Apache-2.0", repo: "unsloth/Qwen3.5-9B-GGUF", size: 5_680_522_464 };
-  const localListeners = new Set<(p: LocalProgress) => void>();
-  let localInstalled = false;
-  let localStopped = false;
-  const localView = (): LocalModelView => ({
-    model: opts.localModel === null ? null : localInfo,
-    installed: localInstalled,
-    installing: false,
-    remaining: localInstalled ? 0 : localInfo.size + 35_858_360,
-    memory: 16 * 2 ** 30,
-  });
-  const localNames: Record<string, string> = { "http://127.0.0.1:11434": "Ollama", "http://127.0.0.1:1234": "LM Studio" };
-  const aiName = () => {
-    if (!aiCfg.kind || !aiCfg.model || (aiCfg.kind === "anthropic" && !hasKey()) || (aiCfg.kind === "openai" && !aiCfg.baseUrl)) return null;
-    if (aiCfg.kind === "anthropic") return `Anthropic (${aiCfg.model})`;
-    if (aiCfg.kind === "local") return localInstalled ? `Local model (${localInfo.name})` : null;
-    const base = origin(aiCfg.baseUrl ?? "");
-    return `${localNames[base] ?? base.split("://")[1]} (${aiCfg.model})`;
-  };
-  const aiView = (): AiView => ({ ...aiCfg, hasKey: hasKey(), models: ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"] });
-  let aiStopped = false;
+  let settings: Settings = { phpPath: null, snapshotLimit: 30, editor: null, editorCommand: null };
   const ignores = new Map<string, string>();
   let stale = opts.staleIgnores ?? [];
   let lastScan: ScanResult | null = null;
@@ -579,91 +542,6 @@ export function mockApi(
     dismissInterrupted: async () => {},
     checkHistory: async () => checkRuns,
     getSettings: async () => settings,
-    aiProvider: async () => (opts.aiProvider === null ? null : aiName()),
-    aiConfig: async () => aiView(),
-    saveAiConfig: async (config, key) => {
-      await sleep(delay / 3);
-      if (config.baseUrl && !/^https?:\/\//.test(config.baseUrl)) throw new Error("The address has to start with http:// or https://.");
-      aiCfg = config;
-      const name = keyName();
-      if (name && key !== null) {
-        if (key.trim()) aiKeys.add(name);
-        else aiKeys.delete(name);
-      }
-      return aiView();
-    },
-    checkAiConfig: async () => {
-      await sleep(delay);
-      if (!aiName()) throw new Error("Save the provider, model and key first.");
-    },
-    localAiServers: async () => {
-      await sleep(delay / 3);
-      return opts.localAi ?? [];
-    },
-    localModel: async () => localView(),
-    installLocalModel: async () => {
-      localStopped = false;
-      for (const [phase, total] of [["runtime", 35_858_360], ["model", localInfo.size], ["verify", localInfo.size], ["check", 1]] as const) {
-        for (let step = 1; step <= 4; step++) {
-          await sleep(delay / 8);
-          if (localStopped) throw new Error("The local model setup was stopped.");
-          localListeners.forEach((l) => l({ phase, done: (total * step) / 4, total }));
-        }
-      }
-      localInstalled = true;
-      return localView();
-    },
-    cancelLocalModel: async () => {
-      localStopped = true;
-    },
-    removeLocalModel: async () => {
-      localInstalled = false;
-      return localView();
-    },
-    onLocalModelProgress: async (handler) => {
-      localListeners.add(handler);
-      return () => localListeners.delete(handler);
-    },
-    aiPrompt: async (_path, id) => {
-      const f = lastScan?.findings.find((x) => x.id === id);
-      if (!f) throw new Error("Finding not found; scan the project again.");
-      const first = Math.max(1, f.line - 20);
-      return {
-        system: "You fix PHP code for an upgrade to a newer PHP version.",
-        user: `Ferry found this problem in a project moving to PHP ${lastScan?.target}:\n${f.title.en}: ${f.message.en}\n\nFile ${f.file}, lines ${first}-${f.line + 20}. The problem is on line ${f.line}.\n\`\`\`php\n${f.snippet}\n\`\`\``,
-        file: f.file,
-        firstLine: first,
-        lastLine: f.line + 20,
-      };
-    },
-    aiSuggest: async (path, id) => {
-      if (!settings.aiProjects.includes(path)) throw new Error("AI suggestions are off for this project.");
-      const f = lastScan?.findings.find((x) => x.id === id);
-      if (!f) throw new Error("Finding not found; scan the project again.");
-      aiStopped = false;
-      await sleep(delay * 2);
-      if (aiStopped) throw new Error("The AI suggestion was stopped.");
-      aiSuggestion += 1;
-      const fixedLine = f.snippet.replace(/\bmysql_(\w+)\(/, "mysqli_$1(");
-      return {
-        id: aiSuggestion,
-        change: change(f.file, "manual", [[f.ruleId, f.title, f.since, "manual"]], [{ old: f.line, spec: [["del", f.snippet], ["add", fixedLine === f.snippet ? `${f.snippet} // ${f.ruleId}` : fixedLine]] }]),
-        lintErrors: [],
-        lintChecked: true,
-      };
-    },
-    cancelAi: async () => {
-      aiStopped = true;
-    },
-    applyAiSuggestion: async (path, id, label) => {
-      await sleep(delay);
-      if (id !== aiSuggestion) throw new Error("The suggestion is out of date; ask for it again.");
-      const f = lastScan?.findings.find((x) => x.id);
-      const files = [f?.file ?? "includes/helpers.php"];
-      const snapshot: Snapshot = { id: String(Date.now()), createdAt: Date.now(), projectRoot: path, label, files: files.map((p) => ({ path: p, existed: true })) };
-      snapshots = [snapshot, ...snapshots];
-      return { snapshot, written: files, lintErrors: [], lintChecked: true, branch: null, commit: null, gitError: null };
-    },
     saveSettings: async (s) => {
       settings = s;
     },
