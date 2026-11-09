@@ -84,7 +84,7 @@ Ferry'nin kendi PHP sözcük çözümleyicisi ve kural seti vardır; kodu PHP'ni
 - `PDO::query()` ya da `Iterator::current()` gibi yerleşik bir sınıfın ya da arayüzün metodunu dönüş tipi olmadan ezen ve PHP 8.1'den itibaren `#[\ReturnTypeWillChange]` isteyen metotlar
 - yeni sürümde çalışmayı bırakan kodlar: PHP'ye sonradan eklenen bir fonksiyonu ya da sınıfı (`str_contains()`, `JsonException`) `function_exists()` kontrolü olmadan tanımlamak, statik olmayan bir metodu `Sinif::metot()` ile çağırmak, kendi fonksiyon, metot ve constructor'larınıza eksik argümanla yapılan çağrılar, yerleşik fonksiyonlara yanlış sayıda argüman (`mktime()`, `crypt($pw)`), beşinci `$errcontext` parametresini zorunlu tutan hata işleyiciler, `Exception` tipli istisna işleyiciler, üst sınıfı olmayan sınıfta `parent::`, `preg_replace()` içindeki `/e` belirteci ve artık nesne olan curl, GD ya da pgsql değerleri için `is_resource()`
 - PHP 8'de artık hiç tutmayan, `@` için yazılmış `error_reporting() == 0` kontrolleri
-- `eval()`, `extract()` ve değişken değişkenler gibi elle kontrol edilmesi gereken kodlar
+- `eval()`, `extract()` ve PHP 5 ile PHP 7'nin farklı okuduğu `$$ad[...]` gibi elle kontrol edilmesi gereken kodlar
 
 Ferry, hangi PHP'nin gerçekten çalışacağını belirleyen ve kodun çevresinde duran dosyaları da okur:
 

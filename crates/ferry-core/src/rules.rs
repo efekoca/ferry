@@ -57,6 +57,9 @@ impl SymbolRule {
         if self.id == "deprecated.oci8_alias" {
             return OCI8_ALIASES.contains(&name);
         }
+        if self.id == "removed.oci_internal_debug" {
+            return name == "oci_internal_debug" || name == "ociinternaldebug";
+        }
         match self.name.strip_suffix('*') {
             Some(prefix) => name.starts_with(prefix),
             None => name == self.name,
@@ -163,9 +166,7 @@ pub const PG_ALIASES: [(&str, &str); 24] = [
 pub const OCI8_ALIASES: &[&str] = &[
     "ocibindbyname",
     "ocicancel",
-    "ocicloselob",
     "ocicollappend",
-    "ocicollassign",
     "ocicollassignelem",
     "ocicollgetelem",
     "ocicollmax",
@@ -189,7 +190,6 @@ pub const OCI8_ALIASES: &[&str] = &[
     "ocifreecursor",
     "ocifreedesc",
     "ocifreestatement",
-    "ociinternaldebug",
     "ociloadlob",
     "ocilogoff",
     "ocilogon",
@@ -199,6 +199,7 @@ pub const OCI8_ALIASES: &[&str] = &[
     "ocinlogon",
     "ocinumcols",
     "ociparse",
+    "ocipasswordchange",
     "ociplogon",
     "ociresult",
     "ocirollback",
@@ -209,7 +210,6 @@ pub const OCI8_ALIASES: &[&str] = &[
     "ocisetprefetch",
     "ocistatementtype",
     "ociwritelobtofile",
-    "ociwritetemporarylob",
 ];
 
 /// Settings PHP ignores since it removed them, for extensions the symbol dumps can't build.
@@ -418,6 +418,18 @@ const NOOP_SINCE_80: Text = Text::new(
     "PHP 8.0'dan beri hiçbir şey yapmıyor, 8.5'te kullanımdan kalktı.",
     "Has done nothing since PHP 8.0 and is deprecated in 8.5.",
 );
+const FREED_SINCE_80: Text = Text::new(
+    "PHP 8.0'dan beri hiçbir şey yapmıyor ve o sürümde kullanımdan kalktı; nesne kendiliğinden serbest bırakılıyor.",
+    "Has done nothing since PHP 8.0, where it was also deprecated; the object is freed automatically.",
+);
+const GETSS: Text = Text::new(
+    "Bu fonksiyon PHP 8.0'da kaldırıldı. Okumayı yalnızca strip_tags() ile sarmayın: dosya sonundaki false '' olur ve while (... !== false) döngüsü hiç bitmez. Bir etiket iki satıra bölünmüşse ikinci yarısı artık sonraki satırda kalır.",
+    "This function was removed in PHP 8.0. Don't just wrap the read in strip_tags(): the false at end of file becomes '' and a while (... !== false) loop never ends. When a tag is split across lines, its second half now stays in the next line.",
+);
+const SUN_INFO: Text = Text::new(
+    "Kullanımdan kalktı. date_sun_info() zaman damgası döndürür. Ofset argümanı verilmediyse eski metin varsayılan saat diliminde yazılıyordu, date() ile biçimlendirin; ofset verildiyse gmdate('H:i', $t + $ofset * 3600) kullanın. Eski fonksiyon saat diliminin 1970'teki farkını kullanıyordu (İstanbul'da bir saat geri), hesaplama da değiştiği için saat birkaç dakika kayabilir.",
+    "Deprecated. date_sun_info() returns timestamps. Without the offset argument the old string was written in the default time zone, so format it with date(); with an offset, use gmdate('H:i', $t + $offset * 3600). The old function used the time zone's 1970 offset (an hour behind in Istanbul), and the calculation changed too, so the time can move by a few minutes.",
+);
 const REMOVE_CALL: Option<Text> = tx("çağrıyı silin", "remove the call");
 const AI_IDN: Text = Text::new(
     "glibc'nin kaldırdığı bu socket sabitleri PHP 7.4'te kullanımdan kalktı ve 8.0'da kaldırıldı.",
@@ -463,10 +475,10 @@ pub const FUNCTIONS: &[SymbolRule] = &[
     rule!("removed.image2wbmp", "image2wbmp", R, (8, 0), code("imagewbmp"), A, REMOVED_FN),
     rule!("removed.png2wbmp", "png2wbmp", R, (8, 0), None, M, REMOVED_FN),
     rule!("removed.jpeg2wbmp", "jpeg2wbmp", R, (8, 0), None, M, REMOVED_FN),
-    rule!("removed.fgetss", "fgetss", R, (8, 0), code("strip_tags(fgets(...))"), M, REMOVED_FN),
-    rule!("removed.money_format", "money_format", R, (8, 0), code("NumberFormatter"), M, Text::new(
-        "money_format() kaldırıldı. Yerine intl eklentisindeki NumberFormatter kullanılmalı.",
-        "money_format() was removed. Use NumberFormatter from the intl extension instead.")),
+    rule!("removed.fgetss", "fgetss", R, (8, 0), code("($line = fgets($h)) === false ? false : strip_tags($line)"), M, GETSS),
+    rule!("removed.money_format", "money_format", R, (8, 0), code("sprintf('%.2f', $v)"), M, Text::new(
+        "money_format() PHP 8.0'da kaldırıldı. Yerel ayar hiç değiştirilmediyse (C yerel ayarı) %i ve %n biçimleri sprintf('%.2f', $v) ile aynı sonucu verir. Para birimi simgesi gerekiyorsa intl eklentisindeki NumberFormatter::formatCurrency() kullanın; çıktısı money_format()'tan farklıdır.",
+        "money_format() was removed in PHP 8.0. If the locale was never changed (the C locale), the %i and %n formats give the same result as sprintf('%.2f', $v). For a currency symbol, use NumberFormatter::formatCurrency() from the intl extension; its output differs from money_format()'s.")),
     rule!("removed.restore_include_path", "restore_include_path", R, (8, 0), code("ini_restore('include_path')"), A, REMOVED_FN),
     rule!("removed.ezmlm_hash", "ezmlm_hash", R, (8, 0), None, M, REMOVED_FN),
     rule!("removed.hebrevc", "hebrevc", R, (8, 0), code("nl2br(hebrev(...))"), A, REMOVED_FN),
@@ -475,7 +487,9 @@ pub const FUNCTIONS: &[SymbolRule] = &[
     rule!("removed.get_magic_quotes_runtime", "get_magic_quotes_runtime", R, (8, 0), code("false"), M, MAGIC_QUOTES_GET),
     rule!("removed.is_real", "is_real", R, (8, 0), code("is_float"), A, REMOVED_ALIAS),
     rule!("removed.ldap_sort", "ldap_sort", R, (8, 0), None, M, REMOVED_FN),
-    rule!("removed.ldap_control_paged_result", "ldap_control_paged_result", R, (8, 0), tx("ldap_search'teki $controls", "$controls in ldap_search"), M, REMOVED_FN),
+    rule!("removed.ldap_control_paged_result", "ldap_control_paged_result", R, (8, 0), code("ldap_set_option($link, LDAP_OPT_SERVER_CONTROLS, [['oid' => LDAP_CONTROL_PAGEDRESULTS, 'value' => ['size' => $size]]])"), M, Text::new(
+        "ldap_control_paged_result() PHP 8.0'da kaldırıldı. Sayfalama kontrolünü bağlantıya koyuyordu; ldap_set_option() ile LDAP_OPT_SERVER_CONTROLS aynı şeyi yapar. ldap_search()'ün $controls parametresi ise yalnızca o aramaya uygulanır.",
+        "ldap_control_paged_result() was removed in PHP 8.0. It set the paging control on the connection, which ldap_set_option() with LDAP_OPT_SERVER_CONTROLS also does. The $controls parameter of ldap_search() applies to that one search only.")),
     rule!("removed.mbereg", "mbereg*", R, (8, 0), code("mb_ereg*"), A, Text::new(
         "mbereg* takma adları kaldırıldı.",
         "The mbereg* aliases were removed.")),
@@ -485,8 +499,8 @@ pub const FUNCTIONS: &[SymbolRule] = &[
         "strftime() is deprecated and will be removed in PHP 9. Its format characters don't map one-to-one to date().")),
     rule!("deprecated.gmstrftime", "gmstrftime", D, (8, 1), tx("IntlDateFormatter ya da gmdate()", "IntlDateFormatter or gmdate()"), M, DEPRECATED_FN),
     rule!("deprecated.strptime", "strptime", D, (8, 1), tx("date_parse_from_format ya da IntlDateFormatter::parse", "date_parse_from_format or IntlDateFormatter::parse"), M, DEPRECATED_FN),
-    rule!("deprecated.date_sunrise", "date_sunrise", D, (8, 1), code("date_sun_info"), M, DEPRECATED_FN),
-    rule!("deprecated.date_sunset", "date_sunset", D, (8, 1), code("date_sun_info"), M, DEPRECATED_FN),
+    rule!("deprecated.date_sunrise", "date_sunrise", D, (8, 1), code("date('H:i', date_sun_info($ts, $lat, $lng)['sunrise'])"), M, SUN_INFO),
+    rule!("deprecated.date_sunset", "date_sunset", D, (8, 1), code("date('H:i', date_sun_info($ts, $lat, $lng)['sunset'])"), M, SUN_INFO),
     rule!("deprecated.mhash", "mhash*", D, (8, 1), code("hash_*"), M, Text::new(
         "mhash fonksiyonları kullanımdan kalktı.",
         "The mhash functions are deprecated.")),
@@ -509,10 +523,10 @@ pub const FUNCTIONS: &[SymbolRule] = &[
         "Has done nothing since PHP 8.1 and is deprecated in 8.5.")),
     rule!("deprecated.imagedestroy", "imagedestroy", D, (8, 5), REMOVE_CALL, A, NOOP_SINCE_80),
     rule!("deprecated.xml_parser_free", "xml_parser_free", D, (8, 5), REMOVE_CALL, A, NOOP_SINCE_80),
-    rule!("deprecated.openssl_x509_free", "openssl_x509_free", D, (8, 0), REMOVE_CALL, M, NOOP_SINCE_80),
-    rule!("deprecated.openssl_pkey_free", "openssl_pkey_free", D, (8, 0), REMOVE_CALL, M, NOOP_SINCE_80),
-    rule!("deprecated.openssl_free_key", "openssl_free_key", D, (8, 0), REMOVE_CALL, M, NOOP_SINCE_80),
-    rule!("deprecated.shmop_close", "shmop_close", D, (8, 0), REMOVE_CALL, M, NOOP_SINCE_80),
+    rule!("deprecated.openssl_x509_free", "openssl_x509_free", D, (8, 0), REMOVE_CALL, M, FREED_SINCE_80),
+    rule!("deprecated.openssl_pkey_free", "openssl_pkey_free", D, (8, 0), REMOVE_CALL, M, FREED_SINCE_80),
+    rule!("deprecated.openssl_free_key", "openssl_free_key", D, (8, 0), REMOVE_CALL, M, FREED_SINCE_80),
+    rule!("deprecated.shmop_close", "shmop_close", D, (8, 0), REMOVE_CALL, M, FREED_SINCE_80),
     rule!("deprecated.intlcal_set", "intlcal_set", D, (8, 4), tx("IntlCalendar::set(), setDate() ya da setDateTime()", "IntlCalendar::set(), setDate() or setDateTime()"), M, Text::new(
         "intlcal_set() 8.4'te kullanımdan kalktı.",
         "intlcal_set() is deprecated in 8.4.")),
@@ -526,20 +540,22 @@ pub const FUNCTIONS: &[SymbolRule] = &[
     rule!("deprecated.zip_procedural", "zip_*", D, (8, 0), code("ZipArchive"), M, Text::new(
         "Prosedürel zip_* API'si 8.0'da kullanımdan kalktı; ZipArchive sınıfını kullanın.",
         "The procedural zip_* API is deprecated in 8.0; use the ZipArchive class.")),
-    rule!("removed.gzgetss", "gzgetss", R, (8, 0), code("strip_tags(gzgets(...))"), M, REMOVED_FN),
-    rule!("removed.ldap_control_paged_result_response", "ldap_control_paged_result_response", R, (8, 0), tx("ldap_search()'e kontrol dizisi verin", "pass controls to ldap_search()"), M, REMOVED_FN),
-    rule!("removed.xmlrpc", "xmlrpc_*", R, (8, 0), tx("PECL xmlrpc ya da bir XML-RPC kütüphanesi", "PECL xmlrpc or an XML-RPC library"), M, Text::new(
-        "xmlrpc eklentisi PHP 8.0'da çekirdekten çıkarıldı.",
-        "The xmlrpc extension was unbundled in PHP 8.0.")),
+    rule!("removed.gzgetss", "gzgetss", R, (8, 0), code("($line = gzgets($zp, $length)) === false ? false : strip_tags($line)"), M, GETSS),
+    rule!("removed.ldap_control_paged_result_response", "ldap_control_paged_result_response", R, (8, 0), code("ldap_parse_result($link, $result, $code, $dn, $msg, $refs, $controls)"), M, Text::new(
+        "ldap_control_paged_result_response() PHP 8.0'da kaldırıldı. Sonraki sayfanın çerezini ldap_parse_result() ile okuyun: $controls[LDAP_CONTROL_PAGEDRESULTS]['value']['cookie'].",
+        "ldap_control_paged_result_response() was removed in PHP 8.0. Read the next page's cookie with ldap_parse_result(): $controls[LDAP_CONTROL_PAGEDRESULTS]['value']['cookie'].")),
+    rule!("removed.xmlrpc", "xmlrpc_*", R, (8, 0), tx("phpxmlrpc/polyfill-xmlrpc paketi", "the phpxmlrpc/polyfill-xmlrpc package"), M, Text::new(
+        "xmlrpc eklentisi PHP 8.0'da çekirdekten çıkarıldı. PECL'deki sürümü 2021'den kalma bir beta (1.0.0RC3). composer require phpxmlrpc/polyfill-xmlrpc xmlrpc_* fonksiyonlarını saf PHP ile sağlar; tam değil ve ürettiği XML birebir aynı değil.",
+        "The xmlrpc extension was unbundled in PHP 8.0. Its PECL release is a 2021 beta (1.0.0RC3). composer require phpxmlrpc/polyfill-xmlrpc provides the xmlrpc_* functions in plain PHP; it isn't complete, and the XML it writes isn't byte-for-byte the same.")),
     rule!("removed.wddx", "wddx_*", R, (7, 4), tx("JSON ya da serialize()", "JSON or serialize()"), M, Text::new(
         "wddx eklentisi PHP 7.4'te kaldırıldı.",
         "The wddx extension was removed in PHP 7.4.")),
-    rule!("removed.recode", "recode_*", R, (7, 4), code("iconv / mb_convert_encoding"), M, Text::new(
-        "recode eklentisi PHP 7.4'te kaldırıldı.",
-        "The recode extension was removed in PHP 7.4.")),
-    rule!("removed.interbase", "ibase_*", R, (7, 4), tx("PECL interbase ya da PDO_Firebird", "PECL interbase or PDO_Firebird"), M, Text::new(
-        "interbase eklentisi PHP 7.4'te çekirdekten çıkarıldı.",
-        "The interbase extension was unbundled in PHP 7.4.")),
+    rule!("removed.recode", "recode_*", R, (7, 4), code("iconv('UTF-8', 'ISO-8859-1//TRANSLIT//IGNORE', $s)"), M, Text::new(
+        "recode eklentisi PHP 7.4'te kaldırıldı. iconv()'a //TRANSLIT//IGNORE ekleyin: eklemezseniz hedef karakter setinde olmayan bir karakterde false döner; recode o karakteri yaklaştırıyordu (€ yerine EUR).",
+        "The recode extension was removed in PHP 7.4. Add //TRANSLIT//IGNORE to iconv(): without it, a character the target set can't hold makes it return false, where recode approximated it (EUR for €).")),
+    rule!("removed.interbase", "ibase_*", R, (7, 4), tx("PDO_Firebird ya da FirebirdSQL/php-firebird", "PDO_Firebird or FirebirdSQL/php-firebird"), M, Text::new(
+        "interbase eklentisi PHP 7.4'te çekirdekten çıkarıldı ve PECL'de yok. ibase_* çağrılarını korumak için eklentiyi FirebirdSQL/php-firebird kaynağından derleyin ya da kodu PDO_Firebird'e taşıyın.",
+        "The interbase extension was unbundled in PHP 7.4 and isn't on PECL. To keep the ibase_* calls, build the extension from FirebirdSQL/php-firebird, or move the code to PDO_Firebird.")),
     rule!("removed.imageps", "imageps*", R, (7, 0), code("imagettftext / imagefttext"), M, Text::new(
         "PostScript Type1 font desteği PHP 7.0'da kaldırıldı.",
         "PostScript Type1 font support was removed in PHP 7.0.")),
@@ -554,9 +570,9 @@ pub const FUNCTIONS: &[SymbolRule] = &[
     rule!("removed.sybase", "sybase_*", R, (7, 0), tx("PDO", "PDO"), M, Text::new(
         "sybase eklentisi PHP 7.0'da kaldırıldı.",
         "The sybase extension was removed in PHP 7.0.")),
-    rule!("deprecated.libxml_disable_entity_loader", "libxml_disable_entity_loader", D, (8, 0), REMOVE_CALL, M, Text::new(
-        "libxml 2.9'dan beri dış varlıklar zaten kapalı; bu çağrı hiçbir şey yapmıyor ve silinebilir.",
-        "External entities are already disabled since libxml 2.9; this call does nothing and can be removed.")),
+    rule!("deprecated.libxml_disable_entity_loader", "libxml_disable_entity_loader", D, (8, 0), code("libxml_set_external_entity_loader(static fn () => null)"), M, Text::new(
+        "8.0'da kullanımdan kalktı, ama çağrı hâlâ çalışıyor: açıkken dış varlıklar ve dosya yüklemeleri engelleniyor. Kod LIBXML_NOENT ya da LIBXML_DTDLOAD kullanıyorsa çağrıyı silmek dış varlıkları yeniden açar (XXE). Engeli korumak için libxml_set_external_entity_loader(static fn () => null) yazın; false ile çağrılan yerde libxml_set_external_entity_loader(null) yazın.",
+        "Deprecated in 8.0, but the call still works: while it's on, external entities and file loads are blocked. If the code uses LIBXML_NOENT or LIBXML_DTDLOAD, deleting the call turns external entities back on (XXE). To keep the block, write libxml_set_external_entity_loader(static fn () => null); where it's called with false, write libxml_set_external_entity_loader(null).")),
     rule!("removed.imap", "imap_*", R, (8, 4), tx("PECL imap ya da bir IMAP kütüphanesi", "PECL imap or an IMAP library"), M, Text::new(
         "imap eklentisi PHP 8.4'te çekirdekten çıkarıldı; ancak PECL'den ayrıca kurulursa çalışır.",
         "The imap extension was unbundled in PHP 8.4; it only works if you install it from PECL.")),
@@ -566,9 +582,12 @@ pub const FUNCTIONS: &[SymbolRule] = &[
     rule!("removed.mysqli_embedded_server", "mysqli_embedded_server_*", R, (7, 4), None, M, Text::new(
         "Gömülü MySQL sunucusu fonksiyonları PHP 7.4'te kaldırıldı.",
         "The embedded MySQL server functions were removed in PHP 7.4.")),
+    rule!("removed.oci_internal_debug", "oci_internal_debug", R, (8, 0), REMOVE_CALL, M, Text::new(
+        "oci_internal_debug() ve takma adı ociinternaldebug() OCI8 2.0'dan beri hiçbir şey yapmıyordu ve PHP 8.0'da kaldırıldı. Çağrıyı silmek hiçbir şeyi değiştirmez.",
+        "oci_internal_debug() and its alias ociinternaldebug() had done nothing since OCI8 2.0 and were removed in PHP 8.0. Deleting the call changes nothing.")),
     rule!("deprecated.oci8_alias", "oci*", D, (8, 0), tx("oci_ ile başlayan karşılığı", "the oci_ prefixed equivalent"), M, Text::new(
-        "oci_ öneki olmayan OCI8 takma adları PHP 8.0'da kullanımdan kalktı; oci8 eklentisi de 8.4'te çekirdekten çıkarıldı.",
-        "The OCI8 aliases without the oci_ prefix are deprecated since PHP 8.0, and the oci8 extension was unbundled in 8.4.")),
+        "oci_ öneki olmayan OCI8 takma adları PHP 8.0'da kullanımdan kalktı; oci8 eklentisi de 8.4'te çekirdekten çıkarıldı. ocifetchinto()'nun bir karşılığı yok; oci_fetch_array() ile yeniden yazın.",
+        "The OCI8 aliases without the oci_ prefix are deprecated since PHP 8.0, and the oci8 extension was unbundled in 8.4. ocifetchinto() has no direct equivalent; rewrite it with oci_fetch_array().")),
     rule!("removed.oci8", "oci_*", R, (8, 4), tx("PECL oci8", "PECL oci8"), M, Text::new(
         "oci8 eklentisi PHP 8.4'te çekirdekten çıkarıldı; ancak PECL'den ayrıca kurulursa çalışır.",
         "The oci8 extension was unbundled in PHP 8.4; it only works if you install it from PECL.")),
@@ -646,11 +665,11 @@ pub const CONSTANTS: &[SymbolRule] = &[
         "input_request",
         R,
         (8, 0),
-        code("$_REQUEST"),
+        code("null"),
         M,
         Text::new(
-            "INPUT_REQUEST hiç uygulanmamıştı ve PHP 8.0'da kaldırıldı.",
-            "INPUT_REQUEST was never implemented and was removed in PHP 8.0."
+            "INPUT_REQUEST hiç uygulanmamıştı: filter_input() bununla her zaman null döndürüp uyarı veriyordu (FILTER_NULL_ON_FAILURE ile false, default seçeneği verildiyse o değer); filter_has_var() false döndürüyordu. PHP 8.0'da kaldırıldı. Eski sonucu korumak için çağrının yerine bu değeri yazın; $_REQUEST okumak, kodun hiç görmediği gerçek girdiyi içeri alır.",
+            "INPUT_REQUEST was never implemented: filter_input() with it always returned null and warned (false with FILTER_NULL_ON_FAILURE, or the default option's value if given), and filter_has_var() returned false. PHP 8.0 removed it. To keep the old result, write that value in place of the call; reading $_REQUEST instead brings in real input the code has never seen."
         )
     ),
     rule!(
@@ -658,11 +677,11 @@ pub const CONSTANTS: &[SymbolRule] = &[
         "input_session",
         R,
         (8, 0),
-        code("$_SESSION"),
+        code("null"),
         M,
         Text::new(
-            "INPUT_SESSION hiç uygulanmamıştı ve PHP 8.0'da kaldırıldı.",
-            "INPUT_SESSION was never implemented and was removed in PHP 8.0."
+            "INPUT_SESSION hiç uygulanmamıştı: filter_input() bununla her zaman null döndürüp uyarı veriyordu (FILTER_NULL_ON_FAILURE ile false, default seçeneği verildiyse o değer); filter_has_var() false döndürüyordu. PHP 8.0'da kaldırıldı. Eski sonucu korumak için çağrının yerine bu değeri yazın; $_SESSION okumak, kodun hiç görmediği gerçek veriyi içeri alır.",
+            "INPUT_SESSION was never implemented: filter_input() with it always returned null and warned (false with FILTER_NULL_ON_FAILURE, or the default option's value if given), and filter_has_var() returned false. PHP 8.0 removed it. To keep the old result, write that value in place of the call; reading $_SESSION instead brings in real data the code has never seen."
         )
     ),
     rule!(
@@ -670,27 +689,39 @@ pub const CONSTANTS: &[SymbolRule] = &[
         "assert_quiet_eval",
         R,
         (8, 0),
-        tx("sabiti silin", "remove the constant"),
+        tx("assert_options(ASSERT_QUIET_EVAL, ...) çağrısını silin", "delete the assert_options(ASSERT_QUIET_EVAL, ...) call"),
         M,
-        Text::new("ASSERT_QUIET_EVAL PHP 8.0'da kaldırıldı.", "ASSERT_QUIET_EVAL was removed in PHP 8.0.")
+        Text::new(
+            "ASSERT_QUIET_EVAL PHP 8.0'da kaldırıldı; yalnızca PHP 8'in artık çalıştırmadığı metin assert'lerini etkiliyordu. Başka bir yerde yerine 5 yazmayın: PHP 8'de 5, ASSERT_EXCEPTION'ın değeri.",
+            "ASSERT_QUIET_EVAL was removed in PHP 8.0; it only affected string assertions, which PHP 8 no longer evaluates. Don't write 5 in its place elsewhere: on PHP 8, 5 is the value of ASSERT_EXCEPTION."
+        )
     ),
     rule!(
         "removed.mb_overload",
         "mb_overload_*",
         R,
         (8, 0),
-        tx("sabiti silin", "remove the constant"),
+        tx(
+            "MB_OVERLOAD_MAIL yerine 1, MB_OVERLOAD_STRING yerine 2, MB_OVERLOAD_REGEX yerine 4",
+            "1 for MB_OVERLOAD_MAIL, 2 for MB_OVERLOAD_STRING, 4 for MB_OVERLOAD_REGEX"
+        ),
         M,
-        Text::new("mbstring fonksiyon aşırı yüklemesi PHP 8.0'da kaldırıldı.", "mbstring function overloading was removed in PHP 8.0.")
+        Text::new(
+            "mbstring fonksiyon aşırı yüklemesi PHP 8.0'da kaldırıldı. Sabiti silmek & ifadelerini ve dizileri bozar; yerine eski değerini yazın. PHP 8'de ini_get('mbstring.func_overload') false döndüğü için bu tür kontroller 0 verir.",
+            "mbstring function overloading was removed in PHP 8.0. Deleting the constant breaks & expressions and arrays; write its old value instead. On PHP 8 ini_get('mbstring.func_overload') returns false, so such checks give 0."
+        )
     ),
     rule!(
-        "removed.pgsql_libpq_version_str",
+        "deprecated.pgsql_libpq_version_str",
         "pgsql_libpq_version_str",
-        R,
+        D,
         (8, 0),
         code("PGSQL_LIBPQ_VERSION"),
         M,
-        Text::new("PGSQL_LIBPQ_VERSION_STR PHP 8.0'da kaldırıldı.", "PGSQL_LIBPQ_VERSION_STR was removed in PHP 8.0.")
+        Text::new(
+            "PGSQL_LIBPQ_VERSION_STR PHP 8.0'dan beri PGSQL_LIBPQ_VERSION ile aynı değeri taşıyor ve kullanımdan kalktı. PHP 7'deki uzun derleme bilgisi artık yok.",
+            "PGSQL_LIBPQ_VERSION_STR has held the same value as PGSQL_LIBPQ_VERSION since PHP 8.0 and is deprecated. The long build string it held in PHP 7 is gone."
+        )
     ),
     rule!("deprecated.file_binary", "file_binary", D, (8, 1), tx("bayrağı çıkarın; tek başına kullanılıyorsa 0 yazın", "take the flag out; where it stands alone, write 0"), M, NO_EFFECT),
     rule!("deprecated.file_text", "file_text", D, (8, 1), tx("bayrağı çıkarın; tek başına kullanılıyorsa 0 yazın", "take the flag out; where it stands alone, write 0"), M, NO_EFFECT),
@@ -864,7 +895,7 @@ pub const MEMBERS: &[MemberRule] = &[
         Mt,
         "mysqli",
         rule!(
-            "deprecated.mysqli_method",
+            "deprecated.mysqli_ping",
             "ping",
             D,
             (8, 4),
@@ -879,9 +910,9 @@ pub const MEMBERS: &[MemberRule] = &[
     member(
         Mt,
         "mysqli",
-        rule!("deprecated.mysqli_method", "kill", D, (8, 4), tx("KILL CONNECTION sorgusu", "a KILL CONNECTION query"), M, DEPRECATED_FN),
+        rule!("deprecated.mysqli_kill", "kill", D, (8, 4), tx("KILL CONNECTION sorgusu", "a KILL CONNECTION query"), M, DEPRECATED_FN),
     ),
-    member(Mt, "mysqli", rule!("deprecated.mysqli_method", "refresh", D, (8, 4), tx("FLUSH sorguları", "FLUSH queries"), M, DEPRECATED_FN)),
+    member(Mt, "mysqli", rule!("deprecated.mysqli_refresh", "refresh", D, (8, 4), tx("FLUSH sorguları", "FLUSH queries"), M, DEPRECATED_FN)),
     member(
         Mt,
         "reflection",
@@ -909,11 +940,11 @@ pub const MEMBERS: &[MemberRule] = &[
             "export",
             R,
             (8, 0),
-            tx("(string) new ReflectionX(...)", "(string) new ReflectionX(...)"),
+            code("echo new ReflectionX(...), \"\\n\";"),
             M,
             Text::new(
-                "Reflection*::export() PHP 8.0'da kaldırıldı; nesneyi metne çevirip yazdırın.",
-                "Reflection*::export() was removed in PHP 8.0; cast the object to a string and print it instead."
+                "Reflection*::export() PHP 8.0'da kaldırıldı. Nesnenin metnini bir satır sonuyla yazdırıp null döndürüyordu; son argüman true ise yazdırmadan metni döndürüyordu, onun yerine (string) new ReflectionX(...) yazın.",
+                "Reflection*::export() was removed in PHP 8.0. It printed the object's text with a newline and returned null; with true as the last argument it returned the text instead, which (string) new ReflectionX(...) does."
             )
         ),
     ),
@@ -939,9 +970,12 @@ pub const MEMBERS: &[MemberRule] = &[
             "type_currency",
             D,
             (8, 3),
-            code("NumberFormatter::formatCurrency()"),
+            tx("formatCurrency() ya da parseCurrency()", "formatCurrency() or parseCurrency()"),
             M,
-            Text::new("NumberFormatter::TYPE_CURRENCY 8.3'te kullanımdan kalktı; formatCurrency() ve parseCurrency() kullanın.", "NumberFormatter::TYPE_CURRENCY is deprecated in 8.3; use formatCurrency() and parseCurrency().")
+            Text::new(
+                "NumberFormatter::TYPE_CURRENCY 8.3'te kullanımdan kalktı; format() ve parse() onu 8.0'dan beri zaten kabul etmiyor. Para birimi için formatCurrency() ve parseCurrency() kullanın.",
+                "NumberFormatter::TYPE_CURRENCY is deprecated in 8.3; format() and parse() have rejected it since 8.0. Use formatCurrency() and parseCurrency() for currency."
+            )
         ),
     ),
     member(
@@ -957,32 +991,36 @@ pub const MEMBERS: &[MemberRule] = &[
             Text::new("ZipArchive::FL_RECOMPRESS 8.3'te kullanımdan kalktı; libzip'in yeni sürümlerinde kaldırılacak.", "ZipArchive::FL_RECOMPRESS is deprecated in 8.3 and will be removed in future libzip versions.")
         ),
     ),
+    member(K, "datetime", RFC7231),
+    member(K, "datetimeimmutable", RFC7231),
+    member(K, "datetimeinterface", RFC7231),
+    member(Mt, "datetime", DATE_WAKEUP),
+    member(Mt, "datetimeimmutable", DATE_WAKEUP),
+    member(Mt, "datetimezone", DATE_WAKEUP),
+    member(Mt, "dateinterval", DATE_WAKEUP),
+    member(Mt, "dateperiod", DATE_WAKEUP),
+    member(Mt, "splfixedarray", rule!("deprecated.splfixedarray_wakeup", "__wakeup", D, (8, 4), WAKEUP_HINT, M, SPL_WAKEUP)),
     member(
-        K,
-        "datetime",
+        Mt,
+        "splfileinfo",
         rule!(
-            "deprecated.date_rfc7231",
-            "rfc7231",
+            "deprecated.splfileinfo_bad_state_ex",
+            "_bad_state_ex",
             D,
-            (8, 5),
-            tx("UTC'de 'D, d M Y H:i:s \\G\\M\\T' biçimi", "the 'D, d M Y H:i:s \\G\\M\\T' format in UTC"),
+            (8, 2),
+            REMOVE_CALL,
             M,
             Text::new(
-                "RFC7231 biçimi saat dilimini yok sayıp her zaman GMT yazdığı için 8.5'te kullanımdan kalktı. Tarihi UTC'ye çevirip biçimi kendiniz yazın.",
-                "The RFC7231 format ignores the time zone and always writes GMT, so it's deprecated in 8.5. Convert the date to UTC and spell out the format."
+                "8.2'de kullanımdan kalktı. Bu metot geçerli bir nesnede bile her zaman Error fırlatır; çağrıyı silmek, sonrasındaki kodun çalışmasını sağlar. Hatanın sürmesi gerekiyorsa Error'u kendiniz fırlatın.",
+                "Deprecated in 8.2. The method always throws Error, even on a valid object, so deleting the call lets the code after it run. If the error is wanted, throw the Error yourself."
             )
         ),
     ),
-    member(Mt, "datetime", rule!("deprecated.date_wakeup", "__wakeup", D, (8, 5), tx("çağrıyı silin; alt sınıfta mantığı __unserialize()'a taşıyın", "delete the call; in a subclass, move the logic to __unserialize()"), M, WAKEUP)),
-    member(Mt, "dateinterval", rule!("deprecated.date_wakeup", "__wakeup", D, (8, 5), tx("çağrıyı silin; alt sınıfta mantığı __unserialize()'a taşıyın", "delete the call; in a subclass, move the logic to __unserialize()"), M, WAKEUP)),
-    member(Mt, "dateperiod", rule!("deprecated.date_wakeup", "__wakeup", D, (8, 5), tx("çağrıyı silin; alt sınıfta mantığı __unserialize()'a taşıyın", "delete the call; in a subclass, move the logic to __unserialize()"), M, WAKEUP)),
-    member(Mt, "splfixedarray", rule!("deprecated.splfixedarray_wakeup", "__wakeup", D, (8, 4), tx("çağrıyı silin; alt sınıfta mantığı __unserialize()'a taşıyın", "delete the call; in a subclass, move the logic to __unserialize()"), M, WAKEUP)),
-    member(Mt, "splfileinfo", rule!("deprecated.splfileinfo_bad_state_ex", "_bad_state_ex", D, (8, 2), REMOVE_CALL, M, DEPRECATED_FN)),
     member(
         Mt,
         "mysqli",
         rule!(
-            "deprecated.mysqli_method",
+            "deprecated.mysqli_get_client_info",
             "get_client_info",
             D,
             (8, 1),
@@ -995,7 +1033,7 @@ pub const MEMBERS: &[MemberRule] = &[
         Mt,
         "mysqli",
         rule!(
-            "deprecated.mysqli_method",
+            "deprecated.mysqli_init",
             "init",
             D,
             (8, 1),
@@ -1034,11 +1072,11 @@ pub const MEMBERS: &[MemberRule] = &[
             "fetch_serialize",
             D,
             (8, 1),
-            None,
+            code("PDO::FETCH_DEFAULT"),
             M,
             Text::new(
-                "PDO::FETCH_SERIALIZE, Serializable arayüzüne dayandığı için 8.1'de kullanımdan kalktı.",
-                "PDO::FETCH_SERIALIZE relies on the Serializable interface and is deprecated in 8.1."
+                "PDO::FETCH_SERIALIZE, Serializable arayüzüne dayandığı için 8.1'de kullanımdan kalktı. Tek başına hiçbir etkisi yoktu: PDO varsayılan getirme modunu kullanıyordu, bu yüzden PDO::FETCH_DEFAULT yazmak sonucu korur. FETCH_CLASS ile birlikteyse sütunu alıp unserialize() ile kendiniz çözün.",
+                "PDO::FETCH_SERIALIZE relies on the Serializable interface and is deprecated in 8.1. On its own it had no effect: PDO used the default fetch mode, so PDO::FETCH_DEFAULT keeps the result. Combined with FETCH_CLASS, fetch the column and unserialize() it yourself."
             )
         ),
     ),
@@ -1117,9 +1155,49 @@ const REMOVE_USE: Option<Text> = tx(
     "kullanımı silin; | ile birleştirilmişse yalnızca bu sabiti çıkarın",
     "remove its use; in a | combination, take out only this constant",
 );
-const WAKEUP: Text = Text::new(
-    "Bu sınıfın __wakeup() metodu kullanımdan kalktı; serileştirme artık __unserialize() ile yapılıyor. Alt sınıfta parent::__wakeup() çağrısını kaldırın ya da __unserialize()'a taşıyın.",
-    "This class's __wakeup() method is deprecated; unserialization now goes through __unserialize(). In a subclass, drop the parent::__wakeup() call or move it to __unserialize().",
+const WAKEUP_HINT: Option<Text> =
+    tx("çağrıyı silin; alt sınıfta mantığı __unserialize()'a taşıyın", "delete the call; in a subclass, move the logic to __unserialize()");
+const DATE_WAKEUP: SymbolRule = rule!(
+    "deprecated.date_wakeup",
+    "__wakeup",
+    D,
+    (8, 5),
+    WAKEUP_HINT,
+    M,
+    Text::new(
+        "Bu sınıfın __wakeup() metodu 8.5'te kullanımdan kalktı. DateTime, DateTimeImmutable, DateTimeZone ya da DatePeriod nesnesinde doğrudan çağrılınca her zaman Error fırlatıyor; DateInterval'da hiçbir şey yapmıyor. Çağrıyı silmek, sonrasındaki kodun çalışmasını sağlar. Alt sınıftaki __wakeup() mantığını __unserialize()'a taşıyın.",
+        "This class's __wakeup() method is deprecated in 8.5. Called directly on a DateTime, DateTimeImmutable, DateTimeZone or DatePeriod object it always throws Error; on DateInterval it does nothing. Deleting the call lets the code after it run. In a subclass, move the __wakeup() logic to __unserialize()."
+    )
+);
+const SPL_WAKEUP: Text = Text::new(
+    "SplFixedArray::__wakeup() 8.4'te kullanımdan kalktı; serileştirme artık __unserialize() ile yapılıyor ve bu çağrı nesnede hiçbir şey değiştirmiyor. Alt sınıftaki mantığı __unserialize()'a taşıyın.",
+    "SplFixedArray::__wakeup() is deprecated in 8.4; unserialization now goes through __unserialize(), and the call changes nothing on the object. In a subclass, move the logic to __unserialize().",
+);
+const RFC7231: SymbolRule = rule!(
+    "deprecated.date_rfc7231",
+    "rfc7231",
+    D,
+    (8, 5),
+    tx("UTC'de 'D, d M Y H:i:s \\G\\M\\T' biçimi", "the 'D, d M Y H:i:s \\G\\M\\T' format in UTC"),
+    M,
+    Text::new(
+        "RFC7231 biçimi saat dilimini yok sayıp her zaman GMT yazdığı için 8.5'te kullanımdan kalktı. Tarihi UTC'ye çevirip biçimi kendiniz yazın.",
+        "The RFC7231 format ignores the time zone and always writes GMT, so it's deprecated in 8.5. Convert the date to UTC and spell out the format."
+    )
+);
+
+/// NumberFormatter::TYPE_CURRENCY as the type argument of format() or parse(), which throw on it.
+pub const TYPE_CURRENCY_CALL: SymbolRule = rule!(
+    "removed.numberformatter_type_currency",
+    "type_currency",
+    R,
+    (8, 0),
+    tx("formatCurrency() ya da parseCurrency()", "formatCurrency() or parseCurrency()"),
+    M,
+    Text::new(
+        "format() ve parse() NumberFormatter::TYPE_CURRENCY'yi PHP 8.0'dan beri kabul etmiyor ve ValueError fırlatıyor; PHP 7'de çağrı uyarı verip false döndürüyordu. Para birimi için formatCurrency() ya da parseCurrency() kullanın. Sabit ayrıca 8.3'te kullanımdan kalktı.",
+        "format() and parse() have rejected NumberFormatter::TYPE_CURRENCY with a ValueError since PHP 8.0; in PHP 7 the call warned and returned false. Use formatCurrency() or parseCurrency() for currency. The constant itself is also deprecated in 8.3."
+    )
 );
 const REFLECTION_TYPE: Text = Text::new(
     "Bu ReflectionParameter metodu 8.0'da kullanımdan kalktı; parametrenin tipini getType() ve ReflectionNamedType ile okuyun.",
@@ -1485,14 +1563,14 @@ pub mod patterns {
     };
     pub const VARIABLE_VARIABLE: PatternRule = PatternRule {
         id: "review.variable_variable",
-        title: Text::new("Değişken değişken ($$)", "Variable variable ($$)"),
+        title: Text::new("Değişken değişkende dizi erişimi ($$a[...])", "Array access on a variable variable ($$a[...])"),
         severity: Severity::Behavior,
         since: (7, 0),
         replacement: None,
         fix: FixKind::Manual,
         note: Text::new(
-            "$$ kullanımı statik analizden kaçar ve PHP 7'den beri farklı bir öncelikle değerlendirilir.",
-            "Variable variables escape static analysis and have been evaluated with different precedence since PHP 7.",
+            "$$ad[...] PHP 7'den beri farklı okunuyor: PHP 5 bunu ${$ad[...]}, PHP 7 ve sonrası ${$ad}[...] olarak okur. Kastedilen anlamı süslü parantezle açıkça yazın.",
+            "$$name[...] has been read differently since PHP 7: PHP 5 read it as ${$name[...]}, PHP 7 and later as ${$name}[...]. Write the meaning you want with braces.",
         ),
     };
     pub const EXTRACT: PatternRule = PatternRule {
@@ -1671,8 +1749,8 @@ pub mod patterns {
         replacement: None,
         fix: FixKind::Manual,
         note: Text::new(
-            "PHP 7'de yerleşik fonksiyonlar eksik ya da fazla argümanla yalnızca uyarı verip null döndürüyordu. PHP 8'de çağrı ArgumentCountError fırlatır. Örneğin mktime() artık saati, crypt() de salt değerini zorunlu istiyor.",
-            "In PHP 7 a built-in function called with too few or too many arguments only warned and returned null. PHP 8 throws ArgumentCountError. For example, mktime() now requires the hour and crypt() the salt.",
+            "PHP 8'de yerleşik bir fonksiyon eksik ya da fazla argümanla çağrılınca ArgumentCountError fırlatır. PHP 7'de çoğu fonksiyon yalnızca uyarı verip çalışmadan null döndürüyordu. Bazı parametreler de zorunlu oldu: argümansız mktime() o anki zamanı döndürüyordu (yerine time() yazın), salt'sız crypt() rastgele bir salt üretiyordu.",
+            "In PHP 8 a built-in function called with too few or too many arguments throws ArgumentCountError. In PHP 7 most functions only warned and returned null without running. Some parameters also became required: mktime() without arguments returned the current time (write time() instead), and crypt() without a salt made a random one.",
         ),
     };
     pub const PARSE_STR_ONE_ARG: PatternRule = PatternRule {
@@ -1968,14 +2046,14 @@ pub mod patterns {
     };
     pub const CONCAT_PRECEDENCE: PatternRule = PatternRule {
         id: "behavior.concat_precedence",
-        title: Text::new("Parantezsiz . ile + / -", "Unparenthesized . with + or -"),
+        title: Text::new("Parantezsiz . ile +, -, << ya da >>", "Unparenthesized . with +, -, << or >>"),
         severity: Severity::Behavior,
         since: (8, 0),
         replacement: code("\"Toplam: \" . ($a + $b)"),
         fix: FixKind::Manual,
         note: Text::new(
-            "PHP 8.0'da + ve - artık . işleminden önce yapılıyor; \"Toplam: \" . $a + $b artık farklı sonuç verir. Niyetinizi parantezle belirtin.",
-            "Since PHP 8.0, + and - are evaluated before .; \"Total: \" . $a + $b now gives a different result. Add parentheses to say what you mean.",
+            "PHP 8.0'da +, -, << ve >> artık . işleminden önce yapılıyor; \"Toplam: \" . $a + $b artık farklı sonuç verir. Niyetinizi parantezle belirtin.",
+            "Since PHP 8.0, +, -, << and >> are evaluated before .; \"Total: \" . $a + $b now gives a different result. Add parentheses to say what you mean.",
         ),
     };
     pub const SERIALIZABLE: PatternRule = PatternRule {
@@ -1995,11 +2073,14 @@ pub mod patterns {
         title: Text::new("Kaldırılan otomatik değişken", "Removed magic variable"),
         severity: Severity::Behavior,
         since: (7, 0),
-        replacement: tx("error_get_last() ya da file_get_contents('php://input')", "error_get_last() or file_get_contents('php://input')"),
+        replacement: tx(
+            "file_get_contents('php://input') ya da error_get_last()['message'] ?? null",
+            "file_get_contents('php://input') or error_get_last()['message'] ?? null",
+        ),
         fix: FixKind::Manual,
         note: Text::new(
-            "$HTTP_RAW_POST_DATA ve $php_errormsg artık oluşturulmuyor; kod çalışır ama bu değişken boş kalır.",
-            "$HTTP_RAW_POST_DATA and $php_errormsg are no longer created; the code still runs but the variable stays empty.",
+            "$HTTP_RAW_POST_DATA PHP 7.0'da, $php_errormsg 8.0'da kaldırıldı; okunduğunda tanımsız değişken uyarısı verir ve null döner. php://input multipart/form-data isteklerinde boştur; error_get_last() ise yalnızca bu kodun değil, isteğin son hatasını verir.",
+            "$HTTP_RAW_POST_DATA was removed in PHP 7.0 and $php_errormsg in 8.0; reading them warns about an undefined variable and gives null. php://input is empty for multipart/form-data requests, and error_get_last() gives the last error of the whole request, not just of this code.",
         ),
     };
     pub const DYNAMIC_PROPERTY: PatternRule = PatternRule {
@@ -2043,11 +2124,11 @@ pub mod patterns {
         title: Text::new("Dahili fonksiyona null", "null passed to a built-in function"),
         severity: Severity::Deprecated,
         since: (8, 1),
-        replacement: tx("'' ya da uygun bir değer", "'' or a suitable value"),
+        replacement: tx("parametrenin tipine göre '', 0 ya da false", "'', 0 or false, by the parameter's type"),
         fix: FixKind::Manual,
         note: Text::new(
-            "Dahili fonksiyonların nullable olmayan parametrelerine null vermek 8.1'de kullanımdan kalktı ve PHP 9'da TypeError olacak.",
-            "Passing null to non-nullable parameters of built-in functions is deprecated in 8.1 and will be a TypeError in PHP 9.",
+            "Dahili fonksiyonların nullable olmayan parametrelerine null vermek 8.1'de kullanımdan kalktı ve PHP 9'da TypeError olacak. Eski sonucu korumak için null yerine tipin boş değerini yazın: metin için '', sayı için 0 (örneğin number_format()), bool için false.",
+            "Passing null to non-nullable parameters of built-in functions is deprecated in 8.1 and will be a TypeError in PHP 9. To keep the old result, write the type's empty value instead of null: '' for strings, 0 for numbers (number_format(), for example), false for bools.",
         ),
     };
     pub const PARTIAL_CALLABLE: PatternRule = PatternRule {
@@ -2055,11 +2136,11 @@ pub mod patterns {
         title: Text::new("Kısmen desteklenen callable", "Partially supported callable"),
         severity: Severity::Deprecated,
         since: (8, 2),
-        replacement: code("[self::class, 'm'] / self::m(...)"),
+        replacement: code("self::m(...)"),
         fix: FixKind::Manual,
         note: Text::new(
-            "\"self::m\", \"parent::m\", \"static::m\" ve ['self', 'm'] gibi callable'lar call_user_func() ile çalışır ama $callable() ile çalışmaz; 8.2'de kullanımdan kalktı.",
-            "Callables like \"self::m\", \"parent::m\", \"static::m\" and ['self', 'm'] work with call_user_func() but not $callable(); they are deprecated in 8.2.",
+            "\"self::m\", \"parent::m\", \"static::m\" ve ['self', 'm'] gibi callable'lar call_user_func() ile çalışır ama $callable() ile çalışmaz; 8.2'de kullanımdan kalktı. PHP 8.1'den itibaren aynı çağrıyı self::m(...) gibi bir first-class callable ile yazın. [self::class, 'm'] statik metotta aynı değildir: late static binding kaybolur.",
+            "Callables like \"self::m\", \"parent::m\", \"static::m\" and ['self', 'm'] work with call_user_func() but not $callable(); they are deprecated in 8.2. From PHP 8.1, write the same call as a first-class callable such as self::m(...). [self::class, 'm'] isn't the same in a static method: it loses late static binding.",
         ),
     };
 }

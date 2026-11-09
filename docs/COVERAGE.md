@@ -34,7 +34,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-7.0/UPGRADING)
 
 | Area | Change | Status | Rules | Note |
 | --- | --- | --- | --- | --- |
-| Changes to variable handling | Indirect variable, property and method references are now interpreted with left-to-right semantics. | Covered | `review.variable_variable`<br>`behavior.indirect_access_order` | $$foo['bar'] is flagged as a variable variable. $foo->$bar['baz'], $foo->$bar['baz']() and Foo::$bar['baz']() are reported; self::, static:: and parent:: calls are skipped because modern code writes them on purpose. |
+| Changes to variable handling | Indirect variable, property and method references are now interpreted with left-to-right semantics. | Covered | `review.variable_variable`<br>`behavior.indirect_access_order` | $$foo['bar'] is flagged as array access on a variable variable. $foo->$bar['baz'], $foo->$bar['baz']() and Foo::$bar['baz']() are reported; self::, static:: and parent:: calls are skipped because modern code writes them on purpose. |
 | Changes to variable handling | The global keyword now only accepts simple variables. | Covered | `review.variable_variable` | global $$foo->bar is reported as a variable variable. |
 | Changes to variable handling | Parentheses around variables or function calls no longer have any influence on behavior. | Covered | `behavior.parenthesized_reference` | A function result wrapped in extra parentheses and passed to a by-reference built-in such as array_pop() is reported. |
 | Changes to variable handling | Array elements or object properties that are automatically created during by-reference assignments will now result in a different order. | Runtime only |  | Ordering of elements auto-created by reference assignment only shows at runtime. |
@@ -398,7 +398,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.0/UPGRADING)
 | Mbstring | mb_ereg() and mb_eregi() will now return boolean true on a successful match. | Runtime only |  | Return value change of mb_ereg() only matters for runtime use of the result. |
 | OCI8 | The OCI-Lob class is now called OCILob, and the OCI-Collection class is now called OCICollection for name compliance enforced by PHP 8 arginfo type annotation tooling. | Covered | `behavior.oci_class_name` | The literal class names 'OCI-Lob' and 'OCI-Collection' are reported. |
 | OCI8 | Several alias functions have been marked as deprecated. | Covered | `deprecated.oci8_alias` | The OCI8 aliases without the oci_ prefix, such as ocilogon() and ociparse(), are reported. |
-| OCI8 | oci_internal_debug() and its alias ociinternaldebug() have been removed. | Covered | `deprecated.oci8_alias`<br>`removed.oci8` | oci_internal_debug() and its alias ociinternaldebug() are reported. |
+| OCI8 | oci_internal_debug() and its alias ociinternaldebug() have been removed. | Covered | `removed.oci_internal_debug` | oci_internal_debug() and its alias ociinternaldebug() are reported. |
 | ODBC | odbc_connect() no longer reuses persistent connections. | Not applicable |  | Connection pooling behavior of odbc_connect(); no source change required. |
 | ODBC | The unused flags parameter of odbc_exec() has been removed. | Covered | `removed.builtin_arity` | odbc_exec($c, $sql, 1) with the flags argument is reported. |
 | OpenSSL | openssl_x509_read() and openssl_csr_sign() will now return an OpenSSLCertificate object rather than a resource. | Covered | `removed.resource_check` | is_resource() on openssl_x509_read() and openssl_csr_sign() is reported. |
@@ -489,7 +489,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.0/UPGRADING)
 | Enchant | enchant_broker_free and enchant_broker_free_dict, unset the object instead | Covered | `deprecated.builtin_function` | enchant_broker_free() and enchant_broker_free_dict() are reported. |
 | Enchant | ENCHANT_MYSPELL and ENCHANT_ISPELL constants | Covered | `deprecated.builtin_constant` | ENCHANT_MYSPELL and ENCHANT_ISPELL are reported. |
 | LibXML | libxml_disable_entity_loader() has been deprecated. | Covered | `deprecated.libxml_disable_entity_loader` | libxml_disable_entity_loader() is reported. |
-| PGSQL / PDO PGSQL | The constant PGSQL_LIBPQ_VERSION_STR has now the same value as PGSQL_LIBPQ_VERSION, and thus is deprecated. | Covered | `removed.pgsql_libpq_version_str` | PGSQL_LIBPQ_VERSION_STR is reported. |
+| PGSQL / PDO PGSQL | The constant PGSQL_LIBPQ_VERSION_STR has now the same value as PGSQL_LIBPQ_VERSION, and thus is deprecated. | Covered | `deprecated.pgsql_libpq_version_str` | PGSQL_LIBPQ_VERSION_STR is reported. |
 | PGSQL / PDO PGSQL | Function aliases in the pgsql extension have been deprecated. | Covered | `deprecated.pg_alias` | pg_numrows() is reported. |
 | Zip | Using empty file as ZipArchive is deprecated. | Runtime only |  | Whether the opened file is empty depends on runtime data. |
 | Zip | The procedural API of Zip is deprecated. | Covered | `deprecated.zip_procedural` | zip_open() and zip_read() are reported. |
@@ -554,8 +554,8 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.1/UPGRADING)
 | Intl | Calling IntlCalendar::roll() with bool argument is deprecated. | Covered | `deprecated.intlcal_roll_bool` | $cal = new IntlGregorianCalendar(); $cal->roll(IntlCalendar::FIELD_DAY_OF_MONTH, true) is reported when the receiver's class is visible in the code. |
 | Mbstring | Calling mb_check_encoding() without an argument is deprecated. | Covered | `deprecated.implicit_argument` | mb_check_encoding() without arguments is reported. |
 | MySQLi | The mysqli_driver::$driver_version property has been deprecated. | Covered | `deprecated.mysqli_driver_version` | $d = new mysqli_driver(); echo $d->driver_version is reported when the receiver's class is visible in the code. |
-| MySQLi | Calling mysqli::get_client_info in OO style or passing $mysqli argument to mysqli_get_client_info() function has been deprecated. | Covered | `deprecated.mysqli_method`<br>`deprecated.mysqli_get_client_info_arg` | mysqli_get_client_info($m) is reported. |
-| MySQLi | The mysqli::init() method has been deprecated. | Covered | `deprecated.builtin_method` | parent::init() in a mysqli subclass is reported. |
+| MySQLi | Calling mysqli::get_client_info in OO style or passing $mysqli argument to mysqli_get_client_info() function has been deprecated. | Covered | `deprecated.mysqli_get_client_info`<br>`deprecated.mysqli_get_client_info_arg` | $mysqli->get_client_info() and mysqli_get_client_info($m) are reported. |
+| MySQLi | The mysqli::init() method has been deprecated. | Covered | `deprecated.mysqli_init`<br>`deprecated.builtin_method` | $mysqli->init() and parent::init() in a mysqli subclass are reported. |
 | OCI8 | The INI directive oci8.old_oci_close_semantics has been deprecated. | Covered | `deprecated.ini_setting` | ini_set('oci8.old_oci_close_semantics', 1) is reported. |
 | ODBC | odbc_result_all() has been deprecated. | Covered | `deprecated.odbc_result_all` | odbc_result_all() call is reported. |
 | PDO | The PDO::FETCH_SERIALIZE mode has been deprecated. | Covered | `deprecated.pdo_fetch_serialize` | PDO::FETCH_SERIALIZE is reported. |
@@ -712,9 +712,9 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.4/UPGRADING)
 | Intl | Calling intlgregcal_create_instance() as well as calling IntlGregorianCalendar::__construct() with more than 2 arguments is deprecated. | Covered | `deprecated.intlgregcal_create_instance` | new IntlGregorianCalendar(2020, 1, 1) is reported. |
 | LDAP | Calling ldap_connect() with more than 2 arguments is deprecated. | Covered | `removed.builtin_arity` | ldap_connect() with 3 arguments is reported (as an arity issue). |
 | LDAP | Calling ldap_exop() with more than 4 arguments is deprecated. | Covered | `deprecated.ldap_exop_response` | ldap_exop($l, $o, null, null, $r, $m) is reported. |
-| Mysqli | The mysqli_ping() function and mysqli::ping() method are now deprecated, as the reconnect feature was removed in PHP 8.2. | Covered | `deprecated.mysqli_ping`<br>`deprecated.mysqli_method` | mysqli_ping() and $mysqli->ping() are reported. |
-| Mysqli | The mysqli_kill() function and mysqli::kill() method are now deprecated. | Covered | `deprecated.mysqli_kill`<br>`deprecated.mysqli_method` | mysqli_kill() and $mysqli->kill() are reported. |
-| Mysqli | The mysqli_refresh() function and mysqli::refresh() method are now deprecated. | Covered | `deprecated.mysqli_refresh`<br>`deprecated.mysqli_method`<br>`deprecated.mysqli_refresh_constant` | mysqli_refresh(), ->refresh() and MYSQLI_REFRESH_* constants are reported. |
+| Mysqli | The mysqli_ping() function and mysqli::ping() method are now deprecated, as the reconnect feature was removed in PHP 8.2. | Covered | `deprecated.mysqli_ping` | mysqli_ping() and $mysqli->ping() are reported. |
+| Mysqli | The mysqli_kill() function and mysqli::kill() method are now deprecated. | Covered | `deprecated.mysqli_kill` | mysqli_kill() and $mysqli->kill() are reported. |
+| Mysqli | The mysqli_refresh() function and mysqli::refresh() method are now deprecated. | Covered | `deprecated.mysqli_refresh`<br>`deprecated.mysqli_refresh_constant` | mysqli_refresh(), ->refresh() and MYSQLI_REFRESH_* constants are reported. |
 | Mysqli | Passing explicitly the $mode parameter to mysqli_store_result() has been deprecated. | Covered | `deprecated.mysqli_store_result_copy_data`<br>`deprecated.mysqli_store_result_mode` | $m = new mysqli(); $m->store_result(0) is reported when the receiver's class is visible in the code. |
 | PDO_PGSQL | Using escaped question marks (??) inside dollar-quoted strings is deprecated. | Covered | `deprecated.pgsql_escaped_question` | ?? inside $$-quoted SQL passed to prepare(), query() or exec() is reported. |
 | PgSQL | Calling pg_fetch_result() with 2 arguments is deprecated. | Covered | `deprecated.pg_implicit_row` | pg_fetch_result($r, 'col') is reported. |

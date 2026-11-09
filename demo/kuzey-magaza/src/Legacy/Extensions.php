@@ -20,6 +20,11 @@ class Extensions
         return $parsed === false ? U_MULTIPLE_DECIMAL_SEPERATORS : $parsed;
     }
 
+    public function priceType()
+    {
+        return NumberFormatter::TYPE_CURRENCY;
+    }
+
     public function archive($path)
     {
         $zip = new ZipArchive();

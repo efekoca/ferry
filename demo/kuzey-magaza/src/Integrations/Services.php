@@ -11,10 +11,13 @@ class Services implements \Countable, \ArrayAccess
         if (!$db->ping()) {
             return null;
         }
+        $client = $db->get_client_info();
+        $replica = new \mysqli();
+        $replica->init();
         $pdo = new \PDO('mysql:host=localhost;dbname=shop', 'kuzey', 'secret');
         $pdo->setAttribute(\PDO::MYSQL_ATTR_INIT_COMMAND, 'SET NAMES utf8mb4');
         $cached = $pdo->query('SELECT payload FROM cache')->fetchAll(\PDO::FETCH_SERIALIZE);
-        return array($db, $pdo, $cached);
+        return array($db, $pdo, $cached, $client, $replica);
     }
 
     public function inspect($object)

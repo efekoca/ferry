@@ -9,7 +9,7 @@
    "review.variable_variable",
    "behavior.indirect_access_order"
   ],
-  "note": "$$foo['bar'] is flagged as a variable variable. $foo->$bar['baz'], $foo->$bar['baz']() and Foo::$bar['baz']() are reported; self::, static:: and parent:: calls are skipped because modern code writes them on purpose."
+  "note": "$$foo['bar'] is flagged as array access on a variable variable. $foo->$bar['baz'], $foo->$bar['baz']() and Foo::$bar['baz']() are reported; self::, static:: and parent:: calls are skipped because modern code writes them on purpose."
  },
  {
   "version": "7.0",
@@ -3217,8 +3217,7 @@
   "change": "oci_internal_debug() and its alias ociinternaldebug() have been removed.",
   "status": "covered",
   "rules": [
-   "deprecated.oci8_alias",
-   "removed.oci8"
+   "removed.oci_internal_debug"
   ],
   "note": "oci_internal_debug() and its alias ociinternaldebug() are reported."
  },
@@ -4129,7 +4128,7 @@
   "change": "The constant PGSQL_LIBPQ_VERSION_STR has now the same value as PGSQL_LIBPQ_VERSION, and thus is deprecated.",
   "status": "covered",
   "rules": [
-   "removed.pgsql_libpq_version_str"
+   "deprecated.pgsql_libpq_version_str"
   ],
   "note": "PGSQL_LIBPQ_VERSION_STR is reported."
  },
@@ -4741,10 +4740,10 @@
   "change": "Calling mysqli::get_client_info in OO style or passing $mysqli argument to mysqli_get_client_info() function has been deprecated.",
   "status": "covered",
   "rules": [
-   "deprecated.mysqli_method",
+   "deprecated.mysqli_get_client_info",
    "deprecated.mysqli_get_client_info_arg"
   ],
-  "note": "mysqli_get_client_info($m) is reported."
+  "note": "$mysqli->get_client_info() and mysqli_get_client_info($m) are reported."
  },
  {
   "version": "8.1",
@@ -4753,9 +4752,10 @@
   "change": "The mysqli::init() method has been deprecated.",
   "status": "covered",
   "rules": [
+   "deprecated.mysqli_init",
    "deprecated.builtin_method"
   ],
-  "note": "parent::init() in a mysqli subclass is reported."
+  "note": "$mysqli->init() and parent::init() in a mysqli subclass are reported."
  },
  {
   "version": "8.1",
@@ -6108,8 +6108,7 @@
   "change": "The mysqli_ping() function and mysqli::ping() method are now deprecated, as the reconnect feature was removed in PHP 8.2.",
   "status": "covered",
   "rules": [
-   "deprecated.mysqli_ping",
-   "deprecated.mysqli_method"
+   "deprecated.mysqli_ping"
   ],
   "note": "mysqli_ping() and $mysqli->ping() are reported."
  },
@@ -6120,8 +6119,7 @@
   "change": "The mysqli_kill() function and mysqli::kill() method are now deprecated.",
   "status": "covered",
   "rules": [
-   "deprecated.mysqli_kill",
-   "deprecated.mysqli_method"
+   "deprecated.mysqli_kill"
   ],
   "note": "mysqli_kill() and $mysqli->kill() are reported."
  },
@@ -6133,7 +6131,6 @@
   "status": "covered",
   "rules": [
    "deprecated.mysqli_refresh",
-   "deprecated.mysqli_method",
    "deprecated.mysqli_refresh_constant"
   ],
   "note": "mysqli_refresh(), ->refresh() and MYSQLI_REFRESH_* constants are reported."

@@ -28,3 +28,5 @@ $settings = parse_ini_file(__DIR__ . '/../config/app.ini', true);
 foreach ($settings as $section => $values) {
     $$section = $values;
 }
+$active = array('section' => 'app');
+$current = $$active['section'];
