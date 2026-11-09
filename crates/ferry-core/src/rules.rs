@@ -1680,11 +1680,11 @@ pub mod patterns {
         title: Text::new("Tek parametreli parse_str()", "parse_str() with one argument"),
         severity: Severity::Breaking,
         since: (8, 0),
-        replacement: code("parse_str($s, $result)"),
-        fix: FixKind::Likely,
+        replacement: code("parse_str($s, $vars); extract($vars);"),
+        fix: FixKind::Manual,
         note: Text::new(
-            "parse_str() artık sonucu yerel değişkenlere yazmıyor; ikinci parametre zorunlu. Düzeltmeden sonra bu değişkenleri kullanan yerleri $result['...'] olarak değiştirin.",
-            "parse_str() no longer writes into local variables; the second argument is required. After the fix, change code that used those variables to $result['...'].",
+            "parse_str() artık sonucu yerel değişkenlere yazmıyor; ikinci parametre zorunlu. Aynı değişkenleri korumak için sonucu bir diziye alıp extract() ile açın ya da o değişkenleri kullanan yerleri $vars['...'] olarak değiştirin.",
+            "parse_str() no longer writes into local variables; the second argument is required. To keep the same variables, read the result into an array and unpack it with extract(), or change the code that used them to $vars['...'].",
         ),
     };
     pub const ASSERT_STRING: PatternRule = PatternRule {
