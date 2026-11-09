@@ -19,7 +19,6 @@ tauri-plugin-opener = "2"
 serde.workspace = true
 serde_json.workspace = true
 ferry-core = { path = "../crates/ferry-core" }
-keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }

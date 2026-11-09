@@ -42,7 +42,6 @@ fn harness() -> Harness {
     let data = tempfile::tempdir().unwrap();
     let (project_dir, root) = fixture();
     let mut state = AppState::new(data.path().to_path_buf());
-    state.secrets = Box::new(Memory::default());
     if let Some(tools) = std::env::var_os("FERRY_TEST_TOOLS") {
         state.tools_dir = PathBuf::from(tools);
     }
@@ -223,14 +222,11 @@ fn an_update_never_starts_deleting_backups() {
 #[test]
 fn settings_round_trip() {
     let h = harness();
-    assert_eq!(
-        h.ok("get_settings", json!({})),
-        json!({ "phpPath": null, "snapshotLimit": 30, "editor": null, "editorCommand": null, "aiProjects": [] })
-    );
+    assert_eq!(h.ok("get_settings", json!({})), json!({ "phpPath": null, "snapshotLimit": 30, "editor": null, "editorCommand": null }));
     h.ok("save_settings", json!({ "settings": { "phpPath": "/opt/php/bin/php", "editor": "vscode" } }));
     assert_eq!(
         h.ok("get_settings", json!({})),
-        json!({ "phpPath": "/opt/php/bin/php", "snapshotLimit": null, "editor": "vscode", "editorCommand": null, "aiProjects": [] })
+        json!({ "phpPath": "/opt/php/bin/php", "snapshotLimit": null, "editor": "vscode", "editorCommand": null })
     );
     h.ok("save_settings", json!({ "settings": { "phpPath": null, "snapshotLimit": 10 } }));
     assert_eq!(h.ok("get_settings", json!({}))["snapshotLimit"], 10);
@@ -807,151 +803,6 @@ fn backup_usage_and_delete_all_over_ipc() {
     h.ok("delete_all_snapshots", json!({}));
     assert_eq!(h.ok("snapshot_usage", json!({}))["snapshots"], 0);
     assert_eq!(h.ok("list_snapshots", json!({ "path": h.root })), json!([]));
-}
-
-#[derive(Default)]
-struct Memory(std::sync::Mutex<HashMap<String, String>>);
-
-impl Secrets for Memory {
-    fn get(&self, name: &str) -> Option<String> {
-        self.0.lock().unwrap().get(name).cloned()
-    }
-
-    fn set(&self, name: &str, value: &str) -> Result<(), String> {
-        self.0.lock().unwrap().insert(name.into(), value.into());
-        Ok(())
-    }
-
-    fn delete(&self, name: &str) -> Result<(), String> {
-        self.0.lock().unwrap().remove(name);
-        Ok(())
-    }
-}
-
-#[test]
-fn an_ai_key_goes_to_the_keychain_and_never_to_a_file() {
-    let _lang = turkish();
-    let h = harness();
-    assert_eq!(h.ok("ai_config", json!({}))["hasKey"], false);
-    let saved = h.ok(
-        "save_ai_config",
-        json!({ "config": { "kind": "anthropic", "model": "claude-opus-5-5", "baseUrl": null }, "key": " sk-ant-secret " }),
-    );
-    assert_eq!(saved["hasKey"], true);
-    assert_eq!(h.ok("ai_provider", json!({})), "Anthropic (claude-opus-5-5)");
-    let state = h._app.state::<AppState>();
-    assert_eq!(state.secrets.get("anthropic-api-key").as_deref(), Some("sk-ant-secret"));
-    let file = std::fs::read_to_string(state.data_dir.join("ai.json")).unwrap();
-    assert!(file.contains("claude-opus-5-5") && !file.contains("sk-ant"));
-    for path in walkdir::WalkDir::new(&state.data_dir).into_iter().flatten().filter(|e| e.file_type().is_file()) {
-        assert!(!std::fs::read_to_string(path.path()).unwrap_or_default().contains("sk-ant-secret"), "{}", path.path().display());
-    }
-
-    h.ok("save_ai_config", json!({ "config": { "kind": "anthropic", "model": "claude-opus-5-5" }, "key": "" }));
-    assert_eq!(h.ok("ai_provider", json!({})), Value::Null);
-    let err = h.invoke("save_ai_config", json!({ "config": { "kind": "openai", "model": "m", "baseUrl": "ftp://x" } })).unwrap_err();
-    assert!(err.as_str().unwrap().contains("http"));
-    h.ok("save_ai_config", json!({ "config": { "kind": "openai", "model": "qwen", "baseUrl": "http://localhost:11434/v1" } }));
-    assert_eq!(h.ok("ai_provider", json!({})), "localhost:11434 (qwen)");
-}
-
-#[test]
-fn an_openai_compatible_key_stays_with_its_server() {
-    let h = harness();
-    let openai = json!({ "kind": "openai", "model": "gpt-5", "baseUrl": "https://api.openai.com/v1" });
-    assert_eq!(h.ok("save_ai_config", json!({ "config": openai, "key": "sk-openai" }))["hasKey"], true);
-    let state = h._app.state::<AppState>();
-    assert_eq!(state.secrets.get("openai-api-key https://api.openai.com").as_deref(), Some("sk-openai"));
-
-    let local = h.ok("save_ai_config", json!({ "config": { "kind": "openai", "model": "qwen", "baseUrl": "http://127.0.0.1:11434/v1" } }));
-    assert_eq!(local["hasKey"], false);
-    assert_eq!(h.ok("ai_provider", json!({})), "Ollama (qwen)");
-    assert_eq!(h.ok("save_ai_config", json!({ "config": openai }))["hasKey"], true);
-}
-
-#[test]
-fn the_local_model_is_offered_by_memory_and_used_only_once_installed() {
-    let h = harness();
-    let view = h.ok("local_model", json!({}));
-    assert_eq!((view["installed"].as_bool(), view["installing"].as_bool()), (Some(false), Some(false)));
-    assert!(view["memory"].as_u64().unwrap() > 0);
-    if let Some(size) = view["model"]["size"].as_u64() {
-        assert!(view["remaining"].as_u64().unwrap() > size);
-        assert_eq!(view["model"]["license"], "Apache-2.0");
-    }
-    let saved = h.ok("save_ai_config", json!({ "config": { "kind": "local", "model": "qwen3.5-9b" } }));
-    assert_eq!((saved["kind"].as_str(), saved["hasKey"].as_bool()), (Some("local"), Some(false)));
-    assert_eq!(h.ok("ai_provider", json!({})), Value::Null);
-    assert_eq!(h.ok("remove_local_model", json!({}))["installed"], false);
-    h.ok("cancel_local_model", json!({}));
-}
-
-#[test]
-fn ferrys_local_model_is_offered_only_for_rules_it_was_checked_on() {
-    let _lang = turkish();
-    let h = harness();
-    let root = h.root.clone();
-    let scan = h.ok("scan_project", json!({ "path": root, "target": "8.4", "run": 1 }));
-    let manual: Vec<Value> = scan["findings"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter(|f| f["fix"] == "manual" && !f["ruleId"].as_str().unwrap().starts_with("framework."))
-        .cloned()
-        .collect();
-    let outside = manual.iter().find(|f| !ferry_core::ai::local_supports(f["ruleId"].as_str().unwrap())).unwrap();
-    assert!(h.invoke("ai_prompt", json!({ "path": root, "id": outside["id"] })).is_ok());
-    h.ok("save_ai_config", json!({ "config": { "kind": "local", "model": "qwen3.5-9b" } }));
-    let err = h.invoke("ai_prompt", json!({ "path": root, "id": outside["id"] })).unwrap_err();
-    assert!(err.as_str().unwrap().contains("yerel modeli"), "{err}");
-    if let Some(inside) = manual.iter().find(|f| ferry_core::ai::local_supports(f["ruleId"].as_str().unwrap())) {
-        assert!(h.invoke("ai_prompt", json!({ "path": root, "id": inside["id"] })).is_ok());
-    }
-}
-
-/// Turns `each()` into `foreach` in whatever window it's shown, like a model would.
-struct Scripted;
-
-impl ferry_core::ai::Provider for Scripted {
-    fn name(&self) -> String {
-        "Scripted".into()
-    }
-
-    fn complete(&self, prompt: &ferry_core::ai::Prompt, _: &AtomicBool) -> Result<String, String> {
-        let code = prompt.user.split("```php\n").nth(1).and_then(|r| r.split("\n```").next()).unwrap_or_default();
-        Ok(format!("```php\n{}\n```", code.replace("while (list($k, $v) = each($this->items)) {", "foreach ($this->items as $k => $v) {")))
-    }
-}
-
-#[test]
-fn an_ai_suggestion_needs_consent_and_is_written_with_a_backup() {
-    let _lang = turkish();
-    let h = harness();
-    let root = h.root.clone();
-    let scan = h.ok("scan_project", json!({ "path": root, "target": "8.4", "run": 1 }));
-    let each = scan["findings"].as_array().unwrap().iter().find(|f| f["ruleId"] == "removed.each").unwrap().clone();
-    let prompt = h.ok("ai_prompt", json!({ "path": root, "id": each["id"] }));
-    assert!(prompt["user"].as_str().unwrap().contains("each($this->items)"));
-    assert_eq!(h.ok("ai_provider", json!({})), Value::Null);
-
-    let err = h.invoke("ai_suggest", json!({ "path": root, "id": each["id"] })).unwrap_err();
-    assert_eq!(err, json!("Bu projede AI önerileri kapalı."));
-    h.ok("save_settings", json!({ "settings": { "aiProjects": [root] } }));
-    let err = h.invoke("ai_suggest", json!({ "path": root, "id": each["id"] })).unwrap_err();
-    assert_eq!(err, json!("Henüz bir AI sağlayıcısı yok."));
-
-    h._app.state::<AppState>().ai_provider.lock().unwrap().replace(Arc::new(Scripted));
-    assert_eq!(h.ok("ai_provider", json!({})), "Scripted");
-    let suggestion = h.ok("ai_suggest", json!({ "path": root, "id": each["id"] }));
-    assert_eq!(suggestion["change"]["file"], "src/Greeter.php");
-    let stale = h.invoke("apply_ai_suggestion", json!({ "path": root, "id": 999, "label": "AI" })).unwrap_err();
-    assert!(stale.as_str().unwrap().contains("güncel değil"));
-    let applied = h.ok("apply_ai_suggestion", json!({ "path": root, "id": suggestion["id"], "label": "AI önerisi" }));
-    assert_eq!(applied["written"], json!(["src/Greeter.php"]));
-    let text = std::fs::read_to_string(Path::new(&root).join("src/Greeter.php")).unwrap();
-    assert!(text.contains("foreach ($this->items as $k => $v) {") && !text.contains("each($this->items)"));
-    let backups = h.ok("list_snapshots", json!({ "path": root }));
-    assert_eq!(backups[0]["label"], "AI önerisi");
 }
 
 #[test]

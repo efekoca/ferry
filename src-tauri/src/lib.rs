@@ -4,7 +4,6 @@ use ferry_core::git;
 use ferry_core::history;
 use ferry_core::i18n::{self, Lang};
 use ferry_core::ignore::{self, Ignore, IgnoredFinding};
-use ferry_core::local_ai;
 use ferry_core::project::{self, ProjectInfo};
 use ferry_core::rector::{self, FileChange, RectorError, RectorMode, RectorPreview};
 use ferry_core::rules::FixKind;
@@ -23,85 +22,6 @@ use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 const CHANGES_FILE: &str = "changes.json";
 const WRITTEN_FILE: &str = "written.json";
 const SETTINGS_FILE: &str = "settings.json";
-const AI_FILE: &str = "ai.json";
-const KEYCHAIN_SERVICE: &str = "io.github.efekoca.ferry";
-
-/// Which provider AI suggestions use. The key isn't here: it lives in the system keychain.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-pub struct AiConfig {
-    pub kind: Option<ferry_core::ai::Kind>,
-    pub model: Option<String>,
-    pub base_url: Option<String>,
-}
-
-pub trait Secrets: Send + Sync {
-    fn get(&self, name: &str) -> Option<String>;
-    fn set(&self, name: &str, value: &str) -> Result<(), String>;
-    fn delete(&self, name: &str) -> Result<(), String>;
-}
-
-/// The macOS Keychain, Windows Credential Manager or the Secret Service on Linux.
-struct Keychain;
-
-impl Secrets for Keychain {
-    fn get(&self, name: &str) -> Option<String> {
-        keyring::Entry::new(KEYCHAIN_SERVICE, name).ok()?.get_password().ok()
-    }
-
-    fn set(&self, name: &str, value: &str) -> Result<(), String> {
-        keyring::Entry::new(KEYCHAIN_SERVICE, name).and_then(|e| e.set_password(value)).map_err(|e| e.to_string())
-    }
-
-    fn delete(&self, name: &str) -> Result<(), String> {
-        match keyring::Entry::new(KEYCHAIN_SERVICE, name).and_then(|e| e.delete_credential()) {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(e) => Err(e.to_string()),
-        }
-    }
-}
-
-/// Where the key for this provider is kept. An OpenAI-compatible key belongs to its server, so
-/// pointing the address somewhere else never sends it there.
-fn key_name(config: &AiConfig) -> Option<String> {
-    match config.kind? {
-        ferry_core::ai::Kind::Anthropic => Some("anthropic-api-key".into()),
-        ferry_core::ai::Kind::Openai => config.base_url.as_deref().map(|u| format!("openai-api-key {}", ferry_core::ai::origin(u))),
-        ferry_core::ai::Kind::Local => None,
-    }
-}
-
-fn remote(config: &AiConfig, secrets: &dyn Secrets) -> Option<ferry_core::ai::Remote> {
-    use ferry_core::ai::{Kind, Remote};
-    let kind = config.kind?;
-    let model = config.model.clone().filter(|m| !m.trim().is_empty())?;
-    let key = key_name(config).and_then(|name| secrets.get(&name));
-    match kind {
-        Kind::Anthropic => Some(Remote::anthropic(&model, &key?)),
-        Kind::Openai => {
-            let base_url = config.base_url.clone().filter(|u| !u.trim().is_empty())?;
-            Some(Remote { kind, model, base_url, key })
-        }
-        Kind::Local => None,
-    }
-}
-
-/// The model Ferry runs itself, with the one server slot every provider shares.
-struct Local {
-    install: local_ai::Install,
-    slot: Arc<local_ai::Slot>,
-    cancel: Mutex<Option<Arc<AtomicBool>>>,
-}
-
-fn provider(config: &AiConfig, secrets: &dyn Secrets, local: &Local) -> Option<Arc<dyn ferry_core::ai::Provider>> {
-    if config.kind == Some(ferry_core::ai::Kind::Local) {
-        let model = local_ai::model(config.model.as_deref()?)?;
-        return local.install.installed(model).then(|| {
-            Arc::new(local_ai::LocalModel::new(local.install.clone(), model, local.slot.clone())) as Arc<dyn ferry_core::ai::Provider>
-        });
-    }
-    remote(config, secrets).map(|r| Arc::new(r) as Arc<dyn ferry_core::ai::Provider>)
-}
 const DEFAULT_BACKUPS: u32 = 30;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -111,8 +31,6 @@ pub struct Settings {
     pub snapshot_limit: Option<u32>,
     pub editor: Option<String>,
     pub editor_command: Option<String>,
-    /// Projects where the user turned AI suggestions on. Their code can leave the computer only there.
-    pub ai_projects: Vec<String>,
 }
 
 pub struct AppState {
@@ -125,12 +43,6 @@ pub struct AppState {
     previews: Mutex<HashMap<String, (u64, RectorPreview)>>,
     writes: Arc<Mutex<()>>,
     rector_cancel: Mutex<HashMap<String, Arc<AtomicBool>>>,
-    ai_provider: Mutex<Option<Arc<dyn ferry_core::ai::Provider>>>,
-    ai_config: Mutex<AiConfig>,
-    secrets: Box<dyn Secrets>,
-    local: Local,
-    ai_suggestions: Mutex<HashMap<String, (u64, FileChange, PhpVersion)>>,
-    ai_cancel: Mutex<HashMap<String, Arc<AtomicBool>>>,
     scan_cancel: Mutex<HashMap<String, Arc<AtomicBool>>>,
     docker_cancel: Mutex<HashMap<String, Arc<AtomicBool>>>,
     check_cancel: Mutex<HashMap<String, Arc<AtomicBool>>>,
@@ -158,12 +70,6 @@ impl AppState {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => first_settings(&data_dir),
             read => read.ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default(),
         };
-        let ai_config: AiConfig =
-            ferry_core::safefs::read_bytes(data_dir.join(AI_FILE)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
-        let secrets: Box<dyn Secrets> = Box::new(Keychain);
-        let local =
-            Local { install: local_ai::Install::new(data_dir.join("tools").join("llama")), slot: Arc::default(), cancel: Mutex::new(None) };
-        let ai_provider = provider(&ai_config, secrets.as_ref(), &local);
         Self {
             tools_dir: data_dir.join("tools"),
             data_dir,
@@ -174,12 +80,6 @@ impl AppState {
             previews: Mutex::new(HashMap::new()),
             writes: Arc::new(Mutex::new(())),
             rector_cancel: Mutex::new(HashMap::new()),
-            ai_provider: Mutex::new(ai_provider),
-            ai_config: Mutex::new(ai_config),
-            secrets,
-            local,
-            ai_suggestions: Mutex::new(HashMap::new()),
-            ai_cancel: Mutex::new(HashMap::new()),
             scan_cancel: Mutex::new(HashMap::new()),
             docker_cancel: Mutex::new(HashMap::new()),
             check_cancel: Mutex::new(HashMap::new()),
@@ -1379,277 +1279,39 @@ fn batch_branch(target: PhpVersion, mode: RectorMode) -> String {
     format!("ferry/php-{target}-{mode}")
 }
 
-/// A PHP that can tell whether code runs on the target: the target itself or newer.
-fn lint_php(php_override: Option<&Path>, target: PhpVersion) -> Option<PathBuf> {
-    toolchain::find_php(php_override)
-        .filter(|php| toolchain::php_version(php).and_then(|v| v.parse::<PhpVersion>().ok()).is_some_and(|v| v >= target))
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct AiSuggestion {
-    id: u64,
-    change: FileChange,
-    lint_errors: Vec<String>,
-    lint_checked: bool,
-}
-
-fn presented_finding(state: &AppState, path: &str, root: &Path, id: &str) -> CmdResult<(ferry_core::analyzer::Finding, PhpVersion)> {
-    let scan = state.scans.lock().unwrap().get(path).cloned().ok_or_else(|| t!("Önce projeyi tarayın.", "Scan the project first."))?;
-    let log = state.runtime_log(path);
-    let finding = presented(root, &scan, log.as_ref())
-        .into_iter()
-        .find(|f| f.id == id)
-        .ok_or_else(|| t!("Bulgu bulunamadı; projeyi yeniden tarayın.", "Finding not found; scan the project again."))?;
-    Ok((finding, scan.target))
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct AiView {
-    kind: Option<ferry_core::ai::Kind>,
-    model: Option<String>,
-    base_url: Option<String>,
-    has_key: bool,
-    models: Vec<&'static str>,
-}
-
-fn ai_view(state: &AppState) -> AiView {
-    let config = state.ai_config.lock().unwrap().clone();
-    let has_key = key_name(&config).is_some_and(|name| state.secrets.get(&name).is_some());
-    AiView { kind: config.kind, model: config.model, base_url: config.base_url, has_key, models: ferry_core::ai::ANTHROPIC_MODELS.to_vec() }
-}
-
 #[tauri::command]
-fn ai_config(state: State<'_, AppState>) -> AiView {
-    ai_view(&state)
-}
-
-/// `key`: a new key, an empty string to delete the stored one, or nothing to keep it.
-#[tauri::command]
-fn save_ai_config(state: State<'_, AppState>, config: AiConfig, key: Option<String>) -> CmdResult<AiView> {
-    let failed = |e: &dyn std::fmt::Display| t!("AI ayarları kaydedilemedi: {e}", "Couldn't save the AI settings: {e}");
-    let config = AiConfig {
-        model: config.model.map(|m| m.trim().to_string()).filter(|m| !m.is_empty()),
-        base_url: config.base_url.map(|u| u.trim().to_string()).filter(|u| !u.is_empty()),
-        ..config
-    };
-    if let Some(url) = &config.base_url {
-        if !(url.starts_with("https://") || url.starts_with("http://")) {
-            return Err(t!("Adres http:// ya da https:// ile başlamalı.", "The address has to start with http:// or https://."));
-        }
-    }
-    if let (Some(name), Some(key)) = (key_name(&config), key) {
-        let key = key.trim();
-        if key.is_empty() { state.secrets.delete(&name) } else { state.secrets.set(&name, key) }.map_err(|e| failed(&e))?;
-    }
-    let json = serde_json::to_vec_pretty(&config).map_err(|e| failed(&e))?;
-    ferry_core::safefs::write_atomic(&state.data_dir.join(AI_FILE), &json).map_err(|e| failed(&e))?;
-    *state.ai_provider.lock().unwrap() = provider(&config, state.secrets.as_ref(), &state.local);
-    *state.ai_config.lock().unwrap() = config;
-    Ok(ai_view(&state))
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct LocalModelView {
-    /// The model for this computer, or none when its memory is too small or llama.cpp has no build.
-    model: Option<&'static local_ai::Model>,
-    installed: bool,
-    installing: bool,
-    /// Bytes still to download.
-    remaining: u64,
-    memory: u64,
-}
-
-fn local_view(state: &AppState) -> LocalModelView {
-    let memory = local_ai::total_memory();
-    let model = local_ai::recommended(memory);
-    LocalModelView {
-        model,
-        installed: model.is_some_and(|m| state.local.install.installed(m)),
-        installing: state.local.cancel.lock().unwrap().is_some(),
-        remaining: model.map_or(0, |m| state.local.install.remaining(m)),
-        memory,
-    }
-}
-
-#[tauri::command]
-fn local_model(state: State<'_, AppState>) -> LocalModelView {
-    local_view(&state)
-}
-
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct LocalProgress {
-    phase: local_ai::Phase,
-    done: u64,
-    total: u64,
-}
-
-/// Downloads llama.cpp and the model for this computer, checks both, and runs the model once.
-#[tauri::command]
-async fn install_local_model<R: Runtime>(app: AppHandle<R>, state: State<'_, AppState>) -> CmdResult<LocalModelView> {
-    let model = local_ai::recommended(local_ai::total_memory())
-        .ok_or_else(|| t!("Bu bilgisayar için uygun bir yerel model yok.", "There's no local model that suits this computer."))?;
-    let cancel = Arc::new(AtomicBool::new(false));
-    {
-        let mut current = state.local.cancel.lock().unwrap();
-        if current.is_some() {
-            return Err(t!("Yerel model zaten kuruluyor.", "The local model is already being set up."));
-        }
-        *current = Some(cancel.clone());
-    }
-    let install = state.local.install.clone();
-    let result = blocking(move || {
-        let progress = |phase, done, total| {
-            let _ = app.emit("local-model://progress", LocalProgress { phase, done, total });
-        };
-        install.install(model, &cancel, &progress)
-    })
-    .await;
-    state.local.cancel.lock().unwrap().take();
-    result.map(|()| local_view(&state))
-}
-
-#[tauri::command]
-fn cancel_local_model(state: State<'_, AppState>) {
-    if let Some(cancel) = state.local.cancel.lock().unwrap().as_ref() {
-        cancel.store(true, Ordering::Relaxed);
-    }
-}
-
-/// Deletes llama.cpp and the model. AI suggestions that used it stop until another provider is set.
-#[tauri::command]
-fn remove_local_model(state: State<'_, AppState>) -> CmdResult<LocalModelView> {
-    if state.local.cancel.lock().unwrap().is_some() {
-        return Err(t!("Önce kurulumu durdurun.", "Stop the setup first."));
-    }
-    state.local.slot.stop();
-    state.local.install.remove().map_err(|e| t!("Yerel model silinemedi: {e}", "Couldn't delete the local model: {e}"))?;
-    let config = state.ai_config.lock().unwrap().clone();
-    *state.ai_provider.lock().unwrap() = provider(&config, state.secrets.as_ref(), &state.local);
-    Ok(local_view(&state))
-}
-
-/// Lists the provider's models, which proves the key and address without spending tokens.
-#[tauri::command]
-async fn check_ai_config(state: State<'_, AppState>) -> CmdResult<()> {
-    let config = state.ai_config.lock().unwrap().clone();
-    let remote = remote(&config, state.secrets.as_ref())
-        .ok_or_else(|| t!("Önce sağlayıcıyı, modeli ve anahtarı kaydedin.", "Save the provider, model and key first."))?;
-    blocking(move || remote.check(&AtomicBool::new(false))).await
-}
-
-/// Ollama or LM Studio, when one is running on this computer.
-#[tauri::command]
-async fn local_ai_servers() -> CmdResult<Vec<ferry_core::ai::LocalServer>> {
-    blocking(|| Ok(ferry_core::ai::local_servers(&ferry_core::ai::LOCAL_SERVERS, &AtomicBool::new(false)))).await
-}
-
-#[tauri::command]
-fn ai_provider(state: State<'_, AppState>) -> Option<String> {
-    state.ai_provider.lock().unwrap().as_ref().map(|p| p.name())
-}
-
-/// Ferry's own local model is offered only for the rules where it gave correct fixes.
-fn local_allows(state: &AppState, rule: &str) -> CmdResult<()> {
-    if state.ai_config.lock().unwrap().kind == Some(ferry_core::ai::Kind::Local) && !ferry_core::ai::local_supports(rule) {
-        return Err(t!(
-            "Ferry'nin yerel modeli bu tür bulgularda denendi ama güvenilir düzeltmeler vermedi. Bir bulut sağlayıcıyla deneyin ya da elle düzeltin.",
-            "Ferry's local model was tried on this kind of finding and didn't give reliable fixes. Try a cloud provider or fix it by hand."
-        ));
-    }
-    Ok(())
-}
-
-/// What a suggestion would send, shown before anything leaves the computer.
-#[tauri::command]
-async fn ai_prompt(state: State<'_, AppState>, path: String, id: String) -> CmdResult<ferry_core::ai::Prompt> {
-    let path = normalize_path(path);
-    let root = project_root(&path)?;
-    let (finding, target) = presented_finding(&state, &path, &root, &id)?;
-    local_allows(&state, &finding.rule_id)?;
-    blocking(move || ferry_core::ai::prompt(&root, &finding, target)).await
-}
-
-#[tauri::command]
-async fn ai_suggest(state: State<'_, AppState>, path: String, id: String) -> CmdResult<AiSuggestion> {
-    let path = normalize_path(path);
-    let root = project_root(&path)?;
-    let allowed = state.settings.lock().unwrap().ai_projects.iter().any(|p| normalize_path(p.clone()) == path);
-    if !allowed {
-        return Err(t!("Bu projede AI önerileri kapalı.", "AI suggestions are off for this project."));
-    }
-    let provider =
-        state.ai_provider.lock().unwrap().clone().ok_or_else(|| t!("Henüz bir AI sağlayıcısı yok.", "No AI provider is set up yet."))?;
-    let (finding, target) = presented_finding(&state, &path, &root, &id)?;
-    local_allows(&state, &finding.rule_id)?;
-    let cancel = Arc::new(AtomicBool::new(false));
-    state.ai_cancel.lock().unwrap().insert(path.clone(), cancel.clone());
-    let php = state.php_override();
-    let made = blocking(move || {
-        let prompt = ferry_core::ai::prompt(&root, &finding, target)?;
-        let php = lint_php(php.as_deref(), target);
-        let syntax = |change: &FileChange| {
-            let original = ferry_core::safefs::read_text(root.join(&change.file)).ok();
-            php.as_ref().map_or((Vec::new(), false), |php| {
-                let lint = toolchain::new_syntax_errors(php, [(change.file.as_str(), original.as_deref(), change.new_content.as_str())]);
-                let checked = lint.not_run.is_empty();
-                (lint.errors, checked)
-            })
-        };
-        ferry_core::ai::suggest(provider.as_ref(), &finding, &prompt, &cancel, &syntax)
-    })
-    .await;
-    state.ai_cancel.lock().unwrap().remove(&path);
-    let (change, lint_errors, lint_checked) = made?;
-    let id = state.next_preview.fetch_add(1, Ordering::Relaxed);
-    state.ai_suggestions.lock().unwrap().insert(path, (id, change.clone(), target));
-    Ok(AiSuggestion { id, change, lint_errors, lint_checked })
-}
-
-#[tauri::command]
-fn cancel_ai(state: State<'_, AppState>, path: String) {
-    if let Some(cancel) = state.ai_cancel.lock().unwrap().get(&normalize_path(path)) {
-        cancel.store(true, Ordering::Relaxed);
-    }
-}
-
-/// A suggestion is written like any other change: backed up first, then linted.
-#[tauri::command]
-async fn apply_ai_suggestion(state: State<'_, AppState>, path: String, id: u64, label: String) -> CmdResult<ApplyResult> {
-    let path = normalize_path(path);
-    let root = project_root(&path)?;
-    let (change, target) = match state.ai_suggestions.lock().unwrap().get(&path) {
-        Some((known, change, target)) if *known == id => (change.clone(), *target),
-        _ => return Err(t!("Öneri güncel değil; yeniden isteyin.", "The suggestion is out of date; ask for it again.")),
-    };
-    let result = write_with_backup(&state, root, vec![change], target, RectorMode::Compat, label, None, None).await?;
-    state.ai_suggestions.lock().unwrap().remove(&path);
-    state.forget_check(&path);
-    Ok(result)
-}
-
-/// Every change the app writes goes through here: a fresh check, a backup, the write, a lint
-/// with the target PHP, and an optional commit. A failed write is rolled back.
-#[allow(clippy::too_many_arguments)]
-async fn write_with_backup(
-    state: &AppState,
-    root: PathBuf,
-    selected: Vec<FileChange>,
-    target: PhpVersion,
-    mode: RectorMode,
-    label: String,
+async fn apply_changes(
+    state: State<'_, AppState>,
+    path: String,
+    preview_id: u64,
+    files: Vec<String>,
     skipped: Option<HashMap<String, Vec<usize>>>,
+    label: String,
     commit_message: Option<String>,
 ) -> CmdResult<ApplyResult> {
+    let path = normalize_path(path);
+    let root = project_root(&path)?;
+    let (selected, target, mode): (Vec<FileChange>, PhpVersion, RectorMode) = {
+        let previews = state.previews.lock().unwrap();
+        let (id, preview) = previews.get(&path).ok_or_else(|| t!("Önce değişiklikleri hesaplayın.", "Calculate the changes first."))?;
+        if *id != preview_id {
+            return Err(t!(
+                "Önizleme güncel değil. Değişiklikleri yeniden hesaplayın.",
+                "The preview is out of date. Calculate the changes again."
+            ));
+        }
+        let selected = preview.changes.iter().filter(|c| files.contains(&c.file)).cloned().collect();
+        (selected, preview.target, preview.mode)
+    };
+    if selected.is_empty() {
+        return Err(t!("Uygulanacak dosya seçilmedi.", "No files selected to apply."));
+    }
     let store = state.snapshots();
     let applied_files: Vec<String> = selected.iter().map(|c| c.file.clone()).collect();
     let writes = state.writes.clone();
     let php_override = state.php_override();
     let snapshot_limit = state.settings.lock().unwrap().snapshot_limit;
-    blocking(move || {
+    let result = blocking(move || {
         let _guard = writes.lock().unwrap_or_else(|e| e.into_inner());
         let refs: Vec<&FileChange> = selected.iter().collect();
         rector::check_fresh(&root, &refs).map_err(|e| e.to_string())?;
@@ -1689,7 +1351,9 @@ async fn write_with_backup(
         let outcome = rector::write_changes(&root, &refs, &mut written);
         match outcome {
             Ok(()) => {
-                let lint = lint_php(php_override.as_deref(), target).map(|php| {
+                let lint = toolchain::find_php(php_override.as_deref())
+                    .filter(|php| toolchain::php_version(php).and_then(|v| v.parse::<PhpVersion>().ok()).is_some_and(|v| v >= target))
+                    .map(|php| {
                         let files =
                             selected.iter().map(|c| (c.file.as_str(), originals.get(&c.file).map(String::as_str), c.new_content.as_str()));
                         toolchain::new_syntax_errors(&php, files)
@@ -1750,37 +1414,7 @@ async fn write_with_backup(
             }
         }
     })
-    .await
-}
-
-#[tauri::command]
-async fn apply_changes(
-    state: State<'_, AppState>,
-    path: String,
-    preview_id: u64,
-    files: Vec<String>,
-    skipped: Option<HashMap<String, Vec<usize>>>,
-    label: String,
-    commit_message: Option<String>,
-) -> CmdResult<ApplyResult> {
-    let path = normalize_path(path);
-    let root = project_root(&path)?;
-    let (selected, target, mode): (Vec<FileChange>, PhpVersion, RectorMode) = {
-        let previews = state.previews.lock().unwrap();
-        let (id, preview) = previews.get(&path).ok_or_else(|| t!("Önce değişiklikleri hesaplayın.", "Calculate the changes first."))?;
-        if *id != preview_id {
-            return Err(t!(
-                "Önizleme güncel değil. Değişiklikleri yeniden hesaplayın.",
-                "The preview is out of date. Calculate the changes again."
-            ));
-        }
-        let selected = preview.changes.iter().filter(|c| files.contains(&c.file)).cloned().collect();
-        (selected, preview.target, preview.mode)
-    };
-    if selected.is_empty() {
-        return Err(t!("Uygulanacak dosya seçilmedi.", "No files selected to apply."));
-    }
-    let result = write_with_backup(&state, root, selected, target, mode, label, skipped, commit_message).await?;
+    .await?;
     if let Some((_, preview)) = state.previews.lock().unwrap().get_mut(&path) {
         preview.changes.retain(|c| !result.written.contains(&c.file));
     }
@@ -2037,19 +1671,6 @@ pub fn with_commands<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R
         install_rector,
         rector_preview,
         apply_changes,
-        ai_provider,
-        ai_config,
-        save_ai_config,
-        check_ai_config,
-        local_ai_servers,
-        local_model,
-        install_local_model,
-        cancel_local_model,
-        remove_local_model,
-        ai_prompt,
-        ai_suggest,
-        cancel_ai,
-        apply_ai_suggestion,
         list_snapshots,
         restore_snapshot,
         delete_snapshot,
@@ -2106,15 +1727,7 @@ pub fn run() {
             if let Some(tools) = std::env::var_os("FERRY_TOOLS_DIR") {
                 state.tools_dir = PathBuf::from(tools);
             }
-            let (install, slot, shutdown) = (state.local.install.clone(), state.local.slot.clone(), state.shutdown.clone());
             app.manage(state);
-            std::thread::spawn(move || {
-                install.reap();
-                while !shutdown.load(Ordering::Relaxed) {
-                    std::thread::sleep(Duration::from_secs(15));
-                    slot.stop_if_idle(Duration::from_secs(600));
-                }
-            });
             #[cfg(debug_assertions)]
             if std::env::var_os("FERRY_E2E").is_some() {
                 use tauri::Listener;
@@ -2141,11 +1754,6 @@ pub fn run() {
             state.rector_cancel.lock().unwrap().values().for_each(|t| t.store(true, Ordering::Relaxed));
             state.docker_cancel.lock().unwrap().values().for_each(|t| t.store(true, Ordering::Relaxed));
             state.check_cancel.lock().unwrap().values().for_each(|t| t.store(true, Ordering::Relaxed));
-            state.ai_cancel.lock().unwrap().values().for_each(|t| t.store(true, Ordering::Relaxed));
-            if let Some(cancel) = state.local.cancel.lock().unwrap().as_ref() {
-                cancel.store(true, Ordering::Relaxed);
-            }
-            state.local.slot.stop();
             let started = Instant::now();
             while state.rector_running.load(Ordering::SeqCst) > 0 && started.elapsed() < Duration::from_secs(3) {
                 std::thread::sleep(Duration::from_millis(50));
