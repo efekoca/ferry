@@ -623,7 +623,7 @@ pub const CONSTANTS: &[SymbolRule] = &[
         "e_strict",
         D,
         (8, 4),
-        tx("E_STRICT'i kaldırın", "remove E_STRICT"),
+        tx("maskeden çıkarın; karşılaştırmalarda 2048 yazın", "take it out of the mask; in comparisons, write 2048"),
         M,
         Text::new(
             "E_STRICT kullanımdan kalktı; bu hata seviyesi artık hiç tetiklenmiyor.",
@@ -1935,8 +1935,8 @@ pub mod patterns {
         replacement: tx("çağrıyı silin", "remove the call"),
         fix: FixKind::Manual,
         note: Text::new(
-            "$this'i unset etmek PHP 7.1'den beri ölümcül hata verir ve dosya derlenmez.",
-            "Unsetting $this has been a fatal error since PHP 7.1, so the file doesn't compile.",
+            "$this'i unset etmek PHP 7.1'den beri ölümcül hata verir ve dosya derlenmez. PHP 5'te yalnızca yerel değişkeni siliyordu, nesneye dokunmuyordu; metot sonrasında $this'i okumuyorsa çağrıyı silmek davranışı korur.",
+            "Unsetting $this has been a fatal error since PHP 7.1, so the file doesn't compile. In PHP 5 it only removed the local variable and left the object alone, so deleting the call keeps the behavior when the method doesn't read $this afterwards.",
         ),
     };
     pub const BREAK_OUTSIDE_LOOP: PatternRule = PatternRule {

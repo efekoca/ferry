@@ -179,6 +179,9 @@ const RULE_TITLES: &[(&str, Text)] = &[
     ("ConstantToValue", Text::new("Sabit değeriyle değiştirilir", "Replace constants with their value")),
     ("RenameConstant", Text::new("Sabit yeni adıyla değiştirilir", "Rename constants")),
     ("RenameOciAlias", Text::same("ocilogon() → oci_connect()")),
+    ("RemoveNoOpCall", Text::new("Hiçbir şey yapmayan çağrı silinir", "Remove calls that do nothing")),
+    ("DropNoOpFlag", Text::new("Etkisiz bayrak çıkarılır", "Drop flags that have no effect")),
+    ("RemoveUnsetThis", Text::new("unset($this) silinir", "Remove unset($this)")),
     (
         "ParenthesizeNestedTernaryRector",
         Text::new("İç içe ternary paranteze alınır (eski davranış korunur)", "Parenthesize nested ternaries (keeps the old behaviour)"),
