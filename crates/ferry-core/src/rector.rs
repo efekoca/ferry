@@ -159,6 +159,12 @@ const LIKELY_RULES: &[&str] = &[
     "DropRecompressLevel",
     "StripTagsAfterRead",
     "RecodeToIconv",
+    "DropAiIdnFlag",
+    "RemoveEmbeddedServerCall",
+    "StrayBreakToReturn",
+    "IdnaVariantUts46",
+    "SubstrFalseToEmptyString",
+    "KeepVariableVariableOrder",
 ];
 
 const RULE_TITLES: &[(&str, Text)] = &[
@@ -210,6 +216,21 @@ const RULE_TITLES: &[(&str, Text)] = &[
         Text::new("ezmlm_hash() aynı hesabı yapan bir fonksiyonla değiştirilir", "Replace ezmlm_hash() with the same calculation"),
     ),
     ("SqlRegcaseToCallback", Text::same("sql_regcase() → preg_replace_callback()")),
+    (
+        "NullToEmptyArgument",
+        Text::new(
+            "Dahili fonksiyona verilen null, tipin boş değeri olur",
+            "null passed to a built-in function becomes the type's empty value",
+        ),
+    ),
+    ("AddReturnTypeWillChange", Text::new("#[\\ReturnTypeWillChange] eklenir", "Add #[\\ReturnTypeWillChange]")),
+    ("DropAiIdnFlag", Text::new("AI_IDN_* bayrakları silinir", "Drop the AI_IDN_* flags")),
+    ("RemoveEmbeddedServerCall", Text::new("Gömülü MySQL sunucusu çağrıları silinir", "Remove embedded MySQL server calls")),
+    ("StrayBreakToReturn", Text::new("Döngü dışındaki break/continue return olur", "break/continue outside a loop becomes return")),
+    ("IdnaVariantUts46", Text::same("INTL_IDNA_VARIANT_2003 → INTL_IDNA_VARIANT_UTS46")),
+    ("SubstrFalseToEmptyString", Text::same("substr() === false → substr() === ''")),
+    ("KeepVariableVariableOrder", Text::same("$$a['b'] → ${$a['b']}")),
+    ("BraceVariableVariable", Text::same("$$a['b'] → ${$a}['b']")),
     (
         "ParenthesizeNestedTernaryRector",
         Text::new("İç içe ternary paranteze alınır (eski davranış korunur)", "Parenthesize nested ternaries (keeps the old behaviour)"),

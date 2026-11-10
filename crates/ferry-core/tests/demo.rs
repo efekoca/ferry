@@ -130,9 +130,22 @@ fn kuzey_magaza_triggers_every_rule() {
         "removed.recode",
         "removed.ezmlm_hash",
         "removed.sql_regcase",
+        "deprecated.null_to_internal",
+        "deprecated.tentative_return_type",
+        "removed.ai_idn_constant",
+        "removed.mysqli_embedded_server",
+        "removed.break_outside_loop",
+        "removed.intl_idna_variant_2003",
+        "behavior.substr_false",
+        "behavior.indirect_access_order",
+        "review.variable_variable",
     ];
     for id in own_fixes {
-        assert!(result.findings.iter().any(|f| f.rule_id == id && f.fix != FixKind::Manual), "{id} isn't fixed in the demo");
+        assert!(
+            result.findings.iter().any(|f| f.rule_id == id && f.fix != FixKind::Manual),
+            "{id} isn't fixed in the demo: {:?}",
+            result.findings.iter().filter(|f| f.rule_id == id).map(|f| format!("{}:{} {}", f.file, f.line, f.snippet)).collect::<Vec<_>>()
+        );
     }
 
     let summary = report::summarize(&result.findings);
@@ -264,12 +277,10 @@ fn auto_findings_are_fixed_by_rector() {
                 };
                 !word.is_empty() && count(&change.new_content) < count(&source)
             } else {
-                change
-                    .diff
-                    .hunks
-                    .iter()
-                    .flat_map(|h| &h.lines)
-                    .any(|l| l.kind == ferry_core::diff::LineKind::Del && l.old_no == Some(f.line))
+                let deleted = |l: &ferry_core::diff::DiffLine| l.kind == ferry_core::diff::LineKind::Del && l.old_no == Some(f.line);
+                let added_above =
+                    |w: &[ferry_core::diff::DiffLine]| w[0].kind == ferry_core::diff::LineKind::Add && w[1].old_no == Some(f.line);
+                change.diff.hunks.iter().any(|h| h.lines.iter().any(deleted) || h.lines.windows(2).any(added_above))
             };
             if !touched {
                 unfixed.insert(format!("{} ({:?}) {}:{}", f.rule_id, f.fix, f.file, f.line));

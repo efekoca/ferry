@@ -99,6 +99,7 @@ pub struct ProjectIndex {
     mysqli_report: bool,
     enums: HashSet<String>,
     target: Option<crate::version::PhpVersion>,
+    current: Option<crate::version::PhpVersion>,
     overridden_by_all: std::sync::OnceLock<HashMap<String, HashSet<String>>>,
     redefines_checks: std::sync::OnceLock<bool>,
 }
@@ -130,7 +131,8 @@ impl ProjectIndex {
         target: Option<crate::version::PhpVersion>,
         cancel: &std::sync::atomic::AtomicBool,
     ) -> Self {
-        let mut index = Self { framework: Some(crate::project::detect_framework(root)), target, ..Self::default() };
+        let framework = Some(crate::project::detect_framework(root));
+        let mut index = Self { framework, target, current: crate::project::current_version(root), ..Self::default() };
         let mut seen = HashSet::new();
         let mut declared = Vec::new();
         for path in files.iter().cloned().chain(composer_files(root)) {
@@ -158,6 +160,16 @@ impl ProjectIndex {
             }
         }
         index
+    }
+
+    /// The version the project runs on today, when its composer.json says.
+    pub(crate) fn current(&self) -> Option<crate::version::PhpVersion> {
+        self.current
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_current(self, current: crate::version::PhpVersion) -> Self {
+        Self { current: Some(current), ..self }
     }
 
     pub fn included_by_version_check(&self, file: &str) -> bool {

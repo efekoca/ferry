@@ -755,7 +755,7 @@ pub fn analyze_source_in(file: &str, src: &str, target: PhpVersion, index: &crat
             _ => {}
         }
     }
-    crate::fixes::mark(src, &tokens, &mut ctx.out);
+    crate::fixes::mark(src, &tokens, &mut ctx.out, index.current());
     ctx.out
 }
 
