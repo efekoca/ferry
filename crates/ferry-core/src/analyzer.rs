@@ -756,7 +756,7 @@ pub fn analyze_source_in(file: &str, src: &str, target: PhpVersion, index: &crat
             _ => {}
         }
     }
-    crate::fixes::mark(src, &tokens, &mut ctx.out, index, &ctx.guessed);
+    crate::fixes::mark(src, &tokens, &mut ctx.out, index, target, &ctx.guessed);
     ctx.out
 }
 
@@ -2043,16 +2043,16 @@ fn builtin_method(class: &str, name: &str, target: PhpVersion) -> Option<&'stati
     parents.iter().find_map(|p| builtin_method(p, name, target))
 }
 
-enum Override {
+pub(crate) enum Override {
     MissingTentativeType,
     Incompatible(&'static crate::builtin::Method),
     UserIncompatible(String, crate::index::MethodSig),
 }
 
-struct BuiltinOverride {
-    name: usize,
+pub(crate) struct BuiltinOverride {
+    pub(crate) name: usize,
     parent: usize,
-    problem: Override,
+    pub(crate) problem: Override,
 }
 
 #[derive(Debug, Clone)]
@@ -2128,7 +2128,7 @@ pub(crate) fn param_shapes(tokens: &[Token], open: usize, close: usize) -> Vec<P
 
 const SCALAR_TYPES: [&str; 11] = ["int", "float", "string", "bool", "array", "null", "callable", "iterable", "false", "true", "void"];
 
-fn accepts(child: &[String], parent: &str) -> bool {
+pub(crate) fn accepts(child: &[String], parent: &str) -> bool {
     if child.is_empty() || child.iter().any(|t| t == "mixed") {
         return true;
     }
@@ -2145,7 +2145,7 @@ fn accepts(child: &[String], parent: &str) -> bool {
     })
 }
 
-fn covariant(child: &[String], parent: &str) -> bool {
+pub(crate) fn covariant(child: &[String], parent: &str) -> bool {
     if parent.is_empty() || child.iter().any(|c| c.starts_with('(')) {
         return true;
     }
@@ -2166,7 +2166,7 @@ fn covariant(child: &[String], parent: &str) -> bool {
     })
 }
 
-fn compatible(child: &[ParamShape], is_static: bool, child_return: Option<&[String]>, parent: &crate::builtin::Method) -> bool {
+pub(crate) fn compatible(child: &[ParamShape], is_static: bool, child_return: Option<&[String]>, parent: &crate::builtin::Method) -> bool {
     let &(name, parent_static, required, params, variadic, returns, tentative, ..) = parent;
     let params: Vec<(bool, String)> = params.iter().map(|&(by_ref, ty)| (by_ref, ty.to_string())).collect();
     let returns = if tentative { "" } else { returns };
@@ -2458,7 +2458,7 @@ fn trait_abstract_overrides(tokens: &[Token], index: &crate::index::ProjectIndex
     out
 }
 
-fn builtin_overrides(tokens: &[Token], index: &crate::index::ProjectIndex, target: PhpVersion) -> Vec<BuiltinOverride> {
+pub(crate) fn builtin_overrides(tokens: &[Token], index: &crate::index::ProjectIndex, target: PhpVersion) -> Vec<BuiltinOverride> {
     let mut out = Vec::new();
     let names = crate::index::Names::new(tokens);
     for i in 0..tokens.len() {

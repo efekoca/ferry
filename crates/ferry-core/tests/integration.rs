@@ -287,8 +287,8 @@ fn rector_leaves_alone_what_it_would_break() {
         ("stop.php", "<?php\necho 'a';\nbreak;\necho 'b';\n", "break;"),
         (
             "wbmp.php",
-            "<?php\nfunction thumb($png) {\n    png2wbmp($png, 'png.wbmp', 32, 32, 7);\n    return read_exif_data($png);\n}\n",
-            "png2wbmp($png, 'png.wbmp', 32, 32, 7);",
+            "<?php\nfunction thumb($png, $args) {\n    png2wbmp($png, 'png.wbmp', 32, 32, 7);\n    png2wbmp(...$args);\n    return read_exif_data($png);\n}\n",
+            "png2wbmp(...$args);",
         ),
         ("exif.php", "<?php\nfunction meta($f) {\n    return read_exif_data($f);\n}\n", "exif_read_data($f)"),
     ];
@@ -318,4 +318,5 @@ fn rector_leaves_alone_what_it_would_break() {
     assert!(broken.is_empty(), "{}", broken.join("\n"));
     let wbmp = preview.changes.iter().find(|c| c.file == "wbmp.php").expect("wbmp.php keeps its other renames");
     assert!(wbmp.new_content.contains("exif_read_data($png)"), "{}", wbmp.new_content);
+    assert!(wbmp.new_content.contains("    })($png, 'png.wbmp', 32, 32, 7);"), "{}", wbmp.new_content);
 }

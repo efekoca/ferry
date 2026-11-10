@@ -171,6 +171,8 @@ const LIKELY_RULES: &[&str] = &[
     "RemoveSplFixedArrayWakeup",
     "SessionHandlerObject",
     "AutoloadToSplRegister",
+    "InlineWbmpConversion",
+    "WidenBuiltinOverride",
 ];
 
 const RULE_TITLES: &[(&str, Text)] = &[
@@ -257,6 +259,14 @@ const RULE_TITLES: &[(&str, Text)] = &[
         ),
     ),
     ("AutoloadToSplRegister", Text::same("__autoload() → spl_autoload_register()")),
+    (
+        "InlineWbmpConversion",
+        Text::new("png2wbmp() aynı dönüşümü yapan bir fonksiyonla değiştirilir", "Replace png2wbmp() with the same conversion"),
+    ),
+    (
+        "WidenBuiltinOverride",
+        Text::new("Yerleşik metodu ezen imza PHP 8'e uyacak şekilde genişletilir", "Widen signatures that override built-in methods"),
+    ),
     (
         "ParenthesizeNestedTernaryRector",
         Text::new("İç içe ternary paranteze alınır (eski davranış korunur)", "Parenthesize nested ternaries (keeps the old behaviour)"),
