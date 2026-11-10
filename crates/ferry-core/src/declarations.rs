@@ -69,10 +69,10 @@ fn params(tokens: &[Token], open: usize, close: usize) -> Vec<Param> {
 pub(crate) struct Function {
     pub(crate) keyword: usize,
     pub(crate) name: Option<usize>,
-    by_ref: bool,
+    pub(crate) by_ref: bool,
     pub(crate) params: Vec<Param>,
     pub(crate) uses: Vec<usize>,
-    returns: Option<Vec<String>>,
+    pub(crate) returns: Option<Vec<String>>,
     pub(crate) body: Option<(usize, usize)>,
 }
 

@@ -432,8 +432,8 @@ const SUN_INFO: Text = Text::new(
 );
 const REMOVE_CALL: Option<Text> = tx("çağrıyı silin", "remove the call");
 const AI_IDN: Text = Text::new(
-    "glibc'nin kaldırdığı bu socket sabitleri PHP 7.4'te kullanımdan kalktı ve 8.0'da kaldırıldı.",
-    "These socket constants, removed from glibc, were deprecated in PHP 7.4 and removed in 8.0.",
+    "Bu iki socket sabiti glibc 2.28'den beri hiçbir şey yapmıyor; PHP 7.4'te kullanımdan kalktı ve 8.0'da kaldırıldı. | birleşiminden silmek ya da tek başına duruyorsa yerine 0 yazmak, glibc 2.28 ve sonrasında aynı aramayı yapar.",
+    "These two socket constants have done nothing since glibc 2.28; they were deprecated in PHP 7.4 and removed in 8.0. Dropping them from a | mask, or writing 0 where one stands alone, does the same lookup on glibc 2.28 and later.",
 );
 
 macro_rules! rule {
@@ -579,9 +579,9 @@ pub const FUNCTIONS: &[SymbolRule] = &[
     rule!("removed.pspell", "pspell_*", R, (8, 4), tx("PECL pspell", "PECL pspell"), M, Text::new(
         "pspell eklentisi PHP 8.4'te çekirdekten çıkarıldı; ancak PECL'den ayrıca kurulursa çalışır.",
         "The pspell extension was unbundled in PHP 8.4; it only works if you install it from PECL.")),
-    rule!("removed.mysqli_embedded_server", "mysqli_embedded_server_*", R, (7, 4), None, M, Text::new(
-        "Gömülü MySQL sunucusu fonksiyonları PHP 7.4'te kaldırıldı.",
-        "The embedded MySQL server functions were removed in PHP 7.4.")),
+    rule!("removed.mysqli_embedded_server", "mysqli_embedded_server_*", R, (7, 4), REMOVE_CALL, M, Text::new(
+        "Gömülü MySQL sunucusu fonksiyonları PHP 7.4'te kaldırıldı. Varsayılan mysqlnd sürücüsüyle derlenen PHP'lerde hiç yoktu, yani çağrı betiği zaten orada durduruyordu. Sonucu kullanılmayan çağrı silinebilir.",
+        "The embedded MySQL server functions were removed in PHP 7.4. PHP built with the default mysqlnd driver never had them, so the call already stopped the script there. A call whose result isn't used can be deleted.")),
     rule!("removed.oci_internal_debug", "oci_internal_debug", R, (8, 0), REMOVE_CALL, M, Text::new(
         "oci_internal_debug() ve takma adı ociinternaldebug() OCI8 2.0'dan beri hiçbir şey yapmıyordu ve PHP 8.0'da kaldırıldı. Çağrıyı silmek hiçbir şeyi değiştirmez.",
         "oci_internal_debug() and its alias ociinternaldebug() had done nothing since OCI8 2.0 and were removed in PHP 8.0. Deleting the call changes nothing.")),
@@ -658,7 +658,10 @@ pub const CONSTANTS: &[SymbolRule] = &[
         (8, 0),
         code("INTL_IDNA_VARIANT_UTS46"),
         M,
-        Text::new("INTL_IDNA_VARIANT_2003 PHP 8.0'da kaldırıldı.", "INTL_IDNA_VARIANT_2003 was removed in PHP 8.0.")
+        Text::new(
+            "INTL_IDNA_VARIANT_2003 PHP 8.0'da kaldırıldı; geriye yalnızca UTS46 kaldı. idn_to_ascii() ikisinde de aynı sonucu verir, yalnızca UTS46 büyük ASCII harfleri küçültür. idn_to_utf8() ise ß, Σ, İ gibi harflerde ve büyük harflerde farklı sonuç verebilir.",
+            "INTL_IDNA_VARIANT_2003 was removed in PHP 8.0; UTS46 is the only variant left. idn_to_ascii() gives the same result with both, except that UTS46 lowercases upper-case ASCII. idn_to_utf8() can differ for letters such as ß, Σ and İ, and for upper case."
+        )
     ),
     rule!(
         "removed.input_request",
@@ -824,7 +827,7 @@ pub const CONSTANTS: &[SymbolRule] = &[
     rule!("deprecated.curlpipe_http1", "curlpipe_http1", D, (7, 4), code("CURLPIPE_NOTHING"), M, Text::new(
         "CURLPIPE_HTTP1 curl 7.62'den beri hiçbir şey yapmıyor ve PHP 7.4'te kullanımdan kalktı. Bugünkü davranışı CURLPIPE_NOTHING korur; CURLPIPE_MULTIPLEX ise HTTP/2 çoğullamayı açar.",
         "CURLPIPE_HTTP1 has done nothing since curl 7.62 and is deprecated since PHP 7.4. CURLPIPE_NOTHING keeps today's behavior; CURLPIPE_MULTIPLEX turns on HTTP/2 multiplexing.")),
-    rule!("removed.ai_idn_constant", "ai_idn_*", R, (8, 0), None, M, AI_IDN),
+    rule!("removed.ai_idn_constant", "ai_idn_*", R, (8, 0), tx("| birleşiminden silin; tek başınaysa 0", "drop it from | masks; alone, write 0"), M, AI_IDN),
     rule!("deprecated.mysqli_update_max_length", "mysqli_stmt_attr_update_max_length", D, (8, 1), code("0"), M, Text::new(
         "Bu sabit PHP 8.1'den beri hiçbir şey yapmıyor; max_length artık her zaman 0. Değeri de 0 olduğu için yerine 0 yazmak attr_set() çağrılarını aynı bırakır.",
         "This constant has done nothing since PHP 8.1; max_length is now always 0. Its value is 0 too, so writing 0 keeps attr_set() calls the same.")),

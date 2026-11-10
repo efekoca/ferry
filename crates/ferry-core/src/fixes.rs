@@ -29,6 +29,15 @@ pub const GETSS: &str = "Ferry\\Php80\\StripTagsAfterRead";
 pub const RECODE: &str = "Ferry\\Php74\\RecodeToIconv";
 pub const EZMLM: &str = "Ferry\\Php80\\InlineEzmlmHash";
 pub const REGCASE: &str = "Ferry\\Php70\\SqlRegcaseToCallback";
+pub const NULL_ARGUMENT: &str = "Ferry\\Php81\\NullToEmptyArgument";
+pub const WILL_CHANGE: &str = "Ferry\\Php81\\AddReturnTypeWillChange";
+pub const AI_IDN_FLAG: &str = "Ferry\\Php80\\DropAiIdnFlag";
+pub const EMBEDDED_SERVER: &str = "Ferry\\Php74\\RemoveEmbeddedServerCall";
+pub const BREAK_RETURN: &str = "Ferry\\Php70\\StrayBreakToReturn";
+pub const IDNA_UTS46: &str = "Ferry\\Php80\\IdnaVariantUts46";
+pub const SUBSTR_EMPTY: &str = "Ferry\\Php70\\SubstrFalseToEmptyString";
+pub const VARIABLE_ORDER: &str = "Ferry\\Php70\\KeepVariableVariableOrder";
+pub const VARIABLE_BRACES: &str = "Ferry\\Php70\\BraceVariableVariable";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Fix {
@@ -152,6 +161,21 @@ const NO_OP_FLAGS: &[(&str, &str, Alone)] = &[
     ("deprecated.file_text", "FILE_TEXT", Alone::Value("0")),
     ("removed.filter_flag_host_required", "FILTER_FLAG_HOST_REQUIRED", Alone::Argument),
     ("removed.filter_flag_scheme_required", "FILTER_FLAG_SCHEME_REQUIRED", Alone::Argument),
+    ("removed.ai_idn_constant", "AI_IDN_ALLOW_UNASSIGNED", Alone::Constant("0")),
+    ("removed.ai_idn_constant", "AI_IDN_USE_STD3_ASCII_RULES", Alone::Constant("0")),
+];
+
+/// Rules whose fix reads the code around the finding, and for three of them the version the project
+/// runs on today.
+const SITE_RULES: [&str; 8] = [
+    "deprecated.null_to_internal",
+    "deprecated.tentative_return_type",
+    "removed.mysqli_embedded_server",
+    "removed.break_outside_loop",
+    "removed.intl_idna_variant_2003",
+    "behavior.substr_false",
+    "behavior.indirect_access_order",
+    "review.variable_variable",
 ];
 
 /// (MHASH_ name, value, hash() algorithm, has an HMAC, mhash_get_hash_name(), mhash_get_block_size()),
@@ -290,6 +314,7 @@ fn handles(rule: &str) -> bool {
         || CONSTANT_VALUES.iter().chain(RENAMED_CONSTANTS).any(|(r, ..)| *r == rule)
         || NO_OP_CALLS.iter().any(|(r, ..)| *r == rule)
         || NO_OP_FLAGS.iter().any(|(r, ..)| *r == rule)
+        || SITE_RULES.contains(&rule)
 }
 
 /// Whether the text names anything a fix could take, checked before the file is analyzed again.
@@ -299,7 +324,10 @@ pub(crate) fn mentions(src: &str) -> bool {
     if names.chain(["TRANSACTION_", "CURLOPT_BINARYTRANSFER"]).any(|name| src.contains(name)) {
         return true;
     }
-    if ["MHASH_", "MYSQLI_REFRESH_", "MYSQLI_STORE_RESULT_COPY_DATA", "FETCH_SERIALIZE"].iter().any(|name| src.contains(name)) {
+    if ["MHASH_", "MYSQLI_REFRESH_", "MYSQLI_STORE_RESULT_COPY_DATA", "FETCH_SERIALIZE", "INTL_IDNA_VARIANT_2003", "$$"]
+        .iter()
+        .any(|name| src.contains(name))
+    {
         return true;
     }
     let lower = src.to_ascii_lowercase();
@@ -322,17 +350,27 @@ pub(crate) fn mentions(src: &str) -> bool {
         "recode",
         "ezmlm_hash",
         "sql_regcase",
+        "mysqli_embedded_server",
+        "substr",
+        "null",
+        "break",
+        "continue",
+        "extends",
+        "implements",
     ];
     OCI_ALIASES.iter().map(|(old, _)| *old).chain(NO_OP_CALLS.iter().map(|(_, f, _)| *f)).chain(calls).any(|name| lower.contains(name))
         || (lower.contains("unset") && src.contains("$this"))
         || (lower.contains("export") && lower.contains("reflection"))
 }
 
-/// A file as the fixes see it: its text, its tokens, and which tokens hold a no-op flag finding.
+/// A file as the fixes see it: its text, its tokens, which tokens hold a no-op flag finding, the
+/// version the project runs on today and whether the file declares strict types.
 pub(crate) struct Source<'a> {
     pub(crate) src: &'a str,
     pub(crate) tokens: &'a [Token],
     pub(crate) flagged: HashSet<usize>,
+    current: Option<PhpVersion>,
+    strict: bool,
 }
 
 impl<'a> Source<'a> {
@@ -341,13 +379,15 @@ impl<'a> Source<'a> {
         tokens: &'a [Token],
         findings: &[Finding],
         at_position: &std::collections::HashMap<(usize, usize), usize>,
+        current: Option<PhpVersion>,
     ) -> Self {
         let flagged = findings
             .iter()
             .filter(|f| NO_OP_FLAGS.iter().any(|(r, ..)| *r == f.rule_id))
             .filter_map(|f| at_position.get(&(f.line, f.column)).copied())
             .collect();
-        Source { src, tokens, flagged }
+        let strict = tokens.windows(3).any(|w| w[0].is_ident_ci("strict_types") && w[1].is_punct("=") && w[2].text == "1");
+        Source { src, tokens, flagged, current, strict }
     }
 
     fn text(&self, first: usize, last: usize) -> &'a str {
@@ -369,7 +409,10 @@ pub(crate) fn at(file: &Source, k: usize, rule: &str) -> Option<Fix> {
         return Some(fix);
     }
     if NO_OP_FLAGS.iter().any(|(r, ..)| *r == rule) {
-        return flag_fix(file, k);
+        return flag_fix(file, k, rule);
+    }
+    if SITE_RULES.contains(&rule) {
+        return site_fix(file, k, rule);
     }
     let tok = tokens.get(k).filter(|t| t.kind == TokenKind::Ident)?;
     let bare = tok.text.trim_start_matches('\\');
@@ -541,11 +584,11 @@ fn emptied(file: &Source, first: usize, last: usize, alone: Alone, class: &'stat
 }
 
 /// Drops flags that change nothing from the mask around `k`. Lone flags take their value or go.
-fn flag_fix(file: &Source, k: usize) -> Option<Fix> {
+fn flag_fix(file: &Source, k: usize, rule: &str) -> Option<Fix> {
     let tokens = file.tokens;
     let (operands, operators) = mask(tokens, k)?;
     let (first, last) = (operands[0].first, operands.last()?.atom);
-    let class = NO_OP_FLAG;
+    let class = if rule == "removed.ai_idn_constant" { AI_IDN_FLAG } else { NO_OP_FLAG };
     if operands.len() == 1 {
         let alone = flag(file, &operands[0])?;
         if let Alone::Value(value) = alone {
@@ -633,6 +676,148 @@ fn flag_fix(file: &Source, k: usize) -> Option<Fix> {
     (text != original).then(|| Fix { class, start: tokens[first].start, end: tokens[last].end, text })
 }
 
+fn site_fix(file: &Source, k: usize, rule: &str) -> Option<Fix> {
+    let tokens = file.tokens;
+    let tok = tokens.get(k)?;
+    let php5 = file.current.is_some_and(|v| v < PhpVersion::new(7, 0));
+    let replace = |class, text: String| Some(Fix { class, start: tok.start, end: tok.end, text });
+    match rule {
+        "deprecated.null_to_internal" => {
+            if !tok.is_ident_ci("null") || file.strict {
+                return None;
+            }
+            let call = enclosing_call(tokens, k)?;
+            replace(NULL_ARGUMENT, if call_named(tokens, call, &["number_format"]) { "0" } else { "''" }.into())
+        }
+        "deprecated.tentative_return_type" => will_change(file, k),
+        "removed.break_outside_loop" => {
+            let plain = (tok.is_ident_ci("break") || tok.is_ident_ci("continue")) && tokens.get(k + 1).is_some_and(|t| t.is_punct(";"));
+            let function = enclosing_function(tokens, k).filter(|_| plain)?;
+            let void = function.returns.as_ref().is_none_or(|r| r.len() == 1 && r[0] == "void");
+            if !void || function.by_ref {
+                return None;
+            }
+            replace(BREAK_RETURN, "return".into())
+        }
+        "removed.intl_idna_variant_2003" => {
+            let constant = tok.text.trim_start_matches('\\') == "INTL_IDNA_VARIANT_2003" && is_atom(tokens, k);
+            constant.then(|| Fix {
+                class: IDNA_UTS46,
+                start: tok.start,
+                end: tok.end,
+                text: format!("{}INTL_IDNA_VARIANT_UTS46", lead(tok)),
+            })
+        }
+        "behavior.substr_false" => substr_false(file, k).filter(|_| php5),
+        "behavior.indirect_access_order" => {
+            if !php5 || !crate::calls::indirect_access(tokens, k) {
+                return None;
+            }
+            let end = dimensions_end(tokens, k)?;
+            Some(Fix {
+                class: crate::analyzer::INDIRECT_ACCESS_FIX,
+                start: tok.start,
+                end: tokens[end].end,
+                text: format!("{{{}}}", file.text(k, end)),
+            })
+        }
+        "review.variable_variable" => variable_variable(file, k),
+        _ => None,
+    }
+}
+
+/// The last `]` of the `[...]` that follow token `k`; `None` when one is empty or unclosed.
+fn dimensions_end(tokens: &[Token], k: usize) -> Option<usize> {
+    let mut end = k;
+    while tokens.get(end + 1).is_some_and(|n| n.is_punct("[")) {
+        let close = crate::declarations::close_of(tokens, end + 1)?;
+        if close == end + 2 {
+            return None;
+        }
+        end = close;
+    }
+    (end > k).then_some(end)
+}
+
+/// `#[\ReturnTypeWillChange]` on its own line above the method named at `k`, after its docblock.
+fn will_change(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let keyword = match k.checked_sub(1).map(|p| &tokens[p]) {
+        Some(p) if p.is_ident_ci("function") => k - 1,
+        Some(p) if p.is_punct("&") && k >= 2 && tokens[k - 2].is_ident_ci("function") => k - 2,
+        _ => return None,
+    };
+    let modifiers = ["public", "protected", "private", "static", "final", "abstract"];
+    let mut first = keyword;
+    while first > 0 && modifiers.iter().any(|m| tokens[first - 1].is_ident_ci(m)) {
+        first -= 1;
+    }
+    let at = tokens[first].start;
+    let line = &file.src[file.src[..at].rfind('\n').map_or(0, |i| i + 1)..at];
+    let indent: String = line.chars().take_while(|c| *c == ' ' || *c == '\t').collect();
+    let newline = if file.src.contains("\r\n") { "\r\n" } else { "\n" };
+    Some(Fix { class: WILL_CHANGE, start: at, end: at, text: format!("#[\\ReturnTypeWillChange]{newline}{indent}") })
+}
+
+/// The innermost function or method whose body holds token `k`.
+fn enclosing_function(tokens: &[Token], k: usize) -> Option<crate::declarations::Function> {
+    (0..k)
+        .filter(|&j| tokens[j].is_ident_ci("function"))
+        .filter_map(|j| crate::declarations::function_at(tokens, j))
+        .filter(|f| f.body.is_some_and(|(open, close)| open < k && k < close))
+        .max_by_key(|f| f.body.map(|(open, _)| open))
+}
+
+/// `substr(A, B) === false` → `=== ''`: with two arguments PHP 5 returned false exactly where PHP 7.0+
+/// returns an empty string.
+fn substr_false(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let (close, args) = function_call(tokens, k, &["substr"])?;
+    if args.len() != 2 {
+        return None;
+    }
+    let strict = |j: usize| tokens.get(j).is_some_and(|o| o.is_punct("===") || o.is_punct("!=="));
+    let falsy = |j: usize| tokens.get(j).is_some_and(|t| t.is_ident_ci("false"));
+    let before = |j: usize| j.checked_sub(1).map(|p| &tokens[p]);
+    let first = if k > 0 && tokens[k - 1].is_punct("@") { k - 1 } else { k };
+    let at = if strict(close + 1) && falsy(close + 2) && loose(tokens.get(close + 3), LOOSE_AFTER) && loose(before(first), LOOSE_BEFORE) {
+        close + 2
+    } else if first >= 2
+        && strict(first - 1)
+        && falsy(first - 2)
+        && loose(before(first - 2), LOOSE_BEFORE)
+        && loose(tokens.get(close + 1), LOOSE_AFTER)
+    {
+        first - 2
+    } else {
+        return None;
+    };
+    Some(Fix { class: SUBSTR_EMPTY, start: tokens[at].start, end: tokens[at].end, text: "''".into() })
+}
+
+/// `$$name[...]` with its PHP 5 meaning `${$name[...]}` written out, or `${$name}[...]` on a project
+/// that already runs PHP 7.
+fn variable_variable(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let current = file.current?;
+    let name = tokens.get(k + 1).filter(|t| t.kind == TokenKind::Variable)?;
+    let before = k.checked_sub(1).map(|p| &tokens[p]);
+    let nested = before.is_some_and(|p| ["$", "->", "?->", "::"].iter().any(|s| p.is_punct(s)) || p.is_ident_ci("global"));
+    if !tokens[k].is_punct("$") || nested {
+        return None;
+    }
+    if current >= PhpVersion::new(7, 0) {
+        return Some(Fix {
+            class: VARIABLE_BRACES,
+            start: tokens[k].start,
+            end: name.end,
+            text: format!("${{{}}}", file.text(k + 1, k + 1)),
+        });
+    }
+    let end = dimensions_end(tokens, k + 1)?;
+    Some(Fix { class: VARIABLE_ORDER, start: tokens[k].start, end: tokens[end].end, text: format!("${{{}}}", file.text(k + 1, end)) })
+}
+
 /// Token ranges of the arguments of the call whose `(` is at `open`, and the `)` that closes it.
 fn arguments(tokens: &[Token], open: usize) -> Option<(usize, Vec<(usize, usize)>)> {
     let mut depth = 0usize;
@@ -668,6 +853,19 @@ fn literal(tokens: &[Token], (first, last): (usize, usize)) -> bool {
         && (t.kind == TokenKind::Number
             || matches!(t.kind, TokenKind::Str { interpolates: false, backtick: false })
             || ["true", "false", "null"].iter().any(|w| t.is_ident_ci(w)))
+}
+
+/// `[...]` or `array(...)` holding only literals, keys included.
+fn literal_array(tokens: &[Token], (first, last): (usize, usize)) -> bool {
+    let open = if tokens[first].is_punct("[") {
+        first
+    } else if tokens[first].is_ident_ci("array") && tokens.get(first + 1).is_some_and(|t| t.is_punct("(")) {
+        first + 1
+    } else {
+        return false;
+    };
+    crate::declarations::close_of(tokens, open) == Some(last)
+        && (open + 1..last).all(|j| tokens[j].is_punct(",") || tokens[j].is_punct("=>") || literal(tokens, (j, j)))
 }
 
 fn falsy(tokens: &[Token], (first, last): (usize, usize)) -> bool {
@@ -738,6 +936,11 @@ fn statement_fix(file: &Source, k: usize, rule: &str) -> Option<Fix> {
             let simple = |a: &(usize, usize)| plain(tokens, *a) || literal(tokens, *a);
             let fits = given.len() == 3 && given[1] == (k, k) && simple(&given[0]) && simple(&given[2]);
             (fits && tokens.get(close + 1).is_some_and(|t| t.is_punct(";"))).then(|| removal(file, call, close + 1, NO_OP_CALL))
+        }
+        "removed.mysqli_embedded_server" => {
+            let (close, given) = function_call(tokens, k, &["mysqli_embedded_server_start", "mysqli_embedded_server_end"])?;
+            let inert = |a: &(usize, usize)| plain(tokens, *a) || literal(tokens, *a) || literal_array(tokens, *a);
+            (is_statement(tokens, k, close) && given.iter().all(inert)).then(|| removal(file, k, close + 1, EMBEDDED_SERVER))
         }
         "removed.unset_this" => {
             let (close, given) = arguments(tokens, k + 1)?;
@@ -1268,12 +1471,12 @@ fn by_position(tokens: &[Token]) -> std::collections::HashMap<(usize, usize), us
 }
 
 /// Marks the findings a fix takes as automatic.
-pub(crate) fn mark(src: &str, tokens: &[Token], findings: &mut [Finding]) {
+pub(crate) fn mark(src: &str, tokens: &[Token], findings: &mut [Finding], current: Option<PhpVersion>) {
     if !findings.iter().any(|f| f.fix == FixKind::Manual && handles(&f.rule_id)) {
         return;
     }
     let at_position = by_position(tokens);
-    let file = Source::new(src, tokens, findings, &at_position);
+    let file = Source::new(src, tokens, findings, &at_position, current);
     for (i, fix) in plan(&file, findings, &at_position) {
         if findings[i].fix == FixKind::Manual {
             findings[i].fix = crate::rector::describe_rule(fix.class).fix;
@@ -1321,7 +1524,7 @@ pub(crate) fn apply(
     let text = if classic_mac { src.replace('\r', "\n") } else { src.to_string() };
     let tokens = crate::lexer::tokenize(&text);
     let at_position = by_position(&tokens);
-    let file = Source::new(&text, &tokens, &findings, &at_position);
+    let file = Source::new(&text, &tokens, &findings, &at_position, index.current());
     let mut fixes: Vec<Fix> = plan(&file, &findings, &at_position).into_iter().map(|(_, fix)| fix).collect();
     fixes.dedup_by(|a, b| (a.start, a.end) == (b.start, b.end));
     fixes.reverse();
@@ -1572,5 +1775,156 @@ mod tests {
             fixed_for("<?php\necho MYSQLI_NO_DATA, DOM_PHP_ERR;\n", PhpVersion::new(8, 1)).unwrap().0,
             "<?php\necho 100, DOM_PHP_ERR;\n"
         );
+    }
+
+    fn fixed_from(src: &str, current: PhpVersion) -> Option<(String, Vec<&'static str>)> {
+        let target = PhpVersion::new(8, 5);
+        let index = crate::index::ProjectIndex::from_tokens_for(&crate::lexer::tokenize(src), Some(target)).with_current(current);
+        apply("t.php", src, target, &std::sync::Arc::new(index))
+    }
+
+    fn fixes_from(src: &str, current: PhpVersion) -> Vec<(String, FixKind)> {
+        let target = PhpVersion::new(8, 5);
+        let index = crate::index::ProjectIndex::from_tokens_for(&crate::lexer::tokenize(src), Some(target)).with_current(current);
+        crate::analyzer::analyze_source_in("t.php", src, target, &index).into_iter().map(|f| (f.rule_id, f.fix)).collect()
+    }
+
+    fn kinds_of(found: &[(String, FixKind)], rule: &str) -> Vec<FixKind> {
+        found.iter().filter(|(r, _)| r == rule).map(|(_, k)| *k).collect()
+    }
+
+    #[test]
+    fn null_arguments_take_the_empty_value() {
+        let src = "<?php\nstrlen(null);\nstr_replace('a', 'b', null);\nhtmlspecialchars(string: null);\n\\strpos('abc', NULL);\necho number_format(null);\n";
+        let (out, classes) = fixed(src).unwrap();
+        assert_eq!(
+            out,
+            "<?php\nstrlen('');\nstr_replace('a', 'b', '');\nhtmlspecialchars(string: '');\n\\strpos('abc', '');\necho number_format(0);\n"
+        );
+        assert_eq!(classes, [NULL_ARGUMENT]);
+        assert_eq!(kinds_of(&fixes(src), "deprecated.null_to_internal"), [FixKind::Auto; 5]);
+        let strict = "<?php declare(strict_types=1);\nstrlen(null);\n";
+        assert_eq!(fixed(strict), None, "null was already a TypeError there");
+        assert_eq!(kinds_of(&fixes(strict), "deprecated.null_to_internal"), [FixKind::Manual]);
+    }
+
+    #[test]
+    fn tentative_return_types_get_the_attribute() {
+        let src = "<?php\nclass C implements \\Countable {\n    /** Items. */\n    public function count() { return 0; }\n}\nclass D implements \\Countable { public function count() { return 1; } }\n";
+        let (out, classes) = fixed(src).unwrap();
+        assert_eq!(
+            out,
+            "<?php\nclass C implements \\Countable {\n    /** Items. */\n    #[\\ReturnTypeWillChange]\n    public function count() { return 0; }\n}\nclass D implements \\Countable { #[\\ReturnTypeWillChange]\npublic function count() { return 1; } }\n"
+        );
+        assert_eq!(classes, [WILL_CHANGE]);
+        assert_eq!(kinds_of(&fixes(src), "deprecated.tentative_return_type"), [FixKind::Auto; 2]);
+        assert!(kinds_of(&fixes(&out), "deprecated.tentative_return_type").is_empty());
+        let crlf = "<?php\r\nclass C implements \\Countable {\r\n\tpublic function count() { return 0; }\r\n}\r\n";
+        assert_eq!(
+            fixed(crlf).unwrap().0,
+            "<?php\r\nclass C implements \\Countable {\r\n\t#[\\ReturnTypeWillChange]\r\n\tpublic function count() { return 0; }\r\n}\r\n"
+        );
+    }
+
+    #[test]
+    fn ai_idn_flags_go() {
+        let src = "<?php\n$hints = AI_IDN_ALLOW_UNASSIGNED;\n$h = ['ai_flags' => AI_CANONNAME | AI_IDN_USE_STD3_ASCII_RULES];\n$b = AI_IDN_ALLOW_UNASSIGNED | AI_IDN_USE_STD3_ASCII_RULES;\nif ($f & AI_IDN_ALLOW_UNASSIGNED) {}\nif ($f === AI_IDN_USE_STD3_ASCII_RULES) {}\n";
+        let (out, classes) = fixed(src).unwrap();
+        assert_eq!(
+            out,
+            "<?php\n$hints = 0;\n$h = ['ai_flags' => AI_CANONNAME];\n$b = 0;\nif ($f & AI_IDN_ALLOW_UNASSIGNED) {}\nif ($f === AI_IDN_USE_STD3_ASCII_RULES) {}\n"
+        );
+        assert_eq!(classes, [AI_IDN_FLAG]);
+        let kinds = kinds_of(&fixes(src), "removed.ai_idn_constant");
+        assert_eq!(kinds, [FixKind::Likely, FixKind::Likely, FixKind::Likely, FixKind::Likely, FixKind::Manual, FixKind::Manual]);
+    }
+
+    #[test]
+    fn embedded_server_calls_go() {
+        let src = "<?php\nmysqli_embedded_server_start(1, ['--datadir=/tmp'], array());\nif (!mysqli_embedded_server_start(true, [], [])) { die(); }\nmysqli_embedded_server_start(1, options(), []);\n\\mysqli_embedded_server_end();\n";
+        let (out, classes) = fixed(src).unwrap();
+        assert_eq!(
+            out,
+            "<?php\nif (!mysqli_embedded_server_start(true, [], [])) { die(); }\nmysqli_embedded_server_start(1, options(), []);\n"
+        );
+        assert_eq!(classes, [EMBEDDED_SERVER]);
+        let kinds = kinds_of(&fixes(src), "removed.mysqli_embedded_server");
+        assert_eq!(kinds, [FixKind::Likely, FixKind::Manual, FixKind::Manual, FixKind::Likely]);
+    }
+
+    #[test]
+    fn stray_breaks_return() {
+        let src = "<?php\nfunction f($r) {\n    if ($r) { throw new E(); break; }\n}\n$c = function () use ($x): void { if ($x) { continue; } };\nfunction g(): int { if (h()) { break; } return 1; }\nfunction &r() { break; }\nfunction n() { if ($x) { break 2; } }\nif ($x) { break; }\n";
+        let (out, classes) = fixed(src).unwrap();
+        assert_eq!(
+            out,
+            "<?php\nfunction f($r) {\n    if ($r) { throw new E(); return; }\n}\n$c = function () use ($x): void { if ($x) { return; } };\nfunction g(): int { if (h()) { break; } return 1; }\nfunction &r() { break; }\nfunction n() { if ($x) { break 2; } }\nif ($x) { break; }\n"
+        );
+        assert_eq!(classes, [BREAK_RETURN]);
+        let kinds = kinds_of(&fixes(src), "removed.break_outside_loop");
+        assert_eq!(kinds, [FixKind::Likely, FixKind::Likely, FixKind::Manual, FixKind::Manual, FixKind::Manual, FixKind::Manual]);
+    }
+
+    #[test]
+    fn idna_2003_becomes_uts46() {
+        let src = "<?php\nnamespace App;\necho idn_to_ascii($d, IDNA_DEFAULT, INTL_IDNA_VARIANT_2003), \\INTL_IDNA_VARIANT_2003;\n";
+        let (out, classes) = fixed(src).unwrap();
+        assert_eq!(
+            out,
+            "<?php\nnamespace App;\necho idn_to_ascii($d, IDNA_DEFAULT, INTL_IDNA_VARIANT_UTS46), \\INTL_IDNA_VARIANT_UTS46;\n"
+        );
+        assert_eq!(classes, [IDNA_UTS46]);
+        assert_eq!(kinds_of(&fixes(src), "removed.intl_idna_variant_2003"), [FixKind::Likely; 2]);
+    }
+
+    #[test]
+    fn substr_false_needs_a_php5_project() {
+        let src = "<?php\nif (substr($p, strrpos($p, '.') + 1) === false) {}\n$a = false !== substr($s, 3);\n$d = @substr($s, 1) === FALSE;\n$b = substr($s, 1, 2) === false;\n$c = !substr($s, 1) === false;\n";
+        let (out, classes) = fixed_from(src, PhpVersion::new(5, 6)).unwrap();
+        assert_eq!(
+            out,
+            "<?php\nif (substr($p, strrpos($p, '.') + 1) === '') {}\n$a = '' !== substr($s, 3);\n$d = @substr($s, 1) === '';\n$b = substr($s, 1, 2) === false;\n$c = !substr($s, 1) === false;\n"
+        );
+        assert_eq!(classes, [SUBSTR_EMPTY]);
+        let kinds = kinds_of(&fixes_from(src, PhpVersion::new(5, 6)), "behavior.substr_false");
+        assert_eq!(kinds, [FixKind::Likely, FixKind::Likely, FixKind::Likely, FixKind::Manual, FixKind::Manual]);
+        assert_eq!(fixed_from(src, PhpVersion::new(7, 4)), None);
+        assert_eq!(fixed(src), None);
+        assert!(kinds_of(&fixes(src), "behavior.substr_false").iter().all(|k| *k == FixKind::Manual));
+    }
+
+    #[test]
+    fn indirect_access_keeps_the_php5_order() {
+        let src = "<?php\necho $this->store->$map['column'];\nFoo::$bar['baz']();\n";
+        let php5 = PhpVersion::new(5, 6);
+        let (out, classes) = crate::analyzer::fix_legacy_syntax_with(src, &HashSet::new(), PhpVersion::new(8, 5), Some(php5)).unwrap();
+        assert_eq!(out, "<?php\necho $this->store->{$map['column']};\nFoo::{$bar['baz']}();\n");
+        assert_eq!(classes, [crate::analyzer::INDIRECT_ACCESS_FIX]);
+        let at_position = by_position(&crate::lexer::tokenize(src));
+        let tokens = crate::lexer::tokenize(src);
+        let findings = crate::analyzer::analyze_source("t.php", src, PhpVersion::new(8, 5));
+        let file = Source::new(src, &tokens, &findings, &at_position, Some(php5));
+        let marked: String = plan(&file, &findings, &at_position).into_iter().rev().fold(src.to_string(), |mut text, (_, fix)| {
+            text.replace_range(fix.start..fix.end, &fix.text);
+            text
+        });
+        assert_eq!(marked, out, "the fix that marks the finding is the one staging applies");
+        assert_eq!(kinds_of(&fixes_from(src, php5), "behavior.indirect_access_order"), [FixKind::Likely; 2]);
+        assert_eq!(kinds_of(&fixes_from(src, PhpVersion::new(7, 0)), "behavior.indirect_access_order"), [FixKind::Manual; 2]);
+    }
+
+    #[test]
+    fn variable_variables_get_braces() {
+        let src = "<?php\n$$name['k'] = 1;\necho $$a['b']['c'], $$o['p']->q;\n$$e[] = 1;\n";
+        let (php5, classes) = fixed_from(src, PhpVersion::new(5, 6)).unwrap();
+        assert_eq!(php5, "<?php\n${$name['k']} = 1;\necho ${$a['b']['c']}, ${$o['p']}->q;\n$$e[] = 1;\n");
+        assert_eq!(classes, [VARIABLE_ORDER]);
+        let kinds = kinds_of(&fixes_from(src, PhpVersion::new(5, 6)), "review.variable_variable");
+        assert_eq!(kinds, [FixKind::Likely, FixKind::Likely, FixKind::Likely, FixKind::Manual]);
+        let (php7, classes) = fixed_from(src, PhpVersion::new(7, 4)).unwrap();
+        assert_eq!(php7, "<?php\n${$name}['k'] = 1;\necho ${$a}['b']['c'], ${$o}['p']->q;\n${$e}[] = 1;\n");
+        assert_eq!(classes, [VARIABLE_BRACES]);
+        assert_eq!(kinds_of(&fixes_from(src, PhpVersion::new(7, 4)), "review.variable_variable"), [FixKind::Auto; 4]);
+        assert_eq!(fixed(src), None);
     }
 }

@@ -333,6 +333,12 @@ fn composer_php_constraint(root: &Path) -> Option<String> {
     Some(php.to_string())
 }
 
+/// The version the project runs on today: composer's platform setting, or the lowest line its PHP constraint allows.
+pub(crate) fn current_version(root: &Path) -> Option<PhpVersion> {
+    composer_platform_php(root)
+        .or_else(|| composer_php_constraint(root).as_deref().and_then(Constraint::parse).and_then(|c| c.lowest_known_line()))
+}
+
 fn composer_platform_php(root: &Path) -> Option<PhpVersion> {
     let text = crate::safefs::read_text(root.join("composer.json")).ok()?;
     let json: serde_json::Value = serde_json::from_str(&text).ok()?;
@@ -356,8 +362,7 @@ pub fn inspect(root: &Path) -> std::io::Result<ProjectInfo> {
     excluded_dirs.extend(config.exclude.iter().map(|d| exclude_path(d)));
     let php_files = collect_php_files(root, &excluded_dirs).iter().filter(|p| !p.is_dir()).count();
     let php_constraint = composer_php_constraint(root);
-    let current_version =
-        composer_platform_php(root).or_else(|| php_constraint.as_deref().and_then(Constraint::parse).and_then(|c| c.lowest_known_line()));
+    let current_version = current_version(root);
     let name = root.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| root.to_string_lossy().to_string());
     Ok(ProjectInfo {
         root: root.to_string_lossy().to_string(),
