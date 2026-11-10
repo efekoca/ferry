@@ -38,6 +38,13 @@ pub const IDNA_UTS46: &str = "Ferry\\Php80\\IdnaVariantUts46";
 pub const SUBSTR_EMPTY: &str = "Ferry\\Php70\\SubstrFalseToEmptyString";
 pub const VARIABLE_ORDER: &str = "Ferry\\Php70\\KeepVariableVariableOrder";
 pub const VARIABLE_BRACES: &str = "Ferry\\Php70\\BraceVariableVariable";
+pub const FALSE_ARRAY: &str = "Ferry\\Php81\\FalseToEmptyArray";
+pub const GMDATE: &str = "Ferry\\Php81\\GmstrftimeToGmdate";
+pub const LAST_HEADERS: &str = "Ferry\\Php85\\LastResponseHeaders";
+pub const NULL_KEY: &str = "Ferry\\Php85\\NullOffsetToEmptyString";
+pub const FIRST_CLASS_CALLABLE: &str = "Ferry\\Php82\\FirstClassCallable";
+pub const DIRECTORY_HANDLE: &str = "Ferry\\Php85\\PassDirectoryHandle";
+pub const ORIGINAL_ARGS: &str = "Ferry\\Php70\\KeepOriginalArguments";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Fix {
@@ -167,7 +174,14 @@ const NO_OP_FLAGS: &[(&str, &str, Alone)] = &[
 
 /// Rules whose fix reads the code around the finding, and for three of them the version the project
 /// runs on today.
-const SITE_RULES: [&str; 8] = [
+const SITE_RULES: [&str; 15] = [
+    "deprecated.false_to_array",
+    "deprecated.gmstrftime",
+    "deprecated.http_response_header",
+    "deprecated.null_offset",
+    "deprecated.partial_callable",
+    "deprecated.implicit_argument",
+    "behavior.func_get_args_current_value",
     "deprecated.null_to_internal",
     "deprecated.tentative_return_type",
     "removed.mysqli_embedded_server",
@@ -357,6 +371,16 @@ pub(crate) fn mentions(src: &str) -> bool {
         "continue",
         "extends",
         "implements",
+        "false",
+        "gmstrftime",
+        "http_response_header",
+        "self",
+        "parent",
+        "static",
+        "readdir",
+        "rewinddir",
+        "closedir",
+        "func_get_arg",
     ];
     OCI_ALIASES.iter().map(|(old, _)| *old).chain(NO_OP_CALLS.iter().map(|(_, f, _)| *f)).chain(calls).any(|name| lower.contains(name))
         || (lower.contains("unset") && src.contains("$this"))
@@ -722,8 +746,556 @@ fn site_fix(file: &Source, k: usize, rule: &str) -> Option<Fix> {
             })
         }
         "review.variable_variable" => variable_variable(file, k),
+        "deprecated.false_to_array" => false_to_array(file, k),
+        "deprecated.gmstrftime" => gmstrftime_fix(file, k),
+        "deprecated.http_response_header" => last_headers(file, k),
+        "deprecated.null_offset" => null_key(file, k),
+        "deprecated.partial_callable" => first_class_callable(file, k),
+        "deprecated.implicit_argument" => directory_handle(file, k),
+        "behavior.func_get_args_current_value" => original_args(file, k).filter(|_| php5),
         _ => None,
     }
+}
+
+const CONTROL_WORDS: &[&str] = &[
+    "if", "else", "elseif", "for", "foreach", "while", "do", "switch", "case", "default", "try", "catch", "finally", "return", "break",
+    "continue", "goto", "yield", "throw", "declare", "match",
+];
+const SCOPE_WORDS: &[&str] =
+    &["compact", "extract", "get_defined_vars", "eval", "include", "include_once", "require", "require_once", "global"];
+const LOOP_WORDS: &[&str] = &["for", "foreach", "while", "do"];
+
+/// Whether a variable named `name` appears at `j`.
+fn is_var(tokens: &[Token], j: usize, name: &str) -> bool {
+    tokens[j].kind == TokenKind::Variable && tokens[j].text == name
+}
+
+/// Whether the tokens from `from` to `to` can read or rebind a variable without naming it.
+fn reaches_scope(tokens: &[Token], from: usize, to: usize) -> bool {
+    tokens[from..to].iter().any(|t| t.is_punct("$") || SCOPE_WORDS.iter().any(|w| t.is_ident_ci(w)))
+}
+
+/// The loops whose span holds `k`: from the keyword to the end of the body.
+fn loops_around(tokens: &[Token], from: usize, k: usize) -> Vec<(usize, usize)> {
+    (from..k)
+        .filter(|&j| LOOP_WORDS.iter().any(|w| tokens[j].is_ident_ci(w)))
+        .filter_map(|j| {
+            let end = if tokens[j].is_ident_ci("do") {
+                let body = tokens.get(j + 1).filter(|t| t.is_punct("{")).map(|_| j + 1)?;
+                let close = crate::declarations::close_of(tokens, body)?;
+                let head = tokens.get(close + 2).filter(|t| t.is_punct("(")).map(|_| close + 2)?;
+                crate::declarations::close_of(tokens, head)?
+            } else {
+                let head = tokens.get(j + 1).filter(|t| t.is_punct("(")).map(|_| j + 1)?;
+                let close = crate::declarations::close_of(tokens, head)?;
+                if tokens.get(close + 1).is_some_and(|t| t.is_punct("{")) {
+                    crate::declarations::close_of(tokens, close + 1)?
+                } else {
+                    (close + 1..tokens.len()).find(|&e| tokens[e].is_punct(";"))?
+                }
+            };
+            (k < end).then_some((j, end))
+        })
+        .collect()
+}
+
+/// `$v = false;` that a later `$v[...] = ...` in the same straight run of statements turns into an
+/// array: the initializer becomes `[]`.
+fn false_to_array(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let name = tokens.get(k).filter(|t| t.kind == TokenKind::Variable)?.text.as_str();
+    if !starts_statement(tokens, k) || !tokens.get(k + 1).is_some_and(|t| t.is_punct("[")) {
+        return None;
+    }
+    let mut end = crate::declarations::close_of(tokens, k + 1)?;
+    while tokens.get(end + 1).is_some_and(|t| t.is_punct("[")) {
+        end = crate::declarations::close_of(tokens, end + 1)?;
+    }
+    if !tokens.get(end + 1).is_some_and(|t| t.is_punct("=")) {
+        return None;
+    }
+    let semi = (end + 2..tokens.len()).find(|&j| tokens[j].is_punct(";") && enclosing_call(tokens, j).is_none())?;
+    if (k + 1..semi).any(|j| is_var(tokens, j, name)) || reaches_scope(tokens, k, semi) {
+        return None;
+    }
+    let init = (0..k).rev().find(|&j| is_var(tokens, j, name))?;
+    let initializer = starts_statement(tokens, init)
+        && tokens.get(init + 1).is_some_and(|t| t.is_punct("="))
+        && tokens.get(init + 2).is_some_and(|t| t.is_ident_ci("false"))
+        && tokens.get(init + 3).is_some_and(|t| t.is_punct(";"));
+    let straight = (init + 4..k).all(|j| {
+        let t = &tokens[j];
+        !(t.is_punct("{") || t.is_punct("}") || t.is_punct(":") || t.is_punct("?") || t.kind == TokenKind::CloseTag)
+            && !CONTROL_WORDS.iter().any(|w| t.is_ident_ci(w))
+    });
+    (initializer && straight && !reaches_scope(tokens, init, k)).then(|| Fix {
+        class: FALSE_ARRAY,
+        start: tokens[init + 2].start,
+        end: tokens[init + 2].end,
+        text: "[]".into(),
+    })
+}
+
+/// The text of a quoted literal without interpolation.
+fn literal_text(tok: &Token) -> Option<String> {
+    let inner = tok.text.get(1..tok.text.len().checked_sub(1)?)?;
+    match tok.kind {
+        TokenKind::Str { interpolates: false, backtick: false } if tok.text.starts_with('\'') => {
+            let mut out = String::new();
+            let mut chars = inner.chars().peekable();
+            while let Some(c) = chars.next() {
+                if c == '\\' && chars.peek().is_some_and(|n| *n == '\\' || *n == '\'') {
+                    out.push(chars.next()?);
+                } else {
+                    out.push(c);
+                }
+            }
+            Some(out)
+        }
+        TokenKind::Str { backtick: false, .. } if !inner.contains(['\\', '$']) => Some(inner.to_string()),
+        _ => None,
+    }
+}
+
+/// A single-quoted PHP literal holding `value`.
+fn quoted(value: &str) -> String {
+    let chars: Vec<char> = value.chars().collect();
+    let mut out = String::from("'");
+    for (i, &c) in chars.iter().enumerate() {
+        match c {
+            '\'' => out.push_str("\\'"),
+            '\\' if chars.get(i + 1).is_none_or(|n| *n == '\\' || *n == '\'') => out.push_str("\\\\"),
+            c => out.push(c),
+        }
+    }
+    out.push('\'');
+    out
+}
+
+/// (strftime, date): specifiers that print the same in UTC whatever the locale.
+const STRFTIME_DATE: [(char, &str); 17] = [
+    ('Y', "Y"),
+    ('y', "y"),
+    ('m', "m"),
+    ('d', "d"),
+    ('H', "H"),
+    ('I', "h"),
+    ('M', "i"),
+    ('S', "s"),
+    ('u', "N"),
+    ('w', "w"),
+    ('G', "o"),
+    ('V', "W"),
+    ('F', "Y-m-d"),
+    ('T', "H:i:s"),
+    ('R', "H:i"),
+    ('D', "m/d/y"),
+    ('%', "%"),
+];
+
+/// `gmstrftime('<format>'[, $ts])` → `gmdate('<format>'[, $ts])`, when every specifier has a
+/// date() letter that prints the same.
+fn gmstrftime_fix(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let (_, args) = function_call(tokens, k, &["gmstrftime"])?;
+    let &(first, last) = args.first().filter(|_| args.len() <= 2)?;
+    if first != last {
+        return None;
+    }
+    let format = literal_text(&tokens[first])?;
+    let mut out = String::new();
+    let mut chars = format.chars();
+    while let Some(c) = chars.next() {
+        if c == '%' {
+            let spec = chars.next()?;
+            out.push_str(STRFTIME_DATE.iter().find(|(s, _)| *s == spec)?.1);
+        } else if c.is_ascii_alphabetic() || c == '\\' {
+            out.push('\\');
+            out.push(c);
+        } else {
+            out.push(c);
+        }
+    }
+    let between = &file.src[tokens[k].end..tokens[first].start];
+    Some(Fix {
+        class: GMDATE,
+        start: tokens[k].start,
+        end: tokens[first].end,
+        text: format!("{}gmdate{between}{}", lead(&tokens[k]), quoted(&out)),
+    })
+}
+
+/// Calls that fill `$http_response_header` through a stream; any of them earlier in the scope could
+/// leave headers that a failed request doesn't clear.
+const STREAM_CALLS: &[&str] = &[
+    "file_get_contents",
+    "file",
+    "fopen",
+    "readfile",
+    "copy",
+    "get_headers",
+    "file_put_contents",
+    "getimagesize",
+    "md5_file",
+    "sha1_file",
+    "hash_file",
+    "simplexml_load_file",
+    "parse_ini_file",
+    "fsockopen",
+];
+const HEADER_CALLS: &[&str] = &["file_get_contents", "file", "fopen", "readfile", "copy"];
+const NOT_CALLS: &[&str] = &[
+    "if", "elseif", "while", "for", "foreach", "switch", "match", "catch", "declare", "array", "isset", "empty", "list", "unset", "and",
+    "or", "xor", "return", "echo", "print", "exit", "die", "function", "fn", "use",
+];
+
+/// Whether `j` starts a call that runs code: a function, a method, a closure or a constructor.
+fn starts_call(tokens: &[Token], j: usize) -> bool {
+    let t = &tokens[j];
+    let open = tokens.get(j + 1).is_some_and(|n| n.is_punct("("));
+    (open
+        && t.kind == TokenKind::Ident
+        && !NOT_CALLS.iter().any(|w| t.is_ident_ci(w))
+        && !tokens[j.saturating_sub(1)].is_ident_ci("function"))
+        || (open && (t.kind == TokenKind::Variable || t.is_punct(")") || t.is_punct("]") || t.is_punct("}")))
+        || ["new", "include", "include_once", "require", "require_once", "eval", "clone"].iter().any(|w| t.is_ident_ci(w))
+        || t.is_punct("->")
+        || t.is_punct("?->")
+        || t.is_punct("::")
+        || matches!(t.kind, TokenKind::Str { backtick: true, .. })
+}
+
+/// Bodies of the functions nested inside the body `(open, close)`.
+fn nested_bodies(tokens: &[Token], open: usize, close: usize) -> Vec<(usize, usize)> {
+    (open + 1..close)
+        .filter(|&j| tokens[j].is_ident_ci("function") || tokens[j].is_ident_ci("fn"))
+        .filter_map(|j| {
+            let f = crate::declarations::function_at(tokens, j)?;
+            f.body.or_else(|| {
+                let arrow = (j..close).find(|&a| tokens[a].is_punct("=>"))?;
+                Some((j, (arrow..close).find(|&e| tokens[e].is_punct(";") || tokens[e].is_punct(")"))?))
+            })
+        })
+        .collect()
+}
+
+/// A read of `$http_response_header` right after the one request of its scope that set it, with
+/// nothing in between that could make another: `http_get_last_response_headers()`.
+fn last_headers(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let function = enclosing_function(tokens, k)?;
+    let (open, _) = function.body?;
+    let nested = nested_bodies(tokens, open, k);
+    let own = |j: usize| !nested.iter().any(|&(a, b)| a <= j && j <= b);
+    let call = (open + 1..k).rev().find(|&j| own(j) && function_call(tokens, j, STREAM_CALLS).is_some())?;
+    if !call_named(tokens, call, HEADER_CALLS) || (open + 1..call).any(|j| own(j) && function_call(tokens, j, STREAM_CALLS).is_some()) {
+        return None;
+    }
+    if !loops_around(tokens, open + 1, call).is_empty() {
+        return None;
+    }
+    let mut depth = 0usize;
+    for j in (open + 1..call).rev() {
+        if tokens[j].is_punct(")") {
+            depth += 1;
+        } else if tokens[j].is_punct("(") {
+            if depth == 0 && j > 0 && starts_call(tokens, j - 1) {
+                return None;
+            }
+            depth = depth.saturating_sub(1);
+        } else if depth == 0 && (tokens[j].is_punct(";") || tokens[j].is_punct("{") || tokens[j].is_punct("}")) {
+            break;
+        }
+    }
+    let close = arguments(tokens, call + 1)?.0;
+    for j in close + 1..k {
+        let t = &tokens[j];
+        if t.is_punct("}") || LOOP_WORDS.iter().any(|w| t.is_ident_ci(w)) {
+            return None;
+        }
+        if starts_call(tokens, j) {
+            let encloses = tokens
+                .get(j + 1)
+                .filter(|n| n.is_punct("("))
+                .and_then(|_| crate::declarations::close_of(tokens, j + 1))
+                .is_some_and(|c| c > k);
+            if !encloses || t.is_punct("->") || t.is_punct("::") || t.is_ident_ci("new") {
+                return None;
+            }
+        }
+    }
+    let isset =
+        k >= 2 && tokens[k - 1].is_punct("(") && tokens[k - 2].is_ident_ci("isset") && tokens.get(k + 1).is_some_and(|t| t.is_punct(")"));
+    let argument = k.checked_sub(1).is_some_and(|p| tokens[p].is_punct("(") || tokens[p].is_punct(","))
+        && tokens.get(k + 1).is_some_and(|n| n.is_punct(")") || n.is_punct(","));
+    if let Some(outer) = enclosing_call(tokens, k).filter(|_| !isset) {
+        let name = tokens[outer].text.trim_start_matches('\\').to_ascii_lowercase();
+        let by_value = inert_builtin(tokens, outer) && !crate::calls::BY_REF_ARGUMENT.contains(&name.as_str());
+        if name == "isset" || argument && !by_value && !["empty", "array", "list"].contains(&name.as_str()) {
+            return None;
+        }
+    }
+    if isset {
+        return Some(Fix {
+            class: LAST_HEADERS,
+            start: tokens[k - 2].start,
+            end: tokens[k + 1].end,
+            text: "http_get_last_response_headers() !== null".into(),
+        });
+    }
+    Some(Fix { class: LAST_HEADERS, start: tokens[k].start, end: tokens[k].end, text: "http_get_last_response_headers()".into() })
+}
+
+/// `$a[null]` → `$a['']` where `$a` was just given an array literal and only its elements were
+/// touched since.
+fn null_key(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let base = k.checked_sub(2)?;
+    let tok = &tokens[k];
+    let plain = tok.is_ident_ci("null") && tokens[k - 1].is_punct("[") && tokens.get(k + 1).is_some_and(|t| t.is_punct("]"));
+    let var = tokens[base].kind == TokenKind::Variable
+        && !base.checked_sub(1).is_some_and(|p| ["->", "?->", "::", "$", "&"].iter().any(|s| tokens[p].is_punct(s)));
+    if !plain || !var {
+        return None;
+    }
+    let name = tokens[base].text.as_str();
+    let dim = |j: usize| tokens.get(j + 1).is_some_and(|t| t.is_punct("[")) && !tokens[j.saturating_sub(1)].is_punct("&");
+    let mut init = base;
+    loop {
+        init = (0..init).rev().find(|&j| is_var(tokens, j, name))?;
+        if !dim(init) {
+            break;
+        }
+    }
+    let literal_end = match tokens.get(init + 2) {
+        Some(t) if t.is_punct("[") => crate::declarations::close_of(tokens, init + 2),
+        Some(t) if t.is_ident_ci("array") && tokens.get(init + 3).is_some_and(|o| o.is_punct("(")) => {
+            crate::declarations::close_of(tokens, init + 3)
+        }
+        _ => None,
+    }?;
+    let initializer = starts_statement(tokens, init)
+        && tokens.get(init + 1).is_some_and(|t| t.is_punct("="))
+        && tokens.get(literal_end + 1).is_some_and(|t| t.is_punct(";"));
+    if !initializer || reaches_scope(tokens, init, base) {
+        return None;
+    }
+    let mut depth = 0isize;
+    for t in &tokens[init..base] {
+        if t.is_punct("{") {
+            depth += 1;
+        } else if t.is_punct("}") {
+            depth -= 1;
+            if depth < 0 {
+                return None;
+            }
+        }
+    }
+    for (from, to) in loops_around(tokens, init, base) {
+        if (from..to).any(|j| is_var(tokens, j, name) && !dim(j)) || reaches_scope(tokens, from, to) {
+            return None;
+        }
+    }
+    Some(Fix { class: NULL_KEY, start: tok.start, end: tok.end, text: "''".into() })
+}
+
+/// (function, callable argument): calls that run the callable before they return and keep nothing of it.
+const INVOKING_CALLS: [(&str, usize); 12] = [
+    ("call_user_func", 0),
+    ("call_user_func_array", 0),
+    ("array_map", 0),
+    ("array_filter", 1),
+    ("array_walk", 1),
+    ("array_walk_recursive", 1),
+    ("array_reduce", 1),
+    ("usort", 1),
+    ("uasort", 1),
+    ("uksort", 1),
+    ("preg_replace_callback", 1),
+    ("iterator_apply", 1),
+];
+
+/// `'self::m'` or `['parent', 'm']` passed straight to a call that runs it → `self::m(...)`.
+fn first_class_callable(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let value = literal_text(&tokens[k])?;
+    let (first, last, class, method) = if let Some((class, method)) = value.split_once("::") {
+        (k, k, class.to_string(), method.to_string())
+    } else {
+        let method = literal_text(tokens.get(k + 2)?)?;
+        let short = k >= 1 && tokens[k - 1].is_punct("[") && tokens.get(k + 3).is_some_and(|t| t.is_punct("]"));
+        let long = k >= 2
+            && tokens[k - 1].is_punct("(")
+            && tokens[k - 2].is_ident_ci("array")
+            && tokens.get(k + 3).is_some_and(|t| t.is_punct(")"));
+        if !tokens.get(k + 1).is_some_and(|t| t.is_punct(",")) || !(short || long) {
+            return None;
+        }
+        (if short { k - 1 } else { k - 2 }, k + 3, value, method)
+    };
+    let class = class.to_ascii_lowercase();
+    let named =
+        !method.is_empty() && method.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') && !method.as_bytes()[0].is_ascii_digit();
+    if !["self", "parent", "static"].contains(&class.as_str()) || !named {
+        return None;
+    }
+    let (call, index, arg) = argument_of(tokens, first)?;
+    if arg != (first, last) || !INVOKING_CALLS.iter().any(|&(f, slot)| slot == index && call_named(tokens, call, &[f])) {
+        return None;
+    }
+    let decl = crate::index::class_decls(tokens).into_iter().filter(|d| d.open < k && k < d.close).max_by_key(|d| d.open)?;
+    if class == "parent" && decl.info.parent.is_none() {
+        return None;
+    }
+    Some(Fix { class: FIRST_CLASS_CALLABLE, start: tokens[first].start, end: tokens[last].end, text: format!("{class}::{method}(...)") })
+}
+
+/// Builtins that run a callback, and the ones that open a directory.
+const CALLBACK_BUILTINS: &[&str] = &[
+    "array_map",
+    "array_filter",
+    "array_walk",
+    "array_walk_recursive",
+    "array_reduce",
+    "usort",
+    "uasort",
+    "uksort",
+    "call_user_func",
+    "call_user_func_array",
+    "forward_static_call",
+    "forward_static_call_array",
+    "preg_replace_callback",
+    "preg_replace_callback_array",
+    "iterator_apply",
+    "register_shutdown_function",
+    "spl_autoload_call",
+    "class_exists",
+    "interface_exists",
+    "trait_exists",
+    "enum_exists",
+    "is_subclass_of",
+    "is_a",
+    "opendir",
+    "dir",
+];
+
+/// Whether the call at `j` is a PHP function that can't open a directory or run project code.
+fn inert_builtin(tokens: &[Token], j: usize) -> bool {
+    let t = &tokens[j];
+    let name = t.text.trim_start_matches('\\').to_ascii_lowercase();
+    let declared = tokens.windows(2).any(|w| w[0].is_ident_ci("function") && w[1].text.eq_ignore_ascii_case(&name));
+    t.kind == TokenKind::Ident
+        && !j.checked_sub(1).is_some_and(|p| ["->", "?->", "::"].iter().any(|s| tokens[p].is_punct(s)) || tokens[p].is_ident_ci("new"))
+        && crate::arity::ARITY.binary_search_by(|(n, _, _)| (*n).cmp(name.as_str())).is_ok()
+        && !CALLBACK_BUILTINS.contains(&name.as_str())
+        && !declared
+}
+
+/// Whether anything from `from` to `to` could open another directory or run project code.
+fn runs_code(tokens: &[Token], from: usize, to: usize) -> bool {
+    (from..to).any(|j| starts_call(tokens, j) && !(tokens.get(j + 1).is_some_and(|n| n.is_punct("(")) && inert_builtin(tokens, j)))
+}
+
+/// `readdir()` → `readdir($h)` where `$h = opendir(...)` is the only directory its function opens
+/// and nothing between them could open another.
+fn directory_handle(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let names = ["readdir", "rewinddir", "closedir"];
+    let call = if tokens[k].kind == TokenKind::Ident && call_named(tokens, k, &names) { k } else { enclosing_call(tokens, k)? };
+    let (close, args) = function_call(tokens, call, &names)?;
+    let target = match args[..] {
+        [] => None,
+        [(f, l)] if f == l && tokens[f].is_ident_ci("null") => Some(f),
+        _ => return None,
+    };
+    let function = enclosing_function(tokens, call)?;
+    let (open, end) = function.body?;
+    let nested = nested_bodies(tokens, open, end);
+    let own = |j: usize| !nested.iter().any(|&(a, b)| a <= j && j <= b);
+    let openers: Vec<usize> = (open + 1..end).filter(|&j| own(j) && function_call(tokens, j, &["opendir", "dir"]).is_some()).collect();
+    let [opener] = openers[..] else { return None };
+    let handle = opener.checked_sub(2).filter(|&h| {
+        tokens[h].kind == TokenKind::Variable
+            && tokens[h + 1].is_punct("=")
+            && call_named(tokens, opener, &["opendir"])
+            && starts_statement(tokens, h)
+    })?;
+    let name = tokens[handle].text.as_str();
+    let rebound = (open + 1..end).filter(|&j| j != handle && is_var(tokens, j, name)).any(|j| {
+        let prev = &tokens[j - 1];
+        flow_modifies(tokens, j)
+            || prev.is_punct("&")
+            || prev.is_ident_ci("as")
+            || prev.is_ident_ci("global")
+            || prev.is_ident_ci("static")
+            || enclosing_call(tokens, j).is_some_and(|c| call_named(tokens, c, &["unset", "list"]))
+    });
+    let statement_end = (opener..call).find(|&j| tokens[j].is_punct(";"))?;
+    if rebound || opener > call || reaches_scope(tokens, open + 1, end) || runs_code(tokens, statement_end, call) {
+        return None;
+    }
+    for (from, to) in loops_around(tokens, statement_end, call) {
+        if runs_code(tokens, from, to) {
+            return None;
+        }
+    }
+    match target {
+        Some(null) => Some(Fix { class: DIRECTORY_HANDLE, start: tokens[null].start, end: tokens[null].end, text: format!("${name}") }),
+        None => Some(Fix { class: DIRECTORY_HANDLE, start: tokens[call + 1].start, end: tokens[close].end, text: format!("(${name})") }),
+    }
+}
+
+fn flow_modifies(tokens: &[Token], k: usize) -> bool {
+    let next = tokens.get(k + 1);
+    let compound = next.is_some_and(|n| ["+", "-", "*", "/", ".", "%", "&", "|", "^", "??"].iter().any(|o| n.is_punct(o)))
+        && tokens.get(k + 2).is_some_and(|n| n.is_punct("="));
+    next.is_some_and(|n| n.is_punct("=") || n.is_punct("++") || n.is_punct("--") || n.is_punct("["))
+        || compound
+        || k > 0 && (tokens[k - 1].is_punct("++") || tokens[k - 1].is_punct("--"))
+}
+
+/// On a PHP 5 project, `func_get_args()` after a parameter changed returned what was passed:
+/// read it once at the top of the function and use that copy everywhere.
+fn original_args(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let function = enclosing_function(tokens, k)?;
+    let (open, close) = function.body?;
+    if function.params.iter().any(|p| tokens[p.var - 1].is_punct("&")) {
+        return None;
+    }
+    let required = function.params.iter().take_while(|p| p.default.is_none() && !tokens[p.var - 1].is_punct("...")).count();
+    let nested = nested_bodies(tokens, open, close);
+    let own = |j: usize| !nested.iter().any(|&(a, b)| a <= j && j <= b);
+    let mut calls = Vec::new();
+    for j in (open + 1..close).filter(|&j| own(j)) {
+        if let Some((end, args)) = function_call(tokens, j, &["func_get_args"]) {
+            if !args.is_empty() {
+                return None;
+            }
+            calls.push((j, end, None));
+        } else if let Some((end, args)) = function_call(tokens, j, &["func_get_arg"]) {
+            let [(f, l)] = args[..] else { return None };
+            let n = tokens[f].text.parse::<usize>().ok().filter(|&n| f == l && tokens[f].kind == TokenKind::Number && n < required)?;
+            calls.push((j, end, Some(n)));
+        }
+    }
+    let last = calls.last()?.1;
+    let mentioned = |name: &str| (open..close).any(|j| is_var(tokens, j, name));
+    let var = std::iter::once("originalArgs".to_string()).chain((2..).map(|n| format!("originalArgs{n}"))).find(|n| !mentioned(n))?;
+    let src = file.src;
+    let after = &src[tokens[open].end..tokens.get(open + 1).map_or(tokens[open].end, |t| t.start)];
+    let lead = after.rfind('\n').map_or(" ", |i| &after[i..]);
+    let mut text = format!("{lead}${var} = func_get_args();");
+    let mut at = tokens[open].end;
+    for &(start, end, index) in &calls {
+        text.push_str(&src[at..tokens[start].start]);
+        match index {
+            Some(n) => text.push_str(&format!("${var}[{n}]")),
+            None => text.push_str(&format!("${var}")),
+        }
+        at = tokens[end].end;
+    }
+    Some(Fix { class: ORIGINAL_ARGS, start: tokens[open].end, end: tokens[last].end, text })
 }
 
 /// The last `]` of the `[...]` that follow token `k`; `None` when one is empty or unclosed.
@@ -1926,5 +2498,111 @@ mod tests {
         assert_eq!(classes, [VARIABLE_BRACES]);
         assert_eq!(kinds_of(&fixes_from(src, PhpVersion::new(7, 4)), "review.variable_variable"), [FixKind::Auto; 4]);
         assert_eq!(fixed(src), None);
+    }
+
+    #[test]
+    fn false_initializers_become_arrays() {
+        let src = "<?php\nfunction f($raw) {\n    $tags = false;\n    $tags[] = $raw;\n    return $tags;\n}\nfunction g($c) {\n    $a = false;\n    if ($c) { $a[] = 1; }\n    return $a;\n}\nfunction h() {\n    $b = false;\n    $b['k'] = count($b);\n}\nfunction i() {\n    $d = false;\n    $x = 1;\n    $d['a']['b'] = $x;\n}\n";
+        let (out, classes) = fixed(src).unwrap();
+        assert_eq!(
+            out,
+            "<?php\nfunction f($raw) {\n    $tags = [];\n    $tags[] = $raw;\n    return $tags;\n}\nfunction g($c) {\n    $a = false;\n    if ($c) { $a[] = 1; }\n    return $a;\n}\nfunction h() {\n    $b = false;\n    $b['k'] = count($b);\n}\nfunction i() {\n    $d = [];\n    $x = 1;\n    $d['a']['b'] = $x;\n}\n"
+        );
+        assert_eq!(classes, [FALSE_ARRAY]);
+        assert_eq!(kinds_of(&fixes(src), "deprecated.false_to_array"), [FixKind::Auto, FixKind::Manual, FixKind::Manual, FixKind::Auto]);
+    }
+
+    #[test]
+    fn gmstrftime_becomes_gmdate() {
+        let src = "<?php\necho gmstrftime('%Y-%m-%dT%H:%M:%SZ', $t), \\gmstrftime(\"%F %T\"), gmstrftime('%e %B', $t), gmstrftime($f), gmstrftime('100%% at %I:%M');\n";
+        let (out, classes) = fixed(src).unwrap();
+        assert_eq!(
+            out,
+            "<?php\necho gmdate('Y-m-d\\TH:i:s\\Z', $t), \\gmdate('Y-m-d H:i:s'), gmstrftime('%e %B', $t), gmstrftime($f), gmdate('100% \\a\\t h:i');\n"
+        );
+        assert_eq!(classes, [GMDATE]);
+        let kinds = kinds_of(&fixes(src), "deprecated.gmstrftime");
+        assert_eq!(kinds, [FixKind::Auto, FixKind::Auto, FixKind::Manual, FixKind::Manual, FixKind::Auto]);
+        assert_eq!(quoted("a'b\\"), "'a\\'b\\\\'");
+    }
+
+    #[test]
+    fn response_headers_read_right_after_their_request() {
+        let src = "<?php\nfunction a($u) {\n    file_get_contents($u);\n    return $http_response_header;\n}\nfunction b($u) {\n    $body = @file_get_contents($u);\n    if (isset($http_response_header)) { return count($http_response_header); }\n}\nfunction c($u) {\n    file_get_contents($u);\n    log_it();\n    return $http_response_header;\n}\nfunction d($urls) {\n    foreach ($urls as $u) { file_get_contents($u); $h = $http_response_header; }\n}\nfunction e($u) {\n    file_get_contents('a.txt');\n    file_get_contents($u);\n    return $http_response_header;\n}\nfunction g($u) {\n    file_get_contents($u);\n    return end($http_response_header);\n}\nfunction i($u) {\n    file_get_contents($u);\n    return isset($http_response_header[0]);\n}\n";
+        let (out, classes) = fixed(src).unwrap();
+        assert!(out.contains("    file_get_contents($u);\n    return http_get_last_response_headers();\n}\nfunction b"), "{out}");
+        assert!(
+            out.contains("if (http_get_last_response_headers() !== null) { return count(http_get_last_response_headers()); }"),
+            "{out}"
+        );
+        assert_eq!(out.matches("http_get_last_response_headers").count(), 3, "{out}");
+        assert_eq!(classes, [LAST_HEADERS]);
+        let kinds = kinds_of(&fixes(src), "deprecated.http_response_header");
+        assert_eq!(kinds[..3], [FixKind::Likely; 3]);
+        assert!(kinds[3..].iter().all(|k| *k == FixKind::Manual), "{kinds:?}");
+    }
+
+    #[test]
+    fn null_keys_of_fresh_arrays() {
+        let src = "<?php\nfunction f($rows) {\n    $lookup = array();\n    $lookup['a'] = 1;\n    $lookup[null] = $rows;\n    return isset($lookup[null]);\n}\nfunction g($o) {\n    $o[null] = 1;\n}\nfunction h($c) {\n    $a = [];\n    if ($c) { $a = new ArrayObject(); }\n    $a[null] = 1;\n}\nfunction i($c) {\n    if ($c) { $b = []; }\n    $b[null] = 1;\n}\n";
+        let (out, classes) = fixed(src).unwrap();
+        assert!(out.contains("    $lookup[''] = $rows;\n    return isset($lookup['']);"), "{out}");
+        assert_eq!(out.matches("[null]").count(), 3, "{out}");
+        assert_eq!(classes, [NULL_KEY]);
+        let kinds = kinds_of(&fixes(src), "deprecated.null_offset");
+        assert_eq!(kinds, [FixKind::Auto, FixKind::Auto, FixKind::Manual, FixKind::Manual, FixKind::Manual]);
+    }
+
+    #[test]
+    fn relative_callables_become_first_class() {
+        let src = "<?php\nclass K extends P {\n    public static function a($x) {\n        call_user_func('self::report', $x);\n        array_map(['parent', 'wrap'], $x);\n        usort($x, array('static', 'cmp'));\n        if (is_callable('self::report')) {}\n        set_error_handler('self::handle');\n    }\n}\nclass Solo {\n    public function b() { return call_user_func('parent::b'); }\n}\nfunction outside() { return call_user_func('self::x'); }\n";
+        let (out, classes) = fixed(src).unwrap();
+        assert!(
+            out.contains(
+                "call_user_func(self::report(...), $x);\n        array_map(parent::wrap(...), $x);\n        usort($x, static::cmp(...));"
+            ),
+            "{out}"
+        );
+        assert!(out.contains("is_callable('self::report')") && out.contains("set_error_handler('self::handle')"), "{out}");
+        assert!(out.contains("call_user_func('parent::b')") && out.contains("call_user_func('self::x')"), "{out}");
+        assert_eq!(classes, [FIRST_CLASS_CALLABLE]);
+        let kinds = kinds_of(&fixes(src), "deprecated.partial_callable");
+        assert_eq!(kinds[..3], [FixKind::Auto; 3]);
+        assert_eq!(kinds[3..], [FixKind::Manual; 4]);
+    }
+
+    #[test]
+    fn directory_calls_get_their_handle() {
+        let src = "<?php\nfunction a($path) {\n    $dir = opendir($path);\n    while (($entry = readdir()) !== false) {\n        $text[] = strtoupper($entry);\n    }\n    rewinddir(null);\n    closedir();\n}\nfunction b($path) {\n    $dir = opendir($path);\n    while (($entry = readdir()) !== false) {\n        handle($entry);\n    }\n}\nfunction c($p, $q) {\n    $x = opendir($p);\n    $y = opendir($q);\n    readdir();\n}\nfunction d() {\n    readdir();\n}\nfunction e($path, $names) {\n    $dir = opendir($path);\n    foreach ($names as $n) {\n        $seen[] = readdir();\n    }\n}\n";
+        let (out, classes) = fixed(src).unwrap();
+        assert!(out.contains("while (($entry = readdir($dir)) !== false) {\n        $text[] = strtoupper($entry);\n    }\n    rewinddir($dir);\n    closedir($dir);"), "{out}");
+        assert_eq!(out.matches("readdir()").count(), 3, "{out}");
+        assert!(out.contains("$seen[] = readdir($dir);"), "{out}");
+        assert_eq!(classes, [DIRECTORY_HANDLE]);
+        let kinds = kinds_of(&fixes(src), "deprecated.implicit_argument");
+        assert_eq!(
+            kinds,
+            [FixKind::Likely, FixKind::Likely, FixKind::Likely, FixKind::Manual, FixKind::Manual, FixKind::Manual, FixKind::Likely]
+        );
+    }
+
+    #[test]
+    fn original_arguments_on_php5() {
+        let src = "<?php\nclass R {\n    public function audit($first, $second) {\n        // keep\n        $first = trim($first);\n        return func_get_args();\n    }\n    public function pick($a, $b = 2) {\n        $a++;\n        return [func_get_arg(0), func_get_arg(1)];\n    }\n    public function byRef(&$a) {\n        $a = 1;\n        return func_get_args();\n    }\n    public function once($x) { $x = 2; return func_get_args(); }\n}\n";
+        let php5 = PhpVersion::new(5, 6);
+        let (out, classes) = fixed_from(src, php5).unwrap();
+        assert!(
+            out.contains("public function audit($first, $second) {\n        $originalArgs = func_get_args();\n        // keep\n        $first = trim($first);\n        return $originalArgs;\n    }"),
+            "{out}"
+        );
+        assert!(out.contains("public function once($x) { $originalArgs = func_get_args(); $x = 2; return $originalArgs; }"), "{out}");
+        assert!(
+            out.contains("return [func_get_arg(0), func_get_arg(1)];") && out.contains("$a = 1;\n        return func_get_args();"),
+            "{out}"
+        );
+        assert_eq!(classes, [ORIGINAL_ARGS]);
+        let kinds = kinds_of(&fixes_from(src, php5), "behavior.func_get_args_current_value");
+        assert_eq!(kinds, [FixKind::Likely, FixKind::Manual, FixKind::Manual, FixKind::Likely]);
+        assert_eq!(fixed_from(src, PhpVersion::new(7, 4)), None);
     }
 }

@@ -1986,8 +1986,8 @@ pub mod patterns {
         replacement: code("http_get_last_response_headers()"),
         fix: FixKind::Manual,
         note: Text::new(
-            "Kendiliğinden oluşan $http_response_header değişkeni 8.5'te kullanımdan kalktı.",
-            "The magic $http_response_header variable is deprecated in 8.5.",
+            "Kendiliğinden oluşan $http_response_header değişkeni 8.5'te kullanımdan kalktı. İsteğin hemen ardından okunan değişkenin yerine http_get_last_response_headers() yazılabilir. Aynı kapsamda birden çok istek varsa elle bakın: başarısız bir istekten sonra değişken önceki başlıkları tutar, fonksiyon ise null döner.",
+            "The magic $http_response_header variable is deprecated in 8.5. A read right after its request can become http_get_last_response_headers(). Check by hand where one scope makes several requests: after a failed request the variable keeps the earlier headers, while the function returns null.",
         ),
     };
     pub const IMPLODE_ORDER: PatternRule = PatternRule {
@@ -2046,8 +2046,8 @@ pub mod patterns {
         replacement: code("$a['']"),
         fix: FixKind::Manual,
         note: Text::new(
-            "null'ı dizi anahtarı olarak kullanmak 8.5'te kullanımdan kalktı; null zaten boş metne dönüşüyordu.",
-            "Using null as an array key is deprecated in 8.5; it was already turned into an empty string.",
+            "null'ı dizi anahtarı olarak kullanmak 8.5'te kullanımdan kalktı; null zaten boş metne dönüşüyordu. ArrayAccess nesnelerinde ise offsetGet() ve offsetSet() '' değil null alır; '' yazmadan önce değişkenin dizi olduğundan emin olun.",
+            "Using null as an array key is deprecated in 8.5; it was already turned into an empty string. ArrayAccess objects get null in offsetGet() and offsetSet(), not '', so make sure the variable is an array before writing ''.",
         ),
     };
     pub const CASE_SEMICOLON: PatternRule = PatternRule {
