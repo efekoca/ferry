@@ -146,6 +146,12 @@ fn kuzey_magaza_triggers_every_rule() {
         "deprecated.partial_callable",
         "deprecated.implicit_argument",
         "behavior.func_get_args_current_value",
+        "deprecated.splfixedarray_wakeup",
+        "deprecated.reflection_method",
+        "deprecated.xml_handler_string",
+        "deprecated.xml_set_object",
+        "deprecated.session_set_save_handler",
+        "removed.__autoload",
     ];
     for id in own_fixes {
         assert!(

@@ -45,6 +45,13 @@ pub const NULL_KEY: &str = "Ferry\\Php85\\NullOffsetToEmptyString";
 pub const FIRST_CLASS_CALLABLE: &str = "Ferry\\Php82\\FirstClassCallable";
 pub const DIRECTORY_HANDLE: &str = "Ferry\\Php85\\PassDirectoryHandle";
 pub const ORIGINAL_ARGS: &str = "Ferry\\Php70\\KeepOriginalArguments";
+pub const WAKEUP_CALL: &str = "Ferry\\Php84\\RemoveSplFixedArrayWakeup";
+pub const REFLECTION_TYPE_CHECK: &str = "Ferry\\Php80\\ReflectionParameterTypeCheck";
+pub const DISABLED_FALSE: &str = "Ferry\\Php80\\IsDisabledToFalse";
+pub const XML_CALLABLE: &str = "Ferry\\Php84\\XmlHandlerCallable";
+pub const XML_OBJECT: &str = "Ferry\\Php84\\RemoveXmlSetObject";
+pub const SESSION_HANDLER: &str = "Ferry\\Php84\\SessionHandlerObject";
+pub const AUTOLOAD_REGISTER: &str = "Ferry\\Php80\\AutoloadToSplRegister";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Fix {
@@ -174,7 +181,13 @@ const NO_OP_FLAGS: &[(&str, &str, Alone)] = &[
 
 /// Rules whose fix reads the code around the finding, and for three of them the version the project
 /// runs on today.
-const SITE_RULES: [&str; 15] = [
+const SITE_RULES: [&str; 21] = [
+    "deprecated.splfixedarray_wakeup",
+    "deprecated.reflection_method",
+    "deprecated.xml_handler_string",
+    "deprecated.xml_set_object",
+    "deprecated.session_set_save_handler",
+    "removed.__autoload",
     "deprecated.false_to_array",
     "deprecated.gmstrftime",
     "deprecated.http_response_header",
@@ -381,6 +394,13 @@ pub(crate) fn mentions(src: &str) -> bool {
         "rewinddir",
         "closedir",
         "func_get_arg",
+        "__wakeup",
+        "isarray",
+        "iscallable",
+        "isdisabled",
+        "xml_set_",
+        "session_set_save_handler",
+        "__autoload",
     ];
     OCI_ALIASES.iter().map(|(old, _)| *old).chain(NO_OP_CALLS.iter().map(|(_, f, _)| *f)).chain(calls).any(|name| lower.contains(name))
         || (lower.contains("unset") && src.contains("$this"))
@@ -395,6 +415,7 @@ pub(crate) struct Source<'a> {
     pub(crate) flagged: HashSet<usize>,
     current: Option<PhpVersion>,
     strict: bool,
+    index: &'a crate::index::ProjectIndex,
 }
 
 impl<'a> Source<'a> {
@@ -403,7 +424,7 @@ impl<'a> Source<'a> {
         tokens: &'a [Token],
         findings: &[Finding],
         at_position: &std::collections::HashMap<(usize, usize), usize>,
-        current: Option<PhpVersion>,
+        index: &'a crate::index::ProjectIndex,
     ) -> Self {
         let flagged = findings
             .iter()
@@ -411,7 +432,7 @@ impl<'a> Source<'a> {
             .filter_map(|f| at_position.get(&(f.line, f.column)).copied())
             .collect();
         let strict = tokens.windows(3).any(|w| w[0].is_ident_ci("strict_types") && w[1].is_punct("=") && w[2].text == "1");
-        Source { src, tokens, flagged, current, strict }
+        Source { src, tokens, flagged, current: index.current(), strict, index }
     }
 
     fn text(&self, first: usize, last: usize) -> &'a str {
@@ -753,8 +774,284 @@ fn site_fix(file: &Source, k: usize, rule: &str) -> Option<Fix> {
         "deprecated.partial_callable" => first_class_callable(file, k),
         "deprecated.implicit_argument" => directory_handle(file, k),
         "behavior.func_get_args_current_value" => original_args(file, k).filter(|_| php5),
+        "deprecated.splfixedarray_wakeup" => wakeup_call(file, k),
+        "deprecated.reflection_method" => reflection_check(file, k),
+        "deprecated.xml_handler_string" => xml_handler(file, k),
+        "deprecated.xml_set_object" => xml_object(file, k),
+        "deprecated.session_set_save_handler" => session_handler(file, k),
+        "removed.__autoload" => autoload_register(file, k),
         _ => None,
     }
+}
+
+/// The first token of the plain variable or property chain that ends right before the `->` at `arrow`.
+fn receiver_start(tokens: &[Token], arrow: usize) -> Option<usize> {
+    let mut j = arrow.checked_sub(1)?;
+    while tokens[j].kind == TokenKind::Ident && j >= 2 && tokens[j - 1].is_punct("->") {
+        j -= 2;
+    }
+    let before = j.checked_sub(1).map(|p| &tokens[p]);
+    (tokens[j].kind == TokenKind::Variable && !before.is_some_and(|p| ["->", "?->", "::", "$"].iter().any(|s| p.is_punct(s)))).then_some(j)
+}
+
+/// `$x->__wakeup();` on an SplFixedArray, when no class of the project extends it.
+fn wakeup_call(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let call = tokens[k].text.eq_ignore_ascii_case("__wakeup")
+        && tokens.get(k + 1).is_some_and(|t| t.is_punct("("))
+        && tokens.get(k + 2).is_some_and(|t| t.is_punct(")"))
+        && tokens.get(k + 3).is_some_and(|t| t.is_punct(";"))
+        && k.checked_sub(1).is_some_and(|p| tokens[p].is_punct("->"));
+    let first = receiver_start(tokens, k.checked_sub(1)?).filter(|_| call)?;
+    (starts_statement(tokens, first) && !file.index.extends_directly("splfixedarray")).then(|| removal(file, first, k + 3, WAKEUP_CALL))
+}
+
+/// `$param->isArray()` / `->isCallable()` → the same check written with getType(), and
+/// `$function->isDisabled()` → `false`.
+fn reflection_check(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let empty = tokens.get(k + 1).is_some_and(|t| t.is_punct("(")) && tokens.get(k + 2).is_some_and(|t| t.is_punct(")"));
+    let arrow = k.checked_sub(1).filter(|&p| tokens[p].is_punct("->") && empty)?;
+    let first = receiver_start(tokens, arrow)?;
+    let (start, end) = (tokens[first].start, tokens[k + 2].end);
+    let ty = match tokens[k].text.to_ascii_lowercase().as_str() {
+        "isdisabled" => return Some(Fix { class: DISABLED_FALSE, start, end, text: "false".into() }),
+        "isarray" => "array",
+        "iscallable" => "callable",
+        _ => return None,
+    };
+    let check = format!(
+        "(static function (\\ReflectionParameter $p): bool {{ $t = $p->getType(); if ($t === null) {{ return false; }} $b = []; foreach ($t instanceof \\ReflectionUnionType ? $t->getTypes() : [$t] as $x) {{ if ($x instanceof \\ReflectionNamedType && $x->isBuiltin() && $x->getName() !== 'null') {{ $b[] = $x->getName(); }} }} return $b === ['{ty}']; }})({})",
+        file.text(first, arrow - 1)
+    );
+    Some(Fix { class: REFLECTION_TYPE_CHECK, start, end, text: check })
+}
+
+/// Whether the variable `name` gets another value, a reference or an unset anywhere from `from` to `to`.
+fn rebinds(tokens: &[Token], from: usize, to: usize, name: &str, except: usize) -> bool {
+    (from..to).filter(|&j| j != except && is_var(tokens, j, name)).any(|j| {
+        let prev = &tokens[j - 1];
+        flow_modifies(tokens, j)
+            || prev.is_punct("&")
+            || prev.is_ident_ci("as")
+            || prev.is_ident_ci("global")
+            || prev.is_ident_ci("static")
+            || enclosing_call(tokens, j).is_some_and(|c| call_named(tokens, c, &["unset", "list"]))
+    })
+}
+
+const XML_HANDLER_CALLS: &[&str] = &[
+    "xml_set_character_data_handler",
+    "xml_set_default_handler",
+    "xml_set_element_handler",
+    "xml_set_end_namespace_decl_handler",
+    "xml_set_external_entity_ref_handler",
+    "xml_set_notation_decl_handler",
+    "xml_set_processing_instruction_handler",
+    "xml_set_start_namespace_decl_handler",
+    "xml_set_unparsed_entity_decl_handler",
+];
+
+/// The parser and object of the one `xml_set_object($p, $o)` for `parser` in the body `(open, end)`.
+fn xml_object_of(file: &Source, open: usize, end: usize, parser: &str) -> Result<Option<(usize, usize, String)>, ()> {
+    let tokens = file.tokens;
+    let nested = nested_bodies(tokens, open, end);
+    let mut found = Vec::new();
+    for j in (open + 1..end).filter(|&j| !nested.iter().any(|&(a, b)| a <= j && j <= b)) {
+        let Some((close, args)) = function_call(tokens, j, &["xml_set_object"]) else { continue };
+        let [p, o] = args[..] else { return Err(()) };
+        if file.text(p.0, p.1) != parser {
+            continue;
+        }
+        let base = &tokens[o.0];
+        if !plain(tokens, o) || base.text != "this" && rebinds(tokens, open + 1, end, &base.text, o.0) {
+            return Err(());
+        }
+        found.push((j, close, file.text(o.0, o.1).to_string()));
+    }
+    match found.len() {
+        0 => Ok(None),
+        1 => Ok(found.pop()),
+        _ => Err(()),
+    }
+}
+
+/// The string handlers of the xml_set_*_handler() call at `k` as callables: `''` → `null`, a
+/// method name → `[$object, 'name']`. `None` when one of them can't be written so.
+fn xml_handler_edits(file: &Source, k: usize, object: Option<&str>) -> Option<Vec<(usize, String)>> {
+    let tokens = file.tokens;
+    let (_, args) = function_call(tokens, k, XML_HANDLER_CALLS)?;
+    let mut edits = Vec::new();
+    for &(f, l) in args.iter().skip(1) {
+        if f != l || !matches!(tokens[f].kind, TokenKind::Str { .. }) {
+            continue;
+        }
+        let value = literal_text(&tokens[f])?;
+        let named =
+            !value.is_empty() && value.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') && !value.as_bytes()[0].is_ascii_digit();
+        let lower = value.to_ascii_lowercase();
+        let global = crate::arity::ARITY.binary_search_by(|(n, _, _)| (*n).cmp(lower.as_str())).is_ok()
+            || file.index.declares_function("", &lower, true)
+            || tokens.windows(2).any(|w| w[0].is_ident_ci("function") && w[1].text.eq_ignore_ascii_case(&value));
+        let text = match object {
+            _ if value.is_empty() => "null".to_string(),
+            Some(o) if named && !global => format!("[{o}, {}]", quoted(&value)),
+            _ => return None,
+        };
+        edits.push((f, text));
+    }
+    Some(edits)
+}
+
+fn xml_handler(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let (_, args) = function_call(tokens, k, XML_HANDLER_CALLS)?;
+    let &(pf, pl) = args.first()?;
+    let function = enclosing_function(tokens, k)?;
+    let (open, end) = function.body?;
+    let object = xml_object_of(file, open, end, file.text(pf, pl)).ok()?;
+    let edits = xml_handler_edits(file, k, object.as_ref().map(|o| o.2.as_str()))?;
+    let (&(first, _), &(last, _)) = (edits.first()?, edits.last()?);
+    let mut text = String::new();
+    let mut at = tokens[first].start;
+    for (f, new) in &edits {
+        text.push_str(&file.src[at..tokens[*f].start]);
+        text.push_str(new);
+        at = tokens[*f].end;
+    }
+    Some(Fix { class: XML_CALLABLE, start: tokens[first].start, end: tokens[last].end, text })
+}
+
+/// `xml_set_object($p, $o);` once every handler of `$p` in the file is set in the same function and
+/// none of them is left a string.
+fn xml_object(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let (close, args) = function_call(tokens, k, &["xml_set_object"])?;
+    let [(pf, pl), _] = args[..] else { return None };
+    let parser = file.text(pf, pl);
+    let function = enclosing_function(tokens, k)?;
+    let (open, end) = function.body?;
+    let (_, _, object) = xml_object_of(file, open, end, parser).ok()??;
+    if !is_statement(tokens, k, close) {
+        return None;
+    }
+    let range = if parser.starts_with("$this->") { 0..tokens.len() } else { open + 1..end };
+    for j in range {
+        let Some((_, handler_args)) = function_call(tokens, j, XML_HANDLER_CALLS) else { continue };
+        if handler_args.first().is_none_or(|&(f, l)| file.text(f, l) != parser) {
+            continue;
+        }
+        if j < open || j > end || enclosing_function(tokens, j).map(|f| f.keyword) != Some(function.keyword) {
+            return None;
+        }
+        xml_handler_edits(file, j, Some(&object))?;
+    }
+    Some(removal(file, k, close + 1, XML_OBJECT))
+}
+
+const SESSION_METHODS: [(&str, &str); 6] =
+    [("open", "$path, $name"), ("close", ""), ("read", "$id"), ("write", "$id, $data"), ("destroy", "$id"), ("gc", "$max")];
+
+/// `session_set_save_handler($open, …, $gc)` → the same callables behind a SessionHandlerInterface
+/// object, with `false` so that, as before, no session_write_close() is registered for shutdown.
+fn session_handler(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let (close, args) = function_call(tokens, k, &["session_set_save_handler"])?;
+    if args.len() != SESSION_METHODS.len() {
+        return None;
+    }
+    let class = crate::index::class_decls(tokens).into_iter().filter(|d| d.open < k && k < d.close).max_by_key(|d| d.open);
+    let public_method = |name: &str| {
+        class.as_ref().is_some_and(|d| {
+            (d.open..d.close).any(|j| {
+                tokens[j].is_ident_ci("function")
+                    && tokens.get(j + 1).is_some_and(|n| n.text.eq_ignore_ascii_case(name))
+                    && !(d.open..j)
+                        .rev()
+                        .take_while(|&m| tokens[m].kind == TokenKind::Ident)
+                        .any(|m| tokens[m].is_ident_ci("private") || tokens[m].is_ident_ci("protected"))
+            })
+        })
+    };
+    let callable = |&(f, l): &(usize, usize)| {
+        let t = &tokens[f];
+        let closure = t.is_ident_ci("function")
+            || t.is_ident_ci("fn")
+            || t.is_ident_ci("static") && tokens.get(f + 1).is_some_and(|n| n.is_ident_ci("function") || n.is_ident_ci("fn"));
+        let name = f == l
+            && literal_text(t).is_some_and(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'\\'));
+        let pair = match &tokens[f..=l] {
+            [o, this, comma, m, c] if o.is_punct("[") && c.is_punct("]") => Some((this, comma, m)),
+            [a, o, this, comma, m, c] if a.is_ident_ci("array") && o.is_punct("(") && c.is_punct(")") => Some((this, comma, m)),
+            _ => None,
+        };
+        let own = pair.is_some_and(|(this, comma, m)| {
+            this.kind == TokenKind::Variable
+                && this.text == "this"
+                && comma.is_punct(",")
+                && literal_text(m).is_some_and(|m| public_method(&m))
+        });
+        closure || name || own
+    };
+    if !args.iter().all(callable) {
+        return None;
+    }
+    let src = file.src;
+    let line_start = src[..tokens[k].start].rfind('\n').map_or(0, |i| i + 1);
+    let indent: String = src[line_start..tokens[k].start].chars().take_while(|c| *c == ' ' || *c == '\t').collect();
+    let nl = if src.contains("\r\n") { "\r\n" } else { "\n" };
+    let inner = format!("{indent}    ");
+    let callables = file.text(args[0].0, args[args.len() - 1].1);
+    let mut lines = vec![
+        format!("{}session_set_save_handler(new class({callables}) implements \\SessionHandlerInterface {{", lead(&tokens[k])),
+        format!("{inner}private $c;"),
+        String::new(),
+        format!("{inner}public function __construct(...$c)"),
+        format!("{inner}{{"),
+        format!("{inner}    $this->c = $c;"),
+        format!("{inner}}}"),
+    ];
+    for (i, (method, params)) in SESSION_METHODS.iter().enumerate() {
+        lines.push(String::new());
+        lines.push(format!("{inner}#[\\ReturnTypeWillChange]"));
+        lines.push(format!("{inner}public function {method}({params})"));
+        lines.push(format!("{inner}{{"));
+        lines.push(format!("{inner}    return ($this->c[{i}])({params});"));
+        lines.push(format!("{inner}}}"));
+    }
+    lines.push(format!("{indent}}}, false)"));
+    let text = lines.join(nl);
+    Some(Fix { class: SESSION_HANDLER, start: tokens[k].start, end: tokens[close].end, text })
+}
+
+/// `function __autoload($class) { … }` → `spl_autoload_register(function ($class) { … });`, when
+/// nothing else in the project registers or names an autoloader and no code above it needed it.
+fn autoload_register(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let keyword = (0..k).rev().find(|&j| !tokens[j].is_punct("&"))?;
+    if !tokens[keyword].is_ident_ci("function") || !tokens[k].text.eq_ignore_ascii_case("__autoload") || file.index.hooks_autoload() {
+        return None;
+    }
+    let (_, close) = crate::declarations::function_at(tokens, keyword)?.body?;
+    let mut depth = 0isize;
+    for t in &tokens[..keyword] {
+        if t.is_punct("{") {
+            depth += 1;
+        } else if t.is_punct("}") {
+            depth -= 1;
+        }
+    }
+    let uses_classes = tokens[..keyword].iter().any(|t| {
+        ["new", "instanceof", "extends", "implements", "class_exists", "interface_exists"].iter().any(|w| t.is_ident_ci(w))
+            || t.is_punct("::")
+    });
+    let names_itself = tokens[k + 1..close].iter().any(|t| t.is_ident_ci("__FUNCTION__") || t.is_ident_ci("__autoload"));
+    if depth != 0 || uses_classes || names_itself {
+        return None;
+    }
+    let by_ref = if keyword + 1 < k { "&" } else { "" };
+    let text = format!("spl_autoload_register(function {by_ref}{});", &file.src[tokens[k].end..tokens[close].end]);
+    Some(Fix { class: AUTOLOAD_REGISTER, start: tokens[keyword].start, end: tokens[close].end, text })
 }
 
 const CONTROL_WORDS: &[&str] = &[
@@ -2043,13 +2340,22 @@ fn by_position(tokens: &[Token]) -> std::collections::HashMap<(usize, usize), us
 }
 
 /// Marks the findings a fix takes as automatic.
-pub(crate) fn mark(src: &str, tokens: &[Token], findings: &mut [Finding], current: Option<PhpVersion>) {
+/// `guessed` holds the positions of findings whose receiver type was taken from elsewhere in the
+/// class: their fixes would rest on a guess, so they stay manual.
+pub(crate) fn mark(
+    src: &str,
+    tokens: &[Token],
+    findings: &mut [Finding],
+    index: &crate::index::ProjectIndex,
+    guessed: &HashSet<(usize, usize)>,
+) {
     if !findings.iter().any(|f| f.fix == FixKind::Manual && handles(&f.rule_id)) {
         return;
     }
     let at_position = by_position(tokens);
-    let file = Source::new(src, tokens, findings, &at_position, current);
-    for (i, fix) in plan(&file, findings, &at_position) {
+    let file = Source::new(src, tokens, findings, &at_position, index);
+    let open = |f: &Finding| f.fix == FixKind::Manual && !guessed.contains(&(f.line, f.column));
+    for (i, fix) in plan(&file, findings, &at_position, &open) {
         if findings[i].fix == FixKind::Manual {
             findings[i].fix = crate::rector::describe_rule(fix.class).fix;
         }
@@ -2058,11 +2364,16 @@ pub(crate) fn mark(src: &str, tokens: &[Token], findings: &mut [Finding], curren
 
 /// The fixes the findings allow, by finding. A fix inside another one, or crossing it, is left out
 /// and its finding stays manual.
-fn plan(file: &Source, findings: &[Finding], at_position: &std::collections::HashMap<(usize, usize), usize>) -> Vec<(usize, Fix)> {
+fn plan(
+    file: &Source,
+    findings: &[Finding],
+    at_position: &std::collections::HashMap<(usize, usize), usize>,
+    include: &dyn Fn(&Finding) -> bool,
+) -> Vec<(usize, Fix)> {
     let all: Vec<(usize, Fix)> = findings
         .iter()
         .enumerate()
-        .filter(|(_, f)| handles(&f.rule_id))
+        .filter(|(_, f)| handles(&f.rule_id) && include(f))
         .filter_map(|(i, f)| at_position.get(&(f.line, f.column)).and_then(|&k| at(file, k, &f.rule_id)).map(|fix| (i, fix)))
         .collect();
     let inside = |fix: &Fix| all.iter().any(|(_, o)| o.start <= fix.start && fix.end <= o.end && (o.start, o.end) != (fix.start, fix.end));
@@ -2096,8 +2407,9 @@ pub(crate) fn apply(
     let text = if classic_mac { src.replace('\r', "\n") } else { src.to_string() };
     let tokens = crate::lexer::tokenize(&text);
     let at_position = by_position(&tokens);
-    let file = Source::new(&text, &tokens, &findings, &at_position, index.current());
-    let mut fixes: Vec<Fix> = plan(&file, &findings, &at_position).into_iter().map(|(_, fix)| fix).collect();
+    let file = Source::new(&text, &tokens, &findings, &at_position, index);
+    let marked = |f: &Finding| f.fix != FixKind::Manual;
+    let mut fixes: Vec<Fix> = plan(&file, &findings, &at_position, &marked).into_iter().map(|(_, fix)| fix).collect();
     fixes.dedup_by(|a, b| (a.start, a.end) == (b.start, b.end));
     fixes.reverse();
     let mut out = src.to_string();
@@ -2475,11 +2787,13 @@ mod tests {
         let at_position = by_position(&crate::lexer::tokenize(src));
         let tokens = crate::lexer::tokenize(src);
         let findings = crate::analyzer::analyze_source("t.php", src, PhpVersion::new(8, 5));
-        let file = Source::new(src, &tokens, &findings, &at_position, Some(php5));
-        let marked: String = plan(&file, &findings, &at_position).into_iter().rev().fold(src.to_string(), |mut text, (_, fix)| {
-            text.replace_range(fix.start..fix.end, &fix.text);
-            text
-        });
+        let index = crate::index::ProjectIndex::from_tokens(&tokens).with_current(php5);
+        let file = Source::new(src, &tokens, &findings, &at_position, &index);
+        let marked: String =
+            plan(&file, &findings, &at_position, &|_| true).into_iter().rev().fold(src.to_string(), |mut text, (_, fix)| {
+                text.replace_range(fix.start..fix.end, &fix.text);
+                text
+            });
         assert_eq!(marked, out, "the fix that marks the finding is the one staging applies");
         assert_eq!(kinds_of(&fixes_from(src, php5), "behavior.indirect_access_order"), [FixKind::Likely; 2]);
         assert_eq!(kinds_of(&fixes_from(src, PhpVersion::new(7, 0)), "behavior.indirect_access_order"), [FixKind::Manual; 2]);
@@ -2604,5 +2918,93 @@ mod tests {
         let kinds = kinds_of(&fixes_from(src, php5), "behavior.func_get_args_current_value");
         assert_eq!(kinds, [FixKind::Likely, FixKind::Manual, FixKind::Manual, FixKind::Likely]);
         assert_eq!(fixed_from(src, PhpVersion::new(7, 4)), None);
+    }
+
+    #[test]
+    fn spl_wakeup_calls_go() {
+        let src = "<?php\nfunction f($snapshot) {\n    $items = new SplFixedArray(3);\n    $items->__wakeup();\n    return $items;\n}\n";
+        let (out, classes) = fixed(src).unwrap();
+        assert_eq!(out, "<?php\nfunction f($snapshot) {\n    $items = new SplFixedArray(3);\n    return $items;\n}\n");
+        assert_eq!(classes, [WAKEUP_CALL]);
+        assert_eq!(kinds_of(&fixes(src), "deprecated.splfixedarray_wakeup"), [FixKind::Likely]);
+        let subclass = format!("{src}class Slots extends SplFixedArray {{ public $extra = 1; }}\n");
+        assert_eq!(fixed(&subclass), None);
+        let guessed = "<?php\nclass Q {\n    public function make() { $items = new SplFixedArray(2); return $items; }\n    public function restore($items) { $items->__wakeup(); }\n}\n";
+        let kinds = kinds_of(&fixes(guessed), "deprecated.splfixedarray_wakeup");
+        assert!(kinds.iter().all(|k| *k == FixKind::Manual), "{kinds:?}");
+        assert_eq!(fixed(guessed), None);
+    }
+
+    #[test]
+    fn reflection_type_checks() {
+        let src = "<?php\nfunction f(ReflectionFunction $rf) {\n    foreach ($rf->getParameters() as $param) {\n        $a = $param->isArray();\n        $c = $param->isCallable();\n        $k = $param->getClass();\n    }\n    return $rf->isDisabled() || (new ReflectionFunction('x'))->isDisabled();\n}\n";
+        let (out, classes) = fixed(src).unwrap();
+        assert!(out.contains("$a = (static function (\\ReflectionParameter $p): bool { $t = $p->getType();"), "{out}");
+        assert!(out.contains("return $b === ['array']; })($param);\n        $c = (static function"), "{out}");
+        assert!(out.contains("return $b === ['callable']; })($param);\n        $k = $param->getClass();"), "{out}");
+        assert!(out.contains("return false || (new ReflectionFunction('x'))->isDisabled();"), "{out}");
+        assert_eq!(classes, [REFLECTION_TYPE_CHECK, DISABLED_FALSE]);
+        let kinds = kinds_of(&fixes(src), "deprecated.reflection_method");
+        assert_eq!(kinds, [FixKind::Auto, FixKind::Auto, FixKind::Manual, FixKind::Auto, FixKind::Manual]);
+    }
+
+    #[test]
+    fn xml_handlers_become_callables() {
+        let src = "<?php\nclass Feed {\n    public function parse($xml, $handler) {\n        $parser = xml_parser_create();\n        xml_set_object($parser, $handler);\n        xml_set_element_handler($parser, 'openTag', 'closeTag');\n        xml_set_character_data_handler($parser, 'text');\n        xml_set_default_handler($parser, '');\n        xml_parse($parser, $xml);\n    }\n    public function other($xml) {\n        $p = xml_parser_create();\n        xml_set_object($p, $this);\n        xml_set_element_handler($p, 'start', 'end');\n    }\n}\n";
+        let (out, classes) = fixed(src).unwrap();
+        assert!(
+            out.contains("        $parser = xml_parser_create();\n        xml_set_element_handler($parser, [$handler, 'openTag'], [$handler, 'closeTag']);\n        xml_set_character_data_handler($parser, [$handler, 'text']);\n        xml_set_default_handler($parser, null);\n"),
+            "{out}"
+        );
+        assert!(out.contains("xml_set_object($p, $this);\n        xml_set_element_handler($p, 'start', 'end');"), "{out}");
+        let shared = src.replace("($p,", "($parser,").replace("$p = ", "$parser = ");
+        assert_eq!(shared.matches("$parser").count(), 9, "{shared}");
+        let found = fixes(&shared);
+        assert_eq!(
+            kinds_of(&found, "deprecated.xml_set_object"),
+            [FixKind::Auto, FixKind::Manual],
+            "a local in another method is another parser"
+        );
+        let property = shared.replace("$parser", "$this->parser");
+        assert_eq!(
+            kinds_of(&fixes(&property), "deprecated.xml_set_object"),
+            [FixKind::Manual, FixKind::Manual],
+            "a property is shared by the methods"
+        );
+        assert_eq!(classes, [XML_OBJECT, XML_CALLABLE]);
+        let found = fixes(src);
+        assert_eq!(kinds_of(&found, "deprecated.xml_handler_string"), [FixKind::Auto, FixKind::Auto, FixKind::Auto, FixKind::Manual]);
+        assert_eq!(kinds_of(&found, "deprecated.xml_set_object"), [FixKind::Auto, FixKind::Manual]);
+    }
+
+    #[test]
+    fn session_callables_get_a_handler_object() {
+        let src = "<?php\nfunction boot() {\n    session_set_save_handler('m_open', 'm_close', 'm_read', 'm_write', 'm_destroy', 'm_gc');\n}\nclass S {\n    public function start() {\n        session_set_save_handler([$this, 'open'], [$this, 'close'], [$this, 'read'], [$this, 'write'], [$this, 'destroy'], [$this, 'gc']);\n    }\n    public function open($p, $n) {} public function close() {} public function read($i) {} public function write($i, $d) {} public function destroy($i) {} private function gc($m) {}\n}\nsession_set_save_handler($o, $c, $r, $w, $d, $g);\n";
+        let (out, classes) = fixed(src).unwrap();
+        assert!(
+            out.starts_with("<?php\nfunction boot() {\n    session_set_save_handler(new class('m_open', 'm_close', 'm_read', 'm_write', 'm_destroy', 'm_gc') implements \\SessionHandlerInterface {\n        private $c;\n\n        public function __construct(...$c)\n        {\n            $this->c = $c;\n        }\n\n        #[\\ReturnTypeWillChange]\n        public function open($path, $name)\n        {\n            return ($this->c[0])($path, $name);\n        }\n"),
+            "{out}"
+        );
+        assert!(out.contains("            return ($this->c[5])($max);\n        }\n    }, false);\n}\nclass S {"), "{out}");
+        assert!(out.contains("session_set_save_handler([$this, 'open'],") && out.contains("session_set_save_handler($o, $c,"), "{out}");
+        assert_eq!(classes, [SESSION_HANDLER]);
+        assert_eq!(kinds_of(&fixes(src), "deprecated.session_set_save_handler"), [FixKind::Likely, FixKind::Manual, FixKind::Manual]);
+    }
+
+    #[test]
+    fn autoload_becomes_a_registered_closure() {
+        let src = "<?php\nerror_reporting(E_ALL);\n\nfunction __autoload($class)\n{\n    require __DIR__ . '/' . $class . '.php';\n}\n\n$x = new Foo();\n";
+        let (out, classes) = fixed(src).unwrap();
+        assert_eq!(out, "<?php\nerror_reporting(E_ALL);\n\nspl_autoload_register(function ($class)\n{\n    require __DIR__ . '/' . $class . '.php';\n});\n\n$x = new Foo();\n");
+        assert_eq!(classes, [AUTOLOAD_REGISTER]);
+        assert_eq!(kinds_of(&fixes(src), "removed.__autoload"), [FixKind::Likely]);
+        for other in [
+            format!("{src}spl_autoload_register('load');\n"),
+            format!("{src}require __DIR__ . '/vendor/autoload.php';\n"),
+            src.replace("error_reporting(E_ALL);", "$early = new Bar();"),
+            src.replace("require __DIR__", "echo __FUNCTION__; require __DIR__"),
+        ] {
+            assert_eq!(fixed(&other), None, "{other}");
+        }
     }
 }

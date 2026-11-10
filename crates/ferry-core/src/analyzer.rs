@@ -562,6 +562,7 @@ pub fn analyze_source_in(file: &str, src: &str, target: PhpVersion, index: &crat
         namespaces: crate::index::namespaces(&tokens),
         receivers: Receivers::new(&tokens),
         defined: defined_constants(&tokens),
+        guessed: Default::default(),
         out: Vec::new(),
     };
     for &(line, column) in &lexed.stray_hash_brackets {
@@ -755,7 +756,7 @@ pub fn analyze_source_in(file: &str, src: &str, target: PhpVersion, index: &crat
             _ => {}
         }
     }
-    crate::fixes::mark(src, &tokens, &mut ctx.out, index.current());
+    crate::fixes::mark(src, &tokens, &mut ctx.out, index, &ctx.guessed);
     ctx.out
 }
 
@@ -906,6 +907,7 @@ struct Ctx<'a> {
     index: &'a crate::index::ProjectIndex,
     namespaces: Vec<(usize, String)>,
     defined: std::collections::HashSet<String>,
+    guessed: std::collections::HashSet<(usize, usize)>,
     out: Vec<Finding>,
 }
 
@@ -1465,6 +1467,9 @@ impl<'a> Ctx<'a> {
             (_, c) => format!("{}::{}", c.unwrap_or_default(), tok.text),
         };
         let guessed = known.as_ref().is_some_and(|types| types.contains(GUESSED));
+        if guessed {
+            self.guessed.insert((tok.line, tok.column));
+        }
         let hit = Hit {
             rule_id: rule.id,
             title: Localized::same(title),

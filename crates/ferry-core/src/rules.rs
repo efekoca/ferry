@@ -1451,8 +1451,8 @@ pub mod patterns {
         replacement: code("spl_autoload_register()"),
         fix: FixKind::Manual,
         note: Text::new(
-            "__autoload() PHP 8.0'da kaldırıldı; artık hiç çağrılmıyor.",
-            "__autoload() was removed in PHP 8.0 and is never called anymore.",
+            "__autoload() PHP 8.0'da kaldırıldı; bu adla fonksiyon tanımlamak ölümcül hata verir ve dosya yüklenmez. Projede başka bir autoloader yoksa aynı gövdeyi spl_autoload_register(function ($class) { … }) ile kaydetmek eski davranışı korur.",
+            "__autoload() was removed in PHP 8.0; declaring a function with that name is a fatal error and the file doesn't load. If the project has no other autoloader, registering the same body with spl_autoload_register(function ($class) { … }) keeps the old behavior.",
         ),
     };
     pub const UNBALANCED: PatternRule = PatternRule {
@@ -2022,8 +2022,8 @@ pub mod patterns {
         replacement: code("session_set_save_handler(new MyHandler())"),
         fix: FixKind::Manual,
         note: Text::new(
-            "session_set_save_handler()'a ayrı fonksiyonlar vermek 8.4'te kullanımdan kalktı; SessionHandlerInterface uygulayan bir nesne verin.",
-            "Passing separate callables to session_set_save_handler() is deprecated in 8.4; pass an object implementing SessionHandlerInterface.",
+            "session_set_save_handler()'a ayrı fonksiyonlar vermek 8.4'te kullanımdan kalktı; SessionHandlerInterface uygulayan bir nesne verin. Aynı fonksiyonları çağıran bir nesne eski davranışı korur; ikinci argüman olarak false verin, çünkü fonksiyonlu biçim kapanışta session_write_close() kaydetmiyordu.",
+            "Passing separate callables to session_set_save_handler() is deprecated in 8.4; pass an object implementing SessionHandlerInterface. An object that calls the same functions keeps the old behavior; pass false as the second argument, because the callable form didn't register session_write_close() for shutdown.",
         ),
     };
     pub const INI_SETTING: PatternRule = PatternRule {
