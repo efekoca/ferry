@@ -100,6 +100,7 @@ pub struct ProjectIndex {
     enums: HashSet<String>,
     target: Option<crate::version::PhpVersion>,
     current: Option<crate::version::PhpVersion>,
+    autoload_hooks: bool,
     overridden_by_all: std::sync::OnceLock<HashMap<String, HashSet<String>>>,
     redefines_checks: std::sync::OnceLock<bool>,
 }
@@ -165,6 +166,17 @@ impl ProjectIndex {
     /// The version the project runs on today, when its composer.json says.
     pub(crate) fn current(&self) -> Option<crate::version::PhpVersion> {
         self.current
+    }
+
+    /// Whether the project registers an autoloader, requires one, or names `__autoload` anywhere
+    /// but its declaration.
+    pub(crate) fn hooks_autoload(&self) -> bool {
+        self.autoload_hooks
+    }
+
+    /// Whether a class of the project extends `parent` directly.
+    pub(crate) fn extends_directly(&self, parent: &str) -> bool {
+        self.types.values().flatten().any(|t| t.parent.as_deref().is_some_and(|p| short(p) == parent))
     }
 
     #[cfg(test)]
@@ -248,6 +260,12 @@ impl ProjectIndex {
         let mut added = Vec::new();
         self.constants.extend(crate::analyzer::declared_constants(tokens));
         self.mysqli_report |= tokens.iter().any(|t| t.is_ident_ci("mysqli_report") || t.is_ident_ci("report_mode"));
+        self.autoload_hooks |= tokens.iter().enumerate().any(|(i, t)| {
+            let declared = tokens[..i].iter().rev().find(|p| !p.is_punct("&")).is_some_and(|p| p.is_ident_ci("function"));
+            t.is_ident_ci("spl_autoload_register")
+                || t.is_ident_ci("__autoload") && !declared
+                || t.literal().is_some_and(|s| s.to_ascii_lowercase().ends_with("autoload.php") || s.eq_ignore_ascii_case("__autoload"))
+        });
         let methods = crate::analyzer::method_tokens(tokens);
         let spaces = namespaces(tokens);
         let names = Names::new(tokens);

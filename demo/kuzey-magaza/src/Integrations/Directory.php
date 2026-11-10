@@ -40,4 +40,13 @@ class Directory
         xml_parse($parser, $xml);
         xml_parser_free($parser);
     }
+
+    public function parseFeed($xml, $handler)
+    {
+        $parser = xml_parser_create();
+        xml_set_object($parser, $handler);
+        xml_set_element_handler($parser, 'openItem', 'closeItem');
+        xml_set_character_data_handler($parser, 'text');
+        xml_parse($parser, $xml);
+    }
 }

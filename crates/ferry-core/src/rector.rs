@@ -168,6 +168,9 @@ const LIKELY_RULES: &[&str] = &[
     "LastResponseHeaders",
     "PassDirectoryHandle",
     "KeepOriginalArguments",
+    "RemoveSplFixedArrayWakeup",
+    "SessionHandlerObject",
+    "AutoloadToSplRegister",
 ];
 
 const RULE_TITLES: &[(&str, Text)] = &[
@@ -241,6 +244,19 @@ const RULE_TITLES: &[(&str, Text)] = &[
     ("FirstClassCallable", Text::same("'self::m' → self::m(...)")),
     ("PassDirectoryHandle", Text::same("readdir() → readdir($dir)")),
     ("KeepOriginalArguments", Text::new("func_get_args() fonksiyonun başında okunur", "Read func_get_args() at the start of the function")),
+    ("RemoveSplFixedArrayWakeup", Text::new("SplFixedArray::__wakeup() çağrısı silinir", "Remove SplFixedArray::__wakeup() calls")),
+    ("ReflectionParameterTypeCheck", Text::same("isArray() / isCallable() → getType()")),
+    ("IsDisabledToFalse", Text::same("ReflectionFunction::isDisabled() → false")),
+    ("XmlHandlerCallable", Text::same("'method' → [$object, 'method']")),
+    ("RemoveXmlSetObject", Text::new("xml_set_object() silinir", "Remove xml_set_object()")),
+    (
+        "SessionHandlerObject",
+        Text::new(
+            "Oturum fonksiyonları SessionHandlerInterface nesnesine taşınır",
+            "Wrap session callables in a SessionHandlerInterface object",
+        ),
+    ),
+    ("AutoloadToSplRegister", Text::same("__autoload() → spl_autoload_register()")),
     (
         "ParenthesizeNestedTernaryRector",
         Text::new("İç içe ternary paranteze alınır (eski davranış korunur)", "Parenthesize nested ternaries (keeps the old behaviour)"),
