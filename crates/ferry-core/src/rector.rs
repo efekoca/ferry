@@ -165,6 +165,9 @@ const LIKELY_RULES: &[&str] = &[
     "IdnaVariantUts46",
     "SubstrFalseToEmptyString",
     "KeepVariableVariableOrder",
+    "LastResponseHeaders",
+    "PassDirectoryHandle",
+    "KeepOriginalArguments",
 ];
 
 const RULE_TITLES: &[(&str, Text)] = &[
@@ -231,6 +234,13 @@ const RULE_TITLES: &[(&str, Text)] = &[
     ("SubstrFalseToEmptyString", Text::same("substr() === false → substr() === ''")),
     ("KeepVariableVariableOrder", Text::same("$$a['b'] → ${$a['b']}")),
     ("BraceVariableVariable", Text::same("$$a['b'] → ${$a}['b']")),
+    ("FalseToEmptyArray", Text::new("false ile başlatılan dizi [] ile başlatılır", "Start arrays with [] instead of false")),
+    ("GmstrftimeToGmdate", Text::same("gmstrftime() → gmdate()")),
+    ("LastResponseHeaders", Text::same("$http_response_header → http_get_last_response_headers()")),
+    ("NullOffsetToEmptyString", Text::same("$a[null] → $a['']")),
+    ("FirstClassCallable", Text::same("'self::m' → self::m(...)")),
+    ("PassDirectoryHandle", Text::same("readdir() → readdir($dir)")),
+    ("KeepOriginalArguments", Text::new("func_get_args() fonksiyonun başında okunur", "Read func_get_args() at the start of the function")),
     (
         "ParenthesizeNestedTernaryRector",
         Text::new("İç içe ternary paranteze alınır (eski davranış korunur)", "Parenthesize nested ternaries (keeps the old behaviour)"),

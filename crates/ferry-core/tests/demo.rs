@@ -139,6 +139,13 @@ fn kuzey_magaza_triggers_every_rule() {
         "behavior.substr_false",
         "behavior.indirect_access_order",
         "review.variable_variable",
+        "deprecated.false_to_array",
+        "deprecated.gmstrftime",
+        "deprecated.http_response_header",
+        "deprecated.null_offset",
+        "deprecated.partial_callable",
+        "deprecated.implicit_argument",
+        "behavior.func_get_args_current_value",
     ];
     for id in own_fixes {
         assert!(

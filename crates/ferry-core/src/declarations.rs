@@ -39,7 +39,7 @@ fn type_parts(tokens: &[Token]) -> Vec<String> {
 pub(crate) struct Param {
     pub(crate) var: usize,
     types: Vec<String>,
-    default: Option<usize>,
+    pub(crate) default: Option<usize>,
 }
 
 fn params(tokens: &[Token], open: usize, close: usize) -> Vec<Param> {

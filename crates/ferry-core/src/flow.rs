@@ -220,7 +220,11 @@ pub(crate) fn check(tokens: &[Token]) -> Vec<(usize, &'static PatternRule)> {
             let mention = next_mention(tokens, k, &t.text);
             if single && value.is_ident_ci("false") && mention.is_some_and(|m| tokens.get(m + 1).is_some_and(|n| n.is_punct("["))) {
                 let m = mention.unwrap_or(k);
-                let write = close_of(tokens, m + 1).is_some_and(|c| tokens.get(c + 1).is_some_and(|e| e.is_punct("=")));
+                let mut end = close_of(tokens, m + 1);
+                while let Some(c) = end.filter(|&c| tokens.get(c + 1).is_some_and(|n| n.is_punct("["))) {
+                    end = close_of(tokens, c + 1);
+                }
+                let write = end.is_some_and(|c| tokens.get(c + 1).is_some_and(|e| e.is_punct("=")));
                 if write {
                     out.push((m, &FALSE_TO_ARRAY));
                 }
