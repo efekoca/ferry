@@ -22,6 +22,13 @@ pub const MAGIC_QUOTES: &str = "Ferry\\Php80\\MagicQuotesOff";
 pub const UNUSED_ARGUMENT: &str = "Ferry\\Php84\\RemoveUnusedArgument";
 pub const FUNCTION_RENAME: &str = "Ferry\\RenameFunction";
 pub const REFLECTION_EXPORT: &str = "Ferry\\Php80\\ReflectionExportToString";
+pub const LDAP_PAGING: &str = "Ferry\\Php80\\LdapPagedControl";
+pub const ASSERT_DEFAULT: &str = "Ferry\\Php83\\RemoveDefaultAssertOption";
+pub const ZIP_LEVEL: &str = "Ferry\\Php83\\DropRecompressLevel";
+pub const GETSS: &str = "Ferry\\Php80\\StripTagsAfterRead";
+pub const RECODE: &str = "Ferry\\Php74\\RecodeToIconv";
+pub const EZMLM: &str = "Ferry\\Php80\\InlineEzmlmHash";
+pub const REGCASE: &str = "Ferry\\Php70\\SqlRegcaseToCallback";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Fix {
@@ -221,7 +228,30 @@ const REFLECTION_EXPORTS: [(&str, usize); 9] = [
     ("reflectionclassconstant", 2),
 ];
 
-const CALL_RULES: [&str; 15] = [
+/// (ASSERT_ name, value on PHP 8, literals that set its default).
+const ASSERT_SETTINGS: [(&str, &str, &[&str]); 5] = [
+    ("ACTIVE", "1", &["1", "true", "'1'", "\"1\"", "'on'", "\"on\""]),
+    ("CALLBACK", "2", &["null", "''", "\"\""]),
+    ("BAIL", "3", &["0", "false", "'0'", "\"0\"", "'off'", "\"off\""]),
+    ("WARNING", "4", &["1", "true", "'1'", "\"1\"", "'on'", "\"on\""]),
+    ("EXCEPTION", "5", &["1", "true", "'1'", "\"1\"", "'on'", "\"on\""]),
+];
+
+/// recode charset names and their iconv names, for the pairs compared against PHP 5.6.
+const RECODE_CHARSETS: [(&str, &str); 8] = [
+    ("utf8", "UTF-8"),
+    ("utf-8", "UTF-8"),
+    ("latin1", "ISO-8859-1"),
+    ("iso-8859-1", "ISO-8859-1"),
+    ("iso8859-1", "ISO-8859-1"),
+    ("latin5", "ISO-8859-9"),
+    ("iso-8859-9", "ISO-8859-9"),
+    ("iso8859-9", "ISO-8859-9"),
+];
+
+const EZMLM_PORT: &str = "(static function (string $address): int { $hash = 5381; for ($i = 0, $n = strlen($address); $i < $n; $i++) { $hash = (($hash + ($hash << 5)) ^ ord(strtolower($address[$i]))) & 0xFFFFFFFF; } return $hash % 53; })";
+
+const CALL_RULES: [&str; 27] = [
     "deprecated.mhash",
     "deprecated.mhash_constant",
     "deprecated.mysqli_kill",
@@ -237,6 +267,18 @@ const CALL_RULES: [&str; 15] = [
     "deprecated.mysqli_store_result_copy_data",
     "removed.datefmt_set_timezone_id",
     "removed.reflection_export",
+    "removed.ldap_control_paged_result",
+    "removed.ldap_control_paged_result_response",
+    "deprecated.assert_options",
+    "deprecated.assert_constants",
+    "removed.assert_quiet_eval",
+    "deprecated.zip_fl_recompress",
+    "removed.fgetss",
+    "removed.gzgetss",
+    "removed.recode",
+    "removed.ezmlm_hash",
+    "removed.sql_regcase",
+    "deprecated.curlopt_binarytransfer",
 ];
 
 fn handles(rule: &str) -> bool {
@@ -271,6 +313,15 @@ pub(crate) fn mentions(src: &str) -> bool {
         "get_magic_quotes",
         "store_result",
         "settimezoneid",
+        "ldap_control_paged_result",
+        "assert_options",
+        "assert_",
+        "fl_recompress",
+        "fgetss",
+        "gzgetss",
+        "recode",
+        "ezmlm_hash",
+        "sql_regcase",
     ];
     OCI_ALIASES.iter().map(|(old, _)| *old).chain(NO_OP_CALLS.iter().map(|(_, f, _)| *f)).chain(calls).any(|name| lower.contains(name))
         || (lower.contains("unset") && src.contains("$this"))
@@ -853,6 +904,100 @@ fn argument_of(tokens: &[Token], k: usize) -> Option<(usize, usize, (usize, usiz
     Some((call, index, args[index]))
 }
 
+/// assert_options(ASSERT_X, VALUE); as a statement: ASSERT_QUIET_EVAL always goes, the others when
+/// VALUE is the setting's default.
+fn assert_options_fix(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let (close, args) = function_call(tokens, k, &["assert_options"])?;
+    if !is_statement(tokens, k, close) {
+        return None;
+    }
+    let (first, last) = *args.first()?;
+    let name = tokens[first].text.trim_start_matches('\\').strip_prefix("ASSERT_").filter(|_| first == last)?;
+    if name == "QUIET_EVAL" && args.len() <= 2 {
+        return Some(removal(file, k, close + 1, NO_OP_CALL));
+    }
+    let (_, _, defaults) = ASSERT_SETTINGS.iter().find(|(n, ..)| *n == name)?;
+    let value = args.get(1).filter(|&&(f, l)| f == l && args.len() == 2)?;
+    let literal = tokens[value.0].text.to_ascii_lowercase();
+    defaults.contains(&literal.as_str()).then(|| removal(file, k, close + 1, ASSERT_DEFAULT))
+}
+
+/// ldap_control_paged_result($link, $size[, $critical[, $cookie]]) sets the same control the
+/// connection-wide way ldap_set_option() does.
+fn paged_result_fix(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let (close, args) = function_call(tokens, k, &["ldap_control_paged_result"])?;
+    if !(2..=4).contains(&args.len()) || !args.iter().all(|&a| plain(tokens, a) || literal(tokens, a)) {
+        return None;
+    }
+    let text = |a: (usize, usize)| file.text(a.0, a.1).to_string();
+    let critical = match args.get(2) {
+        None => "false".to_string(),
+        Some(&a) if ["true", "false"].iter().any(|w| tokens[a.0].is_ident_ci(w)) => text(a).to_ascii_lowercase(),
+        Some(&a) => format!("(bool) {}", text(a)),
+    };
+    let cookie = args.get(3).map_or_else(|| "''".to_string(), |&a| text(a));
+    let control = format!(
+        "[['oid' => LDAP_CONTROL_PAGEDRESULTS, 'iscritical' => {critical}, 'value' => ['size' => {}, 'cookie' => {cookie}]]]",
+        text(args[1])
+    );
+    let call = format!("{}ldap_set_option({}, LDAP_OPT_SERVER_CONTROLS, {control})", lead(&tokens[k]), text(args[0]));
+    Some(Fix { class: LDAP_PAGING, start: tokens[k].start, end: tokens[close].end, text: call })
+}
+
+/// The innermost bracket around token `k` that opens an array literal: `[` or `array(`.
+fn array_around(tokens: &[Token], k: usize) -> Option<(usize, usize)> {
+    let mut depth = 0usize;
+    for j in (0..k).rev() {
+        let t = &tokens[j];
+        if t.is_punct(")") || t.is_punct("]") || t.is_punct("}") {
+            depth += 1;
+        } else if t.is_punct("(") || t.is_punct("[") || t.is_punct("{") {
+            if depth > 0 {
+                depth -= 1;
+                continue;
+            }
+            let first = if t.is_punct("[") {
+                j
+            } else if t.is_punct("(") && j > 0 && tokens[j - 1].is_ident_ci("array") {
+                j - 1
+            } else {
+                return None;
+            };
+            return Some((first, crate::declarations::close_of(tokens, j)?));
+        }
+    }
+    None
+}
+
+/// `CURLOPT_BINARYTRANSFER => VALUE` in an array passed straight to curl_setopt_array().
+fn curl_option_item(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    if !tokens.get(k + 1).is_some_and(|t| t.is_punct("=>")) {
+        return None;
+    }
+    let value = (k + 2, k + 2);
+    if !(plain(tokens, value) || literal(tokens, value)) {
+        return None;
+    }
+    let (first, close) = array_around(tokens, k)?;
+    let (call, index, arg) = argument_of(tokens, first)?;
+    if !call_named(tokens, call, &["curl_setopt_array"]) || index != 1 || arg != (first, close) {
+        return None;
+    }
+    let before = &tokens[k - 1];
+    let after = tokens.get(value.1 + 1)?;
+    let (start, end) = if after.is_punct(",") {
+        (tokens[k].start, tokens.get(value.1 + 2).map_or(after.end, |n| n.start))
+    } else if before.is_punct(",") {
+        (tokens[k - 2].end, tokens[value.1].end)
+    } else {
+        (tokens[k].start, tokens[value.1].end)
+    };
+    Some(Fix { class: NO_OP_FLAG, start, end, text: String::new() })
+}
+
 fn call_fix(file: &Source, k: usize, rule: &str) -> Option<Fix> {
     let tokens = file.tokens;
     let tok = &tokens[k];
@@ -993,6 +1138,95 @@ fn call_fix(file: &Source, k: usize, rule: &str) -> Option<Fix> {
             }
             method_call(tokens, k, &["settimezoneid"]).and_then(|_| value("setTimeZone", FUNCTION_RENAME))
         }
+        "removed.ldap_control_paged_result" => paged_result_fix(file, k),
+        "removed.ldap_control_paged_result_response" => {
+            let (close, args) = function_call(tokens, k, &["ldap_control_paged_result_response"])?;
+            let fits = args.len() == 2 && args.iter().all(|&a| plain(tokens, a)) && is_statement(tokens, k, close);
+            fits.then(|| removal(file, k, close + 1, NO_OP_CALL))
+        }
+        "deprecated.assert_options" => assert_options_fix(file, k),
+        "deprecated.assert_constants" | "removed.assert_quiet_eval" => {
+            let name = bare.strip_prefix("ASSERT_")?;
+            match argument_of(tokens, k) {
+                Some((call, 0, arg)) if arg == (k, k) && call_named(tokens, call, &["assert_options"]) => assert_options_fix(file, call),
+                Some((call, ..)) if call_named(tokens, call, &["assert_options"]) => None,
+                _ if rule == "removed.assert_quiet_eval" => None,
+                _ => value(ASSERT_SETTINGS.iter().find(|(n, ..)| *n == name)?.1, CONSTANT_VALUE),
+            }
+        }
+        "deprecated.zip_fl_recompress" => {
+            let class = tokens.get(k.checked_sub(2)?).filter(|c| c.kind == TokenKind::Ident && tokens[k - 1].is_punct("::"))?;
+            if !class.text.trim_start_matches('\\').eq_ignore_ascii_case("ziparchive") {
+                return None;
+            }
+            let (call, index, arg) = argument_of(tokens, k)?;
+            let (_, args) = method_call(tokens, call, &["setcompressionname", "setcompressionindex"])?;
+            (index == 2 && args.len() == 3 && arg == (k - 2, k)).then(|| Fix {
+                class: ZIP_LEVEL,
+                start: tokens[args[1].1].end,
+                end: tok.end,
+                text: String::new(),
+            })
+        }
+        "removed.fgetss" | "removed.gzgetss" => {
+            let (name, read, reads) = if rule == "removed.fgetss" { ("fgetss", "fgets", 1) } else { ("gzgetss", "gzgets", 2) };
+            let (close, args) = function_call(tokens, k, &[name])?;
+            if args.len() < reads || args.len() > 3 {
+                return None;
+            }
+            let allowed = match args.get(2) {
+                Some(&a) if a.0 == a.1 && matches!(tokens[a.0].kind, TokenKind::Str { interpolates: false, .. }) => {
+                    format!(", {}", file.text(a.0, a.1))
+                }
+                Some(_) => return None,
+                None => String::new(),
+            };
+            let read_args = file.text(args[0].0, args[args.len().min(2) - 1].1);
+            let text =
+                format!("(static fn ($line) => $line === false ? false : strip_tags($line{allowed}))({}{read}({read_args}))", lead(tok));
+            Some(Fix { class: GETSS, start: tok.start, end: tokens[close].end, text })
+        }
+        "removed.recode" => {
+            let (close, args) = function_call(tokens, k, &["recode_string"])?;
+            let [request, text] = args[..] else { return None };
+            if request.0 != request.1 || !matches!(tokens[request.0].kind, TokenKind::Str { interpolates: false, backtick: false }) {
+                return None;
+            }
+            let raw = tokens[request.0].text.trim_matches(|c| c == '\'' || c == '"').to_ascii_lowercase();
+            let (from, to) = raw.split_once("..")?;
+            let name = |n: &str| RECODE_CHARSETS.iter().find(|(r, _)| *r == n).map(|(_, i)| *i);
+            let (from, to) = (name(from)?, name(to)?);
+            let call = format!("{}iconv('{from}', '{to}//TRANSLIT//IGNORE', {})", lead(tok), file.text(text.0, text.1));
+            Some(Fix { class: RECODE, start: tok.start, end: tokens[close].end, text: call })
+        }
+        "removed.ezmlm_hash" => {
+            let (close, args) = function_call(tokens, k, &["ezmlm_hash"])?;
+            let [address] = args[..] else { return None };
+            Some(Fix {
+                class: EZMLM,
+                start: tok.start,
+                end: tokens[close].end,
+                text: format!("{EZMLM_PORT}({})", file.text(address.0, address.1)),
+            })
+        }
+        "removed.sql_regcase" => {
+            let other = ["LC_MONETARY", "LC_NUMERIC", "LC_TIME", "LC_COLLATE", "LC_MESSAGES"];
+            let ctype = (0..tokens.len())
+                .filter(|&j| tokens[j].is_ident_ci("setlocale") && tokens.get(j + 1).is_some_and(|t| t.is_punct("(")))
+                .any(|j| tokens.get(j + 2).is_none_or(|category| !other.iter().any(|o| category.text.trim_start_matches('\\') == *o)));
+            if ctype {
+                return None;
+            }
+            let (close, args) = function_call(tokens, k, &["sql_regcase"])?;
+            let [pattern] = args[..] else { return None };
+            let text = format!(
+                "{}preg_replace_callback('/[a-zA-Z]/', static fn ($m) => '[' . strtoupper($m[0]) . strtolower($m[0]) . ']', {})",
+                lead(tok),
+                file.text(pattern.0, pattern.1)
+            );
+            Some(Fix { class: REGCASE, start: tok.start, end: tokens[close].end, text })
+        }
+        "deprecated.curlopt_binarytransfer" => statement_fix(file, k, rule).or_else(|| curl_option_item(file, k)),
         "removed.reflection_export" => {
             let class = tokens.get(k.checked_sub(2)?).filter(|c| c.kind == TokenKind::Ident && tokens[k - 1].is_punct("::"))?;
             let short = class.text.rsplit('\\').next().unwrap_or_default().to_ascii_lowercase();
@@ -1198,10 +1432,7 @@ mod tests {
     #[test]
     fn binarytransfer_and_unset_this_go_when_nothing_reads_them() {
         let curl = "<?php\ncurl_setopt($c, CURLOPT_BINARYTRANSFER, true);\n$ok = curl_setopt($c, CURLOPT_BINARYTRANSFER, true);\ncurl_setopt_array($c, [CURLOPT_BINARYTRANSFER => true]);\n";
-        assert_eq!(
-            fixed(curl).unwrap().0,
-            "<?php\n$ok = curl_setopt($c, CURLOPT_BINARYTRANSFER, true);\ncurl_setopt_array($c, [CURLOPT_BINARYTRANSFER => true]);\n"
-        );
+        assert_eq!(fixed(curl).unwrap().0, "<?php\n$ok = curl_setopt($c, CURLOPT_BINARYTRANSFER, true);\ncurl_setopt_array($c, []);\n");
         let this = "<?php\nclass A {\n    function a() {\n        unset($this);\n        return 1;\n    }\n    function b($x) {\n        unset($x, $this);\n    }\n    function c() {\n        unset($this);\n        return $this->p;\n    }\n}\n";
         let (out, classes) = fixed_for(this, PhpVersion::new(7, 1)).unwrap();
         assert_eq!(out, "<?php\nclass A {\n    function a() {\n        return 1;\n    }\n    function b($x) {\n        unset($x);\n    }\n    function c() {\n        unset($this);\n        return $this->p;\n    }\n}\n");
@@ -1292,6 +1523,36 @@ mod tests {
         let (out, classes) = fixed(src).unwrap();
         assert_eq!(out, "<?php\necho new ReflectionClass('ArrayIterator'), \"\\n\";\necho new \\ReflectionMethod('ArrayIterator', 'count'), \"\\n\";\n$s = (string) new ReflectionFunction('strlen');\n$t = ReflectionClass::export($c);\nReflectionMethod::export('A::b');\nReflectionProperty::export($c, $p, $return);\n");
         assert_eq!(classes, [REFLECTION_EXPORT]);
+    }
+
+    #[test]
+    fn paged_results_and_assert_options() {
+        let src = "<?php\nfunction p($l, $r, $c) {\n    ldap_control_paged_result($l, 100);\n    $ok = ldap_control_paged_result($l, 50, true, $c);\n    ldap_control_paged_result($l, size(), $crit);\n    ldap_control_paged_result_response($l, $r);\n    ldap_control_paged_result_response($l, $r, $c);\n    assert_options(ASSERT_ACTIVE, 1);\n    assert_options(ASSERT_BAIL, false);\n    assert_options(ASSERT_ACTIVE, 0);\n    $old = assert_options(ASSERT_WARNING, 1);\n    assert_options(ASSERT_QUIET_EVAL, 1);\n    return [ASSERT_EXCEPTION, ASSERT_QUIET_EVAL];\n}\n";
+        let (out, _) = fixed(src).unwrap();
+        assert_eq!(out, "<?php\nfunction p($l, $r, $c) {\n    ldap_set_option($l, LDAP_OPT_SERVER_CONTROLS, [['oid' => LDAP_CONTROL_PAGEDRESULTS, 'iscritical' => false, 'value' => ['size' => 100, 'cookie' => '']]]);\n    $ok = ldap_set_option($l, LDAP_OPT_SERVER_CONTROLS, [['oid' => LDAP_CONTROL_PAGEDRESULTS, 'iscritical' => true, 'value' => ['size' => 50, 'cookie' => $c]]]);\n    ldap_control_paged_result($l, size(), $crit);\n    ldap_control_paged_result_response($l, $r, $c);\n    assert_options(ASSERT_ACTIVE, 0);\n    $old = assert_options(ASSERT_WARNING, 1);\n    return [5, ASSERT_QUIET_EVAL];\n}\n");
+        assert_eq!(
+            kinds(src, "deprecated.assert_options"),
+            [FixKind::Likely, FixKind::Likely, FixKind::Manual, FixKind::Manual, FixKind::Auto]
+        );
+        assert_eq!(kinds(src, "removed.assert_quiet_eval"), [FixKind::Auto, FixKind::Manual]);
+    }
+
+    #[test]
+    fn removed_string_functions_get_their_ports() {
+        let src = "<?php\nwhile (($l = fgetss($h, 512, '<b>')) !== false) {}\n$z = gzgetss($zp, 1024);\n$x = fgetss($h, 10, $tags);\n$t = recode_string('UTF8..latin1', $s);\n$u = recode_string('utf8..koi8-r', $s);\n$n = ezmlm_hash($address);\n$p = sql_regcase($pattern);\n";
+        let (out, classes) = fixed(src).unwrap();
+        assert_eq!(out, "<?php\nwhile (($l = (static fn ($line) => $line === false ? false : strip_tags($line, '<b>'))(fgets($h, 512))) !== false) {}\n$z = (static fn ($line) => $line === false ? false : strip_tags($line))(gzgets($zp, 1024));\n$x = fgetss($h, 10, $tags);\n$t = iconv('UTF-8', 'ISO-8859-1//TRANSLIT//IGNORE', $s);\n$u = recode_string('utf8..koi8-r', $s);\n$n = (static function (string $address): int { $hash = 5381; for ($i = 0, $n = strlen($address); $i < $n; $i++) { $hash = (($hash + ($hash << 5)) ^ ord(strtolower($address[$i]))) & 0xFFFFFFFF; } return $hash % 53; })($address);\n$p = preg_replace_callback('/[a-zA-Z]/', static fn ($m) => '[' . strtoupper($m[0]) . strtolower($m[0]) . ']', $pattern);\n");
+        assert_eq!(classes, [GETSS, RECODE, EZMLM, REGCASE]);
+        assert_eq!(fixed("<?php\nsetlocale(LC_ALL, 'tr_TR');\n$p = sql_regcase($pattern);\n"), None);
+        assert!(fixed("<?php\nsetlocale(LC_MONETARY, 'tr_TR');\n$p = sql_regcase($pattern);\n").is_some());
+    }
+
+    #[test]
+    fn recompress_level_and_curl_array_items() {
+        let src = "<?php\n$zip->setCompressionName('a.txt', ZipArchive::CM_DEFLATE, ZipArchive::FL_RECOMPRESS);\n$zip->setCompressionIndex(0, ZipArchive::CM_STORE, \\ZipArchive::FL_RECOMPRESS);\n$flags = ZipArchive::FL_RECOMPRESS;\ncurl_setopt_array($c, [CURLOPT_RETURNTRANSFER => true, CURLOPT_BINARYTRANSFER => true]);\ncurl_setopt_array($c, array(CURLOPT_BINARYTRANSFER => 1, CURLOPT_URL => $u));\ncurl_setopt_array($c, [CURLOPT_BINARYTRANSFER => true]);\n$opts = [CURLOPT_BINARYTRANSFER => true];\n";
+        let (out, _) = fixed(src).unwrap();
+        assert_eq!(out, "<?php\n$zip->setCompressionName('a.txt', ZipArchive::CM_DEFLATE);\n$zip->setCompressionIndex(0, ZipArchive::CM_STORE);\n$flags = ZipArchive::FL_RECOMPRESS;\ncurl_setopt_array($c, [CURLOPT_RETURNTRANSFER => true]);\ncurl_setopt_array($c, array(CURLOPT_URL => $u));\ncurl_setopt_array($c, []);\n$opts = [CURLOPT_BINARYTRANSFER => true];\n");
+        assert_eq!(kinds(src, "deprecated.zip_fl_recompress"), [FixKind::Likely, FixKind::Likely, FixKind::Manual]);
     }
 
     #[test]
