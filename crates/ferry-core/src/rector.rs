@@ -153,6 +153,8 @@ const LIKELY_RULES: &[&str] = &[
     "OrdSingleByteRector",
     "SleepToSerializeRector",
     "WakeupToUnserializeRector",
+    "KillWithQuery",
+    "RefreshWithFlush",
 ];
 
 const RULE_TITLES: &[(&str, Text)] = &[
@@ -182,6 +184,15 @@ const RULE_TITLES: &[(&str, Text)] = &[
     ("RemoveNoOpCall", Text::new("Hiçbir şey yapmayan çağrı silinir", "Remove calls that do nothing")),
     ("DropNoOpFlag", Text::new("Etkisiz bayrak çıkarılır", "Drop flags that have no effect")),
     ("RemoveUnsetThis", Text::new("unset($this) silinir", "Remove unset($this)")),
+    ("MhashToHash", Text::same("mhash() → hash()")),
+    ("KillWithQuery", Text::same("mysqli_kill() → KILL CONNECTION")),
+    ("RefreshWithFlush", Text::same("mysqli_refresh() → FLUSH")),
+    ("IntlCalendarMethods", Text::new("intl fonksiyonu sınıf metoduna çevrilir", "Use the intl calendar methods")),
+    ("LcgValueToRandomizer", Text::same("lcg_value() → Randomizer::getFloat()")),
+    ("MagicQuotesOff", Text::same("get_magic_quotes_gpc() → false")),
+    ("RemoveUnusedArgument", Text::new("Kullanılmayan argüman silinir", "Remove unused arguments")),
+    ("RenameFunction", Text::new("Fonksiyon yeni adıyla çağrılır", "Call functions by their new name")),
+    ("ReflectionExportToString", Text::same("Reflection*::export() → echo new Reflection*()")),
     (
         "ParenthesizeNestedTernaryRector",
         Text::new("İç içe ternary paranteze alınır (eski davranış korunur)", "Parenthesize nested ternaries (keeps the old behaviour)"),

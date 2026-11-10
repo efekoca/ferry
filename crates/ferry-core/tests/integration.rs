@@ -277,7 +277,7 @@ fn rector_leaves_alone_what_it_would_break() {
             "<?php\nclass Report\n{\n    function page($query)\n    {\n        parse_str($query);\n        return isset($page) ? (int) $page : 1;\n    }\n}\n",
             "parse_str($query);",
         ),
-        ("export.php", "<?php\nfunction dump() {\n    ReflectionFunction::export('strlen');\n}\n", "ReflectionFunction::export('strlen');"),
+        ("export.php", "<?php\nfunction dump() {\n    ReflectionFunction::export('strlen');\n}\n", "echo new ReflectionFunction('strlen'), \"\\n\";"),
         (
             "quotes.php",
             "<?php\nfunction quote($a) {\n    return filter_var($a, FILTER_SANITIZE_MAGIC_QUOTES, FILTER_REQUIRE_ARRAY);\n}\n",

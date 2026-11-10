@@ -501,9 +501,9 @@ pub const FUNCTIONS: &[SymbolRule] = &[
     rule!("deprecated.strptime", "strptime", D, (8, 1), tx("date_parse_from_format ya da IntlDateFormatter::parse", "date_parse_from_format or IntlDateFormatter::parse"), M, DEPRECATED_FN),
     rule!("deprecated.date_sunrise", "date_sunrise", D, (8, 1), code("date('H:i', date_sun_info($ts, $lat, $lng)['sunrise'])"), M, SUN_INFO),
     rule!("deprecated.date_sunset", "date_sunset", D, (8, 1), code("date('H:i', date_sun_info($ts, $lat, $lng)['sunset'])"), M, SUN_INFO),
-    rule!("deprecated.mhash", "mhash*", D, (8, 1), code("hash_*"), M, Text::new(
-        "mhash fonksiyonları kullanımdan kalktı.",
-        "The mhash functions are deprecated.")),
+    rule!("deprecated.mhash", "mhash*", D, (8, 1), tx("hash() (ham çıktı için true ile) ya da hash_hmac()", "hash() with true for raw output, or hash_hmac()"), M, Text::new(
+        "mhash fonksiyonları kullanımdan kalktı. mhash() ham ikili çıktı verir; aynısı için hash()'in üçüncü argümanını true yapın, anahtarlı çağrılar hash_hmac() olur.",
+        "The mhash functions are deprecated. mhash() returns raw binary output, so pass true as hash()'s third argument; keyed calls become hash_hmac().")),
     rule!("deprecated.odbc_result_all", "odbc_result_all", D, (8, 1), None, M, DEPRECATED_FN),
     rule!("deprecated.utf8_encode", "utf8_encode", D, (8, 2), code("mb_convert_encoding($s, 'UTF-8', 'ISO-8859-1')"), L, Text::new(
         "utf8_encode() kullanımdan kalktı. Kaynak metnin gerçekten ISO-8859-1 olduğundan emin olun.",
@@ -780,7 +780,7 @@ pub const CONSTANTS: &[SymbolRule] = &[
         "mysqli_store_result_copy_data",
         D,
         (8, 4),
-        REMOVE_USE,
+        tx("mod argümanını silin; başka yerde 16 yazın", "remove the mode argument; elsewhere write 16"),
         M,
         Text::new(
             "MYSQLI_STORE_RESULT_COPY_DATA, mysqli_store_result()'ın kullanımdan kalkan mode parametresiyle birlikte 8.4'te kullanımdan kalktı.",
@@ -820,7 +820,7 @@ pub const CONSTANTS: &[SymbolRule] = &[
             "DATE_RFC7231 ignored the time zone and is deprecated in 8.5."
         )
     ),
-    rule!("deprecated.mhash_constant", "mhash_*", D, (8, 5), code("hash_*"), M, DEPRECATED_FN),
+    rule!("deprecated.mhash_constant", "mhash_*", D, (8, 5), tx("hash() algoritma adı; başka yerde sayı değeri", "the hash() algorithm name; elsewhere its integer value"), M, DEPRECATED_FN),
     rule!("deprecated.curlpipe_http1", "curlpipe_http1", D, (7, 4), code("CURLPIPE_NOTHING"), M, Text::new(
         "CURLPIPE_HTTP1 curl 7.62'den beri hiçbir şey yapmıyor ve PHP 7.4'te kullanımdan kalktı. Bugünkü davranışı CURLPIPE_NOTHING korur; CURLPIPE_MULTIPLEX ise HTTP/2 çoğullamayı açar.",
         "CURLPIPE_HTTP1 has done nothing since curl 7.62 and is deprecated since PHP 7.4. CURLPIPE_NOTHING keeps today's behavior; CURLPIPE_MULTIPLEX turns on HTTP/2 multiplexing.")),

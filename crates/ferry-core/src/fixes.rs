@@ -13,6 +13,15 @@ pub const OCI_ALIAS: &str = "Ferry\\Php80\\RenameOciAlias";
 pub const NO_OP_CALL: &str = "Ferry\\RemoveNoOpCall";
 pub const NO_OP_FLAG: &str = "Ferry\\DropNoOpFlag";
 pub const UNSET_THIS: &str = "Ferry\\Php71\\RemoveUnsetThis";
+pub const MHASH: &str = "Ferry\\Php81\\MhashToHash";
+pub const KILL: &str = "Ferry\\Php84\\KillWithQuery";
+pub const REFRESH: &str = "Ferry\\Php84\\RefreshWithFlush";
+pub const INTL_METHODS: &str = "Ferry\\Php84\\IntlCalendarMethods";
+pub const LCG_VALUE: &str = "Ferry\\Php84\\LcgValueToRandomizer";
+pub const MAGIC_QUOTES: &str = "Ferry\\Php80\\MagicQuotesOff";
+pub const UNUSED_ARGUMENT: &str = "Ferry\\Php84\\RemoveUnusedArgument";
+pub const FUNCTION_RENAME: &str = "Ferry\\RenameFunction";
+pub const REFLECTION_EXPORT: &str = "Ferry\\Php80\\ReflectionExportToString";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Fix {
@@ -138,8 +147,101 @@ const NO_OP_FLAGS: &[(&str, &str, Alone)] = &[
     ("removed.filter_flag_scheme_required", "FILTER_FLAG_SCHEME_REQUIRED", Alone::Argument),
 ];
 
+/// (MHASH_ name, value, hash() algorithm, has an HMAC, mhash_get_hash_name(), mhash_get_block_size()),
+/// read from PHP 8.5: mhash() output equals hash() for each, and keyed output equals hash_hmac().
+const MHASH_ALGOS: [(&str, u32, &str, bool, &str, u32); 39] = [
+    ("CRC32", 0, "crc32", false, "CRC32", 4),
+    ("MD5", 1, "md5", true, "MD5", 16),
+    ("SHA1", 2, "sha1", true, "SHA1", 20),
+    ("HAVAL256", 3, "haval256,3", true, "HAVAL256", 32),
+    ("RIPEMD160", 5, "ripemd160", true, "RIPEMD160", 20),
+    ("TIGER", 7, "tiger192,3", true, "TIGER", 24),
+    ("GOST", 8, "gost", true, "GOST", 32),
+    ("CRC32B", 9, "crc32b", false, "CRC32B", 4),
+    ("HAVAL224", 10, "haval224,3", true, "HAVAL224", 28),
+    ("HAVAL192", 11, "haval192,3", true, "HAVAL192", 24),
+    ("HAVAL160", 12, "haval160,3", true, "HAVAL160", 20),
+    ("HAVAL128", 13, "haval128,3", true, "HAVAL128", 16),
+    ("TIGER128", 14, "tiger128,3", true, "TIGER128", 16),
+    ("TIGER160", 15, "tiger160,3", true, "TIGER160", 20),
+    ("MD4", 16, "md4", true, "MD4", 16),
+    ("SHA256", 17, "sha256", true, "SHA256", 32),
+    ("ADLER32", 18, "adler32", false, "ADLER32", 4),
+    ("SHA224", 19, "sha224", true, "SHA224", 28),
+    ("SHA512", 20, "sha512", true, "SHA512", 64),
+    ("SHA384", 21, "sha384", true, "SHA384", 48),
+    ("WHIRLPOOL", 22, "whirlpool", true, "WHIRLPOOL", 64),
+    ("RIPEMD128", 23, "ripemd128", true, "RIPEMD128", 16),
+    ("RIPEMD256", 24, "ripemd256", true, "RIPEMD256", 32),
+    ("RIPEMD320", 25, "ripemd320", true, "RIPEMD320", 40),
+    ("SNEFRU256", 27, "snefru", true, "SNEFRU256", 32),
+    ("MD2", 28, "md2", true, "MD2", 16),
+    ("FNV132", 29, "fnv132", false, "FNV132", 4),
+    ("FNV1A32", 30, "fnv1a32", false, "FNV1A32", 4),
+    ("FNV164", 31, "fnv164", false, "FNV164", 8),
+    ("FNV1A64", 32, "fnv1a64", false, "FNV1A64", 8),
+    ("JOAAT", 33, "joaat", false, "JOAAT", 4),
+    ("CRC32C", 34, "crc32c", false, "CRC32C", 4),
+    ("MURMUR3A", 35, "murmur3a", false, "MURMUR3A", 4),
+    ("MURMUR3C", 36, "murmur3c", false, "MURMUR3C", 16),
+    ("MURMUR3F", 37, "murmur3f", false, "MURMUR3F", 16),
+    ("XXH32", 38, "xxh32", false, "XXH32", 4),
+    ("XXH64", 39, "xxh64", false, "XXH64", 8),
+    ("XXH3", 40, "xxh3", false, "XXH3", 8),
+    ("XXH128", 41, "xxh128", false, "XXH128", 16),
+];
+
+/// MYSQLI_REFRESH_* flags and the FLUSH option that does the same. The rest stay manual.
+const FLUSH_OPTIONS: [(&str, &str); 5] =
+    [("GRANT", "PRIVILEGES"), ("LOG", "LOGS"), ("TABLES", "TABLES"), ("HOSTS", "HOSTS"), ("STATUS", "STATUS")];
+
+const REFRESH_VALUES: [(&str, &str); 10] = [
+    ("GRANT", "1"),
+    ("LOG", "2"),
+    ("TABLES", "4"),
+    ("HOSTS", "8"),
+    ("STATUS", "16"),
+    ("THREADS", "32"),
+    ("REPLICA", "64"),
+    ("SLAVE", "64"),
+    ("MASTER", "128"),
+    ("BACKUP_LOG", "2097152"),
+];
+
+/// Reflection classes with export(), and how many arguments come before its `$return` flag.
+const REFLECTION_EXPORTS: [(&str, usize); 9] = [
+    ("reflectionclass", 1),
+    ("reflectionobject", 1),
+    ("reflectionfunction", 1),
+    ("reflectionextension", 1),
+    ("reflectionzendextension", 1),
+    ("reflectionmethod", 2),
+    ("reflectionproperty", 2),
+    ("reflectionparameter", 2),
+    ("reflectionclassconstant", 2),
+];
+
+const CALL_RULES: [&str; 15] = [
+    "deprecated.mhash",
+    "deprecated.mhash_constant",
+    "deprecated.mysqli_kill",
+    "deprecated.mysqli_refresh",
+    "deprecated.mysqli_refresh_constant",
+    "deprecated.intlcal_set",
+    "deprecated.intlgregcal_create_instance",
+    "deprecated.lcg_value",
+    "removed.get_magic_quotes_gpc",
+    "removed.get_magic_quotes_runtime",
+    "deprecated.pdo_fetch_serialize",
+    "deprecated.mysqli_store_result_mode",
+    "deprecated.mysqli_store_result_copy_data",
+    "removed.datefmt_set_timezone_id",
+    "removed.reflection_export",
+];
+
 fn handles(rule: &str) -> bool {
-    rule == "deprecated.pgsql_transaction_constant"
+    CALL_RULES.contains(&rule)
+        || rule == "deprecated.pgsql_transaction_constant"
         || rule == "deprecated.oci8_alias"
         || rule == "deprecated.curlopt_binarytransfer"
         || rule == "removed.unset_this"
@@ -155,9 +257,24 @@ pub(crate) fn mentions(src: &str) -> bool {
     if names.chain(["TRANSACTION_", "CURLOPT_BINARYTRANSFER"]).any(|name| src.contains(name)) {
         return true;
     }
+    if ["MHASH_", "MYSQLI_REFRESH_", "MYSQLI_STORE_RESULT_COPY_DATA", "FETCH_SERIALIZE"].iter().any(|name| src.contains(name)) {
+        return true;
+    }
     let lower = src.to_ascii_lowercase();
-    OCI_ALIASES.iter().map(|(old, _)| *old).chain(NO_OP_CALLS.iter().map(|(_, f, _)| *f)).any(|name| lower.contains(name))
+    let calls = [
+        "mhash",
+        "kill",
+        "refresh",
+        "intlcal_set",
+        "intlgregcal_create_instance",
+        "lcg_value",
+        "get_magic_quotes",
+        "store_result",
+        "settimezoneid",
+    ];
+    OCI_ALIASES.iter().map(|(old, _)| *old).chain(NO_OP_CALLS.iter().map(|(_, f, _)| *f)).chain(calls).any(|name| lower.contains(name))
         || (lower.contains("unset") && src.contains("$this"))
+        || (lower.contains("export") && lower.contains("reflection"))
 }
 
 /// A file as the fixes see it: its text, its tokens, and which tokens hold a no-op flag finding.
@@ -194,6 +311,9 @@ impl<'a> Source<'a> {
 /// The fix for the finding of `rule` at token `k`, if Ferry has one for it.
 pub(crate) fn at(file: &Source, k: usize, rule: &str) -> Option<Fix> {
     let tokens = file.tokens;
+    if CALL_RULES.contains(&rule) {
+        return call_fix(file, k, rule);
+    }
     if let Some(fix) = statement_fix(file, k, rule) {
         return Some(fix);
     }
@@ -588,6 +708,327 @@ fn statement_fix(file: &Source, k: usize, rule: &str) -> Option<Fix> {
     }
 }
 
+/// A function call `name(...)` at `k`, not a method or a declaration: its `)` and arguments.
+fn function_call(tokens: &[Token], k: usize, names: &[&str]) -> Option<(usize, Vec<(usize, usize)>)> {
+    if tokens[k].kind != TokenKind::Ident || !tokens.get(k + 1).is_some_and(|t| t.is_punct("(")) || !call_named(tokens, k, names) {
+        return None;
+    }
+    let (close, args) = arguments(tokens, k + 1)?;
+    let positional = args
+        .iter()
+        .all(|&(f, l)| !tokens[f].is_punct("...") && !(f < l && tokens[f + 1].is_punct(":") && tokens[f].kind == TokenKind::Ident));
+    positional.then_some((close, args))
+}
+
+/// A method call `->name(...)` at `k`: its `)` and arguments.
+fn method_call(tokens: &[Token], k: usize, names: &[&str]) -> Option<(usize, Vec<(usize, usize)>)> {
+    let arrow = k.checked_sub(1).is_some_and(|p| tokens[p].is_punct("->") || tokens[p].is_punct("?->"));
+    let named = names.iter().any(|n| tokens[k].text.eq_ignore_ascii_case(n));
+    if !arrow || !named || !tokens.get(k + 1).is_some_and(|t| t.is_punct("(")) {
+        return None;
+    }
+    let (close, args) = arguments(tokens, k + 1)?;
+    args.iter().all(|&(f, _)| !tokens[f].is_punct("...")).then_some((close, args))
+}
+
+fn lead(tok: &Token) -> &str {
+    &tok.text[..tok.text.len() - tok.text.trim_start_matches('\\').len()]
+}
+
+fn is_statement(tokens: &[Token], first: usize, close: usize) -> bool {
+    starts_statement(tokens, first) && tokens.get(close + 1).is_some_and(|t| t.is_punct(";"))
+}
+
+/// `(int) X`, with parentheses when X is more than one variable, property or number.
+fn as_int(file: &Source, arg: (usize, usize)) -> String {
+    let text = file.text(arg.0, arg.1);
+    if plain(file.tokens, arg) || literal(file.tokens, arg) {
+        format!("(int) {text}")
+    } else {
+        format!("(int) ({text})")
+    }
+}
+
+fn mhash_algo(
+    tokens: &[Token],
+    (first, last): (usize, usize),
+) -> Option<&'static (&'static str, u32, &'static str, bool, &'static str, u32)> {
+    let name = tokens[first].text.trim_start_matches('\\').strip_prefix("MHASH_")?;
+    (first == last && tokens[first].kind == TokenKind::Ident).then(|| MHASH_ALGOS.iter().find(|a| a.0 == name)).flatten()
+}
+
+/// mhash(), mhash_get_hash_name() and mhash_get_block_size() with a constant algorithm.
+fn mhash_fix(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let names = ["mhash", "mhash_get_hash_name", "mhash_get_block_size"];
+    let (close, args) = function_call(tokens, k, &names)?;
+    let algo = mhash_algo(tokens, *args.first()?)?;
+    let bare = tokens[k].text.trim_start_matches('\\').to_ascii_lowercase();
+    let fix = |start: usize, end: usize, text: String| Some(Fix { class: MHASH, start, end, text });
+    match (bare.as_str(), args.len()) {
+        ("mhash_get_hash_name", 1) => fix(tokens[k].start, tokens[close].end, format!("'{}'", algo.4)),
+        ("mhash_get_block_size", 1) => fix(tokens[k].start, tokens[close].end, algo.5.to_string()),
+        ("mhash", 2 | 3) => {
+            if args.len() == 3 && !algo.3 {
+                return None;
+            }
+            let data = file.text(args[1].0, args[1].1);
+            let call = match args.get(2) {
+                Some(key) => format!("{}hash_hmac('{}', {data}, {}", lead(&tokens[k]), algo.2, file.text(key.0, key.1)),
+                None => format!("{}hash('{}', {data}", lead(&tokens[k]), algo.2),
+            };
+            let hex = enclosing_call(tokens, k).filter(|&c| call_named(tokens, c, &["bin2hex"])).and_then(|c| {
+                let (outer, inner) = function_call(tokens, c, &["bin2hex"])?;
+                (inner == [(k, close)]).then_some((c, outer))
+            });
+            match hex {
+                Some((c, outer)) => fix(tokens[c].start, tokens[outer].end, format!("{call})")),
+                None => fix(tokens[k].start, tokens[close].end, format!("{call}, true)")),
+            }
+        }
+        _ => None,
+    }
+}
+
+/// The FLUSH statement for a `|` mask of MYSQLI_REFRESH_* constants, if every flag has one.
+fn flush_statement(tokens: &[Token], (first, last): (usize, usize)) -> Option<String> {
+    let mut options = Vec::new();
+    for (i, t) in tokens[first..=last].iter().enumerate() {
+        if i % 2 == 1 {
+            if !t.is_punct("|") {
+                return None;
+            }
+            continue;
+        }
+        let flag = t.text.trim_start_matches('\\').strip_prefix("MYSQLI_REFRESH_").filter(|_| t.kind == TokenKind::Ident)?;
+        let option = FLUSH_OPTIONS.iter().find(|(f, _)| *f == flag)?.1;
+        if !options.contains(&option) {
+            options.push(option);
+        }
+    }
+    (!options.is_empty() && (last - first) % 2 == 0).then(|| format!("'FLUSH {}'", options.join(", ")))
+}
+
+/// mysqli_refresh($link, FLAGS) and $link->refresh(FLAGS).
+fn refresh_fix(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    if let Some((close, args)) = function_call(tokens, k, &["mysqli_refresh"]) {
+        let [link, flags] = args[..] else { return None };
+        let sql = flush_statement(tokens, flags)?;
+        let text = format!("{}mysqli_query({}, {sql})", lead(&tokens[k]), file.text(link.0, link.1));
+        return Some(Fix { class: REFRESH, start: tokens[k].start, end: tokens[close].end, text });
+    }
+    let (close, args) = method_call(tokens, k, &["refresh"])?;
+    let [flags] = args[..] else { return None };
+    let sql = flush_statement(tokens, flags)?;
+    Some(Fix { class: REFRESH, start: tokens[k].start, end: tokens[close].end, text: format!("query({sql})") })
+}
+
+/// The mode argument of mysqli_store_result($link, MODE) or ->store_result(MODE) goes.
+fn store_result_fix(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let simple = |a: (usize, usize)| {
+        plain(tokens, a) || literal(tokens, a) || (a.0 == a.1 && is_atom(tokens, a.0)) || (a.1 == a.0 + 2 && tokens[a.0 + 1].is_punct("::"))
+    };
+    let fix = |start: usize, end: usize| Some(Fix { class: UNUSED_ARGUMENT, start, end, text: String::new() });
+    if let Some((_, args)) = function_call(tokens, k, &["mysqli_store_result"]) {
+        let [link, mode] = args[..] else { return None };
+        return if simple(mode) { fix(tokens[link.1].end, tokens[mode.1].end) } else { None };
+    }
+    let (_, args) = method_call(tokens, k, &["store_result"])?;
+    let [mode] = args[..] else { return None };
+    if simple(mode) {
+        fix(tokens[mode.0].start, tokens[mode.1].end)
+    } else {
+        None
+    }
+}
+
+/// The call whose argument holds token `k`, as (call name, argument index), when that argument is
+/// the token alone or the `|` mask around it.
+fn argument_of(tokens: &[Token], k: usize) -> Option<(usize, usize, (usize, usize))> {
+    let call = enclosing_call(tokens, k)?;
+    let (_, args) = arguments(tokens, call + 1)?;
+    let index = args.iter().position(|&(f, l)| f <= k && k <= l)?;
+    Some((call, index, args[index]))
+}
+
+fn call_fix(file: &Source, k: usize, rule: &str) -> Option<Fix> {
+    let tokens = file.tokens;
+    let tok = &tokens[k];
+    let bare = tok.text.trim_start_matches('\\');
+    let value = |text: &str, class| Some(Fix { class, start: tok.start, end: tok.end, text: text.to_string() });
+    match rule {
+        "deprecated.mhash" => mhash_fix(file, k),
+        "deprecated.mhash_constant" => {
+            let algo = mhash_algo(tokens, (k, k))?;
+            match argument_of(tokens, k) {
+                Some((call, 0, _)) if call_named(tokens, call, &["mhash", "mhash_get_hash_name", "mhash_get_block_size"]) => {
+                    mhash_fix(file, call)
+                }
+                Some((call, ..)) if tokens[call].text.trim_start_matches('\\').to_ascii_lowercase().starts_with("mhash") => None,
+                _ => value(&algo.1.to_string(), CONSTANT_VALUE),
+            }
+        }
+        "deprecated.mysqli_kill" => {
+            if let Some((close, args)) = function_call(tokens, k, &["mysqli_kill"]) {
+                let [link, id] = args[..] else { return None };
+                let text = format!("{}mysqli_query({}, 'KILL CONNECTION ' . {})", lead(tok), file.text(link.0, link.1), as_int(file, id));
+                return Some(Fix { class: KILL, start: tok.start, end: tokens[close].end, text });
+            }
+            let (close, args) = method_call(tokens, k, &["kill"])?;
+            let [id] = args[..] else { return None };
+            Some(Fix {
+                class: KILL,
+                start: tok.start,
+                end: tokens[close].end,
+                text: format!("query('KILL CONNECTION ' . {})", as_int(file, id)),
+            })
+        }
+        "deprecated.mysqli_refresh" => refresh_fix(file, k),
+        "deprecated.mysqli_refresh_constant" => {
+            let flag = bare.strip_prefix("MYSQLI_REFRESH_")?;
+            match argument_of(tokens, k) {
+                Some((call, index, _))
+                    if call_named(tokens, call, &["mysqli_refresh"])
+                        || (index == 0 && method_call(tokens, call, &["refresh"]).is_some()) =>
+                {
+                    refresh_fix(file, call)
+                }
+                _ => value(REFRESH_VALUES.iter().find(|(f, _)| *f == flag)?.1, CONSTANT_VALUE),
+            }
+        }
+        "deprecated.intlcal_set" => {
+            let (close, args) = function_call(tokens, k, &["intlcal_set"])?;
+            let (cal, values) = args.split_first()?;
+            let method = match values.len() {
+                2 => "set",
+                3 if is_statement(tokens, k, close) => "setDate",
+                5 | 6 if is_statement(tokens, k, close) => "setDateTime",
+                _ => return None,
+            };
+            let receiver = if plain(tokens, *cal) { file.text(cal.0, cal.1).to_string() } else { format!("({})", file.text(cal.0, cal.1)) };
+            let rest = file.text(values[0].0, values.last()?.1);
+            Some(Fix { class: INTL_METHODS, start: tok.start, end: tokens[close].end, text: format!("{receiver}->{method}({rest})") })
+        }
+        "deprecated.intlgregcal_create_instance" => {
+            let (close, args) = function_call(tokens, k, &["intlgregcal_create_instance"])?;
+            let inner = args.first().map_or("", |a| file.text(a.0, args.last().map_or(a.1, |l| l.1)));
+            let text = match args.len() {
+                0..=2 => format!("new \\IntlGregorianCalendar({inner})"),
+                3 => format!("\\IntlGregorianCalendar::createFromDate({inner})"),
+                5 | 6 => format!("\\IntlGregorianCalendar::createFromDateTime({inner})"),
+                _ => return None,
+            };
+            Some(Fix { class: INTL_METHODS, start: tok.start, end: tokens[close].end, text })
+        }
+        "deprecated.lcg_value" => {
+            let (close, args) = function_call(tokens, k, &["lcg_value"])?;
+            let text = "(new \\Random\\Randomizer())->getFloat(0, 1, \\Random\\IntervalBoundary::OpenOpen)".to_string();
+            args.is_empty().then(|| Fix { class: LCG_VALUE, start: tok.start, end: tokens[close].end, text })
+        }
+        "removed.get_magic_quotes_gpc" | "removed.get_magic_quotes_runtime" => {
+            let (close, args) = function_call(tokens, k, &["get_magic_quotes_gpc", "get_magic_quotes_runtime"])?;
+            if !args.is_empty() {
+                return None;
+            }
+            let guard = k >= 2
+                && tokens[k - 1].is_punct("(")
+                && tokens[k - 2].is_ident_ci("if")
+                && tokens.get(close + 1).is_some_and(|t| t.is_punct(")"));
+            let block = close + 2;
+            if guard && starts_statement(tokens, k - 2) && tokens.get(block).is_some_and(|t| t.is_punct("{")) {
+                let end = crate::declarations::close_of(tokens, block)?;
+                let chained = tokens.get(end + 1).is_some_and(|t| t.is_ident_ci("else") || t.is_ident_ci("elseif"));
+                if !chained {
+                    return Some(removal(file, k - 2, end, MAGIC_QUOTES));
+                }
+            }
+            if k > 0 && tokens[k - 1].is_punct("!") {
+                return Some(Fix { class: MAGIC_QUOTES, start: tokens[k - 1].start, end: tokens[close].end, text: "true".into() });
+            }
+            Some(Fix { class: MAGIC_QUOTES, start: tok.start, end: tokens[close].end, text: "false".into() })
+        }
+        "deprecated.pdo_fetch_serialize" => {
+            let class = tokens.get(k.checked_sub(2)?).filter(|c| c.kind == TokenKind::Ident && tokens[k - 1].is_punct("::"))?;
+            if !class.text.trim_start_matches('\\').eq_ignore_ascii_case("pdo") {
+                return None;
+            }
+            let (call, index, arg) = argument_of(tokens, k)?;
+            let slot = match tokens[call].text.to_ascii_lowercase().as_str() {
+                "fetch" | "fetchall" | "setfetchmode" => 0,
+                "query" => 1,
+                _ => return None,
+            };
+            let method = call > 0 && (tokens[call - 1].is_punct("->") || tokens[call - 1].is_punct("?->"));
+            (method && index == slot && arg == (k - 2, k)).then(|| Fix {
+                class: CONSTANT_RENAME,
+                start: tok.start,
+                end: tok.end,
+                text: "FETCH_DEFAULT".into(),
+            })
+        }
+        "deprecated.mysqli_store_result_mode" => store_result_fix(file, k),
+        "deprecated.mysqli_store_result_copy_data" => match argument_of(tokens, k) {
+            Some((call, index, arg)) if arg == (k, k) => {
+                let mode = if call_named(tokens, call, &["mysqli_store_result"]) {
+                    1
+                } else if method_call(tokens, call, &["store_result"]).is_some() {
+                    0
+                } else {
+                    return value("16", CONSTANT_VALUE);
+                };
+                if index == mode {
+                    store_result_fix(file, call)
+                } else {
+                    None
+                }
+            }
+            Some((call, ..)) if tokens[call].text.to_ascii_lowercase().ends_with("store_result") => None,
+            _ => value("16", CONSTANT_VALUE),
+        },
+        "removed.datefmt_set_timezone_id" => {
+            if function_call(tokens, k, &["datefmt_set_timezone_id"]).is_some() {
+                return value(&format!("{}datefmt_set_timezone", lead(tok)), FUNCTION_RENAME);
+            }
+            method_call(tokens, k, &["settimezoneid"]).and_then(|_| value("setTimeZone", FUNCTION_RENAME))
+        }
+        "removed.reflection_export" => {
+            let class = tokens.get(k.checked_sub(2)?).filter(|c| c.kind == TokenKind::Ident && tokens[k - 1].is_punct("::"))?;
+            let short = class.text.rsplit('\\').next().unwrap_or_default().to_ascii_lowercase();
+            let base = REFLECTION_EXPORTS.iter().find(|(c, _)| *c == short)?.1;
+            if !tokens.get(k + 1).is_some_and(|t| t.is_punct("(")) {
+                return None;
+            }
+            let (close, args) = arguments(tokens, k + 1)?;
+            if args.len() < base || args.len() > base + 1 || args.iter().any(|&(f, _)| tokens[f].is_punct("...")) {
+                return None;
+            }
+            let flag =
+                args.get(base).map(|&(f, l)| (f == l).then(|| tokens[f].text.to_ascii_lowercase())).unwrap_or(Some("false".into()))?;
+            let inner = file.text(args[0].0, args[base - 1].1);
+            let object = format!("new {}({inner})", class.text);
+            let first = k - 2;
+            match flag.as_str() {
+                "false" if is_statement(tokens, first, close) => Some(Fix {
+                    class: REFLECTION_EXPORT,
+                    start: tokens[first].start,
+                    end: tokens[close].end,
+                    text: format!("echo {object}, \"\\n\""),
+                }),
+                "true" => Some(Fix {
+                    class: REFLECTION_EXPORT,
+                    start: tokens[first].start,
+                    end: tokens[close].end,
+                    text: format!("(string) {object}"),
+                }),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
 fn by_position(tokens: &[Token]) -> std::collections::HashMap<(usize, usize), usize> {
     tokens.iter().enumerate().map(|(k, t)| ((t.line, t.column), k)).collect()
 }
@@ -599,20 +1040,33 @@ pub(crate) fn mark(src: &str, tokens: &[Token], findings: &mut [Finding]) {
     }
     let at_position = by_position(tokens);
     let file = Source::new(src, tokens, findings, &at_position);
-    let kinds: Vec<Option<FixKind>> = findings
-        .iter()
-        .map(|f| {
-            (f.fix == FixKind::Manual && handles(&f.rule_id))
-                .then(|| at_position.get(&(f.line, f.column)).and_then(|&k| at(&file, k, &f.rule_id)))
-                .flatten()
-                .map(|fix| crate::rector::describe_rule(fix.class).fix)
-        })
-        .collect();
-    for (f, kind) in findings.iter_mut().zip(kinds) {
-        if let Some(kind) = kind {
-            f.fix = kind;
+    for (i, fix) in plan(&file, findings, &at_position) {
+        if findings[i].fix == FixKind::Manual {
+            findings[i].fix = crate::rector::describe_rule(fix.class).fix;
         }
     }
+}
+
+/// The fixes the findings allow, by finding. A fix inside another one, or crossing it, is left out
+/// and its finding stays manual.
+fn plan(file: &Source, findings: &[Finding], at_position: &std::collections::HashMap<(usize, usize), usize>) -> Vec<(usize, Fix)> {
+    let all: Vec<(usize, Fix)> = findings
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| handles(&f.rule_id))
+        .filter_map(|(i, f)| at_position.get(&(f.line, f.column)).and_then(|&k| at(file, k, &f.rule_id)).map(|fix| (i, fix)))
+        .collect();
+    let inside = |fix: &Fix| all.iter().any(|(_, o)| o.start <= fix.start && fix.end <= o.end && (o.start, o.end) != (fix.start, fix.end));
+    let mut outer: Vec<(usize, Fix)> = all.iter().filter(|(_, f)| !inside(f)).cloned().collect();
+    outer.sort_by_key(|(_, f)| (f.start, f.end));
+    let mut kept: Vec<(usize, Fix)> = Vec::new();
+    for (i, fix) in outer {
+        if kept.last().is_some_and(|(_, last)| fix.start < last.end && (fix.start, fix.end) != (last.start, last.end)) {
+            continue;
+        }
+        kept.push((i, fix));
+    }
+    kept
 }
 
 /// Applies every fix the file's findings allow. `None` when nothing changes.
@@ -634,13 +1088,9 @@ pub(crate) fn apply(
     let tokens = crate::lexer::tokenize(&text);
     let at_position = by_position(&tokens);
     let file = Source::new(&text, &tokens, &findings, &at_position);
-    let mut fixes: Vec<Fix> = findings
-        .iter()
-        .filter(|f| handles(&f.rule_id))
-        .filter_map(|f| at_position.get(&(f.line, f.column)).and_then(|&k| at(&file, k, &f.rule_id)))
-        .collect();
-    fixes.sort_by_key(|f| std::cmp::Reverse(f.start));
-    fixes.dedup_by(|a, b| a.start == b.start);
+    let mut fixes: Vec<Fix> = plan(&file, &findings, &at_position).into_iter().map(|(_, fix)| fix).collect();
+    fixes.dedup_by(|a, b| (a.start, a.end) == (b.start, b.end));
+    fixes.reverse();
     let mut out = src.to_string();
     let mut applied = Vec::new();
     let mut floor = usize::MAX;
@@ -780,6 +1230,75 @@ mod tests {
     fn bit_tests_on_removed_flags_stay_manual() {
         let src = "<?php\nif ($flags & FILTER_FLAG_HOST_REQUIRED) {}\n$same = $v == CURLPIPE_HTTP1;\nfilter_var_array($a, ['u' => ['filter' => FILTER_VALIDATE_URL, 'options' => FILTER_FLAG_HOST_REQUIRED]]);\n";
         assert_eq!(fixed(src), None);
+    }
+
+    fn kinds(src: &str, rule: &str) -> Vec<FixKind> {
+        analyze_source("t.php", src, PhpVersion::new(8, 5)).into_iter().filter(|f| f.rule_id == rule).map(|f| f.fix).collect()
+    }
+
+    #[test]
+    fn mhash_becomes_hash() {
+        let src = "<?php\n$a = mhash(MHASH_SHA256, $data);\n$b = bin2hex(mhash(MHASH_MD5, $data));\n$c = \\mhash(MHASH_SHA1, $data, $key);\n$d = mhash(MHASH_CRC32, $data, $key);\n$e = [mhash_get_hash_name(MHASH_TIGER), mhash_get_block_size(MHASH_SHA512), MHASH_WHIRLPOOL];\n$f = mhash($algo, $data);\n";
+        let (out, classes) = fixed(src).unwrap();
+        assert_eq!(out, "<?php\n$a = hash('sha256', $data, true);\n$b = hash('md5', $data);\n$c = \\hash_hmac('sha1', $data, $key, true);\n$d = mhash(MHASH_CRC32, $data, $key);\n$e = ['TIGER', 64, 22];\n$f = mhash($algo, $data);\n");
+        assert_eq!(classes, [MHASH, CONSTANT_VALUE]);
+        assert_eq!(
+            kinds(src, "deprecated.mhash"),
+            [FixKind::Auto, FixKind::Auto, FixKind::Auto, FixKind::Manual, FixKind::Auto, FixKind::Auto, FixKind::Manual]
+        );
+        assert_eq!(kinds(src, "deprecated.mhash_constant").iter().filter(|k| **k == FixKind::Manual).count(), 1);
+    }
+
+    #[test]
+    fn kill_and_refresh_become_queries() {
+        let src = "<?php\nfunction f(mysqli $db, $l, $id) {\n    mysqli_kill($l, $id);\n    $db->kill($id + 1);\n    mysqli_refresh($l, MYSQLI_REFRESH_GRANT | MYSQLI_REFRESH_TABLES);\n    $db->refresh(MYSQLI_REFRESH_LOG);\n    $db->refresh(MYSQLI_REFRESH_MASTER);\n    return MYSQLI_REFRESH_HOSTS;\n}\n";
+        let (out, _) = fixed(src).unwrap();
+        assert_eq!(out, "<?php\nfunction f(mysqli $db, $l, $id) {\n    mysqli_query($l, 'KILL CONNECTION ' . (int) $id);\n    $db->query('KILL CONNECTION ' . (int) ($id + 1));\n    mysqli_query($l, 'FLUSH PRIVILEGES, TABLES');\n    $db->query('FLUSH LOGS');\n    $db->refresh(MYSQLI_REFRESH_MASTER);\n    return 8;\n}\n");
+        assert_eq!(kinds(src, "deprecated.mysqli_kill"), [FixKind::Likely, FixKind::Likely]);
+        assert_eq!(kinds(src, "deprecated.mysqli_refresh"), [FixKind::Likely, FixKind::Likely, FixKind::Manual]);
+        assert_eq!(
+            kinds(src, "deprecated.mysqli_refresh_constant"),
+            [FixKind::Likely, FixKind::Likely, FixKind::Likely, FixKind::Manual, FixKind::Auto]
+        );
+    }
+
+    #[test]
+    fn intl_functions_become_methods() {
+        let src = "<?php\nintlcal_set($cal, IntlCalendar::FIELD_MONTH, 3);\n$ok = intlcal_set($cal, IntlCalendar::FIELD_YEAR, 2020);\nintlcal_set($this->cal, 2020, 1, 15);\nintlcal_set(make(), 2020, 1, 15, 10, 30);\n$x = intlcal_set($cal, 2020, 1, 15);\nintlcal_set($cal, 2020, 1, 15, 10);\n$g = [intlgregcal_create_instance(), intlgregcal_create_instance('UTC', 'tr_TR'), intlgregcal_create_instance(2020, 1, 15), intlgregcal_create_instance(2020, 1, 15, 10, 30, 45)];\n$r = lcg_value();\n";
+        let (out, classes) = fixed(src).unwrap();
+        assert_eq!(out, "<?php\n$cal->set(IntlCalendar::FIELD_MONTH, 3);\n$ok = $cal->set(IntlCalendar::FIELD_YEAR, 2020);\n$this->cal->setDate(2020, 1, 15);\n(make())->setDateTime(2020, 1, 15, 10, 30);\n$x = intlcal_set($cal, 2020, 1, 15);\nintlcal_set($cal, 2020, 1, 15, 10);\n$g = [new \\IntlGregorianCalendar(), new \\IntlGregorianCalendar('UTC', 'tr_TR'), \\IntlGregorianCalendar::createFromDate(2020, 1, 15), \\IntlGregorianCalendar::createFromDateTime(2020, 1, 15, 10, 30, 45)];\n$r = (new \\Random\\Randomizer())->getFloat(0, 1, \\Random\\IntervalBoundary::OpenOpen);\n");
+        assert_eq!(classes, [INTL_METHODS, LCG_VALUE]);
+    }
+
+    #[test]
+    fn magic_quotes_checks_are_always_off() {
+        let src = "<?php\nif (get_magic_quotes_gpc()) {\n    $_POST = array_map('stripslashes', $_POST);\n}\n$raw = !get_magic_quotes_runtime();\n$v = get_magic_quotes_gpc() ? stripslashes($v) : $v;\nif (get_magic_quotes_gpc()) { a(); } else { b(); }\n";
+        let (out, classes) = fixed(src).unwrap();
+        assert_eq!(out, "<?php\n$raw = true;\n$v = false ? stripslashes($v) : $v;\nif (false) { a(); } else { b(); }\n");
+        assert_eq!(classes, [MAGIC_QUOTES]);
+    }
+
+    #[test]
+    fn unused_modes_and_renamed_calls() {
+        let src = "<?php\nfunction g(PDO $pdo, mysqli $db, $l, $f) {\n    $rows = $pdo->query('select 1')->fetchAll(PDO::FETCH_SERIALIZE);\n    $s = $pdo->query('select 1', \\PDO::FETCH_SERIALIZE);\n    $m = PDO::FETCH_CLASS | PDO::FETCH_SERIALIZE;\n    mysqli_store_result($l, MYSQLI_STORE_RESULT_COPY_DATA);\n    $db->store_result(0);\n    $copy = MYSQLI_STORE_RESULT_COPY_DATA;\n    datefmt_set_timezone_id($f, 'UTC');\n    $d = new IntlDateFormatter('tr');\n    $d->setTimeZoneID('UTC');\n}\n";
+        let (out, _) = fixed(src).unwrap();
+        assert_eq!(out, "<?php\nfunction g(PDO $pdo, mysqli $db, $l, $f) {\n    $rows = $pdo->query('select 1')->fetchAll(PDO::FETCH_DEFAULT);\n    $s = $pdo->query('select 1', \\PDO::FETCH_DEFAULT);\n    $m = PDO::FETCH_CLASS | PDO::FETCH_SERIALIZE;\n    mysqli_store_result($l);\n    $db->store_result();\n    $copy = 16;\n    datefmt_set_timezone($f, 'UTC');\n    $d = new IntlDateFormatter('tr');\n    $d->setTimeZone('UTC');\n}\n");
+        assert_eq!(kinds(src, "deprecated.pdo_fetch_serialize"), [FixKind::Auto, FixKind::Auto, FixKind::Manual]);
+    }
+
+    #[test]
+    fn reflection_export_prints_or_returns_the_text() {
+        let src = "<?php\nReflectionClass::export('ArrayIterator');\n\\ReflectionMethod::export('ArrayIterator', 'count', false);\n$s = ReflectionFunction::export('strlen', true);\n$t = ReflectionClass::export($c);\nReflectionMethod::export('A::b');\nReflectionProperty::export($c, $p, $return);\n";
+        let (out, classes) = fixed(src).unwrap();
+        assert_eq!(out, "<?php\necho new ReflectionClass('ArrayIterator'), \"\\n\";\necho new \\ReflectionMethod('ArrayIterator', 'count'), \"\\n\";\n$s = (string) new ReflectionFunction('strlen');\n$t = ReflectionClass::export($c);\nReflectionMethod::export('A::b');\nReflectionProperty::export($c, $p, $return);\n");
+        assert_eq!(classes, [REFLECTION_EXPORT]);
+    }
+
+    #[test]
+    fn a_fix_inside_a_removed_block_is_not_counted() {
+        let src = "<?php\nif (get_magic_quotes_gpc()) {\n    $h = mhash(MHASH_MD5, $x);\n}\n";
+        assert_eq!(fixed(src).unwrap().0, "<?php\n");
+        assert_eq!(kinds(src, "deprecated.mhash"), [FixKind::Manual]);
     }
 
     #[test]

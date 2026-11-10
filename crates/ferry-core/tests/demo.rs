@@ -105,9 +105,24 @@ fn kuzey_magaza_triggers_every_rule() {
         "deprecated.curlpipe_http1",
         "deprecated.e_strict",
         "removed.unset_this",
+        "deprecated.mhash",
+        "deprecated.mhash_constant",
+        "deprecated.mysqli_kill",
+        "deprecated.mysqli_refresh",
+        "deprecated.mysqli_refresh_constant",
+        "deprecated.intlcal_set",
+        "deprecated.intlgregcal_create_instance",
+        "deprecated.lcg_value",
+        "removed.get_magic_quotes_gpc",
+        "removed.get_magic_quotes_runtime",
+        "deprecated.pdo_fetch_serialize",
+        "deprecated.mysqli_store_result_mode",
+        "deprecated.mysqli_store_result_copy_data",
+        "removed.datefmt_set_timezone_id",
+        "removed.reflection_export",
     ];
     for id in own_fixes {
-        assert!(result.findings.iter().any(|f| f.rule_id == id && f.fix == FixKind::Auto), "{id} isn't automatic in the demo");
+        assert!(result.findings.iter().any(|f| f.rule_id == id && f.fix != FixKind::Manual), "{id} isn't fixed in the demo");
     }
 
     let summary = report::summarize(&result.findings);
