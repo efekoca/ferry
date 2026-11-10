@@ -155,6 +155,10 @@ const LIKELY_RULES: &[&str] = &[
     "WakeupToUnserializeRector",
     "KillWithQuery",
     "RefreshWithFlush",
+    "RemoveDefaultAssertOption",
+    "DropRecompressLevel",
+    "StripTagsAfterRead",
+    "RecodeToIconv",
 ];
 
 const RULE_TITLES: &[(&str, Text)] = &[
@@ -193,6 +197,19 @@ const RULE_TITLES: &[(&str, Text)] = &[
     ("RemoveUnusedArgument", Text::new("Kullanılmayan argüman silinir", "Remove unused arguments")),
     ("RenameFunction", Text::new("Fonksiyon yeni adıyla çağrılır", "Call functions by their new name")),
     ("ReflectionExportToString", Text::same("Reflection*::export() → echo new Reflection*()")),
+    ("LdapPagedControl", Text::same("ldap_control_paged_result() → ldap_set_option()")),
+    (
+        "RemoveDefaultAssertOption",
+        Text::new("Varsayılanı yeniden ayarlayan assert_options() silinir", "Remove assert_options() calls that set the default"),
+    ),
+    ("DropRecompressLevel", Text::new("FL_RECOMPRESS sıkıştırma düzeyi olarak silinir", "Drop FL_RECOMPRESS as a compression level")),
+    ("StripTagsAfterRead", Text::same("fgetss() → strip_tags(fgets())")),
+    ("RecodeToIconv", Text::same("recode_string() → iconv()")),
+    (
+        "InlineEzmlmHash",
+        Text::new("ezmlm_hash() aynı hesabı yapan bir fonksiyonla değiştirilir", "Replace ezmlm_hash() with the same calculation"),
+    ),
+    ("SqlRegcaseToCallback", Text::same("sql_regcase() → preg_replace_callback()")),
     (
         "ParenthesizeNestedTernaryRector",
         Text::new("İç içe ternary paranteze alınır (eski davranış korunur)", "Parenthesize nested ternaries (keeps the old behaviour)"),

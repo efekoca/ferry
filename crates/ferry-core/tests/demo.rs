@@ -120,6 +120,16 @@ fn kuzey_magaza_triggers_every_rule() {
         "deprecated.mysqli_store_result_copy_data",
         "removed.datefmt_set_timezone_id",
         "removed.reflection_export",
+        "removed.ldap_control_paged_result",
+        "removed.ldap_control_paged_result_response",
+        "deprecated.assert_options",
+        "deprecated.assert_constants",
+        "deprecated.zip_fl_recompress",
+        "removed.fgetss",
+        "removed.gzgetss",
+        "removed.recode",
+        "removed.ezmlm_hash",
+        "removed.sql_regcase",
     ];
     for id in own_fixes {
         assert!(result.findings.iter().any(|f| f.rule_id == id && f.fix != FixKind::Manual), "{id} isn't fixed in the demo");
