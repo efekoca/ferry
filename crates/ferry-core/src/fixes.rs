@@ -52,6 +52,8 @@ pub const XML_CALLABLE: &str = "Ferry\\Php84\\XmlHandlerCallable";
 pub const XML_OBJECT: &str = "Ferry\\Php84\\RemoveXmlSetObject";
 pub const SESSION_HANDLER: &str = "Ferry\\Php84\\SessionHandlerObject";
 pub const AUTOLOAD_REGISTER: &str = "Ferry\\Php80\\AutoloadToSplRegister";
+pub const WBMP_PORT: &str = "Ferry\\Php80\\InlineWbmpConversion";
+pub const WIDEN_OVERRIDE: &str = "Ferry\\Php80\\WidenBuiltinOverride";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Fix {
@@ -181,7 +183,10 @@ const NO_OP_FLAGS: &[(&str, &str, Alone)] = &[
 
 /// Rules whose fix reads the code around the finding, and for three of them the version the project
 /// runs on today.
-const SITE_RULES: [&str; 21] = [
+const SITE_RULES: [&str; 24] = [
+    "removed.incompatible_override",
+    "removed.png2wbmp",
+    "removed.jpeg2wbmp",
     "deprecated.splfixedarray_wakeup",
     "deprecated.reflection_method",
     "deprecated.xml_handler_string",
@@ -401,6 +406,7 @@ pub(crate) fn mentions(src: &str) -> bool {
         "xml_set_",
         "session_set_save_handler",
         "__autoload",
+        "2wbmp",
     ];
     OCI_ALIASES.iter().map(|(old, _)| *old).chain(NO_OP_CALLS.iter().map(|(_, f, _)| *f)).chain(calls).any(|name| lower.contains(name))
         || (lower.contains("unset") && src.contains("$this"))
@@ -416,6 +422,7 @@ pub(crate) struct Source<'a> {
     current: Option<PhpVersion>,
     strict: bool,
     index: &'a crate::index::ProjectIndex,
+    target: PhpVersion,
 }
 
 impl<'a> Source<'a> {
@@ -425,6 +432,7 @@ impl<'a> Source<'a> {
         findings: &[Finding],
         at_position: &std::collections::HashMap<(usize, usize), usize>,
         index: &'a crate::index::ProjectIndex,
+        target: PhpVersion,
     ) -> Self {
         let flagged = findings
             .iter()
@@ -432,7 +440,7 @@ impl<'a> Source<'a> {
             .filter_map(|f| at_position.get(&(f.line, f.column)).copied())
             .collect();
         let strict = tokens.windows(3).any(|w| w[0].is_ident_ci("strict_types") && w[1].is_punct("=") && w[2].text == "1");
-        Source { src, tokens, flagged, current: index.current(), strict, index }
+        Source { src, tokens, flagged, current: index.current(), strict, index, target }
     }
 
     fn text(&self, first: usize, last: usize) -> &'a str {
@@ -780,8 +788,251 @@ fn site_fix(file: &Source, k: usize, rule: &str) -> Option<Fix> {
         "deprecated.xml_set_object" => xml_object(file, k),
         "deprecated.session_set_save_handler" => session_handler(file, k),
         "removed.__autoload" => autoload_register(file, k),
+        "removed.png2wbmp" => wbmp_port(file, k, "png2wbmp", "imagecreatefrompng", "PNG"),
+        "removed.jpeg2wbmp" => wbmp_port(file, k, "jpeg2wbmp", "imagecreatefromjpeg", "JPEG"),
+        "removed.incompatible_override" => widen_override(file, k),
         _ => None,
     }
+}
+
+const COERCED: [&str; 4] = ["int", "float", "string", "bool"];
+
+/// The child's type widened so it accepts the parent's: the union of both, or no type for a `mixed`
+/// parent. `None` where that would change how a value the child already took is coerced, or where
+/// PHP would reject the union.
+fn widened(shape: &crate::analyzer::ParamShape, parent: &str) -> Option<String> {
+    let lower: Vec<String> = parent.trim_start_matches('?').split('|').map(|p| p.to_ascii_lowercase()).collect();
+    let mut parts: Vec<(String, String)> =
+        parent.trim_start_matches('?').split('|').map(|p| (p.to_ascii_lowercase(), p.to_string())).collect();
+    if parent.starts_with('?') {
+        parts.push(("null".into(), "null".into()));
+    }
+    let scalar = shape.ty.iter().any(|t| COERCED.contains(&t.as_str()));
+    if parent.is_empty() || lower.iter().any(|p| p == "mixed") {
+        return (!scalar).then(String::new);
+    }
+    let mut union: Vec<(String, String)> = shape.ty.iter().cloned().zip(shape.shown.iter().cloned()).collect();
+    for (low, shown) in parts {
+        if crate::analyzer::accepts(&shape.ty, &low) {
+            continue;
+        }
+        if scalar && COERCED.contains(&low.as_str()) {
+            return None;
+        }
+        let builtin = ["int", "float", "string", "bool", "array", "null", "callable", "iterable", "false", "true", "object", "void"];
+        let written = if builtin.contains(&low.as_str()) { low.clone() } else { format!("\\{shown}") };
+        if !union.iter().any(|(l, _)| *l == low) {
+            union.push((low, written));
+        }
+    }
+    let has = |t: &str| union.iter().any(|(l, _)| l == t);
+    let class = union.iter().any(|(l, _)| {
+        !COERCED.contains(&l.as_str()) && !["array", "null", "callable", "iterable", "false", "true", "object"].contains(&l.as_str())
+    });
+    let redundant = has("bool") && (has("false") || has("true"))
+        || has("true") && has("false")
+        || has("iterable") && (has("array") || has("traversable"))
+        || has("object") && class;
+    if redundant {
+        return None;
+    }
+    let (nulls, rest): (Vec<_>, Vec<_>) = union.into_iter().partition(|(l, _)| l == "null");
+    Some(rest.into_iter().chain(nulls).map(|(_, s)| s).collect::<Vec<_>>().join("|"))
+}
+
+/// A method that overrides a built-in one with a signature PHP 8 rejects: its parameter types widen
+/// to accept the parent's, a parameter the parent treats as optional gets a default, missing
+/// parameters and a variadic are added, and a tentative return type gets #[\ReturnTypeWillChange].
+/// The result has to pass the same check the scan made.
+fn widen_override(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let over = crate::analyzer::builtin_overrides(tokens, file.index, file.target).into_iter().find(|o| o.name == k)?;
+    let crate::analyzer::Override::Incompatible(method) = over.problem else { return None };
+    let &(_, parent_static, required, params, variadic, returns, tentative, ..) = method;
+    let keyword = match tokens.get(k.checked_sub(1)?) {
+        Some(t) if t.is_ident_ci("function") => k - 1,
+        Some(t) if t.is_punct("&") && k >= 2 && tokens[k - 2].is_ident_ci("function") => k - 2,
+        _ => return None,
+    };
+    let modifiers = ["public", "protected", "private", "static", "final", "abstract"];
+    let mut first = keyword;
+    while first > 0 && modifiers.iter().any(|m| tokens[first - 1].is_ident_ci(m)) {
+        first -= 1;
+    }
+    let is_static = tokens[first..keyword].iter().any(|t| t.is_ident_ci("static"));
+    let open = k + 1;
+    let close = crate::declarations::close_of(tokens, open).filter(|_| tokens[open].is_punct("("))?;
+    let child_return = crate::analyzer::return_type(tokens, close);
+    let return_fits = child_return.as_deref().is_some_and(|r| crate::analyzer::covariant(r, returns));
+    if is_static != parent_static || !tentative && !returns.is_empty() && !return_fits {
+        return None;
+    }
+    let shapes = crate::analyzer::param_shapes(tokens, open, close);
+    let (_, ranges) = arguments(tokens, open)?;
+    if ranges.len() != shapes.len() {
+        return None;
+    }
+    let child_variadic = shapes.iter().any(|s| s.variadic);
+    let src = file.src;
+    let mut texts = Vec::new();
+    for (i, (shape, &(f, l))) in shapes.iter().zip(&ranges).enumerate() {
+        let mut text = file.text(f, l).to_string();
+        if shape.variadic {
+            texts.push(text);
+            continue;
+        }
+        if let Some(&(by_ref, ty)) = params.get(i) {
+            if shape.by_ref != by_ref {
+                return None;
+            }
+            if !crate::analyzer::accepts(&shape.ty, ty) {
+                let var = (f..=l).find(|&j| tokens[j].kind == TokenKind::Variable)?;
+                let compound = (f..var)
+                    .any(|j| tokens[j].is_punct("(") || tokens[j].is_punct("&") && !(tokens[j + 1].is_punct("...") || j + 1 == var));
+                if compound {
+                    return None;
+                }
+                let new = widened(shape, ty)?;
+                let typed: Vec<usize> = (f..=l).filter(|&j| tokens[j].is_punct("?") || shape.ty_at.contains(&j)).collect();
+                let (&from, &to) = (typed.first()?, typed.last()?);
+                let rest = src[tokens[to].end..tokens[l].end].trim_start();
+                text = if new.is_empty() {
+                    format!("{}{rest}", &src[tokens[f].start..tokens[from].start])
+                } else {
+                    format!("{}{new} {rest}", &src[tokens[f].start..tokens[from].start])
+                };
+            }
+        }
+        if i >= required && !shape.optional {
+            if !shape.ty.is_empty() {
+                return None;
+            }
+            text.push_str(" = null");
+        }
+        texts.push(text);
+    }
+    let names: HashSet<&str> = shapes.iter().map(|s| s.name.as_str()).collect();
+    let free =
+        |base: &str| std::iter::once(base.to_string()).chain((2..).map(|n| format!("{base}{n}"))).find(|n| !names.contains(n.as_str()));
+    if !child_variadic {
+        for i in shapes.len()..params.len() {
+            texts.push(format!("${} = null", free(&format!("arg{}", i + 1))?));
+        }
+        if variadic {
+            texts.push(format!("...${}", free("rest")?));
+        }
+    }
+    let header = format!("{}{})", &src[tokens[first].start..tokens[open].end], texts.join(", "));
+    let marked =
+        tokens[first.saturating_sub(8)..first].iter().any(|t| t.text.trim_start_matches('\\').eq_ignore_ascii_case("ReturnTypeWillChange"));
+    let returned = &src[tokens[close].end..return_end(tokens, close)];
+    let check = crate::lexer::tokenize(&format!("<?php class C {{ {header}{returned} {{}} }}"));
+    let name_at = check.iter().position(|t| t.text.eq_ignore_ascii_case(&tokens[k].text) && t.kind == TokenKind::Ident)?;
+    let check_close = crate::declarations::close_of(&check, name_at + 1)?;
+    let new_shapes = crate::analyzer::param_shapes(&check, name_at + 1, check_close);
+    if !crate::analyzer::compatible(&new_shapes, is_static, crate::analyzer::return_type(&check, check_close).as_deref(), method) {
+        return None;
+    }
+    let attribute = if tentative && !return_fits && !marked {
+        let line = &src[src[..tokens[first].start].rfind('\n').map_or(0, |i| i + 1)..tokens[first].start];
+        let indent: String = line.chars().take_while(|c| *c == ' ' || *c == '\t').collect();
+        let nl = if src.contains("\r\n") { "\r\n" } else { "\n" };
+        format!("#[\\ReturnTypeWillChange]{nl}{indent}")
+    } else {
+        String::new()
+    };
+    Some(Fix { class: WIDEN_OVERRIDE, start: tokens[first].start, end: tokens[close].end, text: format!("{attribute}{header}") })
+}
+
+/// Where the return type after the parameter list closing at `close` ends.
+fn return_end(tokens: &[Token], close: usize) -> usize {
+    if !tokens.get(close + 1).is_some_and(|t| t.is_punct(":")) {
+        return tokens[close].end;
+    }
+    (close + 2..tokens.len()).find(|&j| tokens[j].is_punct("{") || tokens[j].is_punct(";")).map_or(tokens[close].end, |j| tokens[j - 1].end)
+}
+
+/// What png2wbmp() and jpeg2wbmp() did in php-src (`_php_image_convert`), step for step: the
+/// destination opened before the source is read, the scale worked out in 32-bit floats, and each
+/// pixel black below `threshold * 32`.
+const WBMP_CONVERSION: &str = "(static function ($source, $destination, $height, $width, $threshold) {
+    $threshold = (int) $threshold;
+    if ($threshold < 0 || $threshold > 8) {
+        trigger_error(\"NAME(): Invalid threshold value '$threshold'\", E_USER_WARNING);
+        return false;
+    }
+    $in = @fopen($source, 'rb');
+    if ($in === false) {
+        trigger_error(\"NAME(): Unable to open '$source' for reading\", E_USER_WARNING);
+        return false;
+    }
+    fclose($in);
+    $out = @fopen($destination, 'wb');
+    if ($out === false) {
+        trigger_error(\"NAME(): Unable to open '$destination' for writing\", E_USER_WARNING);
+        return false;
+    }
+    $image = @LOADER($source);
+    if ($image === false) {
+        fclose($out);
+        trigger_error(\"NAME(): Unable to open '$destination' Not a valid KIND file\", E_USER_WARNING);
+        return false;
+    }
+    $float = static fn (float $v): float => unpack('g', pack('g', $v))[1];
+    $int = static fn (float $v): int => is_finite($v) ? (int) $v : 0;
+    $orgWidth = imagesx($image);
+    $orgHeight = imagesy($image);
+    $width = (int) $width;
+    $height = (int) $height;
+    $x = $float(fdiv($orgWidth, $width));
+    $y = $float(fdiv($orgHeight, $height));
+    if ($x > 1 && $y > 1) {
+        $x = $y = max($x, $y);
+        $width = $int($float(fdiv($orgWidth, $x)));
+        $height = $int($float(fdiv($orgHeight, $y)));
+    } else {
+        $x = $y = min($float(fdiv($width, $orgWidth)), $float(fdiv($height, $orgHeight)));
+        $width = $int($float($orgWidth * $x));
+        $height = $int($float($orgHeight * $y));
+    }
+    $resized = $width > 0 && $height > 0 ? @imagecreate($width, $height) : false;
+    if ($resized === false) {
+        fclose($out);
+        trigger_error(\"NAME(): Unable to allocate temporary buffer\", E_USER_WARNING);
+        return false;
+    }
+    imagecopyresized($resized, $image, 0, 0, 0, 0, $width, $height, $orgWidth, $orgHeight);
+    $result = imagecreate($width, $height);
+    $white = imagecolorallocate($result, 255, 255, 255);
+    $black = imagecolorallocate($result, 0, 0, 0);
+    for ($row = 0; $row < $height; $row++) {
+        for ($col = 0; $col < $width; $col++) {
+            $rgb = imagecolorsforindex($resized, imagecolorat($resized, $col, $row));
+            imagesetpixel($result, $col, $row, intdiv($rgb['red'] + $rgb['green'] + $rgb['blue'], 3) < $threshold * 32 ? $black : $white);
+        }
+    }
+    imagewbmp($result, $out, $black);
+    fclose($out);
+    return true;
+})";
+
+/// `png2wbmp($src, $dest, $height, $width, $threshold)` → the same conversion as a closure called in
+/// place.
+fn wbmp_port(file: &Source, k: usize, name: &str, loader: &str, kind: &str) -> Option<Fix> {
+    let tokens = file.tokens;
+    let (close, args) = function_call(tokens, k, &[name])?;
+    if args.len() != 5 {
+        return None;
+    }
+    let src = file.src;
+    let line_start = src[..tokens[k].start].rfind('\n').map_or(0, |i| i + 1);
+    let indent: String = src[line_start..tokens[k].start].chars().take_while(|c| *c == ' ' || *c == '\t').collect();
+    let nl = if src.contains("\r\n") { "\r\n" } else { "\n" };
+    let closure = WBMP_CONVERSION.replace("NAME", name).replace("LOADER", loader).replace("KIND", kind);
+    let body =
+        closure.lines().enumerate().map(|(i, l)| if i == 0 { l.to_string() } else { format!("{indent}{l}") }).collect::<Vec<_>>().join(nl);
+    let text = format!("{body}({})", file.text(args[0].0, args[4].1));
+    Some(Fix { class: WBMP_PORT, start: tokens[k].start, end: tokens[close].end, text })
 }
 
 /// The first token of the plain variable or property chain that ends right before the `->` at `arrow`.
@@ -2347,13 +2598,14 @@ pub(crate) fn mark(
     tokens: &[Token],
     findings: &mut [Finding],
     index: &crate::index::ProjectIndex,
+    target: PhpVersion,
     guessed: &HashSet<(usize, usize)>,
 ) {
     if !findings.iter().any(|f| f.fix == FixKind::Manual && handles(&f.rule_id)) {
         return;
     }
     let at_position = by_position(tokens);
-    let file = Source::new(src, tokens, findings, &at_position, index);
+    let file = Source::new(src, tokens, findings, &at_position, index, target);
     let open = |f: &Finding| f.fix == FixKind::Manual && !guessed.contains(&(f.line, f.column));
     for (i, fix) in plan(&file, findings, &at_position, &open) {
         if findings[i].fix == FixKind::Manual {
@@ -2407,7 +2659,7 @@ pub(crate) fn apply(
     let text = if classic_mac { src.replace('\r', "\n") } else { src.to_string() };
     let tokens = crate::lexer::tokenize(&text);
     let at_position = by_position(&tokens);
-    let file = Source::new(&text, &tokens, &findings, &at_position, index);
+    let file = Source::new(&text, &tokens, &findings, &at_position, index, target);
     let marked = |f: &Finding| f.fix != FixKind::Manual;
     let mut fixes: Vec<Fix> = plan(&file, &findings, &at_position, &marked).into_iter().map(|(_, fix)| fix).collect();
     fixes.dedup_by(|a, b| (a.start, a.end) == (b.start, b.end));
@@ -2788,7 +3040,7 @@ mod tests {
         let tokens = crate::lexer::tokenize(src);
         let findings = crate::analyzer::analyze_source("t.php", src, PhpVersion::new(8, 5));
         let index = crate::index::ProjectIndex::from_tokens(&tokens).with_current(php5);
-        let file = Source::new(src, &tokens, &findings, &at_position, &index);
+        let file = Source::new(src, &tokens, &findings, &at_position, &index, PhpVersion::new(8, 5));
         let marked: String =
             plan(&file, &findings, &at_position, &|_| true).into_iter().rev().fold(src.to_string(), |mut text, (_, fix)| {
                 text.replace_range(fix.start..fix.end, &fix.text);
@@ -3006,5 +3258,46 @@ mod tests {
         ] {
             assert_eq!(fixed(&other), None, "{other}");
         }
+    }
+
+    #[test]
+    fn wbmp_conversions_run_in_place() {
+        let src = "<?php\nfunction t($png, $jpg, $args) {\n    png2wbmp($png, 'p.wbmp', 32, 32, 7);\n    $ok = jpeg2wbmp($jpg, 'j.wbmp', 20, 30, 4);\n    png2wbmp(...$args);\n}\n";
+        let (out, classes) = fixed(src).unwrap();
+        assert!(
+            out.contains(
+                "    (static function ($source, $destination, $height, $width, $threshold) {\n        $threshold = (int) $threshold;\n"
+            ),
+            "{out}"
+        );
+        assert!(out.contains("        return true;\n    })($png, 'p.wbmp', 32, 32, 7);\n"), "{out}");
+        assert!(out.contains("    $ok = (static function ($source,") && out.contains("$image = @imagecreatefromjpeg($source);"), "{out}");
+        assert!(out.contains("trigger_error(\"jpeg2wbmp(): Invalid threshold value '$threshold'\", E_USER_WARNING);"), "{out}");
+        assert!(out.contains("    png2wbmp(...$args);\n"), "{out}");
+        assert_eq!(classes, [WBMP_PORT]);
+        let found = fixes(src);
+        assert_eq!(kinds_of(&found, "removed.png2wbmp"), [FixKind::Likely, FixKind::Manual]);
+        assert_eq!(kinds_of(&found, "removed.jpeg2wbmp"), [FixKind::Likely]);
+    }
+
+    #[test]
+    fn built_in_overrides_widen() {
+        let src = "<?php\nclass PdoConnection extends PDO {\n    public function query($sql, array $params = array())\n    {\n        return parent::query($sql);\n    }\n}\nclass Items implements Countable {\n    public function count($mode) { return 0; }\n}\nclass Bag extends ArrayObject {\n    public function setFlags(array $flags) {}\n    public function offsetGet(int $key) {}\n    public function append(&$value) {}\n}\nclass Fixed implements Countable {\n    public static function count() { return 0; }\n}\n";
+        let (out, classes) = fixed(src).unwrap();
+        assert!(
+            out.contains(
+                "    #[\\ReturnTypeWillChange]\n    public function query($sql, array|int|null $params = array(), ...$rest)\n    {"
+            ),
+            "{out}"
+        );
+        assert!(out.contains("    #[\\ReturnTypeWillChange]\n    public function count($mode = null) { return 0; }"), "{out}");
+        assert!(out.contains("    #[\\ReturnTypeWillChange]\n    public function setFlags(array|int $flags) {}"), "{out}");
+        assert!(out.contains("    public function offsetGet(int $key) {}\n    public function append(&$value) {}"), "{out}");
+        assert!(out.contains("    public static function count() { return 0; }"), "{out}");
+        assert_eq!(classes, [WIDEN_OVERRIDE]);
+        let kinds = kinds_of(&fixes(src), "removed.incompatible_override");
+        assert_eq!(kinds, [FixKind::Likely, FixKind::Likely, FixKind::Likely, FixKind::Manual, FixKind::Manual, FixKind::Manual]);
+        let again = fixes(&out);
+        assert_eq!(kinds_of(&again, "removed.incompatible_override").len(), 3, "only the three left manual remain");
     }
 }

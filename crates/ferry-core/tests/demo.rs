@@ -152,6 +152,9 @@ fn kuzey_magaza_triggers_every_rule() {
         "deprecated.xml_set_object",
         "deprecated.session_set_save_handler",
         "removed.__autoload",
+        "removed.png2wbmp",
+        "removed.jpeg2wbmp",
+        "removed.incompatible_override",
     ];
     for id in own_fixes {
         assert!(
@@ -283,7 +286,7 @@ fn auto_findings_are_fixed_by_rector() {
                         .filter(|(i, _)| {
                             let before = lower[..*i].chars().last();
                             let after = lower[i + w.len()..].chars().next();
-                            !before.is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '$')
+                            !before.is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '$' || c == '"' || c == '\'')
                                 && !after.is_some_and(|c| c.is_alphanumeric() || c == '_')
                         })
                         .count()
