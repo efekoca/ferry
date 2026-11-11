@@ -155,6 +155,12 @@ fn kuzey_magaza_triggers_every_rule() {
         "removed.png2wbmp",
         "removed.jpeg2wbmp",
         "removed.incompatible_override",
+        "deprecated.date_rfc7231",
+        "deprecated.e_user_error",
+        "removed.input_request",
+        "removed.input_session",
+        "deprecated.soap_functions_all",
+        "deprecated.date_wakeup",
     ];
     for id in own_fixes {
         assert!(
@@ -162,6 +168,10 @@ fn kuzey_magaza_triggers_every_rule() {
             "{id} isn't fixed in the demo: {:?}",
             result.findings.iter().filter(|f| f.rule_id == id).map(|f| format!("{}:{} {}", f.file, f.line, f.snippet)).collect::<Vec<_>>()
         );
+    }
+
+    for id in ["deprecated.date_rfc7231", "deprecated.e_user_error", "removed.input_request", "deprecated.splfileinfo_bad_state_ex"] {
+        assert!(result.findings.iter().any(|f| f.rule_id == id && f.options.len() == 2), "{id} offers no choice in the demo");
     }
 
     let summary = report::summarize(&result.findings);
@@ -274,7 +284,8 @@ fn auto_findings_are_fixed_by_rector() {
                 unfixed.insert(format!("{} ({:?}) {}:{}", f.rule_id, f.fix, f.file, f.line));
                 continue;
             };
-            let touched = if FUNCTIONS.iter().chain(CONSTANTS).any(|r| r.id == f.rule_id) {
+            let keeps_name = f.rule_id == "deprecated.e_user_error";
+            let touched = if FUNCTIONS.iter().chain(CONSTANTS).any(|r| r.id == f.rule_id) && !keeps_name {
                 let source = std::fs::read_to_string(root.join(&f.file)).unwrap();
                 let line = source.lines().nth(f.line - 1).unwrap_or_default();
                 let word: String = line.chars().skip(f.column - 1).take_while(|c| c.is_alphanumeric() || *c == '_').collect();

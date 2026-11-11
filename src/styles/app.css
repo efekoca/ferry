@@ -3472,6 +3472,103 @@ button.menu__item:focus-visible {
   letter-spacing: -0.004em;
 }
 
+.fix-options {
+  display: flex;
+  flex-direction: column;
+  margin-top: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.fix-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+
+.fix-option + .fix-option {
+  border-top: 1px solid var(--border);
+}
+
+.fix-option:hover {
+  background: var(--fill);
+}
+
+.fix-option[aria-checked="true"] {
+  background: var(--accent-soft);
+}
+
+.fix-option:focus-visible {
+  outline-offset: -2px;
+}
+
+.fix-option__dot {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-top: 2px;
+  border-radius: var(--radius-full);
+  border: 1.5px solid var(--border-input);
+  background: var(--surface);
+  transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.fix-option[aria-checked="true"] .fix-option__dot {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 3px var(--surface), inset 0 0 0 7px var(--accent);
+}
+
+.fix-option__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.fix-option__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.fix-option__tag {
+  padding: 0 7px;
+  border-radius: var(--radius-full);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 17px;
+}
+
+.fix-option[aria-checked="true"] .fix-option__tag {
+  background: var(--surface);
+}
+
+.fix-option__effect {
+  font-size: 12.5px;
+  line-height: 18px;
+  text-wrap: pretty;
+}
+
+.fix-options__note {
+  color: var(--text-3);
+  font-size: 12.5px;
+}
+
 .detail__related {
   display: flex;
   flex-direction: column;

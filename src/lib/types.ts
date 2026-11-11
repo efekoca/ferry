@@ -64,6 +64,21 @@ export interface Finding {
   replacement: Localized | null;
   snippet: string;
   runtimeHits: number;
+  options?: FixOption[];
+}
+
+export interface FixOption {
+  id: string;
+  title: Localized;
+  effect: Localized;
+  code: string;
+  fix: FixKind;
+  recommended: boolean;
+}
+
+export interface FixChoice {
+  id: string;
+  option: string;
 }
 
 export interface Summary {

@@ -67,8 +67,69 @@ const SEEDS: Seed[] = [
   { file: "includes/class-order.php", line: 12, ruleId: "deprecated.implicit_nullable", title: NULLABLE_TITLE, message: NULLABLE, since: "8.4", severity: "deprecated", fix: "auto", replacement: NULLABLE_REPL, snippet: "public function __construct(Customer $customer = null, array $items = null)" },
   { file: "includes/class-order.php", line: 46, ruleId: "deprecated.implicit_nullable", title: NULLABLE_TITLE, message: NULLABLE, since: "8.4", severity: "deprecated", fix: "auto", replacement: NULLABLE_REPL, snippet: "public function applyCoupon(Coupon $coupon = null): float" },
   { file: "includes/class-order.php", line: 90, ruleId: "deprecated.get_class_no_args", title: L("Parametresiz get_class()", "get_class() without arguments"), message: L("Parametresiz get_class() ve get_parent_class() çağrıları 8.3'te kullanımdan kalktı.", "Calling get_class() or get_parent_class() without arguments is deprecated in 8.3."), since: "8.3", severity: "deprecated", fix: "auto", replacement: same("self::class"), snippet: "$type = get_class();" },
-  { file: "includes/class-payment.php", line: 31, ruleId: "deprecated.e_strict", title: same("E_STRICT"), message: L("E_STRICT kullanımdan kalktı; bu hata seviyesi artık hiç tetiklenmiyor.", "E_STRICT is deprecated; this error level is never raised anymore."), since: "8.4", severity: "deprecated", fix: "manual", replacement: L("E_STRICT'i kaldırın", "remove E_STRICT"), snippet: "error_reporting(E_ALL & ~E_STRICT);" },
-  { file: "includes/class-payment.php", line: 140, ruleId: "deprecated.curl_close", title: same("curl_close()"), message: L("PHP 8.0'dan beri hiçbir şey yapmıyor, 8.5'te kullanımdan kalktı.", "Has done nothing since PHP 8.0 and is deprecated in 8.5."), since: "8.5", severity: "deprecated", fix: "auto", replacement: L("çağrıyı silin", "remove the call"), snippet: "curl_close($ch);" },
+  {
+    file: "includes/class-files.php",
+    line: 40,
+    ruleId: "deprecated.splfileinfo_bad_state_ex",
+    title: same("->_bad_state_ex()"),
+    message: L("SplFileInfo::_bad_state_ex() 8.2'de kullanımdan kalktı.", "SplFileInfo::_bad_state_ex() is deprecated in 8.2."),
+    since: "8.2",
+    severity: "deprecated",
+    fix: "manual",
+    replacement: L("çağrıyı silin", "remove the call"),
+    snippet: "$file->_bad_state_ex();",
+    options: [
+      {
+        id: "remove",
+        title: L("Çağrıyı sil", "Delete the call"),
+        effect: L("Büyük olasılıkla kastedilen budur; çağrıdan sonraki kod artık çalışır.", "Likely what was meant; the code after the call now runs."),
+        code: "",
+        fix: "likely",
+        recommended: false,
+      },
+      {
+        id: "throw",
+        title: L("Hatayı koru", "Keep the error"),
+        effect: L("Çağrının PHP 8'de her zaman fırlattığı Error açıkça fırlatılır.", "Throws the Error the call always threw on PHP 8."),
+        code: "throw new \\Error('The parent constructor was not called: the object is in an invalid state');",
+        fix: "auto",
+        recommended: false,
+      },
+    ],
+  },
+  {
+    file: "includes/class-payment.php",
+    line: 140,
+    ruleId: "deprecated.date_rfc7231",
+    title: same("DATE_RFC7231"),
+    message: L("DATE_RFC7231 saat dilimini yok sayıyordu ve 8.5'te kullanımdan kalktı.", "DATE_RFC7231 ignored the time zone and is deprecated in 8.5."),
+    since: "8.5",
+    severity: "deprecated",
+    fix: "auto",
+    replacement: L("biçimi açıkça yazın", "write the format out"),
+    snippet: "header('Expires: ' . date(DATE_RFC7231, $expires));",
+    options: [
+      {
+        id: "literal",
+        title: L("Aynı çıktı", "Same output"),
+        effect: L("Sabitin tuttuğu biçim yazılır; yerel saat yine GMT etiketiyle çıkar.", "Writes the format the constant held; local time is still labelled GMT."),
+        code: "header('Expires: ' . date('D, d M Y H:i:s \\G\\M\\T', $expires));",
+        fix: "auto",
+        recommended: true,
+      },
+      {
+        id: "utc",
+        title: L("Gerçek GMT saati", "Real GMT time"),
+        effect: L(
+          "Saat önce UTC'ye çevrilir. Varsayılan saat dilimi ya da nesnenin saat dilimi UTC değilse çıktı değişir.",
+          "The time is converted to UTC first. The output changes when the default or the object's time zone isn't UTC.",
+        ),
+        code: "header('Expires: ' . gmdate('D, d M Y H:i:s \\G\\M\\T', $expires));",
+        fix: "likely",
+        recommended: false,
+      },
+    ],
+  },
   { file: "includes/class-payment.php", line: 152, ruleId: "deprecated.backtick", title: L("Ters tırnakla komut çalıştırma", "Backtick shell execution"), message: L("Ters tırnak operatörü 8.5'te kullanımdan kalktı.", "The backtick operator is deprecated in 8.5."), since: "8.5", severity: "deprecated", fix: "auto", replacement: same("shell_exec()"), snippet: "$rev = `git rev-parse HEAD`;" },
   { file: "includes/template.php", line: 22, ruleId: "review.eval", title: L("eval() kullanımı", "eval() usage"), message: L("eval() içindeki kod statik olarak incelenemez; çalıştırdığı kodun yeni sürümde de çalıştığını elle doğrulayın.", "Code inside eval() can't be analyzed statically; check by hand that what it runs still works on the new version."), since: "7.0", severity: "behavior", fix: "manual", replacement: null, snippet: "eval('?>' . $compiled);" },
   { file: "includes/template.php", line: 48, ruleId: "review.extract", title: L("extract() kullanımı", "extract() usage"), message: L("extract() hangi değişkenleri oluşturduğunu gizler; tip ve null davranışını elle kontrol edin.", "extract() hides which variables it creates; check types and nulls by hand."), since: "7.0", severity: "behavior", fix: "manual", replacement: null, snippet: "extract($vars, EXTR_SKIP);" },
@@ -458,7 +519,7 @@ export function mockApi(
       await sleep(delay * 3);
       return toolchain();
     },
-    rectorPreview: async (_path, target, mode, withPins) => {
+    rectorPreview: async (_path, target, mode, withPins, _choices) => {
       cancelled = false;
       const id = ++previewId;
       await sleep(delay * 2);

@@ -173,6 +173,14 @@ const LIKELY_RULES: &[&str] = &[
     "AutoloadToSplRegister",
     "InlineWbmpConversion",
     "WidenBuiltinOverride",
+    "Rfc7231InUtc",
+    "RemoveDateWakeup",
+    "RemoveBadStateCall",
+    "UserErrorToException",
+    "UserErrorToWarningAndExit",
+    "InputTypeSuperglobal",
+    "SoapDefinedFunctions",
+    "SoapUserFunctions",
 ];
 
 const RULE_TITLES: &[(&str, Text)] = &[
@@ -267,6 +275,17 @@ const RULE_TITLES: &[(&str, Text)] = &[
         "WidenBuiltinOverride",
         Text::new("Yerleşik metodu ezen imza PHP 8'e uyacak şekilde genişletilir", "Widen signatures that override built-in methods"),
     ),
+    ("Rfc7231Literal", Text::same("DATE_RFC7231 → 'D, d M Y H:i:s \\G\\M\\T'")),
+    ("Rfc7231InUtc", Text::new("RFC 7231 tarihi UTC'de yazılır", "Write the RFC 7231 date in UTC")),
+    ("RemoveDateWakeup", Text::new("Tarih nesnesindeki __wakeup() çağrısı silinir", "Remove __wakeup() calls on date objects")),
+    ("RemoveBadStateCall", Text::new("_bad_state_ex() çağrısı silinir", "Remove _bad_state_ex() calls")),
+    ("ThrowSameError", Text::new("Çağrının fırlattığı hata açıkça fırlatılır", "Throw the error the call threw")),
+    ("UserErrorToException", Text::same("trigger_error(E_USER_ERROR) → throw ErrorException")),
+    ("UserErrorToWarningAndExit", Text::same("trigger_error(E_USER_ERROR) → E_USER_WARNING + exit(255)")),
+    ("InputTypeOldResult", Text::new("Çağrı her zaman döndürdüğü değerle değiştirilir", "Replace the call with what it always returned")),
+    ("InputTypeSuperglobal", Text::new("Değer süper globalden okunur", "Read the value from the superglobal")),
+    ("SoapDefinedFunctions", Text::same("SOAP_FUNCTIONS_ALL → get_defined_functions()")),
+    ("SoapUserFunctions", Text::same("SOAP_FUNCTIONS_ALL → get_defined_functions()['user']")),
     (
         "ParenthesizeNestedTernaryRector",
         Text::new("İç içe ternary paranteze alınır (eski davranış korunur)", "Parenthesize nested ternaries (keeps the old behaviour)"),
@@ -451,7 +470,18 @@ struct StagedFile {
 }
 
 impl Staging {
+    #[cfg(test)]
     fn prepare(root: &Path, excluded_dirs: &[String], dir: PathBuf, target: PhpVersion) -> Result<Self, RectorError> {
+        Self::prepare_with(root, excluded_dirs, dir, target, &Choices::new())
+    }
+
+    fn prepare_with(
+        root: &Path,
+        excluded_dirs: &[String],
+        dir: PathBuf,
+        target: PhpVersion,
+        choices: &Choices,
+    ) -> Result<Self, RectorError> {
         let _ = std::fs::remove_dir_all(&dir);
         let source = crate::project::inspect(root).ok().and_then(|info| info.current_version);
         let no_constants = std::collections::HashSet::new();
@@ -491,7 +521,8 @@ impl Staging {
             let rel = crate::analyzer::relative_path(root, &path);
             let (mut fixed, mut applied) =
                 crate::analyzer::fix_legacy_syntax_with(&text, &constants, target, source).unwrap_or_else(|| (text.clone(), Vec::new()));
-            if let Some((out, classes)) = index.as_ref().and_then(|index| crate::fixes::apply(&rel, &fixed, target, index)) {
+            let chosen = choices.get(&rel).map_or(&[][..], Vec::as_slice);
+            if let Some((out, classes)) = index.as_ref().and_then(|index| crate::fixes::apply(&rel, &fixed, target, index, chosen)) {
                 fixed = out;
                 applied.extend(classes.into_iter().filter(|c| !applied.contains(c)).collect::<Vec<_>>());
             }
@@ -700,6 +731,9 @@ pub(crate) fn run_cancellable(cmd: Command, program: &Path, cancel: &AtomicBool,
     }
 }
 
+/// The options chosen for findings, by file relative to the project root.
+pub type Choices = std::collections::HashMap<String, Vec<crate::fixes::Chosen>>;
+
 #[allow(clippy::too_many_arguments)]
 pub fn preview(
     php: &Path,
@@ -711,6 +745,22 @@ pub fn preview(
     work_dir: &Path,
     cancel: &AtomicBool,
 ) -> Result<RectorPreview, RectorError> {
+    preview_with(php, rector, root, target, mode, excluded_dirs, work_dir, cancel, &Choices::new())
+}
+
+/// `preview`, with Ferry's own fixes taking the chosen option where a finding has several.
+#[allow(clippy::too_many_arguments)]
+pub fn preview_with(
+    php: &Path,
+    rector: &Path,
+    root: &Path,
+    target: PhpVersion,
+    mode: RectorMode,
+    excluded_dirs: &[String],
+    work_dir: &Path,
+    cancel: &AtomicBool,
+    choices: &Choices,
+) -> Result<RectorPreview, RectorError> {
     if !rector.is_file() {
         return Err(ToolError::RectorMissing.into());
     }
@@ -720,7 +770,7 @@ pub fn preview(
     std::fs::create_dir_all(&dir).map_err(|e| RectorError::Io(dir.display().to_string(), e))?;
     let run = tempfile::Builder::new().prefix("run-").tempdir_in(&dir).map_err(|e| RectorError::Io(dir.display().to_string(), e))?;
     let config_path = run.path().join("rector.php");
-    let staging = Staging::prepare(root, excluded_dirs, run.path().join("staged"), target)?;
+    let staging = Staging::prepare_with(root, excluded_dirs, run.path().join("staged"), target, choices)?;
     let config = build_config(root, target, mode, excluded_dirs, &staging, &dir.join("cache"));
     std::fs::write(&config_path, config).map_err(|e| RectorError::Io(config_path.display().to_string(), e))?;
 

@@ -54,6 +54,156 @@ pub const SESSION_HANDLER: &str = "Ferry\\Php84\\SessionHandlerObject";
 pub const AUTOLOAD_REGISTER: &str = "Ferry\\Php80\\AutoloadToSplRegister";
 pub const WBMP_PORT: &str = "Ferry\\Php80\\InlineWbmpConversion";
 pub const WIDEN_OVERRIDE: &str = "Ferry\\Php80\\WidenBuiltinOverride";
+pub const RFC_LITERAL: &str = "Ferry\\Php85\\Rfc7231Literal";
+pub const RFC_UTC: &str = "Ferry\\Php85\\Rfc7231InUtc";
+pub const DATE_WAKEUP_DROP: &str = "Ferry\\Php85\\RemoveDateWakeup";
+pub const BAD_STATE_DROP: &str = "Ferry\\Php82\\RemoveBadStateCall";
+pub const KEEP_ERROR: &str = "Ferry\\Php82\\ThrowSameError";
+pub const USER_ERROR_EXCEPTION: &str = "Ferry\\Php84\\UserErrorToException";
+pub const USER_ERROR_WARNING: &str = "Ferry\\Php84\\UserErrorToWarningAndExit";
+pub const INPUT_OLD: &str = "Ferry\\Php80\\InputTypeOldResult";
+pub const INPUT_GLOBAL: &str = "Ferry\\Php80\\InputTypeSuperglobal";
+pub const SOAP_ALL: &str = "Ferry\\Php84\\SoapDefinedFunctions";
+pub const SOAP_USER: &str = "Ferry\\Php84\\SoapUserFunctions";
+
+/// A finding the user asked to fix with one option: its line, its rule, which of that rule's
+/// findings on the line it is, and the option.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Chosen {
+    pub line: usize,
+    pub rule: String,
+    pub ordinal: usize,
+    pub option: String,
+}
+
+/// One of several ways to fix a finding, when they keep different things.
+struct Choice {
+    id: &'static str,
+    fix: Fix,
+    recommended: bool,
+}
+
+/// Rules whose findings can come with options.
+const OPTION_RULES: [&str; 6] = [
+    "deprecated.date_rfc7231",
+    "deprecated.splfileinfo_bad_state_ex",
+    "deprecated.e_user_error",
+    "removed.input_request",
+    "removed.input_session",
+    "deprecated.soap_functions_all",
+];
+
+/// (rule, option, title, what it changes).
+const OPTION_TEXTS: &[(&str, &str, crate::i18n::Text, crate::i18n::Text)] = &[
+    (
+        "deprecated.date_rfc7231",
+        "literal",
+        crate::i18n::Text::new("Aynı çıktı", "Same output"),
+        crate::i18n::Text::new(
+            "Sabitin tuttuğu biçim yazılır; yerel saat yine GMT etiketiyle çıkar.",
+            "Writes the format the constant held; local time is still labelled GMT.",
+        ),
+    ),
+    (
+        "deprecated.date_rfc7231",
+        "utc",
+        crate::i18n::Text::new("Gerçek GMT saati", "Real GMT time"),
+        crate::i18n::Text::new(
+            "Saat önce UTC'ye çevrilir. Varsayılan saat dilimi ya da nesnenin saat dilimi UTC değilse çıktı değişir.",
+            "The time is converted to UTC first. The output changes when the default or the object's time zone isn't UTC.",
+        ),
+    ),
+    (
+        "deprecated.splfileinfo_bad_state_ex",
+        "remove",
+        crate::i18n::Text::new("Çağrıyı sil", "Delete the call"),
+        crate::i18n::Text::new(
+            "Büyük olasılıkla kastedilen budur; çağrıdan sonraki kod artık çalışır.",
+            "Likely what was meant; the code after the call now runs.",
+        ),
+    ),
+    (
+        "deprecated.splfileinfo_bad_state_ex",
+        "throw",
+        crate::i18n::Text::new("Hatayı koru", "Keep the error"),
+        crate::i18n::Text::new(
+            "Çağrının PHP 8'de her zaman fırlattığı Error açıkça fırlatılır.",
+            "Throws the Error the call always threw on PHP 8.",
+        ),
+    ),
+    (
+        "deprecated.e_user_error",
+        "exception",
+        crate::i18n::Text::new("ErrorException fırlat", "Throw ErrorException"),
+        crate::i18n::Text::new(
+            "PHP'nin önerisi. Yakalanmazsa yine ölümcül hata yazar ve 255 ile çıkar; ama set_error_handler() artık görmez, catch blokları yakalar.",
+            "PHP's suggestion. Uncaught, it still prints a fatal error and exits with 255, but set_error_handler() no longer sees it and catch blocks do.",
+        ),
+    ),
+    (
+        "deprecated.e_user_error",
+        "warning",
+        crate::i18n::Text::new("Uyarı ver ve çık", "Warn and exit"),
+        crate::i18n::Text::new(
+            "Hata işleyicileri ve kayıtlar mesajı uyarı olarak görmeye devam eder; betik yine 255 ile durur.",
+            "Error handlers and logs still get the message, as a warning, and the script still stops with 255.",
+        ),
+    ),
+    (
+        "removed.input_request",
+        "old",
+        crate::i18n::Text::new("Eski sonuç", "Old result"),
+        crate::i18n::Text::new(
+            "Çağrının her zaman döndürdüğü değer yazılır; yalnızca uyarı kalkar.",
+            "Writes what the call always returned; only the warning goes.",
+        ),
+    ),
+    (
+        "removed.input_request",
+        "superglobal",
+        crate::i18n::Text::new("$_REQUEST'i oku", "Read $_REQUEST"),
+        crate::i18n::Text::new(
+            "Bu kod şimdiye kadar hep boş değer gördü; artık GET, POST ve çerez verisi gelir. Güvenlik açısından gözden geçirin.",
+            "This code has only ever seen an empty value; GET, POST and cookie data now flow in. Review it for security.",
+        ),
+    ),
+    (
+        "removed.input_session",
+        "old",
+        crate::i18n::Text::new("Eski sonuç", "Old result"),
+        crate::i18n::Text::new(
+            "Çağrının her zaman döndürdüğü değer yazılır; yalnızca uyarı kalkar.",
+            "Writes what the call always returned; only the warning goes.",
+        ),
+    ),
+    (
+        "removed.input_session",
+        "superglobal",
+        crate::i18n::Text::new("$_SESSION'ı oku", "Read $_SESSION"),
+        crate::i18n::Text::new(
+            "Bu kod şimdiye kadar hep boş değer gördü; artık oturum verisi gelir ve bunun için oturum başlamış olmalı. Güvenlik açısından gözden geçirin.",
+            "This code has only ever seen an empty value; session data now flows in, which needs a started session. Review it for security.",
+        ),
+    ),
+    (
+        "deprecated.soap_functions_all",
+        "all",
+        crate::i18n::Text::new("Tanımlı tüm fonksiyonlar", "Every defined function"),
+        crate::i18n::Text::new(
+            "PHP'nin önerisi: o an tanımlı bütün fonksiyonlar açılır; sonradan tanımlananlar çağrılamaz.",
+            "PHP's suggestion: every function defined at that point is exposed; ones defined later can't be called.",
+        ),
+    ),
+    (
+        "deprecated.soap_functions_all",
+        "user",
+        crate::i18n::Text::new("Yalnızca projenin fonksiyonları", "Only the project's functions"),
+        crate::i18n::Text::new(
+            "Daha güvenli: PHP'nin kendi fonksiyonları dışarı açılmaz. Servis onlara güveniyorsa çalışmaz.",
+            "Safer: PHP's own functions aren't exposed. A service that relied on them stops working.",
+        ),
+    ),
+];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Fix {
@@ -183,7 +333,14 @@ const NO_OP_FLAGS: &[(&str, &str, Alone)] = &[
 
 /// Rules whose fix reads the code around the finding, and for three of them the version the project
 /// runs on today.
-const SITE_RULES: [&str; 24] = [
+const SITE_RULES: [&str; 31] = [
+    "deprecated.date_rfc7231",
+    "deprecated.splfileinfo_bad_state_ex",
+    "deprecated.e_user_error",
+    "removed.input_request",
+    "removed.input_session",
+    "deprecated.soap_functions_all",
+    "deprecated.date_wakeup",
     "removed.incompatible_override",
     "removed.png2wbmp",
     "removed.jpeg2wbmp",
@@ -407,6 +564,12 @@ pub(crate) fn mentions(src: &str) -> bool {
         "session_set_save_handler",
         "__autoload",
         "2wbmp",
+        "e_user_error",
+        "input_request",
+        "input_session",
+        "soap_functions_all",
+        "rfc7231",
+        "_bad_state_ex",
     ];
     OCI_ALIASES.iter().map(|(old, _)| *old).chain(NO_OP_CALLS.iter().map(|(_, f, _)| *f)).chain(calls).any(|name| lower.contains(name))
         || (lower.contains("unset") && src.contains("$this"))
@@ -791,8 +954,208 @@ fn site_fix(file: &Source, k: usize, rule: &str) -> Option<Fix> {
         "removed.png2wbmp" => wbmp_port(file, k, "png2wbmp", "imagecreatefrompng", "PNG"),
         "removed.jpeg2wbmp" => wbmp_port(file, k, "jpeg2wbmp", "imagecreatefromjpeg", "JPEG"),
         "removed.incompatible_override" => widen_override(file, k),
+        "deprecated.date_wakeup" => date_wakeup(file, k),
+        _ if OPTION_RULES.contains(&rule) => {
+            let options = choices(file, k, rule);
+            let only = options.len() == 1;
+            options.into_iter().find(|c| c.recommended || only).map(|c| c.fix)
+        }
         _ => None,
     }
+}
+
+/// `$date->__wakeup();` on a live date object, when no class of the project extends one.
+fn date_wakeup(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let call = tokens[k].text.eq_ignore_ascii_case("__wakeup")
+        && tokens.get(k + 1).is_some_and(|t| t.is_punct("("))
+        && tokens.get(k + 2).is_some_and(|t| t.is_punct(")"))
+        && tokens.get(k + 3).is_some_and(|t| t.is_punct(";"))
+        && k.checked_sub(1).is_some_and(|p| tokens[p].is_punct("->"));
+    let first = receiver_start(tokens, k.checked_sub(1)?).filter(|_| call)?;
+    let extended =
+        ["datetime", "datetimeimmutable", "datetimezone", "dateinterval", "dateperiod"].iter().any(|c| file.index.extends_directly(c));
+    (starts_statement(tokens, first) && !extended).then(|| removal(file, first, k + 3, DATE_WAKEUP_DROP))
+}
+
+/// The ways Ferry can fix the finding of an option rule at `k`. One entry means there is nothing to
+/// choose there.
+fn choices(file: &Source, k: usize, rule: &str) -> Vec<Choice> {
+    match rule {
+        "deprecated.date_rfc7231" => rfc7231_choices(file, k),
+        "deprecated.splfileinfo_bad_state_ex" => bad_state_choices(file, k),
+        "deprecated.e_user_error" => user_error_choices(file, k),
+        "removed.input_request" => input_choices(file, k, "INPUT_REQUEST", "$_REQUEST"),
+        "removed.input_session" => input_choices(file, k, "INPUT_SESSION", "$_SESSION"),
+        "deprecated.soap_functions_all" => soap_choices(file, k),
+        _ => [None, None],
+    }
+    .into_iter()
+    .flatten()
+    .collect()
+}
+
+const RFC7231_FORMAT: &str = "'D, d M Y H:i:s \\G\\M\\T'";
+
+/// DATE_RFC7231 or Date*::RFC7231: its literal value, or, where it formats a date, the same format
+/// in UTC.
+fn rfc7231_choices(file: &Source, k: usize) -> [Option<Choice>; 2] {
+    let tokens = file.tokens;
+    let tok = &tokens[k];
+    let first = if tok.text.trim_start_matches('\\') == "DATE_RFC7231" && is_atom(tokens, k) {
+        k
+    } else if tok.text == "RFC7231" && k >= 2 && tokens[k - 1].is_punct("::") {
+        let class = tokens[k - 2].text.trim_start_matches('\\').rsplit('\\').next().unwrap_or_default().to_ascii_lowercase();
+        if !["datetime", "datetimeinterface", "datetimeimmutable"].contains(&class.as_str()) {
+            return [None, None];
+        }
+        k - 2
+    } else {
+        return [None, None];
+    };
+    let literal = Choice {
+        id: "literal",
+        fix: Fix { class: RFC_LITERAL, start: tokens[first].start, end: tok.end, text: RFC7231_FORMAT.into() },
+        recommended: true,
+    };
+    let utc = argument_of(tokens, first).filter(|&(_, index, arg)| index == 0 && arg == (first, k)).and_then(|(call, ..)| {
+        if let Some((close, args)) = function_call(tokens, call, &["date"]).filter(|(_, a)| a.len() <= 2) {
+            let rest = &file.src[tok.end..tokens[close].end];
+            let text = format!("{}gmdate{}{RFC7231_FORMAT}{rest}", lead(&tokens[call]), file.between(call, first));
+            return (args.len() <= 2).then(|| Fix { class: RFC_UTC, start: tokens[call].start, end: tokens[close].end, text });
+        }
+        let (close, args) = method_call(tokens, call, &["format"]).filter(|(_, a)| a.len() == 1)?;
+        let receiver = receiver_start(tokens, call - 1)?;
+        let object = file.text(receiver, call - 2);
+        let text =
+            format!("\\DateTimeImmutable::createFromInterface({object})->setTimezone(new \\DateTimeZone('UTC'))->format({RFC7231_FORMAT})");
+        (args.len() == 1).then(|| Fix { class: RFC_UTC, start: tokens[receiver].start, end: tokens[close].end, text })
+    });
+    [Some(literal), utc.map(|fix| Choice { id: "utc", fix, recommended: false })]
+}
+
+/// `$file->_bad_state_ex();` always threw: delete it, or throw that error. Neither is the default.
+fn bad_state_choices(file: &Source, k: usize) -> [Option<Choice>; 2] {
+    let tokens = file.tokens;
+    let call = tokens[k].text.eq_ignore_ascii_case("_bad_state_ex")
+        && tokens.get(k + 1).is_some_and(|t| t.is_punct("("))
+        && tokens.get(k + 2).is_some_and(|t| t.is_punct(")"))
+        && tokens.get(k + 3).is_some_and(|t| t.is_punct(";"))
+        && k.checked_sub(1).is_some_and(|p| tokens[p].is_punct("->"));
+    let Some(first) = receiver_start(tokens, k.saturating_sub(1)).filter(|&f| call && starts_statement(tokens, f)) else {
+        return [None, None];
+    };
+    let message = "throw new \\Error('The parent constructor was not called: the object is in an invalid state');";
+    [
+        Some(Choice { id: "remove", fix: removal(file, first, k + 3, BAD_STATE_DROP), recommended: false }),
+        Some(Choice {
+            id: "throw",
+            fix: Fix { class: KEEP_ERROR, start: tokens[first].start, end: tokens[k + 3].end, text: message.into() },
+            recommended: false,
+        }),
+    ]
+}
+
+/// `trigger_error($msg, E_USER_ERROR);` → an ErrorException, or a warning followed by exit(255).
+/// The exception is the default unless the project installs its own error handler.
+fn user_error_choices(file: &Source, k: usize) -> [Option<Choice>; 2] {
+    let tokens = file.tokens;
+    let found = enclosing_call(tokens, k).and_then(|call| {
+        let (close, args) = function_call(tokens, call, &["trigger_error", "user_error"])?;
+        let [message, level] = args[..] else { return None };
+        (level == (k, k) && tokens[k].text.trim_start_matches('\\') == "E_USER_ERROR" && is_statement(tokens, call, close))
+            .then_some((call, close, message))
+    });
+    let Some((call, close, message)) = found else { return [None, None] };
+    let (start, end) = (tokens[call].start, tokens[close + 1].end);
+    let text = file.text(message.0, message.1);
+    let handler = file.index.sets_error_handler();
+    [
+        Some(Choice {
+            id: "exception",
+            fix: Fix { class: USER_ERROR_EXCEPTION, start, end, text: format!("throw new \\ErrorException({text}, 0, E_USER_ERROR);") },
+            recommended: !handler,
+        }),
+        Some(Choice {
+            id: "warning",
+            fix: Fix { class: USER_ERROR_WARNING, start, end, text: format!("{}({text}, E_USER_WARNING); exit(255);", tokens[call].text) },
+            recommended: handler,
+        }),
+    ]
+}
+
+/// filter_input(), filter_has_var() and filter_input_array() with INPUT_REQUEST or INPUT_SESSION:
+/// what they always returned, or a read of the superglobal they never read.
+fn input_choices(file: &Source, k: usize, constant: &str, global: &str) -> [Option<Choice>; 2] {
+    let tokens = file.tokens;
+    let found = enclosing_call(tokens, k).and_then(|call| {
+        let (close, args) = function_call(tokens, call, &["filter_input", "filter_has_var", "filter_input_array"])?;
+        (args.first() == Some(&(k, k)) && tokens[k].text.trim_start_matches('\\') == constant).then_some((call, close, args))
+    });
+    let Some((call, close, args)) = found else { return [None, None] };
+    let name = tokens[call].text.trim_start_matches('\\').to_ascii_lowercase();
+    let arg = |i: usize| args.get(i).map(|&(f, l)| file.text(f, l).to_string());
+    let simple = |i: usize| args.get(i).is_some_and(|&a| plain(tokens, a) || literal(tokens, a));
+    let filter = args.get(2).map(|&(f, l)| {
+        let bare = tokens[f].text.trim_start_matches('\\');
+        match RENAMED_CONSTANTS.iter().find(|(_, old, _)| f == l && *old == bare) {
+            Some((_, _, new)) => new.to_string(),
+            None => file.text(f, l).to_string(),
+        }
+    });
+    let (old, read) = match name.as_str() {
+        "filter_input" if (2..=3).contains(&args.len()) && simple(1) => {
+            let key = arg(1).unwrap_or_default();
+            let filtered = filter.map_or(String::new(), |f| format!(", {f}"));
+            ("null", format!("isset({global}[{key}]) ? filter_var({global}[{key}]{filtered}) : null"))
+        }
+        "filter_has_var" if args.len() == 2 && simple(1) => {
+            ("false", format!("array_key_exists({}, {global} ?? [])", arg(1).unwrap_or_default()))
+        }
+        "filter_input_array" if args.len() <= 3 => {
+            let rest: String = (1..args.len()).filter_map(arg).map(|a| format!(", {a}")).collect();
+            ("null", format!("isset({global}) ? filter_var_array({global}{rest}) : null"))
+        }
+        _ => return [None, None],
+    };
+    let (start, end) = (tokens[call].start, tokens[close].end);
+    [
+        Some(Choice { id: "old", fix: Fix { class: INPUT_OLD, start, end, text: old.into() }, recommended: true }),
+        Some(Choice { id: "superglobal", fix: Fix { class: INPUT_GLOBAL, start, end, text: read }, recommended: false }),
+    ]
+}
+
+/// SOAP_FUNCTIONS_ALL passed to addFunction(): every defined function, as PHP suggests, or only the
+/// project's. Anywhere else it is just 999.
+fn soap_choices(file: &Source, k: usize) -> [Option<Choice>; 2] {
+    let tokens = file.tokens;
+    let tok = &tokens[k];
+    if tok.text.trim_start_matches('\\') != "SOAP_FUNCTIONS_ALL" || !is_atom(tokens, k) {
+        return [None, None];
+    }
+    let span = |class, text: &str| Fix { class, start: tok.start, end: tok.end, text: text.to_string() };
+    let added = argument_of(tokens, k).is_some_and(|(call, index, arg)| {
+        index == 0 && arg == (k, k) && method_call(tokens, call, &["addFunction"]).is_some_and(|(_, a)| a.len() == 1)
+    });
+    if !added {
+        return [Some(Choice { id: "value", fix: span(CONSTANT_VALUE, "999"), recommended: true }), None];
+    }
+    [
+        Some(Choice { id: "all", fix: span(SOAP_ALL, "array_merge(...array_values(get_defined_functions()))"), recommended: true }),
+        Some(Choice { id: "user", fix: span(SOAP_USER, "get_defined_functions()['user']"), recommended: false }),
+    ]
+}
+
+/// The lines a fix touches, as it leaves them, without their common indentation.
+fn after(src: &str, fix: &Fix) -> String {
+    let start = src[..fix.start].rfind('\n').map_or(0, |i| i + 1);
+    let last = if fix.end > fix.start { fix.end - 1 } else { fix.end };
+    let end = src[last..].find('\n').map_or(src.len(), |i| last + i);
+    let tail = if fix.end <= end { &src[fix.end..end] } else { "" };
+    let text = format!("{}{}{tail}", &src[start..fix.start], fix.text);
+    let lines: Vec<&str> = text.lines().collect();
+    let indent = lines.iter().filter(|l| !l.trim().is_empty()).map(|l| l.len() - l.trim_start().len()).min().unwrap_or(0);
+    lines.iter().map(|l| l.get(indent..).unwrap_or_else(|| l.trim_start())).collect::<Vec<_>>().join("\n").trim().to_string()
 }
 
 const COERCED: [&str; 4] = ["int", "float", "string", "bool"];
@@ -2607,26 +2970,53 @@ pub(crate) fn mark(
     let at_position = by_position(tokens);
     let file = Source::new(src, tokens, findings, &at_position, index, target);
     let open = |f: &Finding| f.fix == FixKind::Manual && !guessed.contains(&(f.line, f.column));
-    for (i, fix) in plan(&file, findings, &at_position, &open) {
+    let pick = |_: usize, f: &Finding, k: usize| if open(f) { at(&file, k, &f.rule_id) } else { None };
+    for (i, fix) in plan(findings, &at_position, &pick) {
         if findings[i].fix == FixKind::Manual {
             findings[i].fix = crate::rector::describe_rule(fix.class).fix;
         }
     }
+    for f in findings.iter_mut().filter(|f| OPTION_RULES.contains(&f.rule_id.as_str()) && !guessed.contains(&(f.line, f.column))) {
+        let Some(&k) = at_position.get(&(f.line, f.column)) else { continue };
+        let options = choices(&file, k, &f.rule_id);
+        if options.len() < 2 {
+            continue;
+        }
+        f.options = options
+            .into_iter()
+            .map(|c| {
+                let text = OPTION_TEXTS.iter().find(|(r, id, ..)| *r == f.rule_id && *id == c.id);
+                let applied = crate::rector::describe_rule(c.fix.class);
+                crate::analyzer::FixOption {
+                    id: c.id.to_string(),
+                    title: text.map_or_else(|| applied.title.clone(), |t| t.2.into()),
+                    effect: text.map_or_else(|| applied.title.clone(), |t| t.3.into()),
+                    code: after(src, &c.fix),
+                    fix: applied.fix,
+                    recommended: c.recommended,
+                }
+            })
+            .collect();
+    }
+}
+
+/// Which of the findings of its rule on its line each finding is, counted from the left.
+fn ordinals(findings: &[Finding]) -> Vec<usize> {
+    findings.iter().map(|f| findings.iter().filter(|o| o.rule_id == f.rule_id && o.line == f.line && o.column < f.column).count()).collect()
 }
 
 /// The fixes the findings allow, by finding. A fix inside another one, or crossing it, is left out
 /// and its finding stays manual.
 fn plan(
-    file: &Source,
     findings: &[Finding],
     at_position: &std::collections::HashMap<(usize, usize), usize>,
-    include: &dyn Fn(&Finding) -> bool,
+    pick: &dyn Fn(usize, &Finding, usize) -> Option<Fix>,
 ) -> Vec<(usize, Fix)> {
     let all: Vec<(usize, Fix)> = findings
         .iter()
         .enumerate()
-        .filter(|(_, f)| handles(&f.rule_id) && include(f))
-        .filter_map(|(i, f)| at_position.get(&(f.line, f.column)).and_then(|&k| at(file, k, &f.rule_id)).map(|fix| (i, fix)))
+        .filter(|(_, f)| handles(&f.rule_id))
+        .filter_map(|(i, f)| at_position.get(&(f.line, f.column)).and_then(|&k| pick(i, f, k)).map(|fix| (i, fix)))
         .collect();
     let inside = |fix: &Fix| all.iter().any(|(_, o)| o.start <= fix.start && fix.end <= o.end && (o.start, o.end) != (fix.start, fix.end));
     let mut outer: Vec<(usize, Fix)> = all.iter().filter(|(_, f)| !inside(f)).cloned().collect();
@@ -2647,6 +3037,7 @@ pub(crate) fn apply(
     src: &str,
     target: PhpVersion,
     index: &std::sync::Arc<crate::index::ProjectIndex>,
+    chosen: &[Chosen],
 ) -> Option<(String, Vec<&'static str>)> {
     if !mentions(src) {
         return None;
@@ -2660,8 +3051,18 @@ pub(crate) fn apply(
     let tokens = crate::lexer::tokenize(&text);
     let at_position = by_position(&tokens);
     let file = Source::new(&text, &tokens, &findings, &at_position, index, target);
-    let marked = |f: &Finding| f.fix != FixKind::Manual;
-    let mut fixes: Vec<Fix> = plan(&file, &findings, &at_position, &marked).into_iter().map(|(_, fix)| fix).collect();
+    let ordinal = ordinals(&findings);
+    let pick = |i: usize, f: &Finding, k: usize| {
+        let choice = chosen.iter().find(|c| c.line == f.line && c.rule == f.rule_id && c.ordinal == ordinal[i]);
+        match choice {
+            Some(c) if f.options.iter().any(|o| o.id == c.option) => {
+                choices(&file, k, &f.rule_id).into_iter().find(|o| o.id == c.option).map(|o| o.fix)
+            }
+            _ if f.fix != FixKind::Manual => at(&file, k, &f.rule_id),
+            _ => None,
+        }
+    };
+    let mut fixes: Vec<Fix> = plan(&findings, &at_position, &pick).into_iter().map(|(_, fix)| fix).collect();
     fixes.dedup_by(|a, b| (a.start, a.end) == (b.start, b.end));
     fixes.reverse();
     let mut out = src.to_string();
@@ -2706,7 +3107,7 @@ mod tests {
 
     fn fixed_for(src: &str, target: PhpVersion) -> Option<(String, Vec<&'static str>)> {
         let index = std::sync::Arc::new(crate::index::ProjectIndex::from_tokens_for(&crate::lexer::tokenize(src), Some(target)));
-        apply("t.php", src, target, &index)
+        apply("t.php", src, target, &index, &[])
     }
 
     fn fixes(src: &str) -> Vec<(String, FixKind)> {
@@ -2916,7 +3317,7 @@ mod tests {
     fn fixed_from(src: &str, current: PhpVersion) -> Option<(String, Vec<&'static str>)> {
         let target = PhpVersion::new(8, 5);
         let index = crate::index::ProjectIndex::from_tokens_for(&crate::lexer::tokenize(src), Some(target)).with_current(current);
-        apply("t.php", src, target, &std::sync::Arc::new(index))
+        apply("t.php", src, target, &std::sync::Arc::new(index), &[])
     }
 
     fn fixes_from(src: &str, current: PhpVersion) -> Vec<(String, FixKind)> {
@@ -3041,11 +3442,13 @@ mod tests {
         let findings = crate::analyzer::analyze_source("t.php", src, PhpVersion::new(8, 5));
         let index = crate::index::ProjectIndex::from_tokens(&tokens).with_current(php5);
         let file = Source::new(src, &tokens, &findings, &at_position, &index, PhpVersion::new(8, 5));
-        let marked: String =
-            plan(&file, &findings, &at_position, &|_| true).into_iter().rev().fold(src.to_string(), |mut text, (_, fix)| {
+        let marked: String = plan(&findings, &at_position, &|_, f, k| at(&file, k, &f.rule_id)).into_iter().rev().fold(
+            src.to_string(),
+            |mut text, (_, fix)| {
                 text.replace_range(fix.start..fix.end, &fix.text);
                 text
-            });
+            },
+        );
         assert_eq!(marked, out, "the fix that marks the finding is the one staging applies");
         assert_eq!(kinds_of(&fixes_from(src, php5), "behavior.indirect_access_order"), [FixKind::Likely; 2]);
         assert_eq!(kinds_of(&fixes_from(src, PhpVersion::new(7, 0)), "behavior.indirect_access_order"), [FixKind::Manual; 2]);
@@ -3299,5 +3702,122 @@ mod tests {
         assert_eq!(kinds, [FixKind::Likely, FixKind::Likely, FixKind::Likely, FixKind::Manual, FixKind::Manual, FixKind::Manual]);
         let again = fixes(&out);
         assert_eq!(kinds_of(&again, "removed.incompatible_override").len(), 3, "only the three left manual remain");
+    }
+
+    fn options_of(src: &str, rule: &str) -> Vec<Vec<(String, FixKind, bool, String)>> {
+        analyze_source("t.php", src, PhpVersion::new(8, 5))
+            .into_iter()
+            .filter(|f| f.rule_id == rule)
+            .map(|f| f.options.into_iter().map(|o| (o.id, o.fix, o.recommended, o.code)).collect())
+            .collect()
+    }
+
+    fn fixed_choosing(src: &str, chosen: &[(usize, &str, &str)]) -> Option<(String, Vec<&'static str>)> {
+        let target = PhpVersion::new(8, 5);
+        let index = std::sync::Arc::new(crate::index::ProjectIndex::from_tokens_for(&crate::lexer::tokenize(src), Some(target)));
+        let chosen: Vec<Chosen> =
+            chosen.iter().map(|&(line, rule, option)| Chosen { line, rule: rule.into(), ordinal: 0, option: option.into() }).collect();
+        apply("t.php", src, target, &index, &chosen)
+    }
+
+    #[test]
+    fn rfc7231_offers_the_literal_or_utc() {
+        let src = "<?php\nheader('Expires: ' . date(DATE_RFC7231, $t));\necho $d->format(DateTimeInterface::RFC7231);\n$formats = [DateTime::RFC7231];\n";
+        let rule = "deprecated.date_rfc7231";
+        let options = options_of(src, rule);
+        assert_eq!(options.len(), 3, "{options:?}");
+        assert_eq!(
+            options[0][0],
+            ("literal".into(), FixKind::Auto, true, "header('Expires: ' . date('D, d M Y H:i:s \\G\\M\\T', $t));".into())
+        );
+        assert_eq!(
+            options[0][1],
+            ("utc".into(), FixKind::Likely, false, "header('Expires: ' . gmdate('D, d M Y H:i:s \\G\\M\\T', $t));".into())
+        );
+        assert_eq!(
+            options[1][1].3,
+            "echo \\DateTimeImmutable::createFromInterface($d)->setTimezone(new \\DateTimeZone('UTC'))->format('D, d M Y H:i:s \\G\\M\\T');"
+        );
+        assert!(options[2].is_empty(), "a constant that formats nothing has one fix");
+        assert_eq!(kinds_of(&fixes(src), rule), [FixKind::Auto; 3]);
+        let (out, classes) = fixed(src).unwrap();
+        assert_eq!(out, "<?php\nheader('Expires: ' . date('D, d M Y H:i:s \\G\\M\\T', $t));\necho $d->format('D, d M Y H:i:s \\G\\M\\T');\n$formats = ['D, d M Y H:i:s \\G\\M\\T'];\n");
+        assert_eq!(classes, [RFC_LITERAL]);
+        let (chose, classes) = fixed_choosing(src, &[(2, rule, "utc")]).unwrap();
+        assert!(
+            chose.starts_with("<?php\nheader('Expires: ' . gmdate('D, d M Y H:i:s \\G\\M\\T', $t));\necho $d->format('D, d M Y"),
+            "{chose}"
+        );
+        assert_eq!(classes, [RFC_UTC, RFC_LITERAL]);
+    }
+
+    #[test]
+    fn bad_state_calls_wait_for_a_choice() {
+        let src = "<?php\nfunction f(SplFileInfo $file) {\n    $file->_bad_state_ex();\n    return 1;\n}\n";
+        let rule = "deprecated.splfileinfo_bad_state_ex";
+        let options = options_of(src, rule);
+        assert_eq!(options[0].iter().map(|o| (o.0.as_str(), o.2)).collect::<Vec<_>>(), [("remove", false), ("throw", false)]);
+        assert_eq!(options[0][0].3, "", "deleting leaves no line");
+        assert_eq!(kinds_of(&fixes(src), rule), [FixKind::Manual]);
+        assert_eq!(fixed(src), None);
+        let (out, _) = fixed_choosing(src, &[(3, rule, "throw")]).unwrap();
+        assert_eq!(out, "<?php\nfunction f(SplFileInfo $file) {\n    throw new \\Error('The parent constructor was not called: the object is in an invalid state');\n    return 1;\n}\n");
+        let (out, _) = fixed_choosing(src, &[(3, rule, "remove")]).unwrap();
+        assert_eq!(out, "<?php\nfunction f(SplFileInfo $file) {\n    return 1;\n}\n");
+        assert_eq!(fixed_choosing(src, &[(3, rule, "nonsense")]), None, "an unknown option changes nothing");
+    }
+
+    #[test]
+    fn user_errors_throw_unless_the_project_handles_errors() {
+        let src = "<?php\nfunction fail_hard($message) {\n    trigger_error($message, E_USER_ERROR);\n}\n";
+        let rule = "deprecated.e_user_error";
+        let options = options_of(src, rule);
+        assert_eq!(
+            options[0][0],
+            ("exception".into(), FixKind::Likely, true, "throw new \\ErrorException($message, 0, E_USER_ERROR);".into())
+        );
+        assert_eq!(options[0][1], ("warning".into(), FixKind::Likely, false, "trigger_error($message, E_USER_WARNING); exit(255);".into()));
+        let handled = format!("{src}set_error_handler('handle');\n");
+        let options = options_of(&handled, rule);
+        assert_eq!(options[0].iter().map(|o| o.2).collect::<Vec<_>>(), [false, true]);
+        assert!(fixed(&handled).unwrap().0.contains("    trigger_error($message, E_USER_WARNING); exit(255);\n"));
+        assert!(options_of("<?php\nif ($x) trigger_error('m', E_USER_ERROR);\n", rule)[0].is_empty());
+    }
+
+    #[test]
+    fn request_and_session_input_keep_their_old_result() {
+        let src = "<?php\n$a = [filter_input(INPUT_REQUEST, 'id', FILTER_SANITIZE_MAGIC_QUOTES), filter_input(INPUT_SESSION, 'user')];\n$b = filter_has_var(INPUT_REQUEST, 'id');\n$c = filter_input_array(INPUT_SESSION, $definition);\n";
+        let (out, classes) = fixed(src).unwrap();
+        assert_eq!(out, "<?php\n$a = [null, null];\n$b = false;\n$c = null;\n");
+        assert_eq!(classes, [INPUT_OLD]);
+        let options = options_of(src, "removed.input_request");
+        assert_eq!(options[0][1].3, "$a = [isset($_REQUEST['id']) ? filter_var($_REQUEST['id'], FILTER_SANITIZE_ADD_SLASHES) : null, filter_input(INPUT_SESSION, 'user')];");
+        assert_eq!(options[1][1].3, "$b = array_key_exists('id', $_REQUEST ?? []);");
+        assert_eq!(
+            options_of(src, "removed.input_session")[1][1].3,
+            "$c = isset($_SESSION) ? filter_var_array($_SESSION, $definition) : null;"
+        );
+    }
+
+    #[test]
+    fn soap_functions_all() {
+        let src = "<?php\n$server->addFunction(SOAP_FUNCTIONS_ALL);\n$list = [SOAP_FUNCTIONS_ALL, 1];\n";
+        let rule = "deprecated.soap_functions_all";
+        let options = options_of(src, rule);
+        assert_eq!(options[0][0].3, "$server->addFunction(array_merge(...array_values(get_defined_functions())));");
+        assert_eq!(options[0][1].3, "$server->addFunction(get_defined_functions()['user']);");
+        assert!(options[1].is_empty());
+        let (out, _) = fixed(src).unwrap();
+        assert_eq!(out, "<?php\n$server->addFunction(array_merge(...array_values(get_defined_functions())));\n$list = [999, 1];\n");
+        assert_eq!(kinds_of(&fixes(src), rule), [FixKind::Likely, FixKind::Auto]);
+    }
+
+    #[test]
+    fn date_wakeup_calls_go() {
+        let src = "<?php\nfunction restore(DateTime $date) {\n    $date->__wakeup();\n    return $date;\n}\n";
+        let (out, classes) = fixed(src).unwrap();
+        assert_eq!(out, "<?php\nfunction restore(DateTime $date) {\n    return $date;\n}\n");
+        assert_eq!(classes, [DATE_WAKEUP_DROP]);
+        assert_eq!(fixed(&format!("{src}class Stamp extends DateTime {{ public function __wakeup(): void {{}} }}\n")), None);
     }
 }

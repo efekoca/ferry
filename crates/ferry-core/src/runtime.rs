@@ -432,6 +432,7 @@ pub fn merge_from(
             replacement: None,
             snippet,
             runtime_hits: e.count,
+            options: Vec::new(),
         });
         known.add(&findings[findings.len() - 1], findings.len() - 1);
         merged.added += 1;

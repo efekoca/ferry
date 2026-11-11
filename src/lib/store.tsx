@@ -142,6 +142,8 @@ interface AppStore {
   tryFixes(files: string[]): Promise<boolean>;
   skippedHunks: Record<string, number[]>;
   skipHunks(file: string, hunks: number[]): void;
+  fixChoices: Record<string, string>;
+  chooseFix(id: string, option: string): void;
   applying: boolean;
   applyChanges(files: string[], skipped?: Record<string, number[]>, keepTrial?: boolean, commitMessage?: string): Promise<boolean>;
 
@@ -197,6 +199,13 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
     (file: string, hunks: number[]) => setHunkSkips({ previewId: preview?.id ?? null, files: { ...skippedHunks, [file]: hunks } }),
     [preview, skippedHunks],
   );
+  const [fixChoices, setFixChoices] = useState<Record<string, string>>({});
+  const chooseFix = useCallback((id: string, option: string) => {
+    setFixChoices((choices) => (choices[id] === option ? choices : { ...choices, [id]: option }));
+    previewSeq.current++;
+    setPreview(null);
+    setPreviewing(false);
+  }, []);
   const [previewMode, setPreviewMode] = useState<RectorMode>("compat");
   const [previewing, setPreviewing] = useState(false);
   const [applying, setApplying] = useState(false);
@@ -302,6 +311,7 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
     setScan(null);
     setDeps(null);
     setPreview(null);
+    setFixChoices({});
     setScanning(false);
     setPreviewing(false);
     setProgress(null);
@@ -495,7 +505,11 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
       setPreviewMode(mode);
       setPreviewing(true);
       try {
-        const result = await api.rectorPreview(root, step ?? target, mode, withPins);
+        const current = new Set(scan?.findings.map((f) => f.id));
+        const choices = Object.entries(fixChoices)
+          .filter(([id]) => current.has(id))
+          .map(([id, option]) => ({ id, option }));
+        const result = await api.rectorPreview(root, step ?? target, mode, withPins, choices);
         if (seq === previewSeq.current) setPreview(result);
         return true;
       } catch (e) {
@@ -507,7 +521,7 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
         if (seq === previewSeq.current) setPreviewing(false);
       }
     },
-    [api, project, target, previewMode, fail, t],
+    [api, project, target, previewMode, fail, t, scan, fixChoices],
   );
 
   const clearPreview = useCallback(() => {
@@ -783,13 +797,13 @@ export function StoreProvider({ children, api: injected }: { children: ReactNode
     () => ({
       api, view, setView, findingsFilter, setFindingsFilter, showFindings, theme, setTheme, recent, forgetRecent, project, opening, openProject, closeProject,
       target, setTarget, scan, scanning, progress, runScan, cancelScan, deps, toolchain, toolchainFailed, refreshToolchain, installingRector,
-      installRector, preview, previewMode, previewing, loadPreview, clearPreview, cancelPreview, skippedHunks, skipHunks, docker, scanHistory, dockerHistory, checkHistory, dockerStep, runDocker, cancelDocker, saveConfig, dockerArgs, dockerTrial, tryFixes, applying, applyChanges, snapshots,
+      installRector, preview, previewMode, previewing, loadPreview, clearPreview, cancelPreview, skippedHunks, skipHunks, fixChoices, chooseFix, docker, scanHistory, dockerHistory, checkHistory, dockerStep, runDocker, cancelDocker, saveConfig, dockerArgs, dockerTrial, tryFixes, applying, applyChanges, snapshots,
       refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport, ignoreFinding, unignoreFinding, pruneIgnores, importRuntimeLog, setRuntimeRoots, clearRuntimeLog, runLocalCheck, checking, cancelLocalCheck,
     }),
     [
       api, view, findingsFilter, showFindings, theme, setTheme, recent, forgetRecent, project, opening, openProject, closeProject, target,
       setTarget, scan, scanning, progress, runScan, cancelScan, deps, toolchain, toolchainFailed, refreshToolchain, installingRector,
-      installRector, preview, previewMode, previewing, loadPreview, clearPreview, cancelPreview, skippedHunks, skipHunks, docker, scanHistory, dockerHistory, checkHistory, dockerStep, runDocker, cancelDocker, saveConfig, dockerArgs, dockerTrial, tryFixes, applying, applyChanges, snapshots,
+      installRector, preview, previewMode, previewing, loadPreview, clearPreview, cancelPreview, skippedHunks, skipHunks, fixChoices, chooseFix, docker, scanHistory, dockerHistory, checkHistory, dockerStep, runDocker, cancelDocker, saveConfig, dockerArgs, dockerTrial, tryFixes, applying, applyChanges, snapshots,
       refreshSnapshots, restoreSnapshot, deleteSnapshot, deleteAllSnapshots, exportReport, ignoreFinding, unignoreFinding, pruneIgnores, importRuntimeLog, setRuntimeRoots, clearRuntimeLog, runLocalCheck, checking, cancelLocalCheck,
     ],
   );
