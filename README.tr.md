@@ -115,6 +115,8 @@ Bir bulgunun birden çok makul düzeltmesi varsa ayrıntısında **Nasıl düzel
 
 Ferry'nin kendi başına düzeltemediği bulguların ayrıntısında adım adım anlatım ve kısa bir önce/sonra örneği bulunur: `mysql_*`'yi mysqli'ye, `mssql_*` ve `sybase_*`'yi PDO'ya, `strftime()`'ı `date()`'e ya da `IntlDateFormatter`'a, güneş fonksiyonlarını `date_sun_info()`'ya taşımak gibi; toplam 23 kural. Kaldırılan `mcrypt`, `imap` ve `xmlrpc` eklentileri için ayrıntı, fonksiyonları geri getiren Composer paketini (`phpseclib/mcrypt_compat`, `fain182/ext-imap-polyfill`, `phpxmlrpc/polyfill-xmlrpc`) kurulum komutu ve sınırlarıyla gösterir. Paket kurulduktan sonraki taramada bu çağrılar artık bildirilmez, çünkü Ferry bir paketin Composer başlangıç dosyasının yüklediği dosyaları da okur. `oci8` için PIE ile kurulacak eklentiyi gösterir.
 
+PHP 8.5 için taranan üç demo projedeki 246 bulgudan size kalanlar, Ferry'nin kendi düzeltmeleriyle 171'den 58'e indi. 125'i artık otomatik, 63'ü gözden geçirilecek olarak işaretli (önceden 52 ve 23); kalan 58'in 40'ında bir rehber, bir paket ya da seçilecek seçenekler var.
+
 ### Geçişi engelleyen bağımlılıklar
 
 **Bağımlılıklar** sayfası, kilitli her paketi `composer.lock`'ta bildirdiği PHP gereksinimine göre hedef sürümle karşılaştırır. Projenin `composer.json`'daki kendi PHP kısıtı da kontrol edilir. `composer.json`'da ya da kilitli bir pakette `php` için yazılmış bir `conflict` kaydı da hesaba katılır.
@@ -341,7 +343,7 @@ Her şey kendi bilgisayarınızda çalışır:
 - **Metot çağrıları:** Ferry kodu çalıştırmadan bir nesnenin sınıfını bilemez. Bu yüzden bir değişken üzerinden yapılan `$db->ping()` gibi bir çağrı yalnızca kod değişkenin sınıfını gösteriyorsa işaretlenir: `new mysqli`, `mysqli $db` tip bildirimi ya da `instanceof` kontrolü. `$this->db->ping()` gibi özellik üzerinden yapılan çağrılar, dosya özelliğe o sınıfı atıyorsa ya da türünü öyle bildiriyorsa işaretlenir. Statik çağrılar, `parent::` çağrıları ve `PDO::MYSQL_ATTR_INIT_COMMAND` gibi sınıf sabitleri her zaman kontrol edilir.
 - **Şablonlar:** `.phtml`, `.inc` ve benzeri dosyalardaki PHP taranır; Blade dosyalarındaki gerçek `<?php` blokları da buna dahildir. Blade'in `@php` ve `{{ }}` içindeki kodu taranmaz, Twig hiç okunmaz.
 - **Karakter kodlaması:** Otomatik düzeltmeler UTF-8 olmayan dosyaları (örneğin Windows-1254 ya da Latin-1) bozulmasın diye atlar. Düzeltilmeleri için önce UTF-8'e dönüştürün.
-- **Elle yapılan düzeltmeler:** `mysql_*` gibi bulgular kodun yeniden yazılmasını gerektirir. Ferry yerine ne kullanmanız gerektiğini gösterir ama bu kodu sizin yerinize yazmaz.
+- **Elle yapılan düzeltmeler:** `mysql_*` gibi bulgular kodun yeniden yazılmasını gerektirir. Ferry adımları ve bir örneği gösterir ama bu kodu sizin yerinize yazmaz.
 - **Geri yükleme:** Dosyaları uygulamadan önceki hallerine getirdiği için sonradan yaptığınız düzenlemelerin üzerine yazılır. Ferry bu dosyaları listeler, geri yüklemeden önce size sorar ve şu anki içeriklerini Geçmiş'te saklar.
 
 ## Kaynaktan derleme

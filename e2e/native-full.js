@@ -74,7 +74,7 @@
   const stage = Number(sessionStorage.getItem("ferry.e2e.stage") ?? "-1");
   const next = () => {
     leaving = true;
-    const wanted = ["kuzey", "kuzey", "laravel", "wp", "wp", "unicode", "unicode", "odd", "empty", "missing", "missing"][stage + 1];
+    const wanted = ["kuzey", "kuzey", "kuzey", "laravel", "wp", "wp", "unicode", "unicode", "odd", "empty", "missing", "missing"][stage + 1];
     if (wanted) {
       const now = Date.now();
       const order = [projects[wanted], ...Object.values(projects).filter((p) => p !== projects[wanted])];
@@ -159,16 +159,26 @@
       await rescan("8.4");
 
       await nav("Bulgular");
-      const all = await until(() => $$(".finding").length, "findings");
+      const settled = async () => {
+        let last = -1;
+        for (let i = 0; i < 60; i++) {
+          const n = $$(".finding").length;
+          if (n > 0 && n === last) return n;
+          last = n;
+          await sleep(150);
+        }
+        return last;
+      };
+      const all = await settled();
       const fixKind = async (label) => {
         $(".toolbar__select [role=combobox]").click();
         (await until(() => $$("[role=option]").find((o) => o.textContent.startsWith(label)), label)).click();
         await sleep(200);
       };
       await fixKind("Elle düzelt");
-      const manual = $$(".finding").length;
+      const manual = await settled();
       await fixKind("Tüm türler");
-      check($$(".finding").length === all, "filter toggle restores list");
+      check((await settled()) === all, "filter toggle restores list");
       const search = $('input[type="search"], input[aria-label="Bulgularda ara"]');
       search.focus();
       document.execCommand("insertText", false, "zzzz-no-match");
@@ -229,6 +239,30 @@
       }
       emit("  waiting for empty history");
       await until(() => text().includes("Henüz bir değişiklik uygulanmadı"), "history empty after delete");
+    },
+
+    async function ownFixes() {
+      await openRecent(projects.kuzey);
+      await scan();
+      await nav("Bulgular");
+      const search = await until(() => $('input[aria-label="Bulgularda ara"]'), "search box");
+      search.focus();
+      document.execCommand("insertText", false, "_bad_state_ex");
+      const option = await until(() => $$("[role=radio]").find((r) => r.textContent.includes("Hatayı koru")), "fix option");
+      option.click();
+      await until(() => $(".code--suggest")?.textContent.includes("throw new \\Error"), "option code");
+      search.select();
+      document.execCommand("delete");
+      document.execCommand("insertText", false, "MYSQLI_NO_DATA");
+      await until(() => $$(".finding").some((f) => f.textContent.includes("Otomatik")), "automatic finding");
+      const files = await preview();
+      check(files.includes("src/Legacy/Extensions.php"), `own fixes in the preview: ${files}`);
+      const item = $$(".change-item").find((e) => e.querySelector(".change-item__file").textContent === "src/Legacy/Extensions.php");
+      item.querySelector(".change-item__body").click();
+      const diff = await until(() => $$(".diff").find((d) => d.innerText.includes("_bad_state_ex")), "Extensions diff");
+      await emit(`  diff: ${diff.innerText.replace(/\n+/g, " / ").slice(0, 300)}`);
+      check(diff.innerText.includes("throw new \\Error("), "the chosen option is in the diff");
+      check(diff.innerText.includes("array(100, 101)"), "unused constants take their values");
     },
 
     async function laravel() {
