@@ -104,6 +104,7 @@ pub struct ProjectIndex {
     error_handler: bool,
     entity_options: bool,
     monetary_unknown: bool,
+    time_locale: bool,
     monetary_locales: Vec<String>,
     overridden_by_all: std::sync::OnceLock<HashMap<String, HashSet<String>>>,
     redefines_checks: std::sync::OnceLock<bool>,
@@ -192,6 +193,12 @@ impl ProjectIndex {
     /// LC_MONETARY or LC_ALL, or for a category or locale it doesn't spell out.
     pub(crate) fn sets_monetary_locale(&self) -> bool {
         self.monetary_unknown || !self.monetary_locales.is_empty()
+    }
+
+    /// Whether the project may set a time locale other than C, which changes the day and month
+    /// names strftime() prints.
+    pub(crate) fn sets_time_locale(&self) -> bool {
+        self.time_locale
     }
 
     /// The one monetary locale the project sets, without its encoding, when it spells it out.
@@ -317,18 +324,24 @@ impl ProjectIndex {
             let name = t.text.trim_start_matches('\\');
             ["LIBXML_NOENT", "LIBXML_DTDLOAD", "LIBXML_DTDATTR", "LIBXML_DTDVALID"].contains(&name)
         });
+        let categories = ["LC_CTYPE", "LC_NUMERIC", "LC_TIME", "LC_COLLATE", "LC_MESSAGES", "LC_MONETARY", "LC_ALL"];
         for (i, t) in tokens.iter().enumerate() {
             if !t.is_ident_ci("setlocale") || !tokens.get(i + 1).is_some_and(|o| o.is_punct("(")) {
                 continue;
             }
-            let category =
-                tokens.get(i + 2).map(|c| c.text.trim_start_matches('\\')).filter(|_| tokens.get(i + 3).is_some_and(|c| c.is_punct(",")));
-            if category.is_some_and(|c| ["LC_CTYPE", "LC_NUMERIC", "LC_TIME", "LC_COLLATE", "LC_MESSAGES"].contains(&c)) {
+            let category = tokens
+                .get(i + 2)
+                .map(|c| c.text.trim_start_matches('\\'))
+                .filter(|c| categories.contains(c) && tokens.get(i + 3).is_some_and(|n| n.is_punct(",")));
+            let locale = tokens.get(i + 4).and_then(|l| l.literal()).filter(|_| tokens.get(i + 5).is_some_and(|c| c.is_punct(")")));
+            let name = locale.map(|l| l.split(['.', '@']).next().unwrap_or_default().to_string()).filter(|n| !n.is_empty());
+            let neutral = name.as_deref().is_some_and(|n| n == "C" || n == "POSIX");
+            let touches = |which: &str| category.is_none_or(|c| c == which || c == "LC_ALL");
+            self.time_locale |= touches("LC_TIME") && !neutral;
+            if !touches("LC_MONETARY") {
                 continue;
             }
-            let locale = tokens.get(i + 4).and_then(|l| l.literal()).filter(|_| tokens.get(i + 5).is_some_and(|c| c.is_punct(")")));
-            let name = locale.map(|l| l.split(['.', '@']).next().unwrap_or_default().to_string());
-            match name.filter(|n| category.is_some_and(|c| c == "LC_MONETARY" || c == "LC_ALL") && !n.is_empty()) {
+            match name.filter(|_| category.is_some()) {
                 Some(n) if n == "C" || n == "POSIX" => {}
                 Some(n) if !self.monetary_locales.contains(&n) => self.monetary_locales.push(n),
                 Some(_) => {}

@@ -96,6 +96,13 @@ pub const PARSE_STR_EXTRACT: &str = "Ferry\\Php80\\ParseStrIntoExtract";
 pub const FAILED_CALL: &str = "Ferry\\Php80\\KeepFailedCallResult";
 pub const EXTRA_ARGUMENTS: &str = "Ferry\\Php80\\DropExtraArguments";
 pub const DRIVER_CONSTANT: &str = "Ferry\\Php85\\PdoDriverClassConstant";
+pub const GMDATE_NAMES: &str = "Ferry\\Php81\\GmstrftimeNamesToGmdate";
+pub const STRFTIME_DATE: &str = "Ferry\\Php81\\StrftimeToDate";
+pub const STRFTIME_NAMES: &str = "Ferry\\Php81\\StrftimeNamesToDate";
+pub const BASE64_ENCODE: &str = "Ferry\\Php82\\MbBase64ToBase64Encode";
+pub const BASE64_DECODE: &str = "Ferry\\Php82\\MbBase64ToBase64Decode";
+pub const MT_RAND_MODE: &str = "Ferry\\Php83\\DropMtRandPhpMode";
+pub const INI_REMOVE: &str = "Ferry\\RemoveDeprecatedIniSetting";
 
 /// A finding the user asked to fix with one option: its line, its rule, which of that rule's
 /// findings on the line it is, and the option.
@@ -115,7 +122,9 @@ struct Choice {
 }
 
 /// Rules whose findings can come with options.
-const OPTION_RULES: [&str; 19] = [
+const OPTION_RULES: [&str; 21] = [
+    "deprecated.mt_rand_php",
+    "deprecated.ini_setting",
     "deprecated.dynamic_property",
     "deprecated.serializable",
     "deprecated.filter_sanitize_string",
@@ -472,6 +481,24 @@ const OPTION_TEXTS: &[(&str, &str, crate::i18n::Text, crate::i18n::Text)] = &[
             "The function now runs, which it never did for this call before PHP 8. Likely what was meant.",
         ),
     ),
+    (
+        "deprecated.mt_rand_php",
+        "drop",
+        crate::i18n::Text::new("Kipi kaldır", "Drop the mode"),
+        crate::i18n::Text::new(
+            "Mersenne Twister'ın doğru uygulaması kullanılır; aynı tohum artık başka sayılar verir. Saklanan ya da karşılaştırılan değerler varsa yeniden üretin.",
+            "The correct Mersenne Twister is used, so the same seed now gives other numbers. Regenerate any values that are stored or compared.",
+        ),
+    ),
+    (
+        "deprecated.ini_setting",
+        "remove",
+        crate::i18n::Text::new("Satırı sil", "Remove the line"),
+        crate::i18n::Text::new(
+            "Ayar yeni sürümün varsayılanına döner ve satırın değiştirdiği davranış da gider. Neyin değiştiğini aşağıdaki adımlardan kontrol edin.",
+            "The setting goes back to the new version's default, and so does the behavior the line changed. Check what changes in the steps below.",
+        ),
+    ),
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -505,6 +532,9 @@ const CONSTANT_VALUES: &[(&str, &str, &str)] = &[
     ("removed.mb_overload", "MB_OVERLOAD_MAIL", "1"),
     ("removed.mb_overload", "MB_OVERLOAD_REGEX", "4"),
     ("removed.mb_overload", "MB_OVERLOAD_STRING", "2"),
+    ("deprecated.sunfuncs_ret", "SUNFUNCS_RET_TIMESTAMP", "0"),
+    ("deprecated.sunfuncs_ret", "SUNFUNCS_RET_STRING", "1"),
+    ("deprecated.sunfuncs_ret", "SUNFUNCS_RET_DOUBLE", "2"),
 ];
 
 /// (rule, old name, new name): the new constant holds the same value, or does the same job.
@@ -611,7 +641,11 @@ const NO_OP_FLAGS: &[(&str, &str, Alone)] = &[
 
 /// Rules whose fix reads the code around the finding, and for three of them the version the project
 /// runs on today.
-const SITE_RULES: [&str; 47] = [
+const SITE_RULES: [&str; 51] = [
+    "deprecated.strftime",
+    "deprecated.mb_encoding",
+    "deprecated.mt_rand_php",
+    "deprecated.ini_setting",
     "deprecated.dynamic_property",
     "deprecated.serializable",
     "deprecated.filter_sanitize_string",
@@ -882,6 +916,11 @@ pub(crate) fn mentions(src: &str) -> bool {
         "_attr_",
         "sql_use_",
         "sqlite_",
+        "strftime",
+        "mb_convert_encoding",
+        "mt_rand_php",
+        "ini_set",
+        "ini_alter",
     ];
     OCI_ALIASES.iter().map(|(old, _)| *old).chain(NO_OP_CALLS.iter().map(|(_, f, _)| *f)).chain(calls).any(|name| lower.contains(name))
         || (lower.contains("unset") && src.contains("$this"))
@@ -1270,7 +1309,9 @@ fn site_fix(file: &Source, k: usize, rule: &str) -> Option<Fix> {
         }
         "review.variable_variable" => variable_variable(file, k),
         "deprecated.false_to_array" => false_to_array(file, k),
-        "deprecated.gmstrftime" => gmstrftime_fix(file, k),
+        "deprecated.gmstrftime" => strftime_fix(file, k, "gmstrftime", "gmdate", GMDATE, GMDATE_NAMES),
+        "deprecated.strftime" => strftime_fix(file, k, "strftime", "date", STRFTIME_DATE, STRFTIME_NAMES),
+        "deprecated.mb_encoding" => base64_fix(file, k),
         "deprecated.http_response_header" => last_headers(file, k),
         "deprecated.null_offset" => null_key(file, k),
         "deprecated.partial_callable" => first_class_callable(file, k),
@@ -1330,6 +1371,8 @@ fn choices(file: &Source, k: usize, rule: &str) -> Vec<Choice> {
         "removed.money_format" => money_choices(file, k).into(),
         "removed.convert_cyr_string" => cyr_choices(file, k).into(),
         "removed.builtin_arity" => arity_choices(file, k).into(),
+        "deprecated.mt_rand_php" => mt_rand_choices(file, k).into(),
+        "deprecated.ini_setting" => ini_choices(file, k).into(),
         _ => Vec::new(),
     };
     options.into_iter().flatten().collect()
@@ -2284,6 +2327,59 @@ fn driver_constant(file: &Source, k: usize) -> Option<Fix> {
     }
 }
 
+/// mb_convert_encoding() to or from BASE64 for UTF-8 or 8bit text: base64_encode() with mbstring's
+/// 76-column CRLF lines, or base64_decode(), which skips what isn't base64 where mbstring wrote `?`.
+fn base64_fix(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let call = enclosing_call(tokens, k)?;
+    let (close, args) = function_call(tokens, call, &["mb_convert_encoding"]).filter(|(_, a)| a.len() == 3)?;
+    let encoding =
+        |(first, last): (usize, usize)| (first == last).then(|| literal_text(&tokens[first])).flatten().map(|e| e.to_ascii_lowercase());
+    let plain = |a: (usize, usize)| encoding(a).is_some_and(|e| ["utf-8", "utf8", "8bit"].contains(&e.as_str()));
+    let base64 = |a: (usize, usize)| a == (k, k) && encoding(a).as_deref() == Some("base64");
+    let subject = file.text(args[0].0, args[0].1);
+    let lead = lead(&tokens[call]);
+    let (class, text) = if base64(args[1]) && plain(args[2]) {
+        (BASE64_ENCODE, format!("{lead}rtrim(chunk_split(base64_encode({subject}), 76, \"\\r\\n\"), \"\\r\\n\")"))
+    } else if base64(args[2]) && plain(args[1]) {
+        (BASE64_DECODE, format!("{lead}base64_decode({subject})"))
+    } else {
+        return None;
+    };
+    Some(Fix { extra: Vec::new(), class, start: tokens[call].start, end: tokens[close].end, text })
+}
+
+/// MT_RAND_PHP as the mode of mt_srand(), srand() or Mt19937: the call without it. The same seed
+/// then gives other numbers, so nothing is assumed.
+fn mt_rand_choices(file: &Source, k: usize) -> [Option<Choice>; 2] {
+    let tokens = file.tokens;
+    if tokens[k].text.trim_start_matches('\\') != "MT_RAND_PHP" || !is_atom(tokens, k) {
+        return [None, None];
+    }
+    let Some((call, _, _)) = argument_of(tokens, k).filter(|&(_, index, arg)| index == 1 && arg == (k, k)) else { return [None, None] };
+    let name = tokens[call].text.trim_start_matches('\\').to_ascii_lowercase();
+    let seeded = call_named(tokens, call, &["mt_srand", "srand"])
+        || (name == "mt19937" || name.ends_with("\\mt19937")) && call > 0 && tokens[call - 1].is_ident_ci("new");
+    let Some((_, args)) = arguments(tokens, call + 1).filter(|(_, a)| a.len() == 2 && seeded) else { return [None, None] };
+    let fix = Fix { extra: Vec::new(), class: MT_RAND_MODE, start: tokens[args[0].1].end, end: tokens[k].end, text: String::new() };
+    [Some(Choice { id: "drop", fix, recommended: false }), None]
+}
+
+/// `ini_set('<deprecated setting>', <value>);`: the line removed. What the setting changed goes
+/// with it, so nothing is assumed.
+fn ini_choices(file: &Source, k: usize) -> [Option<Choice>; 2] {
+    let tokens = file.tokens;
+    let Some((call, _, _)) = argument_of(tokens, k).filter(|&(_, index, arg)| index == 0 && arg == (k, k)) else { return [None, None] };
+    let Some((close, args)) = function_call(tokens, call, &["ini_set", "ini_alter"]).filter(|(_, a)| a.len() == 2) else {
+        return [None, None];
+    };
+    let inert = |a: &(usize, usize)| plain(tokens, *a) || literal(tokens, *a) || a.0 == a.1 && is_atom(tokens, a.0);
+    if !is_statement(tokens, call, close) || !args.iter().all(inert) {
+        return [None, None];
+    }
+    [Some(Choice { id: "remove", fix: removal(file, call, close + 1, INI_REMOVE), recommended: false }), None]
+}
+
 /// The lines a fix touches, as it leaves them, without their common indentation.
 fn after(src: &str, fix: &Fix) -> String {
     let start = src[..fix.start].rfind('\n').map_or(0, |i| i + 1);
@@ -2893,7 +2989,7 @@ fn false_to_array(file: &Source, k: usize) -> Option<Fix> {
 }
 
 /// The text of a quoted literal without interpolation.
-fn literal_text(tok: &Token) -> Option<String> {
+pub(crate) fn literal_text(tok: &Token) -> Option<String> {
     let inner = tok.text.get(1..tok.text.len().checked_sub(1)?)?;
     match tok.kind {
         TokenKind::Str { interpolates: false, backtick: false } if tok.text.starts_with('\'') => {
@@ -2929,7 +3025,7 @@ fn quoted(value: &str) -> String {
 }
 
 /// (strftime, date): specifiers that print the same in UTC whatever the locale.
-const STRFTIME_DATE: [(char, &str); 17] = [
+const STRFTIME_LETTERS: [(char, &str); 17] = [
     ('Y', "Y"),
     ('y', "y"),
     ('m', "m"),
@@ -2949,22 +3045,30 @@ const STRFTIME_DATE: [(char, &str); 17] = [
     ('%', "%"),
 ];
 
-/// `gmstrftime('<format>'[, $ts])` → `gmdate('<format>'[, $ts])`, when every specifier has a
-/// date() letter that prints the same.
-fn gmstrftime_fix(file: &Source, k: usize) -> Option<Fix> {
+/// Day and month names and AM/PM, which strftime() prints in the C locale the same as date().
+const STRFTIME_NAMES_C: [(char, &str); 6] = [('a', "D"), ('A', "l"), ('b', "M"), ('h', "M"), ('B', "F"), ('p', "A")];
+
+/// `strftime('<format>'[, $ts])` → `date('<format>'[, $ts])`, and gmstrftime() → gmdate(), when
+/// every specifier has a date() letter that prints the same. Names count only while the project
+/// sets no time locale.
+fn strftime_fix(file: &Source, k: usize, name: &str, date: &str, class: &'static str, names_class: &'static str) -> Option<Fix> {
     let tokens = file.tokens;
-    let (_, args) = function_call(tokens, k, &["gmstrftime"])?;
+    let (_, args) = function_call(tokens, k, &[name])?;
     let &(first, last) = args.first().filter(|_| args.len() <= 2)?;
     if first != last {
         return None;
     }
     let format = literal_text(&tokens[first])?;
+    let names = !file.index.sets_time_locale();
+    let mut named = false;
     let mut out = String::new();
     let mut chars = format.chars();
     while let Some(c) = chars.next() {
         if c == '%' {
             let spec = chars.next()?;
-            out.push_str(STRFTIME_DATE.iter().find(|(s, _)| *s == spec)?.1);
+            let name = STRFTIME_NAMES_C.iter().find(|(s, _)| *s == spec && names);
+            named |= name.is_some();
+            out.push_str(STRFTIME_LETTERS.iter().chain(name).find(|(s, _)| *s == spec)?.1);
         } else if c.is_ascii_alphabetic() || c == '\\' {
             out.push('\\');
             out.push(c);
@@ -2975,10 +3079,10 @@ fn gmstrftime_fix(file: &Source, k: usize) -> Option<Fix> {
     let between = &file.src[tokens[k].end..tokens[first].start];
     Some(Fix {
         extra: Vec::new(),
-        class: GMDATE,
+        class: if named { names_class } else { class },
         start: tokens[k].start,
         end: tokens[first].end,
-        text: format!("{}gmdate{between}{}", lead(&tokens[k]), quoted(&out)),
+        text: format!("{}{date}{between}{}", lead(&tokens[k]), quoted(&out)),
     })
 }
 
@@ -5310,5 +5414,58 @@ mod tests {
         assert_eq!(out, "<?php\necho \\Pdo\\Mysql::ATTR_SSL_CA, \\Pdo\\Mysql::ATTR_COMPRESS, 0, \\Pdo\\Sqlite::DETERMINISTIC;\n");
         assert_eq!(classes, [DRIVER_CONSTANT, CONSTANT_VALUE]);
         assert_eq!(kinds_of(&fixes(src), "deprecated.builtin_class_constant"), [FixKind::Auto; 4]);
+    }
+
+    #[test]
+    fn strftime_becomes_date_and_names_wait_for_the_locale() {
+        let src = "<?php\necho strftime('%d.%m.%Y %H:%M', $t), strftime('%A, %d %B'), gmstrftime('%a, %d %b %Y %H:%M:%S GMT', $t), strftime('%e %B');\n";
+        let (out, classes) = fixed(src).unwrap();
+        assert_eq!(out, "<?php\necho date('d.m.Y H:i', $t), date('l, d F'), gmdate('D, d M Y H:i:s \\G\\M\\T', $t), strftime('%e %B');\n");
+        assert_eq!(classes, [STRFTIME_DATE, STRFTIME_NAMES, GMDATE_NAMES]);
+        assert_eq!(kinds_of(&fixes(src), "deprecated.strftime"), [FixKind::Auto, FixKind::Likely, FixKind::Manual]);
+        let localized = "<?php\nsetlocale(LC_TIME, 'tr_TR.UTF-8');\necho strftime('%A %Y');\necho strftime('%Y');\n";
+        assert_eq!(fixed(localized).unwrap().0, localized.replace("strftime('%Y')", "date('Y')"), "names follow the locale");
+        let c = "<?php\nsetlocale(LC_ALL, 'C');\nsetlocale(LC_MONETARY, 'de_DE');\necho strftime('%B');\n";
+        assert_eq!(fixed(c).unwrap().0, c.replace("strftime('%B')", "date('F')"));
+    }
+
+    #[test]
+    fn sun_constants_take_their_values() {
+        let src =
+            "<?php\n$t = date_sunrise(time(), SUNFUNCS_RET_TIMESTAMP, $lat, $lng);\n$s = date_sunset(time(), \\SUNFUNCS_RET_STRING);\n";
+        let (out, classes) = fixed(src).unwrap();
+        assert_eq!(out, "<?php\n$t = date_sunrise(time(), 0, $lat, $lng);\n$s = date_sunset(time(), 1);\n");
+        assert_eq!(classes, [CONSTANT_VALUE]);
+    }
+
+    #[test]
+    fn base64_conversions_use_the_base64_functions() {
+        let src = "<?php\n$a = mb_convert_encoding($s, 'BASE64', 'UTF-8');\n$b = mb_convert_encoding($a, '8bit', 'base64');\n$c = mb_convert_encoding($s, 'BASE64');\n$d = mb_convert_encoding($s, 'HTML-ENTITIES', 'UTF-8');\n";
+        let (out, classes) = fixed(src).unwrap();
+        assert_eq!(
+            out,
+            "<?php\n$a = rtrim(chunk_split(base64_encode($s), 76, \"\\r\\n\"), \"\\r\\n\");\n$b = base64_decode($a);\n$c = mb_convert_encoding($s, 'BASE64');\n$d = mb_convert_encoding($s, 'HTML-ENTITIES', 'UTF-8');\n"
+        );
+        assert_eq!(classes, [BASE64_ENCODE, BASE64_DECODE]);
+        assert_eq!(kinds_of(&fixes(src), "deprecated.mb_encoding"), [FixKind::Auto, FixKind::Likely, FixKind::Manual, FixKind::Manual]);
+    }
+
+    #[test]
+    fn mt_rand_php_and_ini_settings_wait_for_a_choice() {
+        let src = "<?php\nmt_srand($seed, MT_RAND_PHP);\n$e = new \\Random\\Engine\\Mt19937(42, MT_RAND_PHP);\nini_set('session.sid_length', 48);\n$old = ini_set('session.sid_bits_per_character', 6);\n";
+        assert_eq!(fixed(src), None, "nothing applies until it is chosen");
+        let ids = |rule: &str| -> Vec<Vec<(String, FixKind, bool)>> {
+            options_of(src, rule).into_iter().map(|o| o.into_iter().map(|c| (c.0, c.1, c.2)).collect()).collect()
+        };
+        let drop = vec![("drop".to_string(), FixKind::Likely, false)];
+        assert_eq!(ids("deprecated.mt_rand_php"), vec![drop.clone(), drop]);
+        assert_eq!(ids("deprecated.ini_setting"), vec![vec![("remove".to_string(), FixKind::Likely, false)], vec![]]);
+        let chosen =
+            [(2, "deprecated.mt_rand_php", "drop"), (3, "deprecated.mt_rand_php", "drop"), (4, "deprecated.ini_setting", "remove")];
+        let (out, _) = fixed_choosing(src, &chosen).unwrap();
+        assert_eq!(
+            out,
+            "<?php\nmt_srand($seed);\n$e = new \\Random\\Engine\\Mt19937(42);\n$old = ini_set('session.sid_bits_per_character', 6);\n"
+        );
     }
 }

@@ -203,6 +203,11 @@ const LIKELY_RULES: &[&str] = &[
     "ConvertCyrillicWithMbstring",
     "ParseStrIntoExtract",
     "DropExtraArguments",
+    "GmstrftimeNamesToGmdate",
+    "StrftimeNamesToDate",
+    "MbBase64ToBase64Decode",
+    "DropMtRandPhpMode",
+    "RemoveDeprecatedIniSetting",
 ];
 
 const RULE_TITLES: &[(&str, Text)] = &[
@@ -351,6 +356,13 @@ const RULE_TITLES: &[(&str, Text)] = &[
     ),
     ("DropExtraArguments", Text::new("Fazla argümanlar silinir", "Drop the extra arguments")),
     ("PdoDriverClassConstant", Text::same("Pdo\\Mysql::MYSQL_ATTR_* → Pdo\\Mysql::ATTR_*")),
+    ("GmstrftimeNamesToGmdate", Text::same("gmstrftime('%a %B') → gmdate('D F')")),
+    ("StrftimeToDate", Text::same("strftime() → date()")),
+    ("StrftimeNamesToDate", Text::same("strftime('%a %B') → date('D F')")),
+    ("MbBase64ToBase64Encode", Text::same("mb_convert_encoding($s, 'BASE64') → base64_encode()")),
+    ("MbBase64ToBase64Decode", Text::same("mb_convert_encoding($s, …, 'BASE64') → base64_decode()")),
+    ("DropMtRandPhpMode", Text::same("mt_srand($seed, MT_RAND_PHP) → mt_srand($seed)")),
+    ("RemoveDeprecatedIniSetting", Text::new("Kullanımdan kalkan ini ayarı silinir", "Remove the deprecated ini setting")),
     (
         "ParenthesizeNestedTernaryRector",
         Text::new("İç içe ternary paranteze alınır (eski davranış korunur)", "Parenthesize nested ternaries (keeps the old behaviour)"),

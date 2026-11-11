@@ -501,12 +501,12 @@ export const GUIDES: Record<string, Guide> = {
   "review.eval": {
     steps: {
       tr: [
-        "eval'e giden kodun nereden geldiğini bulun. Şablon ya da önbellek dosyalarından geliyorsa o dosyaları da gözden geçirin; Ferry `.phtml` ve `.inc` gibi PHP dosyalarını tarar, Twig gibi başka biçimleri okumaz.",
+        "Tırnak içinde verilen kodu Ferry de tarar ve bulgularını bu satırda gösterir. Kod bir değişkenden geliyorsa kaynağını bulun. Şablon ya da önbellek dosyalarından geliyorsa o dosyaları da gözden geçirin; Ferry `.phtml` ve `.inc` gibi PHP dosyalarını tarar, Twig gibi başka biçimleri okumaz.",
         "PHP 7.0'dan beri eval içindeki sözdizimi hatası false döndürmüyor, ParseError fırlatıyor: `if (eval(…) === false)` denetimlerini `try { … } catch (\\ParseError $e) { … }` ile değiştirin.",
         "PHP 8.0'dan beri değerlendirilen koddaki bazı uyarılar Error'a dönüştü (tanımsız sabitler, yanlış argüman sayısı); şablonların geçtiği yolları hedef sürümün testlerinde çalıştırın.",
       ],
       en: [
-        "Find where the code passed to eval comes from. If it comes from template or cache files, review those too; Ferry scans PHP files such as `.phtml` and `.inc`, but not other formats such as Twig.",
+        "Ferry scans code passed as quoted text too and shows its findings on this line. If the code comes from a variable, find its source. If it comes from template or cache files, review those too; Ferry scans PHP files such as `.phtml` and `.inc`, but not other formats such as Twig.",
         "Since PHP 7.0 a syntax error inside eval throws ParseError instead of returning false: replace `if (eval(…) === false)` checks with `try { … } catch (\\ParseError $e) { … }`.",
         "Since PHP 8.0 some warnings in the evaluated code became Error exceptions (undefined constants, wrong argument counts); run the template paths in the target version's tests.",
       ],
