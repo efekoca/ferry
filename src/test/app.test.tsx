@@ -542,10 +542,27 @@ describe("Ferry app", () => {
     expect(within(detail).getByText(/hazırlanmış sorguları desteklemiyordu/)).toBeInTheDocument();
     expect(within(detail).getByText("Sürüm yolculuğu")).toBeInTheDocument();
     expect(within(detail).getByText("eskidi")).toBeInTheDocument();
+    expect(detail.querySelectorAll(".guide li").length).toBeGreaterThan(3);
+    expect(within(detail).getByText("Örnek")).toBeInTheDocument();
+    expect(within(detail).getAllByText("Önce:")).toHaveLength(1);
+    expect(within(detail).queryByText(/Güvenli bir karar verilemiyor/)).not.toBeInTheDocument();
     const related = within(detail).getByText("Aynı konudaki bulgular").parentElement!;
     const before = within(detail).getByRole("heading", { level: 2 }).textContent;
     await user.click(within(related).getAllByRole("button")[0]);
     await waitFor(() => expect(within(detail).getByRole("heading", { level: 2 }).textContent).not.toBe(before));
+  });
+
+  it("shows the package that keeps removed functions working", async () => {
+    const user = setup();
+    await openAndScan(user);
+    await user.click(nav(/Bulgular/));
+    await user.type(await screen.findByRole("searchbox", { name: "Bulgularda ara" }), "mcrypt");
+    const detail = screen.getByRole("complementary", { name: "Bulgu ayrıntısı" });
+    expect(await within(detail).findByText("composer require phpseclib/mcrypt_compat")).toBeInTheDocument();
+    expect(within(detail).getByRole("button", { name: "Kopyala" })).toBeInTheDocument();
+    expect(within(detail).getByText("Sınırlar")).toBeInTheDocument();
+    expect(within(detail).getByText(/Paketi kurup yeniden taradığınızda/)).toBeInTheDocument();
+    expect(within(detail).getByText("PHPSECLIB_MCRYPT_TARGET_VERSION").tagName).toBe("CODE");
   });
 
   it("falls back to the snippet when the source can't be read", async () => {

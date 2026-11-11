@@ -1,7 +1,8 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { Activity, FileCode2 } from "lucide-react";
-import { Badge, RiskBadge, SeverityBadge, SeverityIcon } from "../components/ui";
+import { Badge, CommandLine, RiskBadge, SeverityBadge, SeverityIcon } from "../components/ui";
 import { useI18n } from "../i18n";
+import { GUIDES, PACKAGES, type CompatPackage, type Guide } from "../i18n/guides";
 import { RULE_NOTES } from "../i18n/rules";
 import type { Api } from "../lib/api";
 import { highlight } from "../lib/code";
@@ -168,6 +169,85 @@ function FixOptions({ finding, choices, onChoose }: { finding: Finding; choices:
   );
 }
 
+/** Text with code between backticks, the code set in the code font. */
+function Prose({ text }: { text: string }) {
+  return (
+    <>
+      {text.split("`").map((part, i) =>
+        i % 2 ? (
+          <code key={i} className="inline-code">
+            {part}
+          </code>
+        ) : (
+          part
+        ),
+      )}
+    </>
+  );
+}
+
+/** A package that keeps the removed functions working: the command to install it and its limits. */
+function PackageFix({ pkg }: { pkg: CompatPackage }) {
+  const { t, lang } = useI18n();
+  return (
+    <div className="package">
+      <p>{pkg.command.startsWith("composer ") ? t.findings.packageLead : t.findings.extensionLead}</p>
+      <CommandLine command={pkg.command} />
+      <p className="package__meta selectable">
+        <code>{pkg.name}</code> · {pkg.license} · PHP {pkg.php}
+      </p>
+      <h4 className="package__label">{t.findings.limits}</h4>
+      <ul className="package__limits">
+        {pkg.limits[lang].map((limit) => (
+          <li key={limit} className="selectable">
+            <Prose text={limit} />
+          </li>
+        ))}
+      </ul>
+      <p className="package__alt selectable">
+        <Prose text={pkg.alternative[lang]} />
+      </p>
+    </div>
+  );
+}
+
+/** What to do by hand, step by step, with a short example. */
+function GuideSteps({ guide }: { guide: Guide }) {
+  const { t, lang } = useI18n();
+  const lines = (code: string, kind: "del" | "add") =>
+    code.split("\n").map((line, i) => (
+      <div key={`${kind}${i}`} className={`example__line example__line--${kind}`}>
+        <span className="example__sign" aria-hidden>
+          {kind === "del" ? "−" : "+"}
+        </span>
+        <span className="example__text">
+          {i === 0 && <span className="sr-only">{kind === "del" ? t.findings.before : t.findings.after}: </span>}
+          {line ? highlight(line, [], true) : " "}
+        </span>
+      </div>
+    ));
+  return (
+    <>
+      <ol className="guide">
+        {guide.steps[lang].map((step) => (
+          <li key={step} className="selectable">
+            <Prose text={step} />
+          </li>
+        ))}
+      </ol>
+      {guide.before && guide.after && (
+        <figure className="example">
+          <figcaption className="example__bar">{t.findings.example}</figcaption>
+          <div className="example__body selectable">
+            {lines(guide.before, "del")}
+            {lines(guide.after, "add")}
+          </div>
+        </figure>
+      )}
+    </>
+  );
+}
+
 export function FindingDetail({
   finding,
   findings,
@@ -197,6 +277,8 @@ export function FindingDetail({
   const note = RULE_NOTES[finding.ruleId];
   const related = relatedFindings(finding, findings);
   const replacement = finding.replacement ? loc(finding.replacement) : null;
+  const pkg = PACKAGES[finding.ruleId];
+  const guide = GUIDES[finding.ruleId];
   return (
     <div className="detail" key={finding.id}>
       <div className="detail__scroll">
@@ -218,10 +300,13 @@ export function FindingDetail({
           <h3>{t.findings.howToFix}</h3>
           {finding.options?.length && onChoose ? (
             <FixOptions finding={finding} choices={choices} onChoose={(option) => onChoose(finding.id, option)} />
+          ) : pkg ? (
+            <PackageFix pkg={pkg} />
           ) : (
             replacement && (looksLikeCode(replacement) ? <pre className="code code--suggest">{replacement}</pre> : <p className="selectable">{replacement}</p>)
           )}
-          {(!finding.options?.length || optionFor(finding, choices)) && <p>{t.fixDesc[finding.fix]}</p>}
+          {guide && !pkg && <GuideSteps guide={guide} />}
+          {!pkg && !guide && (!finding.options?.length || optionFor(finding, choices)) && <p>{t.fixDesc[finding.fix]}</p>}
         </section>
 
         <section className="detail__block">

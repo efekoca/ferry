@@ -164,11 +164,17 @@ fn project_index_sees_polyfills_and_class_hierarchies() {
         std::fs::write(path, body).unwrap();
     };
     write("lib/polyfill.php", "<?php\nif (!function_exists('each')) {\n    function each(&$a) { return []; }\n}\n");
-    write("src/uses.php", "<?php\nnamespace App;\n$x = each($arr);\n$y = \\each($arr);\nmysql_query('x');\nereg('a', 'b');\n");
+    write(
+        "src/uses.php",
+        "<?php\nnamespace App;\n$x = each($arr);\n$y = \\each($arr);\nmysql_query('x');\nereg('a', 'b');\nimap_open('{h}', 'u', 'p');\n",
+    );
     write("vendor/shim/mysql.php", "<?php\nfunction mysql_query($q) {}\n");
+    write("vendor/poly/bootstrap.php", "<?php\nif (extension_loaded('imap')) {\n    return;\n}\nrequire_once __DIR__.'/src/functions.php';\nrequire __DIR__ . '/../outside.php';\n");
+    write("vendor/poly/src/functions.php", "<?php\nif (!function_exists('imap_open')) {\n    function imap_open($m, $u, $p) {}\n}\n");
+    write("vendor/outside.php", "<?php\nfunction ereg($p, $s) {}\n");
     write(
         "vendor/composer/autoload_files.php",
-        "<?php\n$vendorDir = dirname(__DIR__);\nreturn array('abc' => $vendorDir . '/shim/mysql.php');\n",
+        "<?php\n$vendorDir = dirname(__DIR__);\nreturn array('abc' => $vendorDir . '/shim/mysql.php', 'def' => $vendorDir . '/poly/bootstrap.php');\n",
     );
     write("src/Base.php", "<?php\nnamespace App;\nclass Base { protected $name; }\n");
     write(
