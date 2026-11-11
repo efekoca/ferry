@@ -828,6 +828,40 @@ pub(crate) fn composer_files(root: &Path) -> Vec<PathBuf> {
             }
         }
     }
+    let mut next = 0;
+    while next < out.len() && out.len() < 4096 {
+        let file = out[next].clone();
+        next += 1;
+        for required in required_beside(&file) {
+            if !out.contains(&required) {
+                out.push(required);
+            }
+        }
+    }
+    out
+}
+
+/// The files a Composer file loads from its own folder or below with `require __DIR__ . '/x.php'`,
+/// as polyfills do from their bootstrap file.
+fn required_beside(file: &Path) -> Vec<PathBuf> {
+    let (Some(dir), Ok(text)) = (file.parent(), crate::safefs::read_text(file)) else { return Vec::new() };
+    let tokens = lex(&text).tokens;
+    let loads = ["require", "require_once", "include", "include_once"];
+    let mut out = Vec::new();
+    for (k, t) in tokens.iter().enumerate() {
+        if !loads.iter().any(|w| t.is_ident_ci(w)) {
+            continue;
+        }
+        let mut j = k + 1;
+        let parenthesized = tokens.get(j).is_some_and(|p| p.is_punct("("));
+        j += usize::from(parenthesized);
+        let here = tokens.get(j).is_some_and(|d| d.is_ident_ci("__DIR__")) && tokens.get(j + 1).is_some_and(|d| d.is_punct("."));
+        let Some(rel) = tokens.get(j + 2).filter(|_| here).and_then(|p| p.literal()) else { continue };
+        let rel = rel.trim_start_matches('/');
+        if !rel.is_empty() && !rel.split('/').any(|part| part == "..") && rel.ends_with(".php") {
+            out.push(dir.join(rel));
+        }
+    }
     out
 }
 

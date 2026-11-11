@@ -16,6 +16,7 @@ import { NO_FILTER, type FindingsFilter } from "../lib/store";
 import { filterFindings, prioritizeFindings } from "../screens/Findings";
 import { relatedFindings } from "../screens/FindingDetail";
 import { RULE_NOTES } from "../i18n/rules";
+import { GUIDES, PACKAGES } from "../i18n/guides";
 import { isVulnerable, patchedFor } from "../lib/security";
 import type { ExtensionUse, FileDiff, Finding } from "../lib/types";
 import { compareProbe, parseProbe } from "../lib/probe";
@@ -450,6 +451,29 @@ describe("rule notes", () => {
     for (const [id, note] of Object.entries(RULE_NOTES)) {
       expect(note.why.tr.length, id).toBeGreaterThan(40);
       expect(note.why.en.length, id).toBeGreaterThan(40);
+    }
+  });
+});
+
+describe("guides and packages", () => {
+  const closed = (text: string) => text.split("`").length % 2 === 1;
+
+  it("give the same steps in both languages, with every code span closed", () => {
+    for (const [id, guide] of Object.entries(GUIDES)) {
+      expect(guide.steps.tr.length, id).toBe(guide.steps.en.length);
+      expect(guide.steps.tr.length, id).toBeGreaterThan(1);
+      expect(!!guide.before, id).toBe(!!guide.after);
+      for (const step of [...guide.steps.tr, ...guide.steps.en]) expect(closed(step), `${id}: ${step}`).toBe(true);
+    }
+  });
+
+  it("name the package, its install command and its limits in both languages", () => {
+    for (const [id, pkg] of Object.entries(PACKAGES)) {
+      expect(pkg.command, id).toMatch(/^(composer require|pie install) /);
+      expect(pkg.command.endsWith(pkg.name), id).toBe(true);
+      expect(pkg.limits.tr.length, id).toBe(pkg.limits.en.length);
+      for (const text of [...pkg.limits.tr, ...pkg.limits.en, pkg.alternative.tr, pkg.alternative.en]) expect(closed(text), `${id}: ${text}`).toBe(true);
+      expect(GUIDES[id], `${id} has a package, not steps`).toBeUndefined();
     }
   });
 });
