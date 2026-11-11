@@ -161,6 +161,13 @@ fn kuzey_magaza_triggers_every_rule() {
         "removed.input_session",
         "deprecated.soap_functions_all",
         "deprecated.date_wakeup",
+        "behavior.concat_precedence",
+        "behavior.html_default_flags",
+        "behavior.mysqli_default_exceptions",
+        "deprecated.mysqli_ping",
+        "removed.numberformatter_type_currency",
+        "removed.magic_variable",
+        "deprecated.libxml_disable_entity_loader",
     ];
     for id in own_fixes {
         assert!(
@@ -170,7 +177,17 @@ fn kuzey_magaza_triggers_every_rule() {
         );
     }
 
-    for id in ["deprecated.date_rfc7231", "deprecated.e_user_error", "removed.input_request", "deprecated.splfileinfo_bad_state_ex"] {
+    for id in [
+        "deprecated.date_rfc7231",
+        "deprecated.e_user_error",
+        "removed.input_request",
+        "deprecated.splfileinfo_bad_state_ex",
+        "behavior.html_default_flags",
+        "deprecated.mysqli_ping",
+        "removed.numberformatter_type_currency",
+        "removed.magic_variable",
+        "deprecated.libxml_disable_entity_loader",
+    ] {
         assert!(result.findings.iter().any(|f| f.rule_id == id && f.options.len() == 2), "{id} offers no choice in the demo");
     }
 

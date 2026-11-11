@@ -102,6 +102,7 @@ pub struct ProjectIndex {
     current: Option<crate::version::PhpVersion>,
     autoload_hooks: bool,
     error_handler: bool,
+    entity_options: bool,
     overridden_by_all: std::sync::OnceLock<HashMap<String, HashSet<String>>>,
     redefines_checks: std::sync::OnceLock<bool>,
 }
@@ -178,6 +179,11 @@ impl ProjectIndex {
     /// Whether the project installs its own error handler anywhere.
     pub(crate) fn sets_error_handler(&self) -> bool {
         self.error_handler
+    }
+
+    /// Whether the project asks libxml to load external entities or DTDs anywhere.
+    pub(crate) fn loads_entities(&self) -> bool {
+        self.entity_options
     }
 
     /// Whether a class of the project extends `parent` directly.
@@ -267,6 +273,10 @@ impl ProjectIndex {
         self.constants.extend(crate::analyzer::declared_constants(tokens));
         self.mysqli_report |= tokens.iter().any(|t| t.is_ident_ci("mysqli_report") || t.is_ident_ci("report_mode"));
         self.error_handler |= tokens.iter().any(|t| t.is_ident_ci("set_error_handler"));
+        self.entity_options |= tokens.iter().any(|t| {
+            let name = t.text.trim_start_matches('\\');
+            ["LIBXML_NOENT", "LIBXML_DTDLOAD", "LIBXML_DTDATTR", "LIBXML_DTDVALID"].contains(&name)
+        });
         self.autoload_hooks |= tokens.iter().enumerate().any(|(i, t)| {
             let declared = tokens[..i].iter().rev().find(|p| !p.is_punct("&")).is_some_and(|p| p.is_ident_ci("function"));
             t.is_ident_ci("spl_autoload_register")
