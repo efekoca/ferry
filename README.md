@@ -115,6 +115,8 @@ When a finding has more than one reasonable fix, its detail lists them under **H
 
 Findings Ferry can't fix on its own get step-by-step help in their detail, with a short before-and-after example: moving `mysql_*` to mysqli and `mssql_*` or `sybase_*` to PDO, `strftime()` to `date()` or `IntlDateFormatter`, or the sun functions to `date_sun_info()`, 23 rules in all. For the removed `mcrypt`, `imap` and `xmlrpc` extensions, the detail names the Composer package that brings the functions back (`phpseclib/mcrypt_compat`, `fain182/ext-imap-polyfill`, `phpxmlrpc/polyfill-xmlrpc`), with its install command and limits. Once the package is installed, the next scan no longer reports those calls, because Ferry also reads the files a package's Composer bootstrap loads. For `oci8`, it names the extension to install with PIE.
 
+On the three demo projects scanned for PHP 8.5, Ferry's own fixes brought the findings left to you from 171 of 246 down to 58. 125 are now automatic and 63 marked for review, up from 52 and 23, and 40 of the 58 come with a guide, a package or options to choose from.
+
 ### Dependencies that block the upgrade
 
 The **Dependencies** page checks every locked package against the target version, using the PHP requirement each package declares in `composer.lock`. The project's own PHP constraint in `composer.json` is checked too. A `conflict` entry for `php`, in `composer.json` or in a locked package, is taken into account as well.
@@ -341,7 +343,7 @@ Everything runs on your computer:
 - **Method calls:** Ferry can't know an object's class without running the code, so a method call on a variable such as `$db->ping()` is only flagged when the code shows the variable's class (`new mysqli`, a `mysqli $db` type or an `instanceof` check). Calls on properties, such as `$this->db->ping()`, are flagged when the file assigns that class to the property or declares it as the type. Static calls, `parent::` calls and class constants like `PDO::MYSQL_ATTR_INIT_COMMAND` are always checked.
 - **Templates:** PHP inside `.phtml`, `.inc` and similar files is scanned, including real `<?php` blocks in Blade files. Code inside Blade `@php` and `{{ }}` is not, and Twig isn't read at all.
 - **Encodings:** automatic fixes skip files that are not UTF-8 (for example, Windows-1254 or Latin-1), so they are never corrupted. Convert them to UTF-8 to have them fixed.
-- **Manual fixes:** findings such as `mysql_*` need code to be rewritten, and Ferry shows what to use instead but doesn't rewrite them for you.
+- **Manual fixes:** findings such as `mysql_*` need code to be rewritten. Ferry shows the steps and an example, but doesn't rewrite them for you.
 - **Restore:** it puts back the files as they were before the apply, so edits you made to them afterwards are replaced. Ferry lists those files, asks before restoring, and keeps their current content in History.
 
 ## Build from source
