@@ -175,6 +175,7 @@ fn kuzey_magaza_triggers_every_rule() {
         "removed.convert_cyr_string",
         "removed.builtin_arity",
         "removed.parse_str_one_arg",
+        "deprecated.sunfuncs_ret",
     ];
     for id in own_fixes {
         assert!(
@@ -201,6 +202,12 @@ fn kuzey_magaza_triggers_every_rule() {
         "removed.convert_cyr_string",
     ] {
         assert!(result.findings.iter().any(|f| f.rule_id == id && f.options.len() >= 2), "{id} offers no choice in the demo");
+    }
+    for id in ["deprecated.mt_rand_php", "deprecated.ini_setting"] {
+        assert!(
+            result.findings.iter().any(|f| f.rule_id == id && f.options.len() == 1 && f.fix == FixKind::Manual),
+            "{id} waits for a choice"
+        );
     }
 
     let summary = report::summarize(&result.findings);

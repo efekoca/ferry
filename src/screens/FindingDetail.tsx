@@ -278,7 +278,7 @@ export function FindingDetail({
   const related = relatedFindings(finding, findings);
   const replacement = finding.replacement ? loc(finding.replacement) : null;
   const pkg = PACKAGES[finding.ruleId];
-  const guide = GUIDES[finding.ruleId];
+  const guide = finding.fix === "manual" || finding.options?.length ? GUIDES[finding.ruleId] : undefined;
   return (
     <div className="detail" key={finding.id}>
       <div className="detail__scroll">

@@ -994,6 +994,29 @@ impl<'a> Ctx<'a> {
         });
     }
 
+    /// A finding in the code an `eval` at `tok` runs, reported on the `eval` line. Ferry can't fix
+    /// code inside a string, so it stays manual.
+    fn inside_eval(&mut self, inner: Finding, tok: &Token) {
+        if inner.rule_id == patterns::EVAL.id
+            || self.dead.iter().any(|&(start, end)| (tok.line, tok.column) >= start && (tok.line, tok.column) <= end)
+        {
+            return;
+        }
+        let title = Localized { tr: format!("{} (eval içinde)", inner.title.tr), en: format!("{} (inside eval)", inner.title.en) };
+        self.out.push(Finding {
+            id: format!("{}:{}:{}:{}:eval{}", self.file, tok.line, tok.column, inner.rule_id, self.out.len()),
+            file: self.file.to_string(),
+            line: tok.line,
+            column: tok.column,
+            title,
+            fix: FixKind::Manual,
+            snippet: self.snippet(tok.line),
+            runtime_hits: 0,
+            options: Vec::new(),
+            ..inner
+        });
+    }
+
     fn builtin(&mut self, kind: Builtin, title: String, since: (u32, u32), tok: &Token) {
         let since = PhpVersion::new(since.0, since.1);
         if !self.applies(since) {
@@ -1203,7 +1226,15 @@ impl<'a> Ctx<'a> {
         let is_call = next.is_some_and(|n| n.is_punct("("));
         if is_call {
             match lower.as_str() {
-                "eval" => return self.pattern(&patterns::EVAL, tok, None),
+                "eval" => {
+                    self.pattern(&patterns::EVAL, tok, None);
+                    if let Some(code) = eval_code(tokens, i + 1) {
+                        for inner in analyze_source_in(self.file, &format!("<?php {code}"), self.target, self.index) {
+                            self.inside_eval(inner, tok);
+                        }
+                    }
+                    return;
+                }
                 "extract" => return self.pattern(&patterns::EXTRACT, tok, None),
                 "get_class" | "get_parent_class" => {
                     if tokens.get(i + 2).is_some_and(|t| t.is_punct(")")) {
@@ -3922,6 +3953,20 @@ pub(crate) fn dynamic_properties(tokens: &[Token], index: &crate::index::Project
     out
 }
 
+/// The code `eval(…)` runs when its argument is quoted text, alone or joined with dots.
+fn eval_code(tokens: &[Token], open: usize) -> Option<String> {
+    let close = crate::declarations::close_of(tokens, open)?;
+    let mut code = String::new();
+    for (n, t) in tokens[open + 1..close].iter().enumerate() {
+        if n % 2 == 0 {
+            code.push_str(&crate::fixes::literal_text(t)?);
+        } else if !t.is_punct(".") {
+            return None;
+        }
+    }
+    (close - open).is_multiple_of(2).then_some(code)
+}
+
 pub(crate) const MYSQL_CONSTANTS: [&str; 7] = [
     "MYSQL_ASSOC",
     "MYSQL_NUM",
@@ -5665,6 +5710,25 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
         assert_eq!(count85("<?php class E { function __set($n, $v) {} function f() { $this->x = 1; } }", id), 0);
         assert_eq!(count85("<?php class F { var $x; function f() { $this->x = 1; } }", id), 0);
         assert_eq!(count85("<?php class G { function f() { return new class(1) extends V { private $a; function __construct($a) { $this->a = $a; } }; } }", id), 0);
+    }
+
+    #[test]
+    fn quoted_eval_code_is_scanned_where_it_runs() {
+        let src = "<?php\neval('$x = each($a); ' . '$y = ereg(\\'a\\', $b);');\neval('?>' . $tpl);\neval(\"$code\");\n";
+        let found: Vec<(usize, String, FixKind, String)> =
+            analyze_source("a.php", src, PhpVersion::new(8, 5)).into_iter().map(|f| (f.line, f.rule_id, f.fix, f.title.en)).collect();
+        let line2: Vec<_> = found.iter().filter(|f| f.0 == 2).map(|f| (f.1.as_str(), f.2, f.3.as_str())).collect();
+        assert_eq!(
+            line2,
+            [
+                ("review.eval", FixKind::Manual, "eval() usage"),
+                ("removed.each", FixKind::Manual, "each() (inside eval)"),
+                ("removed.ereg", FixKind::Manual, "ereg() (inside eval)")
+            ]
+        );
+        assert_eq!(found.iter().filter(|f| f.0 > 2).map(|f| f.1.as_str()).collect::<Vec<_>>(), ["review.eval", "review.eval"]);
+        let ids: std::collections::HashSet<_> = analyze_source("a.php", src, PhpVersion::new(8, 5)).into_iter().map(|f| f.id).collect();
+        assert_eq!(ids.len(), found.len(), "ids stay unique");
     }
 
     #[test]
