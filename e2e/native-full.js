@@ -159,16 +159,26 @@
       await rescan("8.4");
 
       await nav("Bulgular");
-      const all = await until(() => $$(".finding").length, "findings");
+      const settled = async () => {
+        let last = -1;
+        for (let i = 0; i < 60; i++) {
+          const n = $$(".finding").length;
+          if (n > 0 && n === last) return n;
+          last = n;
+          await sleep(150);
+        }
+        return last;
+      };
+      const all = await settled();
       const fixKind = async (label) => {
         $(".toolbar__select [role=combobox]").click();
         (await until(() => $$("[role=option]").find((o) => o.textContent.startsWith(label)), label)).click();
         await sleep(200);
       };
       await fixKind("Elle düzelt");
-      const manual = $$(".finding").length;
+      const manual = await settled();
       await fixKind("Tüm türler");
-      check($$(".finding").length === all, "filter toggle restores list");
+      check((await settled()) === all, "filter toggle restores list");
       const search = $('input[type="search"], input[aria-label="Bulgularda ara"]');
       search.focus();
       document.execCommand("insertText", false, "zzzz-no-match");
