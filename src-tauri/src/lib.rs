@@ -1154,6 +1154,28 @@ async fn install_rector(state: State<'_, AppState>) -> CmdResult<ToolchainStatus
     .await
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OptionChoice {
+    id: String,
+    option: String,
+}
+
+/// The chosen options as the preview needs them: by file, each with its line, its rule and its place
+/// among that rule's findings on the line, since the staged copy is scanned again.
+fn option_choices(scan: Option<&ScanResult>, choices: &[OptionChoice]) -> rector::Choices {
+    let mut out = rector::Choices::new();
+    let Some(scan) = scan else { return out };
+    for choice in choices {
+        let Some(f) = scan.findings.iter().find(|f| f.id == choice.id) else { continue };
+        let ordinal =
+            scan.findings.iter().filter(|o| o.file == f.file && o.rule_id == f.rule_id && o.line == f.line && o.column < f.column).count();
+        let chosen = ferry_core::fixes::Chosen { line: f.line, rule: f.rule_id.clone(), ordinal, option: choice.option.clone() };
+        out.entry(f.file.clone()).or_default().push(chosen);
+    }
+    out
+}
+
 #[tauri::command]
 async fn rector_preview(
     state: State<'_, AppState>,
@@ -1161,9 +1183,11 @@ async fn rector_preview(
     target: String,
     mode: RectorMode,
     with_pins: bool,
+    choices: Option<Vec<OptionChoice>>,
 ) -> CmdResult<PreviewResponse> {
     let path = normalize_path(path);
     let target = parse_step(&target)?;
+    let chosen = option_choices(state.scans.lock().unwrap().get(&path), &choices.unwrap_or_default());
     let tools = state.tools_dir();
     let work = state.data_dir.join("rector");
     let php_override = state.php_override();
@@ -1184,8 +1208,9 @@ async fn rector_preview(
         let php = toolchain::find_php(php_override.as_deref()).ok_or_else(|| toolchain::ToolError::PhpMissing.to_string())?;
         toolchain::require_supported_php(&php).map_err(|e| e.to_string())?;
         let info = project::inspect(&root).map_err(|e| e.to_string())?;
-        let preview = rector::preview(&php, &toolchain::rector_entry(&tools), &root, target, mode, &info.excluded_dirs, &work, &cancel)
-            .map_err(|e| e.to_string())?;
+        let preview =
+            rector::preview_with(&php, &toolchain::rector_entry(&tools), &root, target, mode, &info.excluded_dirs, &work, &cancel, &chosen)
+                .map_err(|e| e.to_string())?;
         Ok(if with_pins { preview.with_pins(ferry_core::server::bump(&root, target)) } else { preview })
     })
     .await;

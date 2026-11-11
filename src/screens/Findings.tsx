@@ -7,6 +7,7 @@ import { useToast } from "../components/Toast";
 import { ActionMenu, Badge, Button, Callout, EmptyState, RiskBadge, Segmented, Select, SeverityIcon, TextArea, type MenuAction } from "../components/ui";
 import { useI18n } from "../i18n";
 import { errorMessage } from "../lib/api";
+import { withChoice } from "../lib/fixes";
 import { commonTitle, joinPath, fold } from "../lib/labels";
 import { NO_FILTER, useStore, type FindingsFilter } from "../lib/store";
 import type { Finding, FixKind, LocalPhp, Severity } from "../lib/types";
@@ -39,7 +40,7 @@ export function prioritizeFindings(findings: Finding[]): Finding[] {
 
 export function Findings() {
   const { t, loc } = useI18n();
-  const { scan, setView, project, api, runScan, scanning, findingsFilter: filter, setFindingsFilter, ignoreFinding, unignoreFinding, pruneIgnores, importRuntimeLog, setRuntimeRoots, clearRuntimeLog, runLocalCheck, checking, cancelLocalCheck, target } = useStore();
+  const { scan, setView, project, api, runScan, scanning, findingsFilter: filter, setFindingsFilter, ignoreFinding, unignoreFinding, pruneIgnores, importRuntimeLog, setRuntimeRoots, clearRuntimeLog, runLocalCheck, checking, cancelLocalCheck, target, fixChoices, chooseFix } = useStore();
   const [localPhp, setLocalPhp] = useState<LocalPhp[]>([]);
   const [confirmTests, setConfirmTests] = useState(false);
   useEffect(() => {
@@ -58,8 +59,8 @@ export function Findings() {
   const inlineIgnores = useMemo(() => new Set(ignoredList.filter((i) => i.inline).map((i) => i.finding.id)), [ignoredList]);
   const viewingIgnored = showIgnored && ignoredList.length > 0;
   const findings = useMemo(
-    () => (viewingIgnored ? ignoredList.map((i) => i.finding) : scan?.findings ?? []),
-    [scan, viewingIgnored, ignoredList],
+    () => (viewingIgnored ? ignoredList.map((i) => i.finding) : (scan?.findings ?? []).map((f) => withChoice(f, fixChoices))),
+    [scan, viewingIgnored, ignoredList, fixChoices],
   );
   const deferredFilter = useDeferredValue(filter);
   const runtimeCount = useMemo(() => findings.filter((f) => f.runtimeHits > 0).length, [findings]);
@@ -403,6 +404,8 @@ export function Findings() {
                 root={project?.root}
                 api={api}
                 onSelect={setSelectedId}
+                choices={fixChoices}
+                onChoose={viewingIgnored ? undefined : chooseFix}
                 notice={
                   selectedReason !== undefined && (
                     <Callout tone="info" icon={<EyeOff size={15} />}>

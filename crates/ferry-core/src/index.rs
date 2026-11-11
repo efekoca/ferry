@@ -101,6 +101,7 @@ pub struct ProjectIndex {
     target: Option<crate::version::PhpVersion>,
     current: Option<crate::version::PhpVersion>,
     autoload_hooks: bool,
+    error_handler: bool,
     overridden_by_all: std::sync::OnceLock<HashMap<String, HashSet<String>>>,
     redefines_checks: std::sync::OnceLock<bool>,
 }
@@ -172,6 +173,11 @@ impl ProjectIndex {
     /// but its declaration.
     pub(crate) fn hooks_autoload(&self) -> bool {
         self.autoload_hooks
+    }
+
+    /// Whether the project installs its own error handler anywhere.
+    pub(crate) fn sets_error_handler(&self) -> bool {
+        self.error_handler
     }
 
     /// Whether a class of the project extends `parent` directly.
@@ -260,6 +266,7 @@ impl ProjectIndex {
         let mut added = Vec::new();
         self.constants.extend(crate::analyzer::declared_constants(tokens));
         self.mysqli_report |= tokens.iter().any(|t| t.is_ident_ci("mysqli_report") || t.is_ident_ci("report_mode"));
+        self.error_handler |= tokens.iter().any(|t| t.is_ident_ci("set_error_handler"));
         self.autoload_hooks |= tokens.iter().enumerate().any(|(i, t)| {
             let declared = tokens[..i].iter().rev().find(|p| !p.is_punct("&")).is_some_and(|p| p.is_ident_ci("function"));
             t.is_ident_ci("spl_autoload_register")

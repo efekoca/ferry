@@ -5,6 +5,7 @@ import { useI18n } from "../i18n";
 import { RULE_NOTES } from "../i18n/rules";
 import type { Api } from "../lib/api";
 import { highlight } from "../lib/code";
+import { optionFor } from "../lib/fixes";
 import type { Finding, SourceLine } from "../lib/types";
 
 const VERSIONS = ["5.3", "5.4", "5.5", "5.6", "7.0", "7.1", "7.2", "7.3", "7.4", "8.0", "8.1", "8.2", "8.3", "8.4", "8.5"];
@@ -106,6 +107,67 @@ function VersionPath({ finding, current, target }: { finding: Finding; current: 
   );
 }
 
+/** The ways to fix a finding when they keep different things; the one picked goes into the preview. */
+function FixOptions({ finding, choices, onChoose }: { finding: Finding; choices: Readonly<Record<string, string>>; onChoose: (option: string) => void }) {
+  const { t, loc } = useI18n();
+  const options = finding.options ?? [];
+  const selected = optionFor(finding, choices);
+  const move = (group: HTMLElement, dir: 1 | -1) => {
+    const at = selected ? options.indexOf(selected) : dir === 1 ? -1 : 0;
+    const next = (at + dir + options.length) % options.length;
+    onChoose(options[next].id);
+    group.querySelectorAll<HTMLButtonElement>('[role="radio"]')[next]?.focus();
+  };
+  return (
+    <>
+      <div
+        role="radiogroup"
+        aria-label={t.findings.fixOptions}
+        className="fix-options"
+        onKeyDown={(e) => {
+          const dir = e.key === "ArrowDown" || e.key === "ArrowRight" ? 1 : e.key === "ArrowUp" || e.key === "ArrowLeft" ? -1 : 0;
+          if (!dir) return;
+          e.preventDefault();
+          move(e.currentTarget, dir);
+        }}
+      >
+        {options.map((o, i) => {
+          const on = o.id === selected?.id;
+          return (
+            <button
+              key={o.id}
+              type="button"
+              role="radio"
+              aria-checked={on}
+              tabIndex={on || (!selected && i === 0) ? 0 : -1}
+              className="fix-option"
+              onClick={() => onChoose(o.id)}
+            >
+              <span className="fix-option__dot" aria-hidden />
+              <span className="fix-option__body">
+                <span className="fix-option__title">
+                  {loc(o.title)}
+                  {o.recommended && <span className="fix-option__tag">{t.findings.recommended}</span>}
+                </span>
+                <span className="fix-option__effect">{loc(o.effect)}</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      {selected ? (
+        selected.code ? (
+          <pre className="code code--suggest selectable">{selected.code}</pre>
+        ) : (
+          <p className="fix-options__note">{t.findings.removesLine}</p>
+        )
+      ) : (
+        <p className="fix-options__note">{t.findings.pickOption}</p>
+      )}
+    </>
+  );
+}
+
 export function FindingDetail({
   finding,
   findings,
@@ -116,6 +178,8 @@ export function FindingDetail({
   notice,
   footer,
   onSelect,
+  choices = {},
+  onChoose,
 }: {
   finding: Finding;
   findings: readonly Finding[];
@@ -126,6 +190,8 @@ export function FindingDetail({
   notice?: ReactNode;
   footer: ReactNode;
   onSelect: (id: string) => void;
+  choices?: Readonly<Record<string, string>>;
+  onChoose?: (id: string, option: string) => void;
 }) {
   const { t, loc, lang } = useI18n();
   const note = RULE_NOTES[finding.ruleId];
@@ -150,8 +216,12 @@ export function FindingDetail({
 
         <section className="detail__block">
           <h3>{t.findings.howToFix}</h3>
-          {replacement && (looksLikeCode(replacement) ? <pre className="code code--suggest">{replacement}</pre> : <p className="selectable">{replacement}</p>)}
-          <p>{t.fixDesc[finding.fix]}</p>
+          {finding.options?.length && onChoose ? (
+            <FixOptions finding={finding} choices={choices} onChoose={(option) => onChoose(finding.id, option)} />
+          ) : (
+            replacement && (looksLikeCode(replacement) ? <pre className="code code--suggest">{replacement}</pre> : <p className="selectable">{replacement}</p>)
+          )}
+          {(!finding.options?.length || optionFor(finding, choices)) && <p>{t.fixDesc[finding.fix]}</p>}
         </section>
 
         <section className="detail__block">

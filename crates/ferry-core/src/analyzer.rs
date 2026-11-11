@@ -22,6 +22,22 @@ pub struct Finding {
     pub replacement: Option<Localized>,
     pub snippet: String,
     pub runtime_hits: usize,
+    /// Ways to fix it that keep different things. The preview uses the recommended one unless
+    /// another is chosen.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub options: Vec<FixOption>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct FixOption {
+    pub id: String,
+    pub title: Localized,
+    pub effect: Localized,
+    /// The lines as the option leaves them; empty when it removes them.
+    pub code: String,
+    pub fix: FixKind,
+    pub recommended: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -974,6 +990,7 @@ impl<'a> Ctx<'a> {
             replacement: hit.replacement,
             snippet: self.snippet(line),
             runtime_hits: 0,
+            options: Vec::new(),
         });
     }
 

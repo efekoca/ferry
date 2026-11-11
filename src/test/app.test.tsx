@@ -235,6 +235,55 @@ describe("Ferry app", () => {
     expect(within(screen.getByRole("listbox", { name: "Bulgu listesi" })).getAllByRole("option").length).toBeGreaterThan(3);
   });
 
+  it("lets a finding with several fixes be fixed one way", async () => {
+    const user = userEvent.setup();
+    const api = mockApi({ delay: 0 });
+    const preview = vi.spyOn(api, "rectorPreview");
+    render(<App api={api} />);
+    await user.click(await screen.findByRole("button", { name: "Proje klasörü seçin" }));
+    await user.click(await screen.findByRole("radio", { name: "8.5" }));
+    await user.click(screen.getByRole("button", { name: /Taramayı başlat/ }));
+    await screen.findByRole("img", { name: /Hazırlık puanı/ });
+    await user.click(nav(/Bulgular/));
+    const list = await screen.findByRole("listbox", { name: "Bulgu listesi" });
+    const detail = screen.getByRole("complementary", { name: "Bulgu ayrıntısı" });
+
+    await user.type(screen.getByRole("searchbox", { name: "Bulgularda ara" }), "_bad_state_ex");
+    await user.click(within(list).getAllByRole("option")[0]);
+    const choices = within(detail).getByRole("radiogroup", { name: "Düzeltme seçenekleri" });
+    expect(within(choices).getAllByRole("radio").every((r) => r.getAttribute("aria-checked") === "false")).toBe(true);
+    expect(detail).toHaveTextContent("Bir yol seçin; önizleme seçtiğinizi uygular.");
+    expect(within(detail).queryByRole("button", { name: /Düzeltmeyi gör/ })).not.toBeInTheDocument();
+    await user.click(within(choices).getByRole("radio", { name: /Hatayı koru/ }));
+    expect(within(choices).getByRole("radio", { name: /Hatayı koru/ })).toHaveAttribute("aria-checked", "true");
+    expect(detail).toHaveTextContent("throw new \\Error('The parent constructor was not called");
+    expect(within(detail).getByRole("button", { name: /Düzeltmeyi gör/ })).toBeInTheDocument();
+    const chosen = within(list).getAllByRole("option")[0];
+    expect(within(chosen).getByText("Otomatik")).toBeInTheDocument();
+
+    await user.clear(screen.getByRole("searchbox", { name: "Bulgularda ara" }));
+    await user.type(screen.getByRole("searchbox", { name: "Bulgularda ara" }), "DATE_RFC7231");
+    await user.click(within(list).getAllByRole("option")[0]);
+    const rfc = within(detail).getByRole("radiogroup", { name: "Düzeltme seçenekleri" });
+    const same = within(rfc).getByRole("radio", { name: /Aynı çıktı/ });
+    expect(same).toHaveAttribute("aria-checked", "true");
+    expect(within(same).getByText("Önerilen")).toBeInTheDocument();
+    same.focus();
+    await user.keyboard("{ArrowDown}");
+    expect(within(rfc).getByRole("radio", { name: /Gerçek GMT saati/ })).toHaveAttribute("aria-checked", "true");
+    expect(within(rfc).getByRole("radio", { name: /Gerçek GMT saati/ })).toHaveFocus();
+    expect(detail).toHaveTextContent("gmdate('D, d M Y H:i:s");
+
+    await user.click(within(detail).getByRole("button", { name: /Düzeltmeyi gör/ }));
+    await user.click(await screen.findByRole("button", { name: /Önizlemeyi hazırla/ }));
+    await waitFor(() =>
+      expect(preview).toHaveBeenCalledWith(expect.any(String), "8.5", "compat", expect.any(Boolean), [
+        { id: expect.stringContaining("splfileinfo_bad_state_ex"), option: "throw" },
+        { id: expect.stringContaining("date_rfc7231"), option: "utc" },
+      ]),
+    );
+  });
+
   it("filters findings and shows details", async () => {
     const user = setup();
     await openAndScan(user);
@@ -458,7 +507,7 @@ describe("Ferry app", () => {
     await user.click(compat);
     await user.click(pins);
     await user.click(start);
-    await waitFor(() => expect(preview).toHaveBeenCalledWith(expect.any(String), "8.4", "compat", true));
+    await waitFor(() => expect(preview).toHaveBeenCalledWith(expect.any(String), "8.4", "compat", true, []));
     const list = await screen.findByRole("list", { name: "Dosyalar" });
     const all = within(list).getAllByRole("listitem").length;
     expect(within(list).getByRole("checkbox", { name: "Dockerfile dosyasını seçin" })).toBeChecked();

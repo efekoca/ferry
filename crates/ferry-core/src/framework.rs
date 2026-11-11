@@ -667,6 +667,7 @@ fn finding(
         replacement: Some(replacement),
         snippet,
         runtime_hits: 0,
+        options: Vec::new(),
     }
 }
 

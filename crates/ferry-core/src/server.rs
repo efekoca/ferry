@@ -131,6 +131,7 @@ pub fn scan(root: &Path, target: PhpVersion) -> (Vec<Finding>, Vec<FileError>) {
                 replacement: h.replacement,
                 snippet: lines.get(h.line - 1).map_or(String::new(), |l| l.trim().to_string()),
                 runtime_hits: 0,
+                options: Vec::new(),
             });
         }
     });

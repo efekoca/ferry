@@ -1,4 +1,15 @@
-import type { DockerEvent, FileChange } from "./types";
+import type { DockerEvent, FileChange, Finding, FixOption } from "./types";
+
+/** The option a finding uses: the one chosen for it, else the recommended one. */
+export function optionFor(finding: Finding, choices: Readonly<Record<string, string>>): FixOption | undefined {
+  return finding.options?.find((o) => o.id === choices[finding.id]) ?? finding.options?.find((o) => o.recommended);
+}
+
+/** The finding as its chosen option leaves it: the fix kind becomes that option's. */
+export function withChoice(finding: Finding, choices: Readonly<Record<string, string>>): Finding {
+  const option = optionFor(finding, choices);
+  return option && option.fix !== finding.fix ? { ...finding, fix: option.fix } : finding;
+}
 
 export const containerPath = (path: string) => path.replace(/^\/app\//, "");
 

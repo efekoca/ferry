@@ -94,6 +94,7 @@ class Maintenance implements Serializable
         return array(
             filter_input(INPUT_REQUEST, 'id', FILTER_SANITIZE_MAGIC_QUOTES),
             filter_input(INPUT_SESSION, 'user'),
+            filter_var("O'Reilly", FILTER_SANITIZE_MAGIC_QUOTES),
             idn_to_ascii('ferry.dev', 0, INTL_IDNA_VARIANT_2003),
             mt_srand(42, MT_RAND_PHP),
             date_sunrise(time(), SUNFUNCS_RET_TIMESTAMP),
