@@ -1939,7 +1939,7 @@ const RESERVED_CLASS_NAMES: [(&str, u32, u32); 15] = [
     ("readonly", 8, 1),
 ];
 
-fn expression_end(t: &Token) -> bool {
+pub(crate) fn expression_end(t: &Token) -> bool {
     let modifiers = ["public", "protected", "private", "static", "readonly", "var", "const", "function", "fn"];
     matches!(t.kind, TokenKind::Variable | TokenKind::Number | TokenKind::Str { .. })
         || (t.kind == TokenKind::Ident && !EXPR_KEYWORDS.iter().any(|k| t.is_ident_ci(k)) && !modifiers.iter().any(|k| t.is_ident_ci(k)))

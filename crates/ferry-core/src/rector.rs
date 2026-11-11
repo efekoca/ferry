@@ -181,6 +181,17 @@ const LIKELY_RULES: &[&str] = &[
     "InputTypeSuperglobal",
     "SoapDefinedFunctions",
     "SoapUserFunctions",
+    "ParenthesizeConcatOperands",
+    "ExplicitHtmlFlags",
+    "MysqliReportOff",
+    "CatchMysqliException",
+    "PingWithQuery",
+    "DropPingCheck",
+    "CurrencyMethods",
+    "MagicVariableOldValue",
+    "MagicVariableSource",
+    "DropEntityLoaderCall",
+    "NullEntityLoader",
 ];
 
 const RULE_TITLES: &[(&str, Text)] = &[
@@ -286,6 +297,29 @@ const RULE_TITLES: &[(&str, Text)] = &[
     ("InputTypeSuperglobal", Text::new("Değer süper globalden okunur", "Read the value from the superglobal")),
     ("SoapDefinedFunctions", Text::same("SOAP_FUNCTIONS_ALL → get_defined_functions()")),
     ("SoapUserFunctions", Text::same("SOAP_FUNCTIONS_ALL → get_defined_functions()['user']")),
+    (
+        "ParenthesizeConcatOperands",
+        Text::new("Birleştirmedeki aritmetik paranteze alınır", "Parenthesize arithmetic inside concatenations"),
+    ),
+    ("KeepHtmlFlags", Text::same("htmlspecialchars($s) → htmlspecialchars($s, ENT_COMPAT | ENT_HTML401)")),
+    ("ExplicitHtmlFlags", Text::same("htmlspecialchars($s) → htmlspecialchars($s, ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML401)")),
+    ("MysqliReportOff", Text::same("mysqli_report(MYSQLI_REPORT_OFF)")),
+    ("CatchMysqliException", Text::same("or die() → try/catch mysqli_sql_exception")),
+    ("PingWithQuery", Text::same("ping() → query('DO 1')")),
+    ("DropPingCheck", Text::new("ping() kontrolü silinir", "Remove the ping() check")),
+    ("CurrencyMethods", Text::same("format(TYPE_CURRENCY) → formatCurrency()")),
+    (
+        "CurrencyCallOldResult",
+        Text::new("Çağrı PHP 7'deki sonucu olan false ile değiştirilir", "Replace the call with false, its PHP 7 result"),
+    ),
+    (
+        "MagicVariableNeverSet",
+        Text::new("Hiç tanımlanmayan sihirli değişken null olur", "A magic variable that was never set becomes null"),
+    ),
+    ("MagicVariableOldValue", Text::new("Sihirli değişken null olur", "The magic variable becomes null")),
+    ("MagicVariableSource", Text::same("$HTTP_RAW_POST_DATA → file_get_contents('php://input')")),
+    ("DropEntityLoaderCall", Text::new("libxml_disable_entity_loader() silinir", "Remove libxml_disable_entity_loader()")),
+    ("NullEntityLoader", Text::same("libxml_disable_entity_loader(true) → libxml_set_external_entity_loader(fn => null)")),
     (
         "ParenthesizeNestedTernaryRector",
         Text::new("İç içe ternary paranteze alınır (eski davranış korunur)", "Parenthesize nested ternaries (keeps the old behaviour)"),

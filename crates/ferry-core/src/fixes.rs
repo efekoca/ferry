@@ -65,6 +65,20 @@ pub const INPUT_OLD: &str = "Ferry\\Php80\\InputTypeOldResult";
 pub const INPUT_GLOBAL: &str = "Ferry\\Php80\\InputTypeSuperglobal";
 pub const SOAP_ALL: &str = "Ferry\\Php84\\SoapDefinedFunctions";
 pub const SOAP_USER: &str = "Ferry\\Php84\\SoapUserFunctions";
+pub const CONCAT_GROUPS: &str = "Ferry\\Php80\\ParenthesizeConcatOperands";
+pub const HTML_OLD: &str = "Ferry\\Php81\\KeepHtmlFlags";
+pub const HTML_NEW: &str = "Ferry\\Php81\\ExplicitHtmlFlags";
+pub const MYSQLI_REPORT_OFF: &str = "Ferry\\Php81\\MysqliReportOff";
+pub const MYSQLI_CATCH: &str = "Ferry\\Php81\\CatchMysqliException";
+pub const PING_QUERY: &str = "Ferry\\Php84\\PingWithQuery";
+pub const PING_DROP: &str = "Ferry\\Php84\\DropPingCheck";
+pub const CURRENCY_METHOD: &str = "Ferry\\Php80\\CurrencyMethods";
+pub const CURRENCY_FALSE: &str = "Ferry\\Php80\\CurrencyCallOldResult";
+pub const MAGIC_NULL_EXACT: &str = "Ferry\\Php80\\MagicVariableNeverSet";
+pub const MAGIC_NULL: &str = "Ferry\\Php80\\MagicVariableOldValue";
+pub const MAGIC_READ: &str = "Ferry\\Php80\\MagicVariableSource";
+pub const ENTITY_DROP: &str = "Ferry\\Php80\\DropEntityLoaderCall";
+pub const ENTITY_LOADER: &str = "Ferry\\Php80\\NullEntityLoader";
 
 /// A finding the user asked to fix with one option: its line, its rule, which of that rule's
 /// findings on the line it is, and the option.
@@ -84,7 +98,13 @@ struct Choice {
 }
 
 /// Rules whose findings can come with options.
-const OPTION_RULES: [&str; 6] = [
+const OPTION_RULES: [&str; 12] = [
+    "behavior.html_default_flags",
+    "behavior.mysqli_default_exceptions",
+    "deprecated.mysqli_ping",
+    "removed.numberformatter_type_currency",
+    "removed.magic_variable",
+    "deprecated.libxml_disable_entity_loader",
     "deprecated.date_rfc7231",
     "deprecated.splfileinfo_bad_state_ex",
     "deprecated.e_user_error",
@@ -95,6 +115,114 @@ const OPTION_RULES: [&str; 6] = [
 
 /// (rule, option, title, what it changes).
 const OPTION_TEXTS: &[(&str, &str, crate::i18n::Text, crate::i18n::Text)] = &[
+    (
+        "behavior.html_default_flags",
+        "old",
+        crate::i18n::Text::new("Eski çıktıyı koru", "Keep the old output"),
+        crate::i18n::Text::new(
+            "Bu dosyadaki bayraksız çağrılara ENT_COMPAT | ENT_HTML401 eklenir; çıktı PHP 8.1 öncesiyle bayt bayt aynı kalır. Tek tırnaklı HTML özniteliklerindeki eski XSS açığı da kalır.",
+            "Adds ENT_COMPAT | ENT_HTML401 to the calls without flags in this file; the output stays byte for byte as before PHP 8.1. So does the old XSS gap inside single-quoted HTML attributes.",
+        ),
+    ),
+    (
+        "behavior.html_default_flags",
+        "new",
+        crate::i18n::Text::new("PHP 8.1 bayraklarını yaz", "Write the PHP 8.1 flags"),
+        crate::i18n::Text::new(
+            "ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML401 açıkça yazılır. PHP 8.1 ve sonrasında çıktı değişmez, ama eskisinden farklıdır: tek tırnak kodlanır, geçersiz UTF-8 boş sonuç yerine � olur.",
+            "Writes ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML401 out. Nothing changes on PHP 8.1 and later, but the output differs from before: single quotes are encoded and invalid UTF-8 becomes � instead of an empty result.",
+        ),
+    ),
+    (
+        "behavior.mysqli_default_exceptions",
+        "report_off",
+        crate::i18n::Text::new("Eski hata davranışı", "Old error handling"),
+        crate::i18n::Text::new(
+            "Çağrıdan önce mysqli_report(MYSQLI_REPORT_OFF) yazılır; hatalar yine uyarıyla false döndürür ve bu kontrol çalışır. Ayar istek boyunca bütün mysqli çağrılarını etkiler.",
+            "Writes mysqli_report(MYSQLI_REPORT_OFF) before the call, so failures return false with a warning again and this check runs. The setting affects every mysqli call in the request.",
+        ),
+    ),
+    (
+        "behavior.mysqli_default_exceptions",
+        "catch",
+        crate::i18n::Text::new("İstisnayı yakala", "Catch the exception"),
+        crate::i18n::Text::new(
+            "Çağrı try içine alınır, mysqli_sql_exception gelince bu dal çalışır. Başka yerdeki denetlenmeyen mysqli hataları istisna fırlatmaya devam eder.",
+            "Wraps the call in try and runs this branch on mysqli_sql_exception. Unchecked mysqli failures elsewhere keep throwing.",
+        ),
+    ),
+    (
+        "deprecated.mysqli_ping",
+        "query",
+        crate::i18n::Text::new("Sunucuya sor", "Ask the server"),
+        crate::i18n::Text::new(
+            "Aynı tek gidiş-dönüşü 'DO 1' sorgusuyla yapar: bağlantı canlıysa true. ping()'in aksine affected_rows, insert_id ve info değerlerini sıfırlar.",
+            "Makes the same single round trip with 'DO 1': true while the connection lives. Unlike ping(), it resets affected_rows, insert_id and info.",
+        ),
+    ),
+    (
+        "deprecated.mysqli_ping",
+        "drop",
+        crate::i18n::Text::new("Kontrolü kaldır", "Drop the check"),
+        crate::i18n::Text::new(
+            "Kopan bağlantı PHP 8.2'den beri kendiliğinden yeniden kurulmuyor; bir sonraki sorgu hata verir. Gerekirse bağlantıyı bir catch içinde yeniden kurun.",
+            "Dropped connections haven't reconnected on their own since PHP 8.2; the next query fails instead. Reconnect in a catch if needed.",
+        ),
+    ),
+    (
+        "removed.numberformatter_type_currency",
+        "currency",
+        crate::i18n::Text::new("Para birimi metodu", "Currency method"),
+        crate::i18n::Text::new(
+            "Kastedilen buydu: formatCurrency() ya da parseCurrency() biçimlendiricinin para birimiyle çalışır.",
+            "What was meant: formatCurrency() or parseCurrency() with the formatter's currency.",
+        ),
+    ),
+    (
+        "removed.numberformatter_type_currency",
+        "false",
+        crate::i18n::Text::new("Eski sonuç", "Old result"),
+        crate::i18n::Text::new(
+            "PHP 7 bu çağrıda uyarı verip false döndürüyordu; aynı false yazılır.",
+            "PHP 7 warned and returned false for this call; writes that false.",
+        ),
+    ),
+    (
+        "removed.magic_variable",
+        "old",
+        crate::i18n::Text::new("Eski değer", "Old value"),
+        crate::i18n::Text::new(
+            "Kodun gördüğü değer olan null yazılır; tanımsız değişken uyarısı kalkar.",
+            "Writes the null the code saw; the undefined variable warning goes.",
+        ),
+    ),
+    (
+        "removed.magic_variable",
+        "read",
+        crate::i18n::Text::new("Asıl veriyi oku", "Read the actual data"),
+        crate::i18n::Text::new(
+            "İstek gövdesi php://input'tan, son hata error_get_last()'tan okunur. Bu kod şimdiye kadar null görmüş olabilir; error_get_last() isteğin herhangi bir yerindeki son hatayı verir.",
+            "Reads the request body from php://input and the last error from error_get_last(). This code may have only ever seen null; error_get_last() gives the last error anywhere in the request.",
+        ),
+    ),
+    (
+        "deprecated.libxml_disable_entity_loader",
+        "drop",
+        crate::i18n::Text::new("Çağrıyı sil", "Delete the call"),
+        crate::i18n::Text::new(
+            "PHP 8'in varsayılanı geçerli olur: dış varlıklar yalnızca LIBXML_NOENT verildiğinde yüklenir ve dosya yüklemeleri çalışmaya başlar.",
+            "PHP 8's default applies: external entities load only when LIBXML_NOENT is passed, and file loads start to work.",
+        ),
+    ),
+    (
+        "deprecated.libxml_disable_entity_loader",
+        "loader",
+        crate::i18n::Text::new("Dış varlıkları engelle", "Keep blocking external entities"),
+        crate::i18n::Text::new(
+            "Dış varlık yükleyicisi null döndüren bir fonksiyonla değiştirilir; LIBXML_NOENT kullanan kod da dış varlık yükleyemez. Eski ayarı geri yükleyen çağrı yükleyiciyi sıfırlar.",
+            "Replaces the external entity loader with one that returns null, so code that passes LIBXML_NOENT can't load external entities either. The call that restored the old setting resets the loader.",
+        ),
+    ),
     (
         "deprecated.date_rfc7231",
         "literal",
@@ -211,6 +339,15 @@ pub struct Fix {
     pub start: usize,
     pub end: usize,
     pub text: String,
+    /// More edits the same fix needs elsewhere in the file, each `(start, end, text)`.
+    pub extra: Vec<(usize, usize, String)>,
+}
+
+impl Fix {
+    /// Every edit of the fix, the main one first.
+    fn edits(&self) -> impl Iterator<Item = (usize, usize, &str)> {
+        std::iter::once((self.start, self.end, self.text.as_str())).chain(self.extra.iter().map(|(s, e, t)| (*s, *e, t.as_str())))
+    }
 }
 
 /// (rule, constant, value): constants PHP never read or no longer has, whose value keeps the code the same.
@@ -333,7 +470,14 @@ const NO_OP_FLAGS: &[(&str, &str, Alone)] = &[
 
 /// Rules whose fix reads the code around the finding, and for three of them the version the project
 /// runs on today.
-const SITE_RULES: [&str; 31] = [
+const SITE_RULES: [&str; 38] = [
+    "behavior.concat_precedence",
+    "behavior.html_default_flags",
+    "behavior.mysqli_default_exceptions",
+    "deprecated.mysqli_ping",
+    "removed.numberformatter_type_currency",
+    "removed.magic_variable",
+    "deprecated.libxml_disable_entity_loader",
     "deprecated.date_rfc7231",
     "deprecated.splfileinfo_bad_state_ex",
     "deprecated.e_user_error",
@@ -570,10 +714,20 @@ pub(crate) fn mentions(src: &str) -> bool {
         "soap_functions_all",
         "rfc7231",
         "_bad_state_ex",
+        "htmlspecialchars",
+        "htmlentities",
+        "html_entity_decode",
+        "mysqli",
+        "ping",
+        "type_currency",
+        "http_raw_post_data",
+        "php_errormsg",
+        "libxml_disable_entity_loader",
     ];
     OCI_ALIASES.iter().map(|(old, _)| *old).chain(NO_OP_CALLS.iter().map(|(_, f, _)| *f)).chain(calls).any(|name| lower.contains(name))
         || (lower.contains("unset") && src.contains("$this"))
         || (lower.contains("export") && lower.contains("reflection"))
+        || src.contains('.') && ["+", "-", "<<", ">>"].iter().any(|op| src.contains(op))
 }
 
 /// A file as the fixes see it: its text, its tokens, which tokens hold a no-op flag finding, the
@@ -633,7 +787,7 @@ pub(crate) fn at(file: &Source, k: usize, rule: &str) -> Option<Fix> {
     let tok = tokens.get(k).filter(|t| t.kind == TokenKind::Ident)?;
     let bare = tok.text.trim_start_matches('\\');
     let lead = &tok.text[..tok.text.len() - bare.len()];
-    let fix = |class, start, text: String| Some(Fix { class, start, end: tok.end, text });
+    let fix = |class, start, text: String| Some(Fix { extra: Vec::new(), class, start, end: tok.end, text });
     if rule == "deprecated.pgsql_transaction_constant" {
         let class = tokens.get(k.checked_sub(2)?).filter(|c| c.kind == TokenKind::Ident && tokens[k - 1].is_punct("::"))?;
         let short = class.text.rsplit('\\').next().unwrap_or_default();
@@ -650,7 +804,13 @@ pub(crate) fn at(file: &Source, k: usize, rule: &str) -> Option<Fix> {
         let (_, new) = OCI_ALIASES.iter().find(|(old, _)| bare.eq_ignore_ascii_case(old))?;
         let call = tokens.get(k + 1).is_some_and(|n| n.is_punct("("));
         let member = k.checked_sub(1).is_some_and(|p| tokens[p].is_punct("->") || tokens[p].is_punct("::"));
-        return (call && !member).then(|| Fix { class: OCI_ALIAS, start: tok.start, end: tok.end, text: format!("{lead}{new}") });
+        return (call && !member).then(|| Fix {
+            extra: Vec::new(),
+            class: OCI_ALIAS,
+            start: tok.start,
+            end: tok.end,
+            text: format!("{lead}{new}"),
+        });
     }
     if let Some((_, _, value)) = CONSTANT_VALUES.iter().find(|(r, name, _)| *r == rule && *name == bare) {
         return fix(CONSTANT_VALUE, tok.start, value.to_string());
@@ -761,14 +921,21 @@ fn emptied(file: &Source, first: usize, last: usize, alone: Alone, class: &'stat
     let tokens = file.tokens;
     let before = first.checked_sub(1).map(|p| &tokens[p]);
     let after = tokens.get(last + 1);
-    let replace = |text: &str| Some(Fix { class, start: tokens[first].start, end: tokens[last].end, text: text.to_string() });
+    let replace =
+        |text: &str| Some(Fix { extra: Vec::new(), class, start: tokens[first].start, end: tokens[last].end, text: text.to_string() });
     match alone {
         Alone::Value(_) if tokens[first..=last].iter().any(|t| t.is_ident_ci("E_STRICT")) => None,
         Alone::Value(value) => replace(value),
         Alone::Constant(name) => {
             let stored = before.is_some_and(|b| [",", "=>", "=", "("].iter().any(|p| b.is_punct(p)));
             let ends = after.is_some_and(|a| [")", ",", "]", ";"].iter().any(|p| a.is_punct(p)));
-            (stored && ends).then(|| Fix { class, start: tokens[first].start, end: tokens[last].end, text: name.to_string() })
+            (stored && ends).then(|| Fix {
+                extra: Vec::new(),
+                class,
+                start: tokens[first].start,
+                end: tokens[last].end,
+                text: name.to_string(),
+            })
         }
         Alone::Argument => {
             let keyed = before.is_some_and(|b| b.is_punct("=>"))
@@ -790,6 +957,7 @@ fn emptied(file: &Source, first: usize, last: usize, alone: Alone, class: &'stat
             };
             let commas = (call + 2..first).filter(|&j| tokens[j].is_punct(",") && enclosing_call(tokens, j) == Some(call)).count();
             (last_argument && commas == position).then(|| Fix {
+                extra: Vec::new(),
                 class,
                 start: tokens[first - 2].end,
                 end: tokens[last].end,
@@ -813,6 +981,7 @@ fn flag_fix(file: &Source, k: usize, rule: &str) -> Option<Fix> {
                 return None;
             }
             return Some(Fix {
+                extra: Vec::new(),
                 class: CONSTANT_VALUE,
                 start: tokens[operands[0].atom].start,
                 end: tokens[operands[0].atom].end,
@@ -889,14 +1058,14 @@ fn flag_fix(file: &Source, k: usize, rule: &str) -> Option<Fix> {
         text.push_str(&join(term));
     }
     let original = file.text(first, last);
-    (text != original).then(|| Fix { class, start: tokens[first].start, end: tokens[last].end, text })
+    (text != original).then(|| Fix { extra: Vec::new(), class, start: tokens[first].start, end: tokens[last].end, text })
 }
 
 fn site_fix(file: &Source, k: usize, rule: &str) -> Option<Fix> {
     let tokens = file.tokens;
     let tok = tokens.get(k)?;
     let php5 = file.current.is_some_and(|v| v < PhpVersion::new(7, 0));
-    let replace = |class, text: String| Some(Fix { class, start: tok.start, end: tok.end, text });
+    let replace = |class, text: String| Some(Fix { extra: Vec::new(), class, start: tok.start, end: tok.end, text });
     match rule {
         "deprecated.null_to_internal" => {
             if !tok.is_ident_ci("null") || file.strict {
@@ -918,6 +1087,7 @@ fn site_fix(file: &Source, k: usize, rule: &str) -> Option<Fix> {
         "removed.intl_idna_variant_2003" => {
             let constant = tok.text.trim_start_matches('\\') == "INTL_IDNA_VARIANT_2003" && is_atom(tokens, k);
             constant.then(|| Fix {
+                extra: Vec::new(),
                 class: IDNA_UTS46,
                 start: tok.start,
                 end: tok.end,
@@ -931,6 +1101,7 @@ fn site_fix(file: &Source, k: usize, rule: &str) -> Option<Fix> {
             }
             let end = dimensions_end(tokens, k)?;
             Some(Fix {
+                extra: Vec::new(),
                 class: crate::analyzer::INDIRECT_ACCESS_FIX,
                 start: tok.start,
                 end: tokens[end].end,
@@ -955,11 +1126,8 @@ fn site_fix(file: &Source, k: usize, rule: &str) -> Option<Fix> {
         "removed.jpeg2wbmp" => wbmp_port(file, k, "jpeg2wbmp", "imagecreatefromjpeg", "JPEG"),
         "removed.incompatible_override" => widen_override(file, k),
         "deprecated.date_wakeup" => date_wakeup(file, k),
-        _ if OPTION_RULES.contains(&rule) => {
-            let options = choices(file, k, rule);
-            let only = options.len() == 1;
-            options.into_iter().find(|c| c.recommended || only).map(|c| c.fix)
-        }
+        "behavior.concat_precedence" => concat_groups(file, k),
+        _ if OPTION_RULES.contains(&rule) => choices(file, k, rule).into_iter().find(|c| c.recommended).map(|c| c.fix),
         _ => None,
     }
 }
@@ -988,6 +1156,12 @@ fn choices(file: &Source, k: usize, rule: &str) -> Vec<Choice> {
         "removed.input_request" => input_choices(file, k, "INPUT_REQUEST", "$_REQUEST"),
         "removed.input_session" => input_choices(file, k, "INPUT_SESSION", "$_SESSION"),
         "deprecated.soap_functions_all" => soap_choices(file, k),
+        "behavior.html_default_flags" => html_choices(file, k),
+        "behavior.mysqli_default_exceptions" => mysqli_report_choices(file, k),
+        "deprecated.mysqli_ping" => ping_choices(file, k),
+        "removed.numberformatter_type_currency" => currency_choices(file, k),
+        "removed.magic_variable" => magic_choices(file, k),
+        "deprecated.libxml_disable_entity_loader" => entity_choices(file, k),
         _ => [None, None],
     }
     .into_iter()
@@ -1015,21 +1189,27 @@ fn rfc7231_choices(file: &Source, k: usize) -> [Option<Choice>; 2] {
     };
     let literal = Choice {
         id: "literal",
-        fix: Fix { class: RFC_LITERAL, start: tokens[first].start, end: tok.end, text: RFC7231_FORMAT.into() },
+        fix: Fix { extra: Vec::new(), class: RFC_LITERAL, start: tokens[first].start, end: tok.end, text: RFC7231_FORMAT.into() },
         recommended: true,
     };
     let utc = argument_of(tokens, first).filter(|&(_, index, arg)| index == 0 && arg == (first, k)).and_then(|(call, ..)| {
         if let Some((close, args)) = function_call(tokens, call, &["date"]).filter(|(_, a)| a.len() <= 2) {
             let rest = &file.src[tok.end..tokens[close].end];
             let text = format!("{}gmdate{}{RFC7231_FORMAT}{rest}", lead(&tokens[call]), file.between(call, first));
-            return (args.len() <= 2).then(|| Fix { class: RFC_UTC, start: tokens[call].start, end: tokens[close].end, text });
+            return (args.len() <= 2).then(|| Fix {
+                extra: Vec::new(),
+                class: RFC_UTC,
+                start: tokens[call].start,
+                end: tokens[close].end,
+                text,
+            });
         }
         let (close, args) = method_call(tokens, call, &["format"]).filter(|(_, a)| a.len() == 1)?;
         let receiver = receiver_start(tokens, call - 1)?;
         let object = file.text(receiver, call - 2);
         let text =
             format!("\\DateTimeImmutable::createFromInterface({object})->setTimezone(new \\DateTimeZone('UTC'))->format({RFC7231_FORMAT})");
-        (args.len() == 1).then(|| Fix { class: RFC_UTC, start: tokens[receiver].start, end: tokens[close].end, text })
+        (args.len() == 1).then(|| Fix { extra: Vec::new(), class: RFC_UTC, start: tokens[receiver].start, end: tokens[close].end, text })
     });
     [Some(literal), utc.map(|fix| Choice { id: "utc", fix, recommended: false })]
 }
@@ -1050,7 +1230,7 @@ fn bad_state_choices(file: &Source, k: usize) -> [Option<Choice>; 2] {
         Some(Choice { id: "remove", fix: removal(file, first, k + 3, BAD_STATE_DROP), recommended: false }),
         Some(Choice {
             id: "throw",
-            fix: Fix { class: KEEP_ERROR, start: tokens[first].start, end: tokens[k + 3].end, text: message.into() },
+            fix: Fix { extra: Vec::new(), class: KEEP_ERROR, start: tokens[first].start, end: tokens[k + 3].end, text: message.into() },
             recommended: false,
         }),
     ]
@@ -1073,12 +1253,24 @@ fn user_error_choices(file: &Source, k: usize) -> [Option<Choice>; 2] {
     [
         Some(Choice {
             id: "exception",
-            fix: Fix { class: USER_ERROR_EXCEPTION, start, end, text: format!("throw new \\ErrorException({text}, 0, E_USER_ERROR);") },
+            fix: Fix {
+                extra: Vec::new(),
+                class: USER_ERROR_EXCEPTION,
+                start,
+                end,
+                text: format!("throw new \\ErrorException({text}, 0, E_USER_ERROR);"),
+            },
             recommended: !handler,
         }),
         Some(Choice {
             id: "warning",
-            fix: Fix { class: USER_ERROR_WARNING, start, end, text: format!("{}({text}, E_USER_WARNING); exit(255);", tokens[call].text) },
+            fix: Fix {
+                extra: Vec::new(),
+                class: USER_ERROR_WARNING,
+                start,
+                end,
+                text: format!("{}({text}, E_USER_WARNING); exit(255);", tokens[call].text),
+            },
             recommended: handler,
         }),
     ]
@@ -1120,8 +1312,8 @@ fn input_choices(file: &Source, k: usize, constant: &str, global: &str) -> [Opti
     };
     let (start, end) = (tokens[call].start, tokens[close].end);
     [
-        Some(Choice { id: "old", fix: Fix { class: INPUT_OLD, start, end, text: old.into() }, recommended: true }),
-        Some(Choice { id: "superglobal", fix: Fix { class: INPUT_GLOBAL, start, end, text: read }, recommended: false }),
+        Some(Choice { id: "old", fix: Fix { extra: Vec::new(), class: INPUT_OLD, start, end, text: old.into() }, recommended: true }),
+        Some(Choice { id: "superglobal", fix: Fix { extra: Vec::new(), class: INPUT_GLOBAL, start, end, text: read }, recommended: false }),
     ]
 }
 
@@ -1133,7 +1325,7 @@ fn soap_choices(file: &Source, k: usize) -> [Option<Choice>; 2] {
     if tok.text.trim_start_matches('\\') != "SOAP_FUNCTIONS_ALL" || !is_atom(tokens, k) {
         return [None, None];
     }
-    let span = |class, text: &str| Fix { class, start: tok.start, end: tok.end, text: text.to_string() };
+    let span = |class, text: &str| Fix { extra: Vec::new(), class, start: tok.start, end: tok.end, text: text.to_string() };
     let added = argument_of(tokens, k).is_some_and(|(call, index, arg)| {
         index == 0 && arg == (k, k) && method_call(tokens, call, &["addFunction"]).is_some_and(|(_, a)| a.len() == 1)
     });
@@ -1144,6 +1336,349 @@ fn soap_choices(file: &Source, k: usize) -> [Option<Choice>; 2] {
         Some(Choice { id: "all", fix: span(SOAP_ALL, "array_merge(...array_values(get_defined_functions()))"), recommended: true }),
         Some(Choice { id: "user", fix: span(SOAP_USER, "get_defined_functions()['user']"), recommended: false }),
     ]
+}
+
+/// The body of the innermost function around `k`, or the whole file outside functions.
+fn scope_of(tokens: &[Token], k: usize) -> (usize, usize) {
+    enclosing_function(tokens, k).and_then(|f| f.body).unwrap_or((0, tokens.len()))
+}
+
+fn newline(src: &str) -> &'static str {
+    if src.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    }
+}
+
+/// The statement around `k`: its first token, unless it is a branch of an `if` chain or a loop header.
+fn statement_of(tokens: &[Token], k: usize) -> Option<usize> {
+    let mut depth = 0isize;
+    let mut start = 0;
+    for j in (0..k).rev() {
+        let t = &tokens[j];
+        if t.is_punct(")") || t.is_punct("]") {
+            depth += 1;
+        } else if t.is_punct("(") || t.is_punct("[") {
+            depth -= 1;
+        } else if depth <= 0 && (t.is_punct(";") || t.is_punct("{") || t.is_punct("}")) {
+            start = j + 1;
+            break;
+        }
+    }
+    let t = &tokens[start];
+    let condition = (t.is_ident_ci("if") || t.is_ident_ci("while"))
+        && tokens.get(start + 1).is_some_and(|o| o.is_punct("("))
+        && crate::declarations::close_of(tokens, start + 1).is_some_and(|c| c > k);
+    let plain = (t.kind == TokenKind::Variable || t.is_ident_ci("return") || start == k) && depth == 0;
+    (condition || plain).then_some(start)
+}
+
+/// A new statement written on its own line right before the one that starts at `start`.
+fn statement_before(file: &Source, start: usize, statement: &str) -> Fix {
+    let src = file.src;
+    let at = file.tokens[start].start;
+    let line = &src[src[..at].rfind('\n').map_or(0, |i| i + 1)..at];
+    let text =
+        if line.chars().all(|c| c == ' ' || c == '\t') { format!("{statement}{}{line}", newline(src)) } else { format!("{statement} ") };
+    Fix { extra: Vec::new(), class: MYSQLI_REPORT_OFF, start: at, end: at, text }
+}
+
+/// `'Done: ' . $done + 1 . ' of ' . $total`: the `+`/`-` (or shift) operands between the
+/// concatenations in parentheses, which is how PHP 8 reads them.
+fn concat_groups(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let stops = [";", ",", "=>", "=", "?", ":", "??", "&&", "||", "==", "===", "!=", "!==", "<>", "<", ">", "<=", ">=", "<=>", "{", "}"];
+    let words = ["and", "or", "xor", "return", "echo", "print", "case", "yield", "throw"];
+    let shift = |j: usize| {
+        let pair = |a: &Token, b: &Token| a.end == b.start && (a.is_punct("<") && b.is_punct("<") || a.is_punct(">") && b.is_punct(">"));
+        tokens.get(j + 1).is_some_and(|n| pair(&tokens[j], n)) || j > 0 && pair(&tokens[j - 1], &tokens[j])
+    };
+    let stop = |j: usize| {
+        let t = &tokens[j];
+        !shift(j)
+            && (stops.iter().any(|p| t.is_punct(p))
+                || words.iter().any(|w| t.is_ident_ci(w))
+                || t.kind == TokenKind::CloseTag
+                || t.text.ends_with('=') && t.kind == TokenKind::Punct)
+    };
+    let walk = |range: &mut dyn Iterator<Item = usize>, open: &str, close: &str| {
+        let mut depth = 0usize;
+        let mut edge = k;
+        for j in range {
+            let t = &tokens[j];
+            if t.is_punct(close) || t.is_punct(if close == ")" { "]" } else { ")" }) {
+                depth += 1;
+            } else if t.is_punct(open) || t.is_punct(if open == "(" { "[" } else { "(" }) {
+                if depth == 0 {
+                    break;
+                }
+                depth -= 1;
+            } else if depth == 0 && stop(j) {
+                break;
+            }
+            edge = j;
+        }
+        edge
+    };
+    let first = walk(&mut (0..k).rev(), "(", ")");
+    let last = walk(&mut (k + 1..tokens.len()), ")", "(");
+    let allowed = [".", "+", "-", "*", "/", "%", "**", "<<", ">>", "->", "?->", "::", "!", "@", "~", "$", "\\"];
+    let mut depth = 0usize;
+    let mut segments = vec![(first, None::<usize>, false)];
+    for j in first..=last {
+        let t = &tokens[j];
+        if t.is_punct("(") || t.is_punct("[") {
+            depth += 1;
+        } else if t.is_punct(")") || t.is_punct("]") {
+            depth = depth.checked_sub(1)?;
+        } else if depth == 0 && t.kind == TokenKind::Punct && shift(j) {
+            let binary = j > first && crate::analyzer::expression_end(&tokens[j - 1]);
+            if binary {
+                segments.last_mut()?.2 = true;
+            }
+        } else if depth == 0 && t.kind == TokenKind::Punct {
+            if !allowed.contains(&t.text.as_str()) {
+                return None;
+            }
+            let binary = j > first && crate::analyzer::expression_end(&tokens[j - 1]);
+            if t.is_punct(".") && binary {
+                segments.last_mut()?.1 = Some(j - 1);
+                segments.push((j + 1, None, false));
+                continue;
+            }
+            if binary && ["+", "-", "<<", ">>"].iter().any(|p| t.is_punct(p)) {
+                segments.last_mut()?.2 = true;
+            }
+        } else if depth == 0 && ["instanceof", "new", "clone", "include", "require", "print"].iter().any(|w| t.is_ident_ci(w)) {
+            return None;
+        }
+    }
+    segments.last_mut()?.1 = Some(last);
+    let mut edits: Vec<(usize, usize, String)> = Vec::new();
+    for (a, b, mixed) in segments {
+        let b = b?;
+        if mixed && a <= b {
+            edits.push((tokens[a].start, tokens[a].start, "(".into()));
+            edits.push((tokens[b].end, tokens[b].end, ")".into()));
+        }
+    }
+    let (start, end, text) = edits.first()?.clone();
+    Some(Fix { class: CONCAT_GROUPS, start, end, text, extra: edits[1..].to_vec() })
+}
+
+const HTML_CALLS: [&str; 4] = ["htmlspecialchars", "htmlentities", "htmlspecialchars_decode", "html_entity_decode"];
+
+/// The first HTML encoding call without flags stands for all of them in the file: each gets the
+/// old flags, or the PHP 8.1 ones written out.
+fn html_choices(file: &Source, k: usize) -> [Option<Choice>; 2] {
+    let tokens = file.tokens;
+    let calls: Vec<usize> = (0..tokens.len())
+        .filter_map(|j| function_call(tokens, j, &HTML_CALLS).filter(|(_, args)| args.len() == 1).map(|(close, _)| close))
+        .collect();
+    let Some((close, _)) = function_call(tokens, k, &HTML_CALLS).filter(|(_, args)| args.len() == 1) else { return [None, None] };
+    let fix = |class, flags: &str| {
+        let insert = |c: usize| (tokens[c].start, tokens[c].start, format!(", {flags}"));
+        let (start, end, text) = insert(close);
+        Fix { class, start, end, text, extra: calls.iter().filter(|&&c| c != close).map(|&c| insert(c)).collect() }
+    };
+    [
+        Some(Choice { id: "old", fix: fix(HTML_OLD, "ENT_COMPAT | ENT_HTML401"), recommended: true }),
+        Some(Choice { id: "new", fix: fix(HTML_NEW, "ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML401"), recommended: false }),
+    ]
+}
+
+/// A checked mysqli call that PHP 8.1 makes throw first: mysqli_report(MYSQLI_REPORT_OFF) before
+/// it, or for `X or die(...)`, a try that dies in its catch.
+fn mysqli_report_choices(file: &Source, k: usize) -> [Option<Choice>; 2] {
+    let tokens = file.tokens;
+    let Some((close, _)) = function_call(tokens, k, &["mysqli_connect", "mysqli_query", "mysqli_real_connect"]) else {
+        return [None, None];
+    };
+    let Some(start) = statement_of(tokens, k) else { return [None, None] };
+    let old = file.current.is_some_and(|v| v < PhpVersion::new(8, 1));
+    let off = Choice { id: "report_off", fix: statement_before(file, start, "mysqli_report(MYSQLI_REPORT_OFF);"), recommended: old };
+    let dies = tokens.get(close + 1).is_some_and(|t| t.is_ident_ci("or"))
+        && tokens.get(close + 2).is_some_and(|t| t.is_ident_ci("die") || t.is_ident_ci("exit"));
+    let catch = dies.then(|| {
+        let exit_close = if tokens.get(close + 3).is_some_and(|t| t.is_punct("(")) {
+            crate::declarations::close_of(tokens, close + 3)?
+        } else {
+            close + 2
+        };
+        let semi = exit_close + 1;
+        let assigned = start == k
+            || tokens[start].kind == TokenKind::Variable && tokens.get(start + 1).is_some_and(|t| t.is_punct("=")) && start + 2 == k;
+        if !tokens.get(semi).is_some_and(|t| t.is_punct(";")) || !assigned {
+            return None;
+        }
+        let text =
+            format!("try {{ {}; }} catch (\\mysqli_sql_exception $e) {{ {}; }}", file.text(start, close), file.text(close + 2, exit_close));
+        Some(Fix { extra: Vec::new(), class: MYSQLI_CATCH, start: tokens[start].start, end: tokens[semi].end, text })
+    });
+    [Some(off), catch.flatten().map(|fix| Choice { id: "catch", fix, recommended: false })]
+}
+
+/// mysqli_ping() and ->ping(): the same round trip as a query, or no check at all.
+fn ping_choices(file: &Source, k: usize) -> [Option<Choice>; 2] {
+    let tokens = file.tokens;
+    let (first, close, query) = if let Some((close, args)) = function_call(tokens, k, &["mysqli_ping"]).filter(|(_, a)| a.len() == 1) {
+        (k, close, format!("(bool) {}mysqli_query({}, 'DO 1')", lead(&tokens[k]), file.text(args[0].0, args[0].1)))
+    } else if let Some((close, _)) = method_call(tokens, k, &["ping"]).filter(|(_, a)| a.is_empty()) {
+        let Some(receiver) = receiver_start(tokens, k - 1) else { return [None, None] };
+        (receiver, close, format!("(bool) {}->query('DO 1')", file.text(receiver, k - 2)))
+    } else {
+        return [None, None];
+    };
+    let query = Fix { extra: Vec::new(), class: PING_QUERY, start: tokens[first].start, end: tokens[close].end, text: query };
+    let statement = starts_statement(tokens, first) && tokens.get(close + 1).is_some_and(|t| t.is_punct(";"));
+    let guarded = first >= 3
+        && tokens[first - 1].is_punct("!")
+        && tokens[first - 2].is_punct("(")
+        && tokens[first - 3].is_ident_ci("if")
+        && starts_statement(tokens, first - 3)
+        && tokens.get(close + 1).is_some_and(|t| t.is_punct(")"))
+        && tokens.get(close + 2).is_some_and(|t| t.is_punct("{"));
+    let drop = if statement {
+        Some(removal(file, first, close + 1, PING_DROP))
+    } else if guarded {
+        crate::declarations::close_of(tokens, close + 2)
+            .filter(|&end| !tokens.get(end + 1).is_some_and(|t| t.is_ident_ci("else") || t.is_ident_ci("elseif")))
+            .map(|end| removal(file, first - 3, end, PING_DROP))
+    } else {
+        None
+    };
+    [Some(Choice { id: "query", fix: query, recommended: true }), drop.map(|fix| Choice { id: "drop", fix, recommended: false })]
+}
+
+/// NumberFormatter::TYPE_CURRENCY as the type of format() or parse(): the currency method, or the
+/// false PHP 7 returned. Keeping false is the default on a project that still runs PHP 7.
+fn currency_choices(file: &Source, k: usize) -> [Option<Choice>; 2] {
+    let tokens = file.tokens;
+    let Some(class) = k.checked_sub(2).filter(|&c| tokens[c].kind == TokenKind::Ident && tokens[c + 1].is_punct("::")) else {
+        return [None, None];
+    };
+    let Some((call, index, _)) = argument_of(tokens, class).filter(|&(_, _, arg)| arg == (class, k)) else { return [None, None] };
+    let code = format!("{}::CURRENCY_CODE", tokens[class].text);
+    let arg = |a: (usize, usize)| file.text(a.0, a.1).to_string();
+    let function = scope_of(tokens, call);
+    let unused = |name: &str| !tokens[function.0..function.1].iter().any(|t| t.kind == TokenKind::Variable && t.text == name);
+    let currency =
+        std::iter::once("currency".to_string()).chain((2..).map(|n| format!("currency{n}"))).find(|n| unused(n)).unwrap_or_default();
+    let (first, close, text) = if let Some((close, args)) = method_call(tokens, call, &["format", "parse"]).filter(|_| index == 1) {
+        let Some(receiver) = receiver_start(tokens, call - 1) else { return [None, None] };
+        let object = file.text(receiver, call - 2);
+        let text = match (tokens[call].text.to_ascii_lowercase().as_str(), &args[..]) {
+            ("format", [n, _]) => format!("{object}->formatCurrency({}, {object}->getTextAttribute({code}))", arg(*n)),
+            ("parse", [s, _]) => format!("{object}->parseCurrency({}, ${currency})", arg(*s)),
+            ("parse", [s, _, at]) => format!("{object}->parseCurrency({}, ${currency}, {})", arg(*s), arg(*at)),
+            _ => return [None, None],
+        };
+        (receiver, close, text)
+    } else if let Some((close, args)) = function_call(tokens, call, &["numfmt_format", "numfmt_parse"]).filter(|_| index == 2) {
+        if !plain(tokens, args[0]) {
+            return [None, None];
+        }
+        let f = arg(args[0]);
+        let text = match (tokens[call].text.trim_start_matches('\\').to_ascii_lowercase().as_str(), &args[..]) {
+            ("numfmt_format", [_, n, _]) => format!("numfmt_format_currency({f}, {}, numfmt_get_text_attribute({f}, {code}))", arg(*n)),
+            ("numfmt_parse", [_, s, _]) => format!("numfmt_parse_currency({f}, {}, ${currency})", arg(*s)),
+            ("numfmt_parse", [_, s, _, at]) => format!("numfmt_parse_currency({f}, {}, ${currency}, {})", arg(*s), arg(*at)),
+            _ => return [None, None],
+        };
+        (call, close, format!("{}{text}", lead(&tokens[call])))
+    } else {
+        return [None, None];
+    };
+    let span = |class, text: String| Fix { extra: Vec::new(), class, start: tokens[first].start, end: tokens[close].end, text };
+    let php7 = file.current.is_some_and(|v| v < PhpVersion::new(8, 0));
+    [
+        Some(Choice { id: "currency", fix: span(CURRENCY_METHOD, text), recommended: !php7 }),
+        Some(Choice { id: "false", fix: span(CURRENCY_FALSE, "false".into()), recommended: php7 }),
+    ]
+}
+
+/// $HTTP_RAW_POST_DATA and $php_errormsg: the null the code saw, or the data they used to carry.
+/// Inside a function without `global $HTTP_RAW_POST_DATA` the old value was certainly null.
+fn magic_choices(file: &Source, k: usize) -> [Option<Choice>; 2] {
+    let tokens = file.tokens;
+    let tok = &tokens[k];
+    let raw = tok.text == "HTTP_RAW_POST_DATA";
+    if tok.kind != TokenKind::Variable || !raw && tok.text != "php_errormsg" {
+        return [None, None];
+    }
+    let after = tokens.get(k + 1);
+    let wrapped = enclosing_call(tokens, k).is_some_and(|c| call_named(tokens, c, &["isset", "empty", "unset"]));
+    if wrapped || after.is_some_and(|t| t.is_punct("[") || t.is_punct("->") || t.is_punct("=")) || k > 0 && tokens[k - 1].is_punct("&") {
+        return [None, None];
+    }
+    let scope = scope_of(tokens, k);
+    let global = tokens[scope.0..scope.1]
+        .windows(2)
+        .any(|w| w[0].is_ident_ci("global") && w[1].kind == TokenKind::Variable && w[1].text == tok.text);
+    let never_set = raw && scope != (0, tokens.len()) && !global;
+    let span = |class, text: &str| Fix { extra: Vec::new(), class, start: tok.start, end: tok.end, text: text.to_string() };
+    let read = if raw { "file_get_contents('php://input')" } else { "(error_get_last()['message'] ?? null)" };
+    [
+        Some(Choice { id: "old", fix: span(if never_set { MAGIC_NULL_EXACT } else { MAGIC_NULL }, "null"), recommended: never_set }),
+        Some(Choice { id: "read", fix: span(MAGIC_READ, read), recommended: false }),
+    ]
+}
+
+/// libxml_disable_entity_loader() statements, alone or as a `$old = …(true); … …($old);` pair:
+/// gone, or an external entity loader that loads nothing. Deleting is the default only when the
+/// project never asks libxml for entities.
+fn entity_choices(file: &Source, k: usize) -> [Option<Choice>; 2] {
+    let tokens = file.tokens;
+    let Some((close, args)) = function_call(tokens, k, &["libxml_disable_entity_loader"]) else { return [None, None] };
+    let value = |a: Option<&(usize, usize)>| match a {
+        None => Some(true),
+        Some(&(f, l)) if f == l && tokens[f].is_ident_ci("true") => Some(true),
+        Some(&(f, l)) if f == l && tokens[f].is_ident_ci("false") => Some(false),
+        _ => None,
+    };
+    let block = "libxml_set_external_entity_loader(static fn ($public, $system, $context) => null);";
+    let reset = "libxml_set_external_entity_loader(null);";
+    let scope = scope_of(tokens, k);
+    let loader = |first: usize, semi: usize, text: &str| (tokens[first].start, tokens[semi].end, text.to_string());
+    let single = (is_statement(tokens, k, close) && args.len() <= 1).then(|| value(args.first())).flatten();
+    let (drop, keep) = if let Some(on) = single {
+        let (s, e, t) = loader(k, close + 1, if on { block } else { reset });
+        (removal(file, k, close + 1, ENTITY_DROP), Fix { extra: Vec::new(), class: ENTITY_LOADER, start: s, end: e, text: t })
+    } else {
+        let saved = |at: usize| -> Option<(usize, usize, usize, String)> {
+            let (c, a) = function_call(tokens, at, &["libxml_disable_entity_loader"])?;
+            let var = at
+                .checked_sub(2)
+                .filter(|&v| tokens[v].kind == TokenKind::Variable && tokens[v + 1].is_punct("=") && starts_statement(tokens, v))?;
+            (value(a.first()) == Some(true) && tokens.get(c + 1).is_some_and(|t| t.is_punct(";")))
+                .then(|| (var, at, c + 1, tokens[var].text.clone()))
+        };
+        let restore = |at: usize, name: &str| -> Option<(usize, usize)> {
+            let (c, a) = function_call(tokens, at, &["libxml_disable_entity_loader"])?;
+            let [(f, l)] = a[..] else { return None };
+            (f == l && is_var(tokens, f, name) && is_statement(tokens, at, c)).then_some((at, c + 1))
+        };
+        let pair = match saved(k) {
+            Some((var, _, semi, name)) => (semi..scope.1).find_map(|j| restore(j, &name)).map(|back| ((var, semi), back, name)),
+            None => {
+                (scope.0..k).rev().find_map(saved).and_then(|(var, _, semi, name)| restore(k, &name).map(|back| ((var, semi), back, name)))
+            }
+        };
+        let Some(((var, semi), (back, back_semi), name)) = pair else { return [None, None] };
+        let uses = (scope.0..scope.1).filter(|&j| is_var(tokens, j, &name)).count();
+        if uses != 2 {
+            return [None, None];
+        }
+        let second = removal(file, back, back_semi, ENTITY_DROP);
+        let mut drop = removal(file, var, semi, ENTITY_DROP);
+        drop.extra.push((second.start, second.end, second.text));
+        let (s, e, t) = loader(var, semi, block);
+        let keep = Fix { class: ENTITY_LOADER, start: s, end: e, text: t, extra: vec![loader(back, back_semi, reset)] };
+        (drop, keep)
+    };
+    let drop_first = !file.index.loads_entities();
+    [Some(Choice { id: "drop", fix: drop, recommended: drop_first }), Some(Choice { id: "loader", fix: keep, recommended: !drop_first })]
 }
 
 /// The lines a fix touches, as it leaves them, without their common indentation.
@@ -1304,7 +1839,13 @@ fn widen_override(file: &Source, k: usize) -> Option<Fix> {
     } else {
         String::new()
     };
-    Some(Fix { class: WIDEN_OVERRIDE, start: tokens[first].start, end: tokens[close].end, text: format!("{attribute}{header}") })
+    Some(Fix {
+        extra: Vec::new(),
+        class: WIDEN_OVERRIDE,
+        start: tokens[first].start,
+        end: tokens[close].end,
+        text: format!("{attribute}{header}"),
+    })
 }
 
 /// Where the return type after the parameter list closing at `close` ends.
@@ -1395,7 +1936,7 @@ fn wbmp_port(file: &Source, k: usize, name: &str, loader: &str, kind: &str) -> O
     let body =
         closure.lines().enumerate().map(|(i, l)| if i == 0 { l.to_string() } else { format!("{indent}{l}") }).collect::<Vec<_>>().join(nl);
     let text = format!("{body}({})", file.text(args[0].0, args[4].1));
-    Some(Fix { class: WBMP_PORT, start: tokens[k].start, end: tokens[close].end, text })
+    Some(Fix { extra: Vec::new(), class: WBMP_PORT, start: tokens[k].start, end: tokens[close].end, text })
 }
 
 /// The first token of the plain variable or property chain that ends right before the `->` at `arrow`.
@@ -1429,7 +1970,7 @@ fn reflection_check(file: &Source, k: usize) -> Option<Fix> {
     let first = receiver_start(tokens, arrow)?;
     let (start, end) = (tokens[first].start, tokens[k + 2].end);
     let ty = match tokens[k].text.to_ascii_lowercase().as_str() {
-        "isdisabled" => return Some(Fix { class: DISABLED_FALSE, start, end, text: "false".into() }),
+        "isdisabled" => return Some(Fix { extra: Vec::new(), class: DISABLED_FALSE, start, end, text: "false".into() }),
         "isarray" => "array",
         "iscallable" => "callable",
         _ => return None,
@@ -1438,7 +1979,7 @@ fn reflection_check(file: &Source, k: usize) -> Option<Fix> {
         "(static function (\\ReflectionParameter $p): bool {{ $t = $p->getType(); if ($t === null) {{ return false; }} $b = []; foreach ($t instanceof \\ReflectionUnionType ? $t->getTypes() : [$t] as $x) {{ if ($x instanceof \\ReflectionNamedType && $x->isBuiltin() && $x->getName() !== 'null') {{ $b[] = $x->getName(); }} }} return $b === ['{ty}']; }})({})",
         file.text(first, arrow - 1)
     );
-    Some(Fix { class: REFLECTION_TYPE_CHECK, start, end, text: check })
+    Some(Fix { extra: Vec::new(), class: REFLECTION_TYPE_CHECK, start, end, text: check })
 }
 
 /// Whether the variable `name` gets another value, a reference or an unset anywhere from `from` to `to`.
@@ -1533,7 +2074,7 @@ fn xml_handler(file: &Source, k: usize) -> Option<Fix> {
         text.push_str(new);
         at = tokens[*f].end;
     }
-    Some(Fix { class: XML_CALLABLE, start: tokens[first].start, end: tokens[last].end, text })
+    Some(Fix { extra: Vec::new(), class: XML_CALLABLE, start: tokens[first].start, end: tokens[last].end, text })
 }
 
 /// `xml_set_object($p, $o);` once every handler of `$p` in the file is set in the same function and
@@ -1635,7 +2176,7 @@ fn session_handler(file: &Source, k: usize) -> Option<Fix> {
     }
     lines.push(format!("{indent}}}, false)"));
     let text = lines.join(nl);
-    Some(Fix { class: SESSION_HANDLER, start: tokens[k].start, end: tokens[close].end, text })
+    Some(Fix { extra: Vec::new(), class: SESSION_HANDLER, start: tokens[k].start, end: tokens[close].end, text })
 }
 
 /// `function __autoload($class) { … }` → `spl_autoload_register(function ($class) { … });`, when
@@ -1665,7 +2206,7 @@ fn autoload_register(file: &Source, k: usize) -> Option<Fix> {
     }
     let by_ref = if keyword + 1 < k { "&" } else { "" };
     let text = format!("spl_autoload_register(function {by_ref}{});", &file.src[tokens[k].end..tokens[close].end]);
-    Some(Fix { class: AUTOLOAD_REGISTER, start: tokens[keyword].start, end: tokens[close].end, text })
+    Some(Fix { extra: Vec::new(), class: AUTOLOAD_REGISTER, start: tokens[keyword].start, end: tokens[close].end, text })
 }
 
 const CONTROL_WORDS: &[&str] = &[
@@ -1740,6 +2281,7 @@ fn false_to_array(file: &Source, k: usize) -> Option<Fix> {
             && !CONTROL_WORDS.iter().any(|w| t.is_ident_ci(w))
     });
     (initializer && straight && !reaches_scope(tokens, init, k)).then(|| Fix {
+        extra: Vec::new(),
         class: FALSE_ARRAY,
         start: tokens[init + 2].start,
         end: tokens[init + 2].end,
@@ -1829,6 +2371,7 @@ fn gmstrftime_fix(file: &Source, k: usize) -> Option<Fix> {
     }
     let between = &file.src[tokens[k].end..tokens[first].start];
     Some(Fix {
+        extra: Vec::new(),
         class: GMDATE,
         start: tokens[k].start,
         end: tokens[first].end,
@@ -1948,13 +2491,20 @@ fn last_headers(file: &Source, k: usize) -> Option<Fix> {
     }
     if isset {
         return Some(Fix {
+            extra: Vec::new(),
             class: LAST_HEADERS,
             start: tokens[k - 2].start,
             end: tokens[k + 1].end,
             text: "http_get_last_response_headers() !== null".into(),
         });
     }
-    Some(Fix { class: LAST_HEADERS, start: tokens[k].start, end: tokens[k].end, text: "http_get_last_response_headers()".into() })
+    Some(Fix {
+        extra: Vec::new(),
+        class: LAST_HEADERS,
+        start: tokens[k].start,
+        end: tokens[k].end,
+        text: "http_get_last_response_headers()".into(),
+    })
 }
 
 /// `$a[null]` → `$a['']` where `$a` was just given an array literal and only its elements were
@@ -2007,7 +2557,7 @@ fn null_key(file: &Source, k: usize) -> Option<Fix> {
             return None;
         }
     }
-    Some(Fix { class: NULL_KEY, start: tok.start, end: tok.end, text: "''".into() })
+    Some(Fix { extra: Vec::new(), class: NULL_KEY, start: tok.start, end: tok.end, text: "''".into() })
 }
 
 /// (function, callable argument): calls that run the callable before they return and keep nothing of it.
@@ -2058,7 +2608,13 @@ fn first_class_callable(file: &Source, k: usize) -> Option<Fix> {
     if class == "parent" && decl.info.parent.is_none() {
         return None;
     }
-    Some(Fix { class: FIRST_CLASS_CALLABLE, start: tokens[first].start, end: tokens[last].end, text: format!("{class}::{method}(...)") })
+    Some(Fix {
+        extra: Vec::new(),
+        class: FIRST_CLASS_CALLABLE,
+        start: tokens[first].start,
+        end: tokens[last].end,
+        text: format!("{class}::{method}(...)"),
+    })
 }
 
 /// Builtins that run a callback, and the ones that open a directory.
@@ -2151,8 +2707,20 @@ fn directory_handle(file: &Source, k: usize) -> Option<Fix> {
         }
     }
     match target {
-        Some(null) => Some(Fix { class: DIRECTORY_HANDLE, start: tokens[null].start, end: tokens[null].end, text: format!("${name}") }),
-        None => Some(Fix { class: DIRECTORY_HANDLE, start: tokens[call + 1].start, end: tokens[close].end, text: format!("(${name})") }),
+        Some(null) => Some(Fix {
+            extra: Vec::new(),
+            class: DIRECTORY_HANDLE,
+            start: tokens[null].start,
+            end: tokens[null].end,
+            text: format!("${name}"),
+        }),
+        None => Some(Fix {
+            extra: Vec::new(),
+            class: DIRECTORY_HANDLE,
+            start: tokens[call + 1].start,
+            end: tokens[close].end,
+            text: format!("(${name})"),
+        }),
     }
 }
 
@@ -2206,7 +2774,7 @@ fn original_args(file: &Source, k: usize) -> Option<Fix> {
         }
         at = tokens[end].end;
     }
-    Some(Fix { class: ORIGINAL_ARGS, start: tokens[open].end, end: tokens[last].end, text })
+    Some(Fix { extra: Vec::new(), class: ORIGINAL_ARGS, start: tokens[open].end, end: tokens[last].end, text })
 }
 
 /// The last `]` of the `[...]` that follow token `k`; `None` when one is empty or unclosed.
@@ -2239,7 +2807,7 @@ fn will_change(file: &Source, k: usize) -> Option<Fix> {
     let line = &file.src[file.src[..at].rfind('\n').map_or(0, |i| i + 1)..at];
     let indent: String = line.chars().take_while(|c| *c == ' ' || *c == '\t').collect();
     let newline = if file.src.contains("\r\n") { "\r\n" } else { "\n" };
-    Some(Fix { class: WILL_CHANGE, start: at, end: at, text: format!("#[\\ReturnTypeWillChange]{newline}{indent}") })
+    Some(Fix { extra: Vec::new(), class: WILL_CHANGE, start: at, end: at, text: format!("#[\\ReturnTypeWillChange]{newline}{indent}") })
 }
 
 /// The innermost function or method whose body holds token `k`.
@@ -2275,7 +2843,7 @@ fn substr_false(file: &Source, k: usize) -> Option<Fix> {
     } else {
         return None;
     };
-    Some(Fix { class: SUBSTR_EMPTY, start: tokens[at].start, end: tokens[at].end, text: "''".into() })
+    Some(Fix { extra: Vec::new(), class: SUBSTR_EMPTY, start: tokens[at].start, end: tokens[at].end, text: "''".into() })
 }
 
 /// `$$name[...]` with its PHP 5 meaning `${$name[...]}` written out, or `${$name}[...]` on a project
@@ -2291,6 +2859,7 @@ fn variable_variable(file: &Source, k: usize) -> Option<Fix> {
     }
     if current >= PhpVersion::new(7, 0) {
         return Some(Fix {
+            extra: Vec::new(),
             class: VARIABLE_BRACES,
             start: tokens[k].start,
             end: name.end,
@@ -2298,7 +2867,13 @@ fn variable_variable(file: &Source, k: usize) -> Option<Fix> {
         });
     }
     let end = dimensions_end(tokens, k + 1)?;
-    Some(Fix { class: VARIABLE_ORDER, start: tokens[k].start, end: tokens[end].end, text: format!("${{{}}}", file.text(k + 1, end)) })
+    Some(Fix {
+        extra: Vec::new(),
+        class: VARIABLE_ORDER,
+        start: tokens[k].start,
+        end: tokens[end].end,
+        text: format!("${{{}}}", file.text(k + 1, end)),
+    })
 }
 
 /// Token ranges of the arguments of the call whose `(` is at `open`, and the `)` that closes it.
@@ -2370,10 +2945,10 @@ fn removal(file: &Source, first: usize, semi: usize, class: &'static str) -> Fix
     let line_end = src[end..].find('\n').map_or(src.len(), |i| end + i + 1);
     let blank = |s: &str| s.chars().all(char::is_whitespace);
     if blank(&src[line_start..start]) && blank(&src[end..line_end]) {
-        return Fix { class, start: line_start, end: line_end, text: String::new() };
+        return Fix { extra: Vec::new(), class, start: line_start, end: line_end, text: String::new() };
     }
     let trailing = src[end..].len() - src[end..].trim_start_matches([' ', '\t']).len();
-    Fix { class, start, end: end + trailing, text: String::new() }
+    Fix { extra: Vec::new(), class, start, end: end + trailing, text: String::new() }
 }
 
 /// The innermost function whose body holds token `k`: its closing brace.
@@ -2439,7 +3014,7 @@ fn statement_fix(file: &Source, k: usize, rule: &str) -> Option<Fix> {
             let (first, last) = given[this];
             let (start, stop) =
                 if this == 0 { (tokens[first].start, tokens[given[1].0].start) } else { (tokens[given[this - 1].1].end, tokens[last].end) };
-            Some(Fix { class: UNSET_THIS, start, end: stop, text: String::new() })
+            Some(Fix { extra: Vec::new(), class: UNSET_THIS, start, end: stop, text: String::new() })
         }
         _ => None,
     }
@@ -2501,7 +3076,7 @@ fn mhash_fix(file: &Source, k: usize) -> Option<Fix> {
     let (close, args) = function_call(tokens, k, &names)?;
     let algo = mhash_algo(tokens, *args.first()?)?;
     let bare = tokens[k].text.trim_start_matches('\\').to_ascii_lowercase();
-    let fix = |start: usize, end: usize, text: String| Some(Fix { class: MHASH, start, end, text });
+    let fix = |start: usize, end: usize, text: String| Some(Fix { extra: Vec::new(), class: MHASH, start, end, text });
     match (bare.as_str(), args.len()) {
         ("mhash_get_hash_name", 1) => fix(tokens[k].start, tokens[close].end, format!("'{}'", algo.4)),
         ("mhash_get_block_size", 1) => fix(tokens[k].start, tokens[close].end, algo.5.to_string()),
@@ -2553,12 +3128,12 @@ fn refresh_fix(file: &Source, k: usize) -> Option<Fix> {
         let [link, flags] = args[..] else { return None };
         let sql = flush_statement(tokens, flags)?;
         let text = format!("{}mysqli_query({}, {sql})", lead(&tokens[k]), file.text(link.0, link.1));
-        return Some(Fix { class: REFRESH, start: tokens[k].start, end: tokens[close].end, text });
+        return Some(Fix { extra: Vec::new(), class: REFRESH, start: tokens[k].start, end: tokens[close].end, text });
     }
     let (close, args) = method_call(tokens, k, &["refresh"])?;
     let [flags] = args[..] else { return None };
     let sql = flush_statement(tokens, flags)?;
-    Some(Fix { class: REFRESH, start: tokens[k].start, end: tokens[close].end, text: format!("query({sql})") })
+    Some(Fix { extra: Vec::new(), class: REFRESH, start: tokens[k].start, end: tokens[close].end, text: format!("query({sql})") })
 }
 
 /// The mode argument of mysqli_store_result($link, MODE) or ->store_result(MODE) goes.
@@ -2567,7 +3142,7 @@ fn store_result_fix(file: &Source, k: usize) -> Option<Fix> {
     let simple = |a: (usize, usize)| {
         plain(tokens, a) || literal(tokens, a) || (a.0 == a.1 && is_atom(tokens, a.0)) || (a.1 == a.0 + 2 && tokens[a.0 + 1].is_punct("::"))
     };
-    let fix = |start: usize, end: usize| Some(Fix { class: UNUSED_ARGUMENT, start, end, text: String::new() });
+    let fix = |start: usize, end: usize| Some(Fix { extra: Vec::new(), class: UNUSED_ARGUMENT, start, end, text: String::new() });
     if let Some((_, args)) = function_call(tokens, k, &["mysqli_store_result"]) {
         let [link, mode] = args[..] else { return None };
         return if simple(mode) { fix(tokens[link.1].end, tokens[mode.1].end) } else { None };
@@ -2629,7 +3204,7 @@ fn paged_result_fix(file: &Source, k: usize) -> Option<Fix> {
         text(args[1])
     );
     let call = format!("{}ldap_set_option({}, LDAP_OPT_SERVER_CONTROLS, {control})", lead(&tokens[k]), text(args[0]));
-    Some(Fix { class: LDAP_PAGING, start: tokens[k].start, end: tokens[close].end, text: call })
+    Some(Fix { extra: Vec::new(), class: LDAP_PAGING, start: tokens[k].start, end: tokens[close].end, text: call })
 }
 
 /// The innermost bracket around token `k` that opens an array literal: `[` or `array(`.
@@ -2681,14 +3256,14 @@ fn curl_option_item(file: &Source, k: usize) -> Option<Fix> {
     } else {
         (tokens[k].start, tokens[value.1].end)
     };
-    Some(Fix { class: NO_OP_FLAG, start, end, text: String::new() })
+    Some(Fix { extra: Vec::new(), class: NO_OP_FLAG, start, end, text: String::new() })
 }
 
 fn call_fix(file: &Source, k: usize, rule: &str) -> Option<Fix> {
     let tokens = file.tokens;
     let tok = &tokens[k];
     let bare = tok.text.trim_start_matches('\\');
-    let value = |text: &str, class| Some(Fix { class, start: tok.start, end: tok.end, text: text.to_string() });
+    let value = |text: &str, class| Some(Fix { extra: Vec::new(), class, start: tok.start, end: tok.end, text: text.to_string() });
     match rule {
         "deprecated.mhash" => mhash_fix(file, k),
         "deprecated.mhash_constant" => {
@@ -2705,11 +3280,12 @@ fn call_fix(file: &Source, k: usize, rule: &str) -> Option<Fix> {
             if let Some((close, args)) = function_call(tokens, k, &["mysqli_kill"]) {
                 let [link, id] = args[..] else { return None };
                 let text = format!("{}mysqli_query({}, 'KILL CONNECTION ' . {})", lead(tok), file.text(link.0, link.1), as_int(file, id));
-                return Some(Fix { class: KILL, start: tok.start, end: tokens[close].end, text });
+                return Some(Fix { extra: Vec::new(), class: KILL, start: tok.start, end: tokens[close].end, text });
             }
             let (close, args) = method_call(tokens, k, &["kill"])?;
             let [id] = args[..] else { return None };
             Some(Fix {
+                extra: Vec::new(),
                 class: KILL,
                 start: tok.start,
                 end: tokens[close].end,
@@ -2740,7 +3316,13 @@ fn call_fix(file: &Source, k: usize, rule: &str) -> Option<Fix> {
             };
             let receiver = if plain(tokens, *cal) { file.text(cal.0, cal.1).to_string() } else { format!("({})", file.text(cal.0, cal.1)) };
             let rest = file.text(values[0].0, values.last()?.1);
-            Some(Fix { class: INTL_METHODS, start: tok.start, end: tokens[close].end, text: format!("{receiver}->{method}({rest})") })
+            Some(Fix {
+                extra: Vec::new(),
+                class: INTL_METHODS,
+                start: tok.start,
+                end: tokens[close].end,
+                text: format!("{receiver}->{method}({rest})"),
+            })
         }
         "deprecated.intlgregcal_create_instance" => {
             let (close, args) = function_call(tokens, k, &["intlgregcal_create_instance"])?;
@@ -2751,12 +3333,12 @@ fn call_fix(file: &Source, k: usize, rule: &str) -> Option<Fix> {
                 5 | 6 => format!("\\IntlGregorianCalendar::createFromDateTime({inner})"),
                 _ => return None,
             };
-            Some(Fix { class: INTL_METHODS, start: tok.start, end: tokens[close].end, text })
+            Some(Fix { extra: Vec::new(), class: INTL_METHODS, start: tok.start, end: tokens[close].end, text })
         }
         "deprecated.lcg_value" => {
             let (close, args) = function_call(tokens, k, &["lcg_value"])?;
             let text = "(new \\Random\\Randomizer())->getFloat(0, 1, \\Random\\IntervalBoundary::OpenOpen)".to_string();
-            args.is_empty().then(|| Fix { class: LCG_VALUE, start: tok.start, end: tokens[close].end, text })
+            args.is_empty().then(|| Fix { extra: Vec::new(), class: LCG_VALUE, start: tok.start, end: tokens[close].end, text })
         }
         "removed.get_magic_quotes_gpc" | "removed.get_magic_quotes_runtime" => {
             let (close, args) = function_call(tokens, k, &["get_magic_quotes_gpc", "get_magic_quotes_runtime"])?;
@@ -2776,9 +3358,15 @@ fn call_fix(file: &Source, k: usize, rule: &str) -> Option<Fix> {
                 }
             }
             if k > 0 && tokens[k - 1].is_punct("!") {
-                return Some(Fix { class: MAGIC_QUOTES, start: tokens[k - 1].start, end: tokens[close].end, text: "true".into() });
+                return Some(Fix {
+                    extra: Vec::new(),
+                    class: MAGIC_QUOTES,
+                    start: tokens[k - 1].start,
+                    end: tokens[close].end,
+                    text: "true".into(),
+                });
             }
-            Some(Fix { class: MAGIC_QUOTES, start: tok.start, end: tokens[close].end, text: "false".into() })
+            Some(Fix { extra: Vec::new(), class: MAGIC_QUOTES, start: tok.start, end: tokens[close].end, text: "false".into() })
         }
         "deprecated.pdo_fetch_serialize" => {
             let class = tokens.get(k.checked_sub(2)?).filter(|c| c.kind == TokenKind::Ident && tokens[k - 1].is_punct("::"))?;
@@ -2793,6 +3381,7 @@ fn call_fix(file: &Source, k: usize, rule: &str) -> Option<Fix> {
             };
             let method = call > 0 && (tokens[call - 1].is_punct("->") || tokens[call - 1].is_punct("?->"));
             (method && index == slot && arg == (k - 2, k)).then(|| Fix {
+                extra: Vec::new(),
                 class: CONSTANT_RENAME,
                 start: tok.start,
                 end: tok.end,
@@ -2848,6 +3437,7 @@ fn call_fix(file: &Source, k: usize, rule: &str) -> Option<Fix> {
             let (call, index, arg) = argument_of(tokens, k)?;
             let (_, args) = method_call(tokens, call, &["setcompressionname", "setcompressionindex"])?;
             (index == 2 && args.len() == 3 && arg == (k - 2, k)).then(|| Fix {
+                extra: Vec::new(),
                 class: ZIP_LEVEL,
                 start: tokens[args[1].1].end,
                 end: tok.end,
@@ -2870,7 +3460,7 @@ fn call_fix(file: &Source, k: usize, rule: &str) -> Option<Fix> {
             let read_args = file.text(args[0].0, args[args.len().min(2) - 1].1);
             let text =
                 format!("(static fn ($line) => $line === false ? false : strip_tags($line{allowed}))({}{read}({read_args}))", lead(tok));
-            Some(Fix { class: GETSS, start: tok.start, end: tokens[close].end, text })
+            Some(Fix { extra: Vec::new(), class: GETSS, start: tok.start, end: tokens[close].end, text })
         }
         "removed.recode" => {
             let (close, args) = function_call(tokens, k, &["recode_string"])?;
@@ -2883,12 +3473,13 @@ fn call_fix(file: &Source, k: usize, rule: &str) -> Option<Fix> {
             let name = |n: &str| RECODE_CHARSETS.iter().find(|(r, _)| *r == n).map(|(_, i)| *i);
             let (from, to) = (name(from)?, name(to)?);
             let call = format!("{}iconv('{from}', '{to}//TRANSLIT//IGNORE', {})", lead(tok), file.text(text.0, text.1));
-            Some(Fix { class: RECODE, start: tok.start, end: tokens[close].end, text: call })
+            Some(Fix { extra: Vec::new(), class: RECODE, start: tok.start, end: tokens[close].end, text: call })
         }
         "removed.ezmlm_hash" => {
             let (close, args) = function_call(tokens, k, &["ezmlm_hash"])?;
             let [address] = args[..] else { return None };
             Some(Fix {
+                extra: Vec::new(),
                 class: EZMLM,
                 start: tok.start,
                 end: tokens[close].end,
@@ -2910,7 +3501,7 @@ fn call_fix(file: &Source, k: usize, rule: &str) -> Option<Fix> {
                 lead(tok),
                 file.text(pattern.0, pattern.1)
             );
-            Some(Fix { class: REGCASE, start: tok.start, end: tokens[close].end, text })
+            Some(Fix { extra: Vec::new(), class: REGCASE, start: tok.start, end: tokens[close].end, text })
         }
         "deprecated.curlopt_binarytransfer" => statement_fix(file, k, rule).or_else(|| curl_option_item(file, k)),
         "removed.reflection_export" => {
@@ -2931,12 +3522,14 @@ fn call_fix(file: &Source, k: usize, rule: &str) -> Option<Fix> {
             let first = k - 2;
             match flag.as_str() {
                 "false" if is_statement(tokens, first, close) => Some(Fix {
+                    extra: Vec::new(),
                     class: REFLECTION_EXPORT,
                     start: tokens[first].start,
                     end: tokens[close].end,
                     text: format!("echo {object}, \"\\n\""),
                 }),
                 "true" => Some(Fix {
+                    extra: Vec::new(),
                     class: REFLECTION_EXPORT,
                     start: tokens[first].start,
                     end: tokens[close].end,
@@ -2979,7 +3572,7 @@ pub(crate) fn mark(
     for f in findings.iter_mut().filter(|f| OPTION_RULES.contains(&f.rule_id.as_str()) && !guessed.contains(&(f.line, f.column))) {
         let Some(&k) = at_position.get(&(f.line, f.column)) else { continue };
         let options = choices(&file, k, &f.rule_id);
-        if options.len() < 2 {
+        if options.len() < 2 && options.iter().all(|c| c.recommended) {
             continue;
         }
         f.options = options
@@ -3018,12 +3611,16 @@ fn plan(
         .filter(|(_, f)| handles(&f.rule_id))
         .filter_map(|(i, f)| at_position.get(&(f.line, f.column)).and_then(|&k| pick(i, f, k)).map(|fix| (i, fix)))
         .collect();
-    let inside = |fix: &Fix| all.iter().any(|(_, o)| o.start <= fix.start && fix.end <= o.end && (o.start, o.end) != (fix.start, fix.end));
-    let mut outer: Vec<(usize, Fix)> = all.iter().filter(|(_, f)| !inside(f)).cloned().collect();
+    let nested = |a: &Fix, b: &Fix| a.edits().any(|(s, e, _)| b.edits().any(|(bs, be, _)| bs <= s && e <= be && (bs, be) != (s, e)));
+    let mut outer: Vec<(usize, Fix)> = all.iter().filter(|(_, f)| !all.iter().any(|(_, o)| o != f && nested(f, o))).cloned().collect();
     outer.sort_by_key(|(_, f)| (f.start, f.end));
+    let crosses = |a: &Fix, b: &Fix| {
+        a != b
+            && a.edits().any(|(s, e, _)| b.edits().any(|(bs, be, _)| (s, e) == (bs, be) || s < be && bs < e || s == e && bs < s && s < be))
+    };
     let mut kept: Vec<(usize, Fix)> = Vec::new();
     for (i, fix) in outer {
-        if kept.last().is_some_and(|(_, last)| fix.start < last.end && (fix.start, fix.end) != (last.start, last.end)) {
+        if kept.iter().any(|(_, k)| crosses(&fix, k)) {
             continue;
         }
         kept.push((i, fix));
@@ -3062,29 +3659,32 @@ pub(crate) fn apply(
             _ => None,
         }
     };
-    let mut fixes: Vec<Fix> = plan(&findings, &at_position, &pick).into_iter().map(|(_, fix)| fix).collect();
-    fixes.dedup_by(|a, b| (a.start, a.end) == (b.start, b.end));
-    fixes.reverse();
+    let fixes: Vec<Fix> = plan(&findings, &at_position, &pick).into_iter().map(|(_, fix)| fix).collect();
+    let mut edits: Vec<(usize, usize, &str, &'static str)> =
+        fixes.iter().flat_map(|f| f.edits().map(move |(s, e, t)| (s, e, t, f.class))).collect();
+    edits.sort_by_key(|&(s, e, ..)| (s, e));
+    edits.dedup_by(|a, b| (a.0, a.1) == (b.0, b.1));
+    edits.reverse();
     let mut out = src.to_string();
     let mut applied = Vec::new();
     let mut floor = usize::MAX;
-    for fix in fixes {
-        if fix.end > floor {
+    for (start, end, text, class) in edits {
+        if end > floor {
             continue;
         }
         let line_start = |at: usize, s: &str| s[..at].rfind('\n').map_or(0, |i| i + 1);
-        let whole_line = fix.start == line_start(fix.start, src) && (fix.end == src.len() || src[..fix.end].ends_with('\n'));
-        out.replace_range(fix.start..fix.end, &fix.text);
-        floor = fix.start;
-        if fix.text.is_empty() && !whole_line {
-            let start = line_start(fix.start, &out);
-            let end = out[fix.start..].find('\n').map_or(out.len(), |i| fix.start + i + 1);
-            if out[start..end].chars().all(char::is_whitespace) {
-                out.replace_range(start..end, "");
-                floor = start;
+        let whole_line = start == line_start(start, src) && (end == src.len() || src[..end].ends_with('\n'));
+        out.replace_range(start..end, text);
+        floor = start;
+        if text.is_empty() && !whole_line {
+            let from = line_start(start, &out);
+            let to = out[start..].find('\n').map_or(out.len(), |i| start + i + 1);
+            if out[from..to].chars().all(char::is_whitespace) {
+                out.replace_range(from..to, "");
+                floor = from;
             }
         }
-        applied.push((fix.start, fix.class));
+        applied.push((start, class));
     }
     applied.sort();
     let mut classes = Vec::new();
@@ -3819,5 +4419,125 @@ mod tests {
         assert_eq!(out, "<?php\nfunction restore(DateTime $date) {\n    return $date;\n}\n");
         assert_eq!(classes, [DATE_WAKEUP_DROP]);
         assert_eq!(fixed(&format!("{src}class Stamp extends DateTime {{ public function __wakeup(): void {{}} }}\n")), None);
+    }
+
+    fn options_from(src: &str, rule: &str, current: PhpVersion) -> Vec<Vec<(String, FixKind, bool, String)>> {
+        let target = PhpVersion::new(8, 5);
+        let index = crate::index::ProjectIndex::from_tokens_for(&crate::lexer::tokenize(src), Some(target)).with_current(current);
+        crate::analyzer::analyze_source_in("t.php", src, target, &index)
+            .into_iter()
+            .filter(|f| f.rule_id == rule)
+            .map(|f| f.options.into_iter().map(|o| (o.id, o.fix, o.recommended, o.code)).collect())
+            .collect()
+    }
+
+    #[test]
+    fn concatenated_arithmetic_gets_parentheses() {
+        let src = "<?php\necho 'Done: ' . $done + 1 . ' of ' . $total;\n$s = \"1\" . 2 << 1;\n$x = $a . $b + $c * 2 - 1 . $d;\n$y = $a << 2 . $b;\n";
+        let (out, classes) = fixed(src).unwrap();
+        assert_eq!(
+            out,
+            "<?php\necho 'Done: ' . ($done + 1) . ' of ' . $total;\n$s = \"1\" . (2 << 1);\n$x = $a . ($b + $c * 2 - 1) . $d;\n$y = ($a << 2) . $b;\n"
+        );
+        assert_eq!(classes, [CONCAT_GROUPS]);
+        assert_eq!(kinds_of(&fixes(src), "behavior.concat_precedence"), [FixKind::Likely; 4]);
+        assert_eq!(fixed("<?php\n$v = $a . $b + 1 & 3;\n"), None, "a bitwise operator binds looser than the dot");
+    }
+
+    #[test]
+    fn html_flags_for_every_call_in_the_file() {
+        let src = "<?php\necho htmlspecialchars($name);\necho htmlentities($a), html_entity_decode($b, ENT_QUOTES);\n";
+        let rule = "behavior.html_default_flags";
+        let options = options_of(src, rule);
+        assert_eq!(options.len(), 1, "the first call stands for the file");
+        assert_eq!(
+            options[0].iter().map(|o| (o.0.as_str(), o.1, o.2)).collect::<Vec<_>>(),
+            [("old", FixKind::Auto, true), ("new", FixKind::Likely, false)]
+        );
+        let (out, classes) = fixed(src).unwrap();
+        assert_eq!(out, "<?php\necho htmlspecialchars($name, ENT_COMPAT | ENT_HTML401);\necho htmlentities($a, ENT_COMPAT | ENT_HTML401), html_entity_decode($b, ENT_QUOTES);\n");
+        assert_eq!(classes, [HTML_OLD]);
+        let (out, _) = fixed_choosing(src, &[(2, rule, "new")]).unwrap();
+        assert!(out.contains("htmlentities($a, ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML401)"), "{out}");
+    }
+
+    #[test]
+    fn mysqli_checks_turn_reporting_off_on_older_projects() {
+        let src = "<?php\nfunction a($db, $sql) {\n    if (mysqli_query($db, $sql) === false) {\n        return;\n    }\n    $link = mysqli_connect('h', 'u', 'p') or die('no db');\n}\n";
+        let rule = "behavior.mysqli_default_exceptions";
+        let options = options_of(src, rule);
+        assert_eq!(options[0].iter().map(|o| (o.0.as_str(), o.2)).collect::<Vec<_>>(), [("report_off", false), ("catch", false)][..1]);
+        assert_eq!(options[1][1].3, "try { $link = mysqli_connect('h', 'u', 'p'); } catch (\\mysqli_sql_exception $e) { die('no db'); }");
+        assert_eq!(kinds_of(&fixes(src), rule), [FixKind::Manual; 2], "nothing is assumed when the project's version is unknown");
+        let (out, _) = fixed_from(src, PhpVersion::new(7, 4)).unwrap();
+        assert_eq!(
+            out,
+            "<?php\nfunction a($db, $sql) {\n    mysqli_report(MYSQLI_REPORT_OFF);\n    if (mysqli_query($db, $sql) === false) {\n        return;\n    }\n    mysqli_report(MYSQLI_REPORT_OFF);\n    $link = mysqli_connect('h', 'u', 'p') or die('no db');\n}\n"
+        );
+        let older = options_from(src, rule, PhpVersion::new(7, 4));
+        assert!(older[0].is_empty(), "a single recommended fix needs no choice");
+        assert_eq!(older[1].iter().map(|o| (o.0.as_str(), o.2)).collect::<Vec<_>>(), [("report_off", true), ("catch", false)]);
+    }
+
+    #[test]
+    fn ping_becomes_a_query_or_goes() {
+        let src = "<?php\nfunction p(mysqli $db, $link) {\n    if (!mysqli_ping($link)) {\n        $link = reconnect();\n    }\n    $ok = $db->ping();\n}\n";
+        let rule = "deprecated.mysqli_ping";
+        let options = options_of(src, rule);
+        assert_eq!(options[0][0].3, "if (!(bool) mysqli_query($link, 'DO 1')) {");
+        assert_eq!(options[0][1].3, "");
+        assert!(options[1].is_empty(), "an assigned ping can't be dropped, so there is nothing to choose");
+        let (out, classes) = fixed(src).unwrap();
+        assert_eq!(out, "<?php\nfunction p(mysqli $db, $link) {\n    if (!(bool) mysqli_query($link, 'DO 1')) {\n        $link = reconnect();\n    }\n    $ok = (bool) $db->query('DO 1');\n}\n");
+        assert_eq!(classes, [PING_QUERY]);
+        let (out, _) = fixed_choosing(src, &[(3, rule, "drop")]).unwrap();
+        assert_eq!(out, "<?php\nfunction p(mysqli $db, $link) {\n    $ok = (bool) $db->query('DO 1');\n}\n");
+    }
+
+    #[test]
+    fn currency_types_use_the_currency_methods() {
+        let src = "<?php\nfunction c(NumberFormatter $f, $n, $s) {\n    return [$f->format($n, NumberFormatter::TYPE_CURRENCY), $f->parse($s, \\NumberFormatter::TYPE_CURRENCY), numfmt_format($f, $n, NumberFormatter::TYPE_CURRENCY)];\n}\n";
+        let rule = "removed.numberformatter_type_currency";
+        let (out, classes) = fixed(src).unwrap();
+        assert_eq!(
+            out,
+            "<?php\nfunction c(NumberFormatter $f, $n, $s) {\n    return [$f->formatCurrency($n, $f->getTextAttribute(NumberFormatter::CURRENCY_CODE)), $f->parseCurrency($s, $currency), numfmt_format_currency($f, $n, numfmt_get_text_attribute($f, NumberFormatter::CURRENCY_CODE))];\n}\n"
+        );
+        assert_eq!(classes, [CURRENCY_METHOD]);
+        let (out, _) = fixed_from(src, PhpVersion::new(7, 4)).unwrap();
+        assert_eq!(out, "<?php\nfunction c(NumberFormatter $f, $n, $s) {\n    return [false, false, false];\n}\n");
+        assert_eq!(kinds_of(&fixes_from(src, PhpVersion::new(7, 4)), rule), [FixKind::Auto; 3]);
+    }
+
+    #[test]
+    fn magic_variables_keep_the_null_they_held() {
+        let src = "<?php\nclass M {\n    public function body() {\n        return [$HTTP_RAW_POST_DATA, $php_errormsg];\n    }\n}\n$raw = $HTTP_RAW_POST_DATA;\n";
+        let rule = "removed.magic_variable";
+        let options = options_of(src, rule);
+        assert_eq!(
+            options.iter().map(|o| o.iter().map(|c| c.2).collect::<Vec<_>>()).collect::<Vec<_>>(),
+            [vec![true, false], vec![false, false], vec![false, false]]
+        );
+        assert_eq!(options[0][1].3, "return [file_get_contents('php://input'), $php_errormsg];");
+        assert_eq!(options[1][1].3, "return [$HTTP_RAW_POST_DATA, (error_get_last()['message'] ?? null)];");
+        assert_eq!(kinds_of(&fixes(src), rule), [FixKind::Auto, FixKind::Manual, FixKind::Manual]);
+        assert_eq!(fixed(src).unwrap().0, src.replacen("[$HTTP_RAW_POST_DATA,", "[null,", 1));
+    }
+
+    #[test]
+    fn entity_loader_calls_go_unless_the_project_loads_entities() {
+        let src = "<?php\nfunction load($xml) {\n    libxml_disable_entity_loader(true);\n    $doc = simplexml_load_string($xml);\n    libxml_disable_entity_loader(false);\n    return $doc;\n}\nfunction safe($xml) {\n    $old = libxml_disable_entity_loader(true);\n    $doc = simplexml_load_string($xml);\n    libxml_disable_entity_loader($old);\n    return $doc;\n}\n";
+        let (out, classes) = fixed(src).unwrap();
+        assert_eq!(
+            out,
+            "<?php\nfunction load($xml) {\n    $doc = simplexml_load_string($xml);\n    return $doc;\n}\nfunction safe($xml) {\n    $doc = simplexml_load_string($xml);\n    return $doc;\n}\n"
+        );
+        assert_eq!(classes, [ENTITY_DROP]);
+        assert_eq!(kinds_of(&fixes(src), "deprecated.libxml_disable_entity_loader"), [FixKind::Likely; 4]);
+        let noent = format!("{src}simplexml_load_string($x, null, LIBXML_NOENT);\n");
+        let (out, classes) = fixed(&noent).unwrap();
+        assert!(out.contains("    libxml_set_external_entity_loader(static fn ($public, $system, $context) => null);\n    $doc = simplexml_load_string($xml);\n    libxml_set_external_entity_loader(null);\n    return $doc;\n}\nfunction safe"), "{out}");
+        assert!(out.contains("function safe($xml) {\n    libxml_set_external_entity_loader(static fn ($public, $system, $context) => null);\n    $doc = simplexml_load_string($xml);\n    libxml_set_external_entity_loader(null);\n"), "{out}");
+        assert_eq!(classes, [ENTITY_LOADER]);
     }
 }
