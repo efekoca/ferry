@@ -275,7 +275,7 @@ fn rector_leaves_alone_what_it_would_break() {
         (
             "parse.php",
             "<?php\nclass Report\n{\n    function page($query)\n    {\n        parse_str($query);\n        return isset($page) ? (int) $page : 1;\n    }\n}\n",
-            "parse_str($query);",
+            "parse_str($query, $queryVars); extract($queryVars);\n        return isset($page)",
         ),
         ("export.php", "<?php\nfunction dump() {\n    ReflectionFunction::export('strlen');\n}\n", "echo new ReflectionFunction('strlen'), \"\\n\";"),
         (
@@ -283,7 +283,7 @@ fn rector_leaves_alone_what_it_would_break() {
             "<?php\nfunction quote($a) {\n    return filter_var($a, FILTER_SANITIZE_MAGIC_QUOTES, FILTER_REQUIRE_ARRAY);\n}\n",
             "filter_var($a, FILTER_SANITIZE_ADD_SLASHES, FILTER_REQUIRE_ARRAY)",
         ),
-        ("money.php", "<?php\nfunction price($v) {\n    return money_format('%i', $v);\n}\n", "money_format('%i', $v)"),
+        ("money.php", "<?php\nfunction price($v) {\n    return money_format('%i', $v);\n}\n", "return sprintf('%.2f', $v);"),
         ("stop.php", "<?php\necho 'a';\nbreak;\necho 'b';\n", "break;"),
         (
             "wbmp.php",

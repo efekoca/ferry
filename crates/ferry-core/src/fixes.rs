@@ -79,6 +79,23 @@ pub const MAGIC_NULL: &str = "Ferry\\Php80\\MagicVariableOldValue";
 pub const MAGIC_READ: &str = "Ferry\\Php80\\MagicVariableSource";
 pub const ENTITY_DROP: &str = "Ferry\\Php80\\DropEntityLoaderCall";
 pub const ENTITY_LOADER: &str = "Ferry\\Php80\\NullEntityLoader";
+pub const DYNAMIC_ALLOW: &str = "Ferry\\Php82\\AllowDynamicProperties";
+pub const DYNAMIC_DECLARE: &str = "Ferry\\Php82\\DeclareDynamicProperties";
+pub const SERIALIZE_OLD: &str = "Ferry\\Php81\\SerializeThroughOldMethods";
+pub const SERIALIZE_PROPERTIES: &str = "Ferry\\Php81\\SerializeProperties";
+pub const SANITIZE_CLOSE: &str = "Ferry\\Php81\\StripTagsAndEncodeQuotes";
+pub const SANITIZE_ESCAPE: &str = "Ferry\\Php81\\SanitizeStringToHtmlEscape";
+pub const SANITIZE_STRIP: &str = "Ferry\\Php81\\SanitizeStringToStripTags";
+pub const MONEY_C_LOCALE: &str = "Ferry\\Php80\\MoneyFormatInCLocale";
+pub const MONEY_PLAIN: &str = "Ferry\\Php80\\MoneyFormatToSprintf";
+pub const MONEY_INTL: &str = "Ferry\\Php80\\MoneyFormatToNumberFormatter";
+pub const CYR_MBSTRING: &str = "Ferry\\Php80\\ConvertCyrillicWithMbstring";
+pub const CYR_TABLE: &str = "Ferry\\Php80\\ConvertCyrillicByTable";
+pub const MKTIME_TIME: &str = "Ferry\\Php80\\MktimeWithoutArgumentsToTime";
+pub const PARSE_STR_EXTRACT: &str = "Ferry\\Php80\\ParseStrIntoExtract";
+pub const FAILED_CALL: &str = "Ferry\\Php80\\KeepFailedCallResult";
+pub const EXTRA_ARGUMENTS: &str = "Ferry\\Php80\\DropExtraArguments";
+pub const DRIVER_CONSTANT: &str = "Ferry\\Php85\\PdoDriverClassConstant";
 
 /// A finding the user asked to fix with one option: its line, its rule, which of that rule's
 /// findings on the line it is, and the option.
@@ -98,7 +115,14 @@ struct Choice {
 }
 
 /// Rules whose findings can come with options.
-const OPTION_RULES: [&str; 12] = [
+const OPTION_RULES: [&str; 19] = [
+    "deprecated.dynamic_property",
+    "deprecated.serializable",
+    "deprecated.filter_sanitize_string",
+    "deprecated.filter_sanitize_stripped",
+    "removed.money_format",
+    "removed.convert_cyr_string",
+    "removed.builtin_arity",
     "behavior.html_default_flags",
     "behavior.mysqli_default_exceptions",
     "deprecated.mysqli_ping",
@@ -331,6 +355,123 @@ const OPTION_TEXTS: &[(&str, &str, crate::i18n::Text, crate::i18n::Text)] = &[
             "Safer: PHP's own functions aren't exposed. A service that relied on them stops working.",
         ),
     ),
+    (
+        "deprecated.dynamic_property",
+        "attribute",
+        crate::i18n::Text::new("Dinamik property'lere izin ver", "Allow dynamic properties"),
+        crate::i18n::Text::new(
+            "Sınıfın üstüne #[\\AllowDynamicProperties] yazılır; sınıf PHP 8.2 öncesindeki gibi çalışır. Alt sınıflar da bu izni alır.",
+            "Writes #[\\AllowDynamicProperties] above the class, so it works as it did before PHP 8.2. Subclasses get the permission too.",
+        ),
+    ),
+    (
+        "deprecated.dynamic_property",
+        "declare",
+        crate::i18n::Text::new("Property'leri tanımla", "Declare the properties"),
+        crate::i18n::Text::new(
+            "Sınıfın bu şekilde değer atadığı her ad public property olarak tanımlanır. Property'ler ilk atamadan önce de null olarak bulunur; property_exists(), get_object_vars(), json_encode() ve serialize() sonuçları değişebilir.",
+            "Declares each name the class assigns this way as a public property. The properties then exist as null before their first assignment, so property_exists(), get_object_vars(), json_encode() and serialize() results can change.",
+        ),
+    ),
+    (
+        "deprecated.serializable",
+        "delegate",
+        crate::i18n::Text::new("Mevcut metotları kullan", "Use the existing methods"),
+        crate::i18n::Text::new(
+            "__serialize() ve __unserialize() eklenir; sınıfın serialize() ve unserialize() metotlarını çağırırlar. Nesne aynı geri yüklenir ve eski kayıtlar okunmaya devam eder. Yeni serialize() çıktısının biçimi değişir; PHP 7.4'ten eski sürümler onu okuyamaz.",
+            "Adds __serialize() and __unserialize(), which call the class's serialize() and unserialize(). The object comes back the same and old payloads still load. New serialize() output has a different format that PHP before 7.4 can't read.",
+        ),
+    ),
+    (
+        "deprecated.serializable",
+        "properties",
+        crate::i18n::Text::new("Property'leri kaydet", "Store the properties"),
+        crate::i18n::Text::new(
+            "__serialize() nesnenin property'lerini döndürür, __unserialize() onları geri yazar. Çıktı daha sade olur, ama serialize() metodunun yaptığı özel işler atlanır.",
+            "__serialize() returns the object's properties and __unserialize() writes them back. The output is simpler, but whatever serialize() did differently is skipped.",
+        ),
+    ),
+    (
+        "deprecated.filter_sanitize_string",
+        "close",
+        crate::i18n::Text::new("Eski çıktıya en yakın", "Closest to the old output"),
+        crate::i18n::Text::new(
+            "Etiketler strip_tags() ile silinir, tırnaklar eskisi gibi &#39; ve &#34; olur. Yalnızca olağandışı işaretlemede farklıdır: boşlukla gelen <, etiket içinde kapanmayan tırnak, <? ve <!--.",
+            "Strips tags with strip_tags() and encodes quotes as &#39; and &#34;, as before. It differs only on unusual markup: < followed by whitespace, an unclosed quote inside a tag, <? and <!--.",
+        ),
+    ),
+    (
+        "deprecated.filter_sanitize_string",
+        "escape",
+        crate::i18n::Text::new("HTML için kodla", "Escape for HTML"),
+        crate::i18n::Text::new(
+            "PHP'nin önerisi: htmlspecialchars() etiketleri silmez, metin olarak gösterir; &, < ve > da kodlanır. Değer kaydedilip sonra yine kodlanıyorsa iki kez kodlanmış olur.",
+            "PHP's suggestion: htmlspecialchars() shows tags as text instead of removing them, and encodes &, < and > too. A value that is stored and escaped again later ends up encoded twice.",
+        ),
+    ),
+    (
+        "deprecated.filter_sanitize_string",
+        "strip",
+        crate::i18n::Text::new("Yalnızca etiketleri sil", "Strip tags only"),
+        crate::i18n::Text::new(
+            "strip_tags() etiketleri siler, tırnaklara dokunmaz. Ekrana basılmayan, saklanan değerler için.",
+            "strip_tags() removes tags and leaves quotes alone. For values that are stored rather than printed.",
+        ),
+    ),
+    (
+        "removed.money_format",
+        "c_locale",
+        crate::i18n::Text::new("C yerel ayarındaki çıktı", "C locale output"),
+        crate::i18n::Text::new(
+            "sprintf('%.2f', …) yazılır. Proje parasal yerel ayarı değiştirmiyorsa money_format() ile aynı çıktıyı verir; değiştiriyorsa para birimi simgesi ve basamak ayırıcıları kaybolur.",
+            "Writes sprintf('%.2f', …). It prints the same as money_format() when the project doesn't change the monetary locale; when it does, the currency symbol and digit grouping are lost.",
+        ),
+    ),
+    (
+        "removed.money_format",
+        "intl",
+        crate::i18n::Text::new("Yerel para birimi", "Locale currency"),
+        crate::i18n::Text::new(
+            "intl eklentisindeki NumberFormatter, tutarı o anki parasal yerel ayarın para birimiyle biçimlendirir. Çıktı ICU'ya göre olur: simgenin yeri, boşluklar ve basamak ayırıcıları money_format()'tan farklı olabilir.",
+            "NumberFormatter from the intl extension formats the amount in the current monetary locale's currency. The output follows ICU: the symbol's place, spaces and digit grouping can differ from money_format().",
+        ),
+    ),
+    (
+        "removed.convert_cyr_string",
+        "mbstring",
+        crate::i18n::Text::new("Okunur dönüşüm", "Readable conversion"),
+        crate::i18n::Text::new(
+            "mb_convert_encoding() kullanılır. Rusça harfler ve ASCII aynı çıkar. Eski fonksiyonun bozduğu Ukraynaca, Belarusça ve Sırpça harfler artık doğru dönüşür ya da ? olur; bazı simgeler farklı eşlenir.",
+            "Uses mb_convert_encoding(). Russian letters and ASCII come out the same. Ukrainian, Belarusian and Serbian letters that the old function mangled now convert properly or become ?, and some symbols map differently.",
+        ),
+    ),
+    (
+        "removed.convert_cyr_string",
+        "table",
+        crate::i18n::Text::new("Bayt bayt aynı", "Byte for byte the same"),
+        crate::i18n::Text::new(
+            "PHP 5'in dönüşüm tablosu strtr() ile uygulanır. Çıktı eskisiyle aynıdır, ama satır okunmaz hâle gelir.",
+            "Applies PHP 5's conversion table with strtr(). The output matches the old one exactly, but the line becomes unreadable.",
+        ),
+    ),
+    (
+        "removed.builtin_arity",
+        "old",
+        crate::i18n::Text::new("Eski sonucu koru", "Keep the old result"),
+        crate::i18n::Text::new(
+            "PHP 8'den önce bu çağrı uyarı verip fonksiyonu hiç çalıştırmadan null ya da false döndürüyordu. Çağrı bu değerle değiştirilir; tek başına bir satırsa silinir.",
+            "Before PHP 8 this call warned and returned null or false without running the function. The call is replaced with that value, or removed when it is a statement of its own.",
+        ),
+    ),
+    (
+        "removed.builtin_arity",
+        "drop",
+        crate::i18n::Text::new("Fazla argümanları sil", "Drop the extra arguments"),
+        crate::i18n::Text::new(
+            "Fonksiyon artık çalışır; PHP 8'den önce bu çağrıda hiç çalışmıyordu. Büyük olasılıkla kastedilen budur.",
+            "The function now runs, which it never did for this call before PHP 8. Likely what was meant.",
+        ),
+    ),
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -470,7 +611,16 @@ const NO_OP_FLAGS: &[(&str, &str, Alone)] = &[
 
 /// Rules whose fix reads the code around the finding, and for three of them the version the project
 /// runs on today.
-const SITE_RULES: [&str; 38] = [
+const SITE_RULES: [&str; 47] = [
+    "deprecated.dynamic_property",
+    "deprecated.serializable",
+    "deprecated.filter_sanitize_string",
+    "deprecated.filter_sanitize_stripped",
+    "removed.money_format",
+    "removed.convert_cyr_string",
+    "removed.builtin_arity",
+    "removed.parse_str_one_arg",
+    "deprecated.builtin_class_constant",
     "behavior.concat_precedence",
     "behavior.html_default_flags",
     "behavior.mysqli_default_exceptions",
@@ -723,11 +873,21 @@ pub(crate) fn mentions(src: &str) -> bool {
         "http_raw_post_data",
         "php_errormsg",
         "libxml_disable_entity_loader",
+        "serializable",
+        "filter_sanitize_str",
+        "money_format",
+        "convert_cyr_string",
+        "parse_str",
+        "mktime",
+        "_attr_",
+        "sql_use_",
+        "sqlite_",
     ];
     OCI_ALIASES.iter().map(|(old, _)| *old).chain(NO_OP_CALLS.iter().map(|(_, f, _)| *f)).chain(calls).any(|name| lower.contains(name))
         || (lower.contains("unset") && src.contains("$this"))
         || (lower.contains("export") && lower.contains("reflection"))
         || src.contains('.') && ["+", "-", "<<", ">>"].iter().any(|op| src.contains(op))
+        || src.contains("$this->")
 }
 
 /// A file as the fixes see it: its text, its tokens, which tokens hold a no-op flag finding, the
@@ -1127,6 +1287,8 @@ fn site_fix(file: &Source, k: usize, rule: &str) -> Option<Fix> {
         "removed.incompatible_override" => widen_override(file, k),
         "deprecated.date_wakeup" => date_wakeup(file, k),
         "behavior.concat_precedence" => concat_groups(file, k),
+        "removed.parse_str_one_arg" => parse_str_fix(file, k),
+        "deprecated.builtin_class_constant" => driver_constant(file, k),
         _ if OPTION_RULES.contains(&rule) => choices(file, k, rule).into_iter().find(|c| c.recommended).map(|c| c.fix),
         _ => None,
     }
@@ -1149,24 +1311,28 @@ fn date_wakeup(file: &Source, k: usize) -> Option<Fix> {
 /// The ways Ferry can fix the finding of an option rule at `k`. One entry means there is nothing to
 /// choose there.
 fn choices(file: &Source, k: usize, rule: &str) -> Vec<Choice> {
-    match rule {
-        "deprecated.date_rfc7231" => rfc7231_choices(file, k),
-        "deprecated.splfileinfo_bad_state_ex" => bad_state_choices(file, k),
-        "deprecated.e_user_error" => user_error_choices(file, k),
-        "removed.input_request" => input_choices(file, k, "INPUT_REQUEST", "$_REQUEST"),
-        "removed.input_session" => input_choices(file, k, "INPUT_SESSION", "$_SESSION"),
-        "deprecated.soap_functions_all" => soap_choices(file, k),
-        "behavior.html_default_flags" => html_choices(file, k),
-        "behavior.mysqli_default_exceptions" => mysqli_report_choices(file, k),
-        "deprecated.mysqli_ping" => ping_choices(file, k),
-        "removed.numberformatter_type_currency" => currency_choices(file, k),
-        "removed.magic_variable" => magic_choices(file, k),
-        "deprecated.libxml_disable_entity_loader" => entity_choices(file, k),
-        _ => [None, None],
-    }
-    .into_iter()
-    .flatten()
-    .collect()
+    let options: Vec<Option<Choice>> = match rule {
+        "deprecated.date_rfc7231" => rfc7231_choices(file, k).into(),
+        "deprecated.splfileinfo_bad_state_ex" => bad_state_choices(file, k).into(),
+        "deprecated.e_user_error" => user_error_choices(file, k).into(),
+        "removed.input_request" => input_choices(file, k, "INPUT_REQUEST", "$_REQUEST").into(),
+        "removed.input_session" => input_choices(file, k, "INPUT_SESSION", "$_SESSION").into(),
+        "deprecated.soap_functions_all" => soap_choices(file, k).into(),
+        "behavior.html_default_flags" => html_choices(file, k).into(),
+        "behavior.mysqli_default_exceptions" => mysqli_report_choices(file, k).into(),
+        "deprecated.mysqli_ping" => ping_choices(file, k).into(),
+        "removed.numberformatter_type_currency" => currency_choices(file, k).into(),
+        "removed.magic_variable" => magic_choices(file, k).into(),
+        "deprecated.libxml_disable_entity_loader" => entity_choices(file, k).into(),
+        "deprecated.dynamic_property" => dynamic_choices(file, k).into(),
+        "deprecated.serializable" => serializable_choices(file, k).into(),
+        "deprecated.filter_sanitize_string" | "deprecated.filter_sanitize_stripped" => sanitize_choices(file, k).into(),
+        "removed.money_format" => money_choices(file, k).into(),
+        "removed.convert_cyr_string" => cyr_choices(file, k).into(),
+        "removed.builtin_arity" => arity_choices(file, k).into(),
+        _ => Vec::new(),
+    };
+    options.into_iter().flatten().collect()
 }
 
 const RFC7231_FORMAT: &str = "'D, d M Y H:i:s \\G\\M\\T'";
@@ -1679,6 +1845,443 @@ fn entity_choices(file: &Source, k: usize) -> [Option<Choice>; 2] {
     };
     let drop_first = !file.index.loads_entities();
     [Some(Choice { id: "drop", fix: drop, recommended: drop_first }), Some(Choice { id: "loader", fix: keep, recommended: !drop_first })]
+}
+
+/// The whitespace before `at` when nothing else comes before it on its line.
+fn indent_before(src: &str, at: usize) -> Option<&str> {
+    let line = &src[src[..at].rfind('\n').map_or(0, |i| i + 1)..at];
+    line.chars().all(|c| c == ' ' || c == '\t').then_some(line)
+}
+
+/// The whitespace that starts the line holding `at`.
+fn line_indent(src: &str, at: usize) -> &str {
+    let start = src[..at].rfind('\n').map_or(0, |i| i + 1);
+    let rest = &src[start..at];
+    &rest[..rest.len() - rest.trim_start_matches([' ', '\t']).len()]
+}
+
+/// The text of an argument ready to stand next to an operator or a cast: as it is when it is a
+/// variable with its properties and elements, a call or a literal, in parentheses otherwise.
+fn operand(file: &Source, (first, last): (usize, usize)) -> String {
+    let tokens = file.tokens;
+    let text = file.text(first, last);
+    let mut j = first + 1;
+    if tokens[first].kind == TokenKind::Variable {
+        while j <= last {
+            if tokens[j].is_punct("[") {
+                let Some(close) = crate::declarations::close_of(tokens, j) else { break };
+                j = close + 1;
+            } else if (tokens[j].is_punct("->") || tokens[j].is_punct("?->"))
+                && tokens.get(j + 1).is_some_and(|t| t.kind == TokenKind::Ident)
+            {
+                j += 2;
+            } else {
+                break;
+            }
+        }
+    } else if tokens[first].kind == TokenKind::Ident && tokens.get(first + 1).is_some_and(|t| t.is_punct("(")) {
+        j = crate::declarations::close_of(tokens, first + 1).map_or(first, |c| c + 1);
+    }
+    if j == last + 1 || literal(tokens, (first, last)) {
+        text.to_string()
+    } else {
+        format!("({text})")
+    }
+}
+
+/// A property the class never declared, assigned through `$this`: the attribute that keeps such
+/// properties allowed, or a declaration for each name the class assigns that way.
+fn dynamic_choices(file: &Source, k: usize) -> [Option<Choice>; 2] {
+    let tokens = file.tokens;
+    let src = file.src;
+    let decls = crate::index::class_decls(tokens);
+    let innermost = |j: usize| decls.iter().filter(|d| d.open < j && j < d.close).max_by_key(|d| d.open);
+    let Some(decl) = innermost(k) else { return [None, None] };
+    let Some(keyword) = (0..decl.open).rev().find(|&j| tokens[j].is_ident_ci("class") && !(j > 0 && tokens[j - 1].is_punct("::"))) else {
+        return [None, None];
+    };
+    let mut first = keyword;
+    while first > 0 && ["final", "abstract", "readonly"].iter().any(|m| tokens[first - 1].is_ident_ci(m)) {
+        first -= 1;
+    }
+    if tokens[first..keyword].iter().any(|t| t.is_ident_ci("readonly")) {
+        return [None, None];
+    }
+    let nl = newline(src);
+    let at = tokens[first].start;
+    let attribute = match indent_before(src, at) {
+        Some(indent) => format!("#[\\AllowDynamicProperties]{nl}{indent}"),
+        None => format!("{nl}#[\\AllowDynamicProperties]{nl}"),
+    };
+    let allow = Fix { extra: Vec::new(), class: DYNAMIC_ALLOW, start: at, end: at, text: attribute };
+    let mut names: Vec<&str> = Vec::new();
+    for j in crate::analyzer::dynamic_properties(tokens, file.index) {
+        if innermost(j).is_some_and(|d| d.open == decl.open) && !names.contains(&tokens[j].text.as_str()) {
+            names.push(&tokens[j].text);
+        }
+    }
+    let dynamic_names = (decl.open..decl.close).any(|j| {
+        tokens[j].kind == TokenKind::Variable
+            && tokens[j].text == "this"
+            && tokens.get(j + 1).is_some_and(|t| t.is_punct("->"))
+            && tokens.get(j + 2).is_some_and(|t| t.kind != TokenKind::Ident)
+    });
+    let magic = file.index.declares_any(&decl.info, &["__get", "__isset", "__unset"]) != Some(false);
+    let declare = (!names.is_empty() && !dynamic_names && !magic).then(|| {
+        let mut depth = 0usize;
+        let mut statement = decl.open + 1;
+        let mut last_property = None;
+        for j in decl.open + 1..decl.close {
+            let t = &tokens[j];
+            if t.is_punct("{") || t.is_punct("(") || t.is_punct("[") || t.is_punct("#[") {
+                depth += 1;
+            } else if t.is_punct("}") || t.is_punct(")") || t.is_punct("]") {
+                depth = depth.saturating_sub(1);
+                if depth == 0 && t.is_punct("}") {
+                    statement = j + 1;
+                }
+            } else if depth == 0 && t.is_punct(";") {
+                let words = &tokens[statement..j];
+                let modifier = words.first().is_some_and(|w| PROPERTY_MODIFIERS.iter().any(|m| w.is_ident_ci(m)));
+                let member = words.iter().any(|w| w.is_ident_ci("function") || w.is_ident_ci("const") || w.is_ident_ci("use"));
+                if modifier && !member && words.iter().any(|w| w.kind == TokenKind::Variable) {
+                    last_property = Some((statement, j));
+                }
+                statement = j + 1;
+            }
+        }
+        let lines = |indent: Option<&str>| -> String {
+            names.iter().map(|n| indent.map_or_else(|| format!(" public ${n};"), |i| format!("{nl}{i}public ${n};"))).collect()
+        };
+        let (at, text) = match last_property {
+            Some((start, semi)) => (tokens[semi].end, lines(indent_before(src, tokens[start].start))),
+            None => match indent_before(src, tokens[decl.open + 1].start) {
+                Some(indent) => (tokens[decl.open].end, format!("{}{nl}", lines(Some(indent)))),
+                None => (tokens[decl.open].end, lines(None)),
+            },
+        };
+        Fix { extra: Vec::new(), class: DYNAMIC_DECLARE, start: at, end: at, text }
+    });
+    [Some(Choice { id: "attribute", fix: allow, recommended: true }), declare.map(|fix| Choice { id: "declare", fix, recommended: false })]
+}
+
+const PROPERTY_MODIFIERS: [&str; 6] = ["public", "protected", "private", "var", "static", "readonly"];
+
+/// A Serializable class without __serialize(): the magic pair that goes through its own
+/// serialize() and unserialize(), or a pair that stores its properties.
+fn serializable_choices(file: &Source, k: usize) -> [Option<Choice>; 2] {
+    let tokens = file.tokens;
+    let src = file.src;
+    let Some(&(_, open, close)) = crate::analyzer::class_bodies(tokens).iter().find(|&&(i, _, _)| i + 1 == k) else { return [None, None] };
+    let mut methods = Vec::new();
+    let mut traits = false;
+    let mut depth = 0usize;
+    for j in open..close {
+        let t = &tokens[j];
+        if t.is_punct("{") {
+            depth += 1;
+        } else if t.is_punct("}") {
+            depth -= 1;
+        } else if depth == 1 && t.is_ident_ci("use") {
+            traits = true;
+        } else if depth == 1 && t.is_ident_ci("function") {
+            if let Some(f) = crate::declarations::function_at(tokens, j) {
+                if let Some(name) = f.name {
+                    methods.push((tokens[name].text.to_ascii_lowercase(), f));
+                }
+            }
+        }
+    }
+    let find = |name: &str| methods.iter().find(|(n, _)| n == name).map(|(_, f)| f);
+    let (Some(serialize), Some(_)) = (find("serialize"), find("unserialize")) else { return [None, None] };
+    let Some((body_open, body_close)) = serialize.body.filter(|_| !traits && find("__unserialize").is_none()) else { return [None, None] };
+    let returns: Vec<usize> = (body_open..body_close).filter(|&j| tokens[j].is_ident_ci("return")).collect();
+    let nested = (body_open + 1..body_close).any(|j| tokens[j].is_ident_ci("function") || tokens[j].is_ident_ci("fn"));
+    let nulls = returns.iter().any(|&j| {
+        tokens.get(j + 1).is_some_and(|t| t.is_punct(";") || t.is_ident_ci("null") && tokens.get(j + 2).is_some_and(|n| n.is_punct(";")))
+    });
+    if returns.is_empty() || nested || nulls {
+        return [None, None];
+    }
+    let nl = newline(src);
+    let pair = |class, serialize: &str, unserialize: &str| {
+        let Some(outer) = indent_before(src, tokens[close].start) else {
+            let text = format!("public function __serialize() {{ {serialize} }} public function __unserialize($data) {{ {unserialize} }} ");
+            return Fix { extra: Vec::new(), class, start: tokens[close].start, end: tokens[close].start, text };
+        };
+        let first = methods.first().map(|(_, f)| f);
+        let member = first.map(|f| line_indent(src, tokens[f.keyword].start)).filter(|m| m.len() > outer.len() && m.starts_with(outer));
+        let member = member.map_or_else(|| format!("{outer}    "), str::to_string);
+        let unit = member[outer.len()..].to_string();
+        let body = first
+            .and_then(|f| f.body)
+            .filter(|&(o, c)| o + 1 < c)
+            .and_then(|(o, _)| indent_before(src, tokens[o + 1].start))
+            .filter(|b| b.len() > member.len())
+            .map_or_else(|| format!("{member}{unit}"), str::to_string);
+        let own_line = first.and_then(|f| f.body).is_some_and(|(o, _)| indent_before(src, tokens[o].start).is_some());
+        let opening = if own_line { format!("{nl}{member}{{") } else { " {".to_string() };
+        let method = |signature: &str, statement: &str| {
+            format!("{nl}{member}public function {signature}{opening}{nl}{body}{statement}{nl}{member}}}{nl}")
+        };
+        let at = src[..tokens[close].start].rfind('\n').map_or(0, |i| i + 1);
+        let text = format!("{}{}", method("__serialize()", serialize), method("__unserialize($data)", unserialize));
+        Fix { extra: Vec::new(), class, start: at, end: at, text }
+    };
+    [
+        Some(Choice {
+            id: "delegate",
+            fix: pair(SERIALIZE_OLD, "return [$this->serialize()];", "$this->unserialize($data[0]);"),
+            recommended: true,
+        }),
+        Some(Choice {
+            id: "properties",
+            fix: pair(
+                SERIALIZE_PROPERTIES,
+                "return get_object_vars($this);",
+                "foreach ($data as $key => $value) { $this->$key = $value; }",
+            ),
+            recommended: false,
+        }),
+    ]
+}
+
+/// filter_var($x, FILTER_SANITIZE_STRING) and `$v = filter_input(…, FILTER_SANITIZE_STRING);`
+/// without flags: tags stripped and quotes encoded as the filter did, HTML escaping, or only the
+/// stripped tags. filter_input() keeps its null and false.
+fn sanitize_choices(file: &Source, k: usize) -> [Option<Choice>; 3] {
+    let tokens = file.tokens;
+    let bare = tokens[k].text.trim_start_matches('\\');
+    let found = (["FILTER_SANITIZE_STRING", "FILTER_SANITIZE_STRIPPED"].contains(&bare) && is_atom(tokens, k))
+        .then(|| argument_of(tokens, k))
+        .flatten()
+        .filter(|&(_, _, arg)| arg == (k, k));
+    let Some((call, index, _)) = found else { return [None, None, None] };
+    let form = |class: &str, x: &str| match class {
+        SANITIZE_ESCAPE => format!("htmlspecialchars({x})"),
+        SANITIZE_STRIP => format!("strip_tags({x})"),
+        _ => format!("str_replace([\"'\", '\"'], ['&#39;', '&#34;'], strip_tags({x}))"),
+    };
+    let forms = [SANITIZE_CLOSE, SANITIZE_ESCAPE, SANITIZE_STRIP];
+    let lead = lead(&tokens[call]);
+    let fixes: Vec<Fix> =
+        if let Some((close, args)) = function_call(tokens, call, &["filter_var"]).filter(|(_, a)| a.len() == 2 && index == 1) {
+            let input = format!("(string) {}", operand(file, args[0]));
+            let span = |class, text: String| Fix { extra: Vec::new(), class, start: tokens[call].start, end: tokens[close].end, text };
+            forms.iter().map(|&class| span(class, format!("{lead}{}", form(class, &input)))).collect()
+        } else if let Some((close, args)) = function_call(tokens, call, &["filter_input"]).filter(|(_, a)| a.len() == 3 && index == 2) {
+            let Some(eq) = call.checked_sub(1).filter(|&e| tokens[e].is_punct("=")) else { return [None, None, None] };
+            let mut first = eq.saturating_sub(1);
+            while first >= 2 && tokens[first].kind == TokenKind::Ident && tokens[first - 1].is_punct("->") {
+                first -= 2;
+            }
+            let assigned =
+                eq > 0 && tokens[first].kind == TokenKind::Variable && plain(tokens, (first, eq - 1)) && starts_statement(tokens, first);
+            if !assigned || !tokens.get(close + 1).is_some_and(|t| t.is_punct(";")) {
+                return [None, None, None];
+            }
+            let target = file.text(first, eq - 1);
+            let gap = indent_before(file.src, tokens[first].start).map_or_else(|| " ".to_string(), |i| format!("{}{i}", newline(file.src)));
+            forms
+                .iter()
+                .map(|&class| Fix {
+                    class,
+                    start: tokens[args[1].1].end,
+                    end: tokens[close + 1].end,
+                    text: format!(");{gap}{target} = is_string({target}) ? {lead}{} : {target};", form(class, target)),
+                    extra: Vec::new(),
+                })
+                .collect()
+        } else {
+            return [None, None, None];
+        };
+    let mut fixes = fixes.into_iter();
+    let mut next = |id, recommended| fixes.next().map(|fix| Choice { id, fix, recommended });
+    [next("close", true), next("escape", false), next("strip", false)]
+}
+
+/// money_format('%i' or '%n', $v): what the C locale printed, or, when the project sets one
+/// monetary locale by name, that locale's currency through NumberFormatter. The C locale output is
+/// the default unless the project sets a monetary locale.
+fn money_choices(file: &Source, k: usize) -> [Option<Choice>; 2] {
+    let tokens = file.tokens;
+    let Some((close, args)) = function_call(tokens, k, &["money_format"]).filter(|(_, a)| a.len() == 2) else { return [None, None] };
+    let format = (args[0].0 == args[0].1).then(|| literal_text(&tokens[args[0].0])).flatten();
+    if !format.is_some_and(|f| ["%i", "%n", "%.2i", "%.2n"].contains(&f.as_str())) {
+        return [None, None];
+    }
+    let value = file.text(args[1].0, args[1].1);
+    let lead = lead(&tokens[k]);
+    let span = |class, text: String| Fix { extra: Vec::new(), class, start: tokens[k].start, end: tokens[close].end, text };
+    let set = file.index.sets_monetary_locale();
+    let intl = file.index.monetary_locale().map(|locale| {
+        let text = format!("(new \\NumberFormatter({}, \\NumberFormatter::CURRENCY))->format({value})", quoted(locale));
+        Choice { id: "intl", fix: span(MONEY_INTL, text), recommended: false }
+    });
+    [
+        Some(Choice {
+            id: "c_locale",
+            fix: span(if set { MONEY_PLAIN } else { MONEY_C_LOCALE }, format!("{lead}sprintf('%.2f', {value})")),
+            recommended: !set,
+        }),
+        intl,
+    ]
+}
+
+/// convert_cyr_string()'s PHP 5.6 tables for bytes 0x80 to 0xFF, the only ones they change: the
+/// charset's bytes to KOI8-R, and KOI8-R to the charset. CP866 has two codes, 'a' and 'd'.
+const CYR_TABLES: [(char, &str, &str); 4] = [
+    ('w', "2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e9aaebe2e9fbd2e2eb3bfb49d2e2e9cb72e2eb6a6ad2e2e9ea398a49b2e2e2ea7e1e2f7e7e4e5f6fae9eaebecedeeeff0f2f3f4f5e6e8e3fefbfdfff9f8fce0f1c1c2d7c7c4c5d6dac9cacbcccdcecfd0d2d3d4d5c6c8c3dedbdddfd9d8dcc0d1", "2020202020202020202020202020202020202020202020202020202020202020202020b8ba20b3bf2020202020b4a220202020a8aa20b2af2020202020a5a1a9fee0e1f6e4e5f4e3f5e8e9eaebecedeeeffff0f1f2f3e6e2fcfbe7f8fdf9f7fadec0c1d6c4c5d4c3d5c8c9cacbcccdcecfdfd0d1d2d3c6c2dcdbc7d8ddd9d7da"),
+    ('i', "202020202020202020202020202020202020202020202020202020202020202020b32020202020202020202020202020e1e2f7e7e4e5f6fae9eaebecedeeeff0f2f3f4f5e6e8e3fefbfdfff9f8fce0f1c1c2d7c7c4c5d6dac9cacbcccdcecfd0d2d3d4d5c6c8c3dedbdddfd9d8dcc0d120a32020202020202020202020202020", "2020202020202020202020202020202020202020202020202020202020202020202020f1202020202020202020202020202020a1202020202020202020202020eed0d1e6d4d5e4d3e5d8d9dadbdcdddedfefe0e1e2e3d6d2ecebd7e8ede9e7eaceb0b1c6b4b5c4b3c5b8b9babbbcbdbebfcfc0c1c2c3b6b2cccbb7c8cdc9c7ca"),
+    ('a', "e1e2f7e7e4e5f6fae9eaebecedeeeff0f2f3f4f5e6e8e3fefbfdfff9f8fce0f1c1c2d7c7c4c5d6dac9cacbcccdcecfd02323237c7c7c7c2b2b7c7c2b2b2b2b2b2b2d2d7c2d2b7c7c2b2b2d2d7c2d2b2d2d2d2d2b2b2b2b2b2b2b2b23237c7c23d2d3d4d5c6c8c3dedbdddfd9d8dcc0d1b3a3b4a4b7a7beae20959e20989f949a", "2020202020202020202020202020202020202020202020202020202020202020cdbad5f1f3c920f5bbd4d3c8be20f7c6c7ccb5f0f2b920f4cbcfd0cad820f620eea0a1e6a4a5e4a3e5a8a9aaabacadaeafefe0e1e2e3a6a2eceba7e8ede9e7ea9e808196848594839588898a8b8c8d8e8f9f9091929386829c9b87989d99979a"),
+    ('m', "e1e2f7e7e4e5f6fae9eaebecedeeeff0f2f3f4f5e6e8e3fefbfdfff9f8fce0f1a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf808182838485868788898a8b8c8d8e8f909192939495969798999a9b9cb3a3d1c1c2d7c7c4c5d6dac9cacbcccdcecfd0d2d3d4d5c6c8c3dedbdddfd9d8dcc0ff", "c0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfa0a1a2dea4a5a6a7a8a9aaabacadaeafb0b1b2ddb4b5b6b7b8b9babbbcbdbebffee0e1f6e4e5f4e3f5e8e9eaebecedeeefdff0f1f2f3e6e2fcfbe7f8fdf9f7fa9e808196848594839588898a8b8c8d8e8f9f9091929386829c9b87989d99979a"),
+];
+
+const CYR_NAMES: [(char, &str); 4] = [('k', "KOI8-R"), ('w', "Windows-1251"), ('i', "ISO-8859-5"), ('a', "CP866")];
+
+fn cyr_byte(code: char, byte: u8, to_koi8: bool) -> u8 {
+    let Some((_, to, from)) = CYR_TABLES.iter().find(|(c, ..)| *c == code).filter(|_| byte >= 0x80) else { return byte };
+    let hex = if to_koi8 { to } else { from };
+    let at = usize::from(byte - 0x80) * 2;
+    u8::from_str_radix(&hex[at..at + 2], 16).unwrap_or(byte)
+}
+
+/// convert_cyr_string($s, FROM, TO) with literal codes: mb_convert_encoding(), or PHP 5's table
+/// through strtr(). MacCyrillic ('m') only has the table, since mbstring can't convert it.
+fn cyr_choices(file: &Source, k: usize) -> [Option<Choice>; 2] {
+    let tokens = file.tokens;
+    let Some((close, args)) = function_call(tokens, k, &["convert_cyr_string"]).filter(|(_, a)| a.len() == 3) else { return [None, None] };
+    let code = |(first, last): (usize, usize)| {
+        let text = (first == last).then(|| literal_text(&tokens[first])).flatten()?;
+        let c = match text.to_ascii_lowercase().as_str() {
+            "d" => 'a',
+            one if one.len() == 1 => one.chars().next()?,
+            _ => return None,
+        };
+        "kwiam".contains(c).then_some(c)
+    };
+    let (Some(from), Some(to)) = (code(args[1]), code(args[2])) else { return [None, None] };
+    let pairs: Vec<(u8, u8)> = (0x80..=0xFFu8).map(|b| (b, cyr_byte(to, cyr_byte(from, b, true), false))).filter(|(a, b)| a != b).collect();
+    if pairs.is_empty() {
+        return [None, None];
+    }
+    let escaped = |bytes: &mut dyn Iterator<Item = u8>| bytes.map(|b| format!("\\x{b:02X}")).collect::<String>();
+    let lead = lead(&tokens[k]);
+    let subject = (args[0].0, args[0].1);
+    let input = if file.current.is_some_and(|v| v < PhpVersion::new(7, 0)) {
+        format!("{lead}strstr({} . \"\\0\", \"\\0\", true)", operand(file, subject))
+    } else {
+        file.text(subject.0, subject.1).to_string()
+    };
+    let table =
+        format!("{lead}strtr({input}, \"{}\", \"{}\")", escaped(&mut pairs.iter().map(|p| p.0)), escaped(&mut pairs.iter().map(|p| p.1)));
+    let name = |c: char| CYR_NAMES.iter().find(|(n, _)| *n == c).map(|(_, name)| *name);
+    let readable = name(from)
+        .zip(name(to))
+        .filter(|_| from != to)
+        .map(|(f, t)| format!("{lead}mb_convert_encoding({}, '{t}', '{f}')", file.text(subject.0, subject.1)));
+    let span = |class, text: String| Fix { extra: Vec::new(), class, start: tokens[k].start, end: tokens[close].end, text };
+    let mbstring = readable.map(|text| Choice { id: "mbstring", fix: span(CYR_MBSTRING, text), recommended: true });
+    let exact = mbstring.is_none();
+    [mbstring, Some(Choice { id: "table", fix: span(CYR_TABLE, table), recommended: exact })]
+}
+
+/// `parse_str($query);` → `parse_str($query, $queryVars); extract($queryVars);`, which sets the
+/// same variables for ordinary keys.
+fn parse_str_fix(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let (close, args) = function_call(tokens, k, &["parse_str"])?;
+    if args.len() != 1 || !is_statement(tokens, k, close) {
+        return None;
+    }
+    let scope = scope_of(tokens, k);
+    let within = &tokens[scope.0..scope.1];
+    if within.iter().any(|t| t.is_ident_ci("get_defined_vars") || t.is_ident_ci("compact") || t.is_punct("$")) {
+        return None;
+    }
+    let used = |n: &str| within.iter().any(|t| t.kind == TokenKind::Variable && t.text == n);
+    let (first, last) = args[0];
+    let base =
+        if first == last && tokens[first].kind == TokenKind::Variable { format!("{}Vars", tokens[first].text) } else { "vars".to_string() };
+    let name = std::iter::once(base.clone()).chain((2..).map(|n| format!("{base}{n}"))).find(|n| !used(n))?;
+    let text = format!(", ${name}); {}extract(${name});", lead(&tokens[k]));
+    Some(Fix { extra: Vec::new(), class: PARSE_STR_EXTRACT, start: tokens[last].end, end: tokens[close + 1].end, text })
+}
+
+/// A built-in called with too few or too many arguments. mktime() and gmmktime() without any
+/// become time(), and parse_str() gets its array. Otherwise, on a project older than PHP 8, the
+/// call never ran: the value it returned instead, or for too many, the call without the extras.
+fn arity_choices(file: &Source, k: usize) -> [Option<Choice>; 2] {
+    let tokens = file.tokens;
+    let tok = &tokens[k];
+    let name = tok.text.trim_start_matches('\\').to_ascii_lowercase();
+    let Some((close, args)) = function_call(tokens, k, &[name.as_str()]) else { return [None, None] };
+    if (name == "mktime" || name == "gmmktime") && args.is_empty() {
+        let fix =
+            Fix { extra: Vec::new(), class: MKTIME_TIME, start: tok.start, end: tokens[close].end, text: format!("{}time()", lead(tok)) };
+        return [Some(Choice { id: "time", fix, recommended: true }), None];
+    }
+    if name == "parse_str" {
+        return [parse_str_fix(file, k).map(|fix| Choice { id: "extract", fix, recommended: true }), None];
+    }
+    let Some((required, max)) = crate::analyzer::arity_on(&name, file.target) else { return [None, None] };
+    if file.current.is_some_and(|v| v >= PhpVersion::new(8, 0)) {
+        return [None, None];
+    }
+    let inert = |a: &(usize, usize)| plain(tokens, *a) || literal(tokens, *a) || a.0 == a.1 && is_atom(tokens, a.0);
+    let value = if crate::arity::FAILED_OTHERWISE.binary_search(&name.as_str()).is_ok() {
+        None
+    } else if crate::arity::FAILED_FALSE.binary_search(&name.as_str()).is_ok() {
+        Some("false")
+    } else {
+        Some("null")
+    };
+    let wrong = args.len() < usize::from(required) || max != 255 && args.len() > usize::from(max);
+    let old = value.filter(|_| wrong && args.iter().all(inert)).map(|value| {
+        if is_statement(tokens, k, close) {
+            removal(file, k, close + 1, FAILED_CALL)
+        } else {
+            Fix { extra: Vec::new(), class: FAILED_CALL, start: tok.start, end: tokens[close].end, text: value.to_string() }
+        }
+    });
+    let keep = usize::from(max);
+    let drop = (max != 255 && args.len() > keep && args[keep..].iter().all(inert)).then(|| {
+        let start = if keep == 0 { tokens[k + 1].end } else { tokens[args[keep - 1].1].end };
+        Fix { extra: Vec::new(), class: EXTRA_ARGUMENTS, start, end: tokens[close].start, text: String::new() }
+    });
+    [old.map(|fix| Choice { id: "old", fix, recommended: false }), drop.map(|fix| Choice { id: "drop", fix, recommended: false })]
+}
+
+/// (old prefix, driver class, new prefix) for PDO's driver constants.
+const DRIVER_PREFIXES: [(&str, &str, &str); 7] = [
+    ("MYSQL_ATTR_", "Mysql", "ATTR_"),
+    ("ODBC_ATTR_", "Odbc", "ATTR_"),
+    ("ODBC_SQL_USE_", "Odbc", "SQL_USE_"),
+    ("PGSQL_ATTR_", "Pgsql", "ATTR_"),
+    ("SQLITE_ATTR_", "Sqlite", "ATTR_"),
+    ("SQLITE_OPEN_", "Sqlite", "OPEN_"),
+    ("SQLITE_DETERMINISTIC", "Sqlite", "DETERMINISTIC"),
+];
+
+/// A PDO driver constant read through a PDO driver class, such as Pdo\Mysql::MYSQL_ATTR_SSL_CA:
+/// the name its driver's class has for it, or the value for the transaction states.
+fn driver_constant(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let class = k.checked_sub(2).filter(|&c| tokens[c].kind == TokenKind::Ident && tokens[c + 1].is_punct("::"))?;
+    let name = tokens[k].text.as_str();
+    let span = |start: usize, text: String| Some(Fix { extra: Vec::new(), class: DRIVER_CONSTANT, start, end: tokens[k].end, text });
+    if let Some(state) = name.strip_prefix("PGSQL_TRANSACTION_") {
+        let value = TRANSACTION_STATES.iter().find(|(s, _)| *s == state)?.1;
+        return Some(Fix { extra: Vec::new(), class: CONSTANT_VALUE, start: tokens[class].start, end: tokens[k].end, text: value.into() });
+    }
+    let (prefix, driver, new) = DRIVER_PREFIXES.iter().find(|(p, ..)| name.starts_with(p))?;
+    let constant = format!("{new}{}", &name[prefix.len()..]);
+    let short = tokens[class].text.rsplit('\\').next().unwrap_or_default();
+    if short.eq_ignore_ascii_case(driver) {
+        span(tokens[k].start, constant)
+    } else {
+        span(tokens[class].start, format!("\\Pdo\\{driver}::{constant}"))
+    }
 }
 
 /// The lines a fix touches, as it leaves them, without their common indentation.
@@ -3578,7 +4181,12 @@ pub(crate) fn mark(
         f.options = options
             .into_iter()
             .map(|c| {
-                let text = OPTION_TEXTS.iter().find(|(r, id, ..)| *r == f.rule_id && *id == c.id);
+                let rule = if f.rule_id == "deprecated.filter_sanitize_stripped" {
+                    "deprecated.filter_sanitize_string"
+                } else {
+                    f.rule_id.as_str()
+                };
+                let text = OPTION_TEXTS.iter().find(|(r, id, ..)| *r == rule && *id == c.id);
                 let applied = crate::rector::describe_rule(c.fix.class);
                 crate::analyzer::FixOption {
                     id: c.id.to_string(),
@@ -3636,7 +4244,7 @@ pub(crate) fn apply(
     index: &std::sync::Arc<crate::index::ProjectIndex>,
     chosen: &[Chosen],
 ) -> Option<(String, Vec<&'static str>)> {
-    if !mentions(src) {
+    if !mentions(src) && chosen.is_empty() {
         return None;
     }
     let findings = crate::analyzer::findings_for_fixes(rel, src, target, index);
@@ -3649,14 +4257,30 @@ pub(crate) fn apply(
     let at_position = by_position(&tokens);
     let file = Source::new(&text, &tokens, &findings, &at_position, index, target);
     let ordinal = ordinals(&findings);
+    let direct: Vec<Option<Fix>> = findings
+        .iter()
+        .enumerate()
+        .map(|(i, f)| {
+            let c = chosen.iter().find(|c| c.line == f.line && c.rule == f.rule_id && c.ordinal == ordinal[i])?;
+            let &k = at_position.get(&(f.line, f.column)).filter(|_| f.options.iter().any(|o| o.id == c.option))?;
+            choices(&file, k, &f.rule_id).into_iter().find(|o| o.id == c.option).map(|o| o.fix)
+        })
+        .collect();
+    // A finding whose options hold the fix chosen for another finding of its rule, as the names of
+    // one class do, follows that choice.
     let pick = |i: usize, f: &Finding, k: usize| {
-        let choice = chosen.iter().find(|c| c.line == f.line && c.rule == f.rule_id && c.ordinal == ordinal[i]);
-        match choice {
-            Some(c) if f.options.iter().any(|o| o.id == c.option) => {
-                choices(&file, k, &f.rule_id).into_iter().find(|o| o.id == c.option).map(|o| o.fix)
-            }
-            _ if f.fix != FixKind::Manual => at(&file, k, &f.rule_id),
-            _ => None,
+        if let Some(fix) = &direct[i] {
+            return Some(fix.clone());
+        }
+        let options = if f.options.is_empty() { Vec::new() } else { choices(&file, k, &f.rule_id) };
+        let picked = |fix: &Fix| direct.iter().zip(&findings).any(|(d, g)| g.rule_id == f.rule_id && d.as_ref() == Some(fix));
+        if let Some(choice) = options.into_iter().find(|o| picked(&o.fix)) {
+            return Some(choice.fix);
+        }
+        if f.fix != FixKind::Manual {
+            at(&file, k, &f.rule_id)
+        } else {
+            None
         }
     };
     let fixes: Vec<Fix> = plan(&findings, &at_position, &pick).into_iter().map(|(_, fix)| fix).collect();
@@ -4539,5 +5163,152 @@ mod tests {
         assert!(out.contains("    libxml_set_external_entity_loader(static fn ($public, $system, $context) => null);\n    $doc = simplexml_load_string($xml);\n    libxml_set_external_entity_loader(null);\n    return $doc;\n}\nfunction safe"), "{out}");
         assert!(out.contains("function safe($xml) {\n    libxml_set_external_entity_loader(static fn ($public, $system, $context) => null);\n    $doc = simplexml_load_string($xml);\n    libxml_set_external_entity_loader(null);\n"), "{out}");
         assert_eq!(classes, [ENTITY_LOADER]);
+    }
+    #[test]
+    fn dynamic_properties_get_the_attribute_or_declarations() {
+        let src = "<?php\nclass Job\n{\n    public $id;\n\n    public function start()\n    {\n        $this->startedAt = time();\n        $this->log[] = 'x';\n    }\n}\n";
+        let rule = "deprecated.dynamic_property";
+        let options = options_of(src, rule);
+        assert_eq!(options.len(), 2);
+        assert_eq!(
+            options[0].iter().map(|o| (o.0.as_str(), o.1, o.2)).collect::<Vec<_>>(),
+            [("attribute", FixKind::Auto, true), ("declare", FixKind::Likely, false)]
+        );
+        assert_eq!(options[0][1].3, "public $id;\npublic $startedAt;\npublic $log;");
+        let (out, classes) = fixed(src).unwrap();
+        assert_eq!(out, src.replace("class Job", "#[\\AllowDynamicProperties]\nclass Job"));
+        assert_eq!(classes, [DYNAMIC_ALLOW]);
+        let (out, classes) = fixed_choosing(src, &[(8, rule, "declare")]).unwrap();
+        assert_eq!(
+            out,
+            src.replace("    public $id;\n", "    public $id;\n    public $startedAt;\n    public $log;\n"),
+            "the class's other names follow"
+        );
+        assert_eq!(classes, [DYNAMIC_DECLARE]);
+        let inline = "<?php class A { function f() { $this->x = 1; } }";
+        assert_eq!(fixed(inline).unwrap().0, "<?php \n#[\\AllowDynamicProperties]\nclass A { function f() { $this->x = 1; } }");
+        assert_eq!(options_of(inline, rule)[0][1].3, "<?php class A { public $x; function f() { $this->x = 1; } }");
+        let magic = "<?php class B { function __get($n) {} function f() { $this->x = 1; } }";
+        assert!(options_of(magic, rule)[0].is_empty(), "with __get() only the attribute keeps the behavior");
+        let named = "<?php class C { function f($n) { $this->x = 1; $this->$n = 2; } }";
+        assert!(options_of(named, rule)[0].is_empty());
+        assert_eq!(fixed("<?php readonly class D { function f() { $this->x = 1; } }"), None);
+    }
+
+    #[test]
+    fn serializable_classes_get_the_magic_pair() {
+        let src = "<?php\nfinal class S implements Serializable\n{\n    private $v;\n\n    public function serialize()\n    {\n        return serialize($this->v);\n    }\n\n    public function unserialize($data)\n    {\n        $this->v = unserialize($data);\n    }\n}\n";
+        let rule = "deprecated.serializable";
+        let options = options_of(src, rule);
+        assert_eq!(
+            options[0].iter().map(|o| (o.0.as_str(), o.1, o.2)).collect::<Vec<_>>(),
+            [("delegate", FixKind::Likely, true), ("properties", FixKind::Likely, false)]
+        );
+        let (out, classes) = fixed(src).unwrap();
+        let pair = "\n    public function __serialize()\n    {\n        return [$this->serialize()];\n    }\n\n    public function __unserialize($data)\n    {\n        $this->unserialize($data[0]);\n    }\n";
+        assert_eq!(out, src.replace("unserialize($data);\n    }\n", &format!("unserialize($data);\n    }}\n{pair}")));
+        assert_eq!(classes, [SERIALIZE_OLD]);
+        let inline = "<?php class T implements \\Serializable { function serialize() { return 'x'; } function unserialize($d) {} }";
+        assert_eq!(
+            fixed(inline).unwrap().0,
+            "<?php class T implements \\Serializable { function serialize() { return 'x'; } function unserialize($d) {} public function __serialize() { return [$this->serialize()]; } public function __unserialize($data) { $this->unserialize($data[0]); } }"
+        );
+        let null = "<?php class U implements Serializable { function serialize() { if ($this->x) { return null; } return 'x'; } function unserialize($d) {} }";
+        assert_eq!(fixed(null), None, "a null from serialize() wrote N; before");
+        assert_eq!(
+            fixed("<?php class V implements Serializable { use T; function serialize() { return 'x'; } function unserialize($d) {} }"),
+            None
+        );
+    }
+
+    #[test]
+    fn sanitized_strings_keep_tags_out_and_quotes_encoded() {
+        let src = "<?php\n$a = filter_var($input, FILTER_SANITIZE_STRING);\nreturn filter_var($a ?: 'x', \\FILTER_SANITIZE_STRIPPED);\n    $q = filter_input(INPUT_GET, 'q', FILTER_SANITIZE_STRING);\n";
+        let options = options_of(src, "deprecated.filter_sanitize_string");
+        assert_eq!(
+            options[0].iter().map(|o| (o.0.as_str(), o.1, o.2)).collect::<Vec<_>>(),
+            [("close", FixKind::Likely, true), ("escape", FixKind::Likely, false), ("strip", FixKind::Likely, false)]
+        );
+        assert_eq!(options[1][2].3, "$q = filter_input(INPUT_GET, 'q');\n$q = is_string($q) ? strip_tags($q) : $q;");
+        assert_eq!(options_of(src, "deprecated.filter_sanitize_stripped")[0][1].3, "return htmlspecialchars((string) ($a ?: 'x'));");
+        let (out, classes) = fixed(src).unwrap();
+        assert_eq!(
+            out,
+            "<?php\n$a = str_replace([\"'\", '\"'], ['&#39;', '&#34;'], strip_tags((string) $input));\nreturn str_replace([\"'\", '\"'], ['&#39;', '&#34;'], strip_tags((string) ($a ?: 'x')));\n    $q = filter_input(INPUT_GET, 'q');\n    $q = is_string($q) ? str_replace([\"'\", '\"'], ['&#39;', '&#34;'], strip_tags($q)) : $q;\n"
+        );
+        assert_eq!(classes, [SANITIZE_CLOSE]);
+        assert_eq!(fixed("<?php $s = filter_var($v, FILTER_SANITIZE_STRING, FILTER_FLAG_NO_ENCODE_QUOTES); echo filter_input(INPUT_GET, 'q', FILTER_SANITIZE_STRING);"), None);
+    }
+
+    #[test]
+    fn money_format_prints_what_the_c_locale_did() {
+        let src = "<?php\necho money_format('%i', $amount), money_format(\"%n\", -$x), money_format('%=*10#5.2n', $y);\n";
+        let rule = "removed.money_format";
+        assert!(options_of(src, rule).iter().all(Vec::is_empty), "one sure option needs no choice");
+        let (out, classes) = fixed(src).unwrap();
+        assert_eq!(out, "<?php\necho sprintf('%.2f', $amount), sprintf('%.2f', -$x), money_format('%=*10#5.2n', $y);\n");
+        assert_eq!(classes, [MONEY_C_LOCALE]);
+        assert_eq!(kinds_of(&fixes(src), rule), [FixKind::Auto, FixKind::Auto, FixKind::Manual]);
+        let localized = "<?php\nsetlocale(LC_MONETARY, 'de_DE.UTF-8');\necho money_format('%n', $total);\n";
+        let options = options_of(localized, rule);
+        assert_eq!(
+            options[0].iter().map(|o| (o.0.as_str(), o.1, o.2)).collect::<Vec<_>>(),
+            [("c_locale", FixKind::Likely, false), ("intl", FixKind::Likely, false)]
+        );
+        assert_eq!(options[0][1].3, "echo (new \\NumberFormatter('de_DE', \\NumberFormatter::CURRENCY))->format($total);");
+        let unknown = "<?php\nsetlocale(LC_ALL, $locale);\necho money_format('%n', $total);\n";
+        assert_eq!(options_of(unknown, rule)[0].iter().map(|o| o.0.as_str()).collect::<Vec<_>>(), ["c_locale"]);
+        assert_eq!(
+            fixed("<?php\nsetlocale(LC_ALL, 'C');\nsetlocale(LC_TIME, 'tr_TR');\necho money_format('%i', $n);\n").unwrap().1,
+            [MONEY_C_LOCALE]
+        );
+    }
+
+    #[test]
+    fn cyrillic_conversions_use_mbstring_or_the_old_table() {
+        let src = "<?php\necho convert_cyr_string($text, 'w', 'k'), convert_cyr_string($t, 'K', 'm');\n";
+        let rule = "removed.convert_cyr_string";
+        let options = options_of(src, rule);
+        assert_eq!(
+            options[0].iter().map(|o| (o.0.as_str(), o.1, o.2)).collect::<Vec<_>>(),
+            [("mbstring", FixKind::Likely, true), ("table", FixKind::Auto, false)]
+        );
+        assert!(options[0][1].3.starts_with("echo strtr($text, \"\\x80\\x81"), "{}", options[0][1].3);
+        assert!(options[1].is_empty(), "mbstring has no MacCyrillic, so the table is the only fix");
+        let (out, classes) = fixed(src).unwrap();
+        assert!(out.starts_with("<?php\necho mb_convert_encoding($text, 'KOI8-R', 'Windows-1251'), strtr($t, \""), "{out}");
+        assert_eq!(classes, [CYR_MBSTRING, CYR_TABLE]);
+        let (old, _) = fixed_from(src, PhpVersion::new(5, 6)).unwrap();
+        assert!(old.contains("strtr(strstr($t . \"\\0\", \"\\0\", true), \""), "PHP 5 stopped at the first NUL byte: {old}");
+        assert_eq!(fixed("<?php echo convert_cyr_string($s, $from, 'k'), convert_cyr_string($s, 'k', 'k');"), None);
+    }
+
+    #[test]
+    fn wrong_argument_counts() {
+        let src = "<?php\n$t = mktime();\n$g = \\gmmktime();\nparse_str($query);\nstrlen($a, $b);\n$n = strlen($a, 'x');\n$d = date();\n$c = crypt($pw);\n$s = substr(foo());\n";
+        let rule = "removed.builtin_arity";
+        let (out, classes) = fixed(src).unwrap();
+        let expected = src.replace("= mktime()", "= time()").replace("\\gmmktime()", "\\time()");
+        assert_eq!(out, expected.replace("parse_str($query);", "parse_str($query, $queryVars); extract($queryVars);"));
+        assert_eq!(classes, [MKTIME_TIME, PARSE_STR_EXTRACT]);
+        assert_eq!(kinds_of(&fixes(src), "removed.parse_str_one_arg"), [FixKind::Likely]);
+        let older = options_from(src, rule, PhpVersion::new(7, 4));
+        let ids = |o: &Vec<(String, FixKind, bool, String)>| o.iter().map(|c| (c.0.clone(), c.2, c.3.clone())).collect::<Vec<_>>();
+        assert_eq!(ids(&older[3]), [("old".to_string(), false, String::new()), ("drop".to_string(), false, "strlen($a);".to_string())]);
+        assert_eq!(ids(&older[4])[0].2, "$n = null;");
+        assert_eq!(ids(&older[5]), [("old".to_string(), false, "$d = false;".to_string())], "date() returned false");
+        assert!(older[6].is_empty() && older[7].is_empty(), "crypt() ran without a salt, and foo() ran before strlen() failed");
+        assert!(options_from(src, rule, PhpVersion::new(8, 1)).iter().all(Vec::is_empty), "the call already throws on PHP 8");
+        let (out, _) = fixed_choosing(src, &[(5, rule, "old"), (6, rule, "drop"), (7, rule, "old")]).unwrap();
+        assert!(out.contains("\n$n = strlen($a);\n$d = false;\n") && !out.contains("strlen($a, $b)"), "{out}");
+    }
+
+    #[test]
+    fn driver_class_constants_take_their_driver_names() {
+        let src = "<?php\necho \\Pdo\\Mysql::MYSQL_ATTR_SSL_CA, Pdo\\Pgsql::MYSQL_ATTR_COMPRESS, \\Pdo\\Pgsql::PGSQL_TRANSACTION_IDLE, \\Pdo\\Sqlite::SQLITE_DETERMINISTIC;\n";
+        let (out, classes) = fixed(src).unwrap();
+        assert_eq!(out, "<?php\necho \\Pdo\\Mysql::ATTR_SSL_CA, \\Pdo\\Mysql::ATTR_COMPRESS, 0, \\Pdo\\Sqlite::DETERMINISTIC;\n");
+        assert_eq!(classes, [DRIVER_CONSTANT, CONSTANT_VALUE]);
+        assert_eq!(kinds_of(&fixes(src), "deprecated.builtin_class_constant"), [FixKind::Auto; 4]);
     }
 }
