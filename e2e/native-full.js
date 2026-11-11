@@ -286,6 +286,9 @@
       const modern = $$(".change-item__file").map((e) => e.textContent);
       await emit(`  compat=${compat.length} modern=${modern.length}: ${modern.join(", ")}`);
       check(modern.length >= compat.length, "modernize covers at least the compat files");
+      const boxes = $$(".change-item input[type=checkbox]");
+      if (!boxes.some((b) => b.checked)) boxes[0].click();
+      await until(() => !/^0 /.test($(".apply-bar button").textContent), "a file to apply");
       await applyAndConfirm();
       await nav("Geçmiş");
       const row = await until(() => $$(".history-backup")[0], "history row");

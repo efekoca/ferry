@@ -2039,7 +2039,7 @@ fn php4_constructors(tokens: &[Token]) -> Vec<usize> {
     out
 }
 
-fn arity_on(name: &str, target: PhpVersion) -> Option<(u8, u8)> {
+pub(crate) fn arity_on(name: &str, target: PhpVersion) -> Option<(u8, u8)> {
     let older = crate::symbols::ARITY_BEFORE;
     let rows = older[older.partition_point(|r| r.0 < name)..].iter().take_while(|r| r.0 == name);
     if let Some(&(_, _, required, max)) = rows.into_iter().find(|r| target <= PhpVersion::new(r.1 .0, r.1 .1)) {
@@ -3848,7 +3848,7 @@ fn static_calls_to_instance_methods(tokens: &[Token], index: &crate::index::Proj
     out
 }
 
-fn dynamic_properties(tokens: &[Token], index: &crate::index::ProjectIndex) -> Vec<usize> {
+pub(crate) fn dynamic_properties(tokens: &[Token], index: &crate::index::ProjectIndex) -> Vec<usize> {
     let mut out = Vec::new();
     for decl in crate::index::class_decls(tokens) {
         let (open, close) = (decl.open, decl.close);

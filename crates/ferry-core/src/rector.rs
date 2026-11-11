@@ -192,6 +192,17 @@ const LIKELY_RULES: &[&str] = &[
     "MagicVariableSource",
     "DropEntityLoaderCall",
     "NullEntityLoader",
+    "DeclareDynamicProperties",
+    "SerializeThroughOldMethods",
+    "SerializeProperties",
+    "StripTagsAndEncodeQuotes",
+    "SanitizeStringToHtmlEscape",
+    "SanitizeStringToStripTags",
+    "MoneyFormatToSprintf",
+    "MoneyFormatToNumberFormatter",
+    "ConvertCyrillicWithMbstring",
+    "ParseStrIntoExtract",
+    "DropExtraArguments",
 ];
 
 const RULE_TITLES: &[(&str, Text)] = &[
@@ -320,6 +331,26 @@ const RULE_TITLES: &[(&str, Text)] = &[
     ("MagicVariableSource", Text::same("$HTTP_RAW_POST_DATA → file_get_contents('php://input')")),
     ("DropEntityLoaderCall", Text::new("libxml_disable_entity_loader() silinir", "Remove libxml_disable_entity_loader()")),
     ("NullEntityLoader", Text::same("libxml_disable_entity_loader(true) → libxml_set_external_entity_loader(fn => null)")),
+    ("AllowDynamicProperties", Text::same("#[\\AllowDynamicProperties]")),
+    ("DeclareDynamicProperties", Text::new("Dinamik property'ler sınıfta tanımlanır", "Declare the dynamic properties on the class")),
+    ("SerializeThroughOldMethods", Text::same("Serializable → __serialize() / __unserialize()")),
+    ("SerializeProperties", Text::new("__serialize() property'leri kaydeder", "__serialize() stores the properties")),
+    ("StripTagsAndEncodeQuotes", Text::same("FILTER_SANITIZE_STRING → strip_tags() + str_replace()")),
+    ("SanitizeStringToHtmlEscape", Text::same("FILTER_SANITIZE_STRING → htmlspecialchars()")),
+    ("SanitizeStringToStripTags", Text::same("FILTER_SANITIZE_STRING → strip_tags()")),
+    ("MoneyFormatInCLocale", Text::same("money_format() → sprintf('%.2f')")),
+    ("MoneyFormatToSprintf", Text::same("money_format() → sprintf('%.2f')")),
+    ("MoneyFormatToNumberFormatter", Text::same("money_format() → NumberFormatter")),
+    ("ConvertCyrillicWithMbstring", Text::same("convert_cyr_string() → mb_convert_encoding()")),
+    ("ConvertCyrillicByTable", Text::same("convert_cyr_string() → strtr()")),
+    ("MktimeWithoutArgumentsToTime", Text::same("mktime() → time()")),
+    ("ParseStrIntoExtract", Text::same("parse_str($s) → parse_str($s, $vars); extract($vars)")),
+    (
+        "KeepFailedCallResult",
+        Text::new("Hiç çalışmayan çağrı eski sonucuyla değiştirilir", "Replace a call that never ran with its old result"),
+    ),
+    ("DropExtraArguments", Text::new("Fazla argümanlar silinir", "Drop the extra arguments")),
+    ("PdoDriverClassConstant", Text::same("Pdo\\Mysql::MYSQL_ATTR_* → Pdo\\Mysql::ATTR_*")),
     (
         "ParenthesizeNestedTernaryRector",
         Text::new("İç içe ternary paranteze alınır (eski davranış korunur)", "Parenthesize nested ternaries (keeps the old behaviour)"),
@@ -538,7 +569,11 @@ impl Staging {
                 }
             };
             constants.extend(crate::analyzer::constant_names(&text));
-            if crate::analyzer::fix_legacy_syntax_with(&text, &no_constants, target, source).is_some() || crate::fixes::mentions(&text) {
+            let chosen = choices.contains_key(&crate::analyzer::relative_path(root, &path));
+            if chosen
+                || crate::analyzer::fix_legacy_syntax_with(&text, &no_constants, target, source).is_some()
+                || crate::fixes::mentions(&text)
+            {
                 candidates.push((path, text));
             }
         }
@@ -549,7 +584,7 @@ impl Staging {
         }
         let index = candidates
             .iter()
-            .any(|(_, text)| crate::fixes::mentions(text))
+            .any(|(path, text)| crate::fixes::mentions(text) || choices.contains_key(&crate::analyzer::relative_path(root, path)))
             .then(|| std::sync::Arc::new(crate::index::ProjectIndex::build_for(root, &php_files, Some(target))));
         for (path, text) in candidates {
             let rel = crate::analyzer::relative_path(root, &path);

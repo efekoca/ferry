@@ -103,6 +103,8 @@ pub struct ProjectIndex {
     autoload_hooks: bool,
     error_handler: bool,
     entity_options: bool,
+    monetary_unknown: bool,
+    monetary_locales: Vec<String>,
     overridden_by_all: std::sync::OnceLock<HashMap<String, HashSet<String>>>,
     redefines_checks: std::sync::OnceLock<bool>,
 }
@@ -184,6 +186,44 @@ impl ProjectIndex {
     /// Whether the project asks libxml to load external entities or DTDs anywhere.
     pub(crate) fn loads_entities(&self) -> bool {
         self.entity_options
+    }
+
+    /// Whether the project may set a monetary locale other than C: a setlocale() call for
+    /// LC_MONETARY or LC_ALL, or for a category or locale it doesn't spell out.
+    pub(crate) fn sets_monetary_locale(&self) -> bool {
+        self.monetary_unknown || !self.monetary_locales.is_empty()
+    }
+
+    /// The one monetary locale the project sets, without its encoding, when it spells it out.
+    pub(crate) fn monetary_locale(&self) -> Option<&str> {
+        match &self.monetary_locales[..] {
+            [only] if !self.monetary_unknown => Some(only),
+            _ => None,
+        }
+    }
+
+    /// Whether the class, its traits or its ancestors declare one of `methods` (lowercase). `None`
+    /// when one of them isn't known.
+    pub(crate) fn declares_any(&self, info: &TypeInfo, methods: &[&str]) -> Option<bool> {
+        self.declares_any_at(info, methods, 0)
+    }
+
+    fn declares_any_at(&self, info: &TypeInfo, methods: &[&str], depth: usize) -> Option<bool> {
+        if depth > 32 {
+            return None;
+        }
+        if methods.iter().any(|m| info.methods.contains(*m)) {
+            return Some(true);
+        }
+        for t in &info.traits {
+            if self.declares_any_at(self.unique(t)?, methods, depth + 1)? {
+                return Some(true);
+            }
+        }
+        match &info.parent {
+            Some(parent) => self.declares_any_at(self.unique(parent)?, methods, depth + 1),
+            None => Some(false),
+        }
     }
 
     /// Whether a class of the project extends `parent` directly.
@@ -277,6 +317,24 @@ impl ProjectIndex {
             let name = t.text.trim_start_matches('\\');
             ["LIBXML_NOENT", "LIBXML_DTDLOAD", "LIBXML_DTDATTR", "LIBXML_DTDVALID"].contains(&name)
         });
+        for (i, t) in tokens.iter().enumerate() {
+            if !t.is_ident_ci("setlocale") || !tokens.get(i + 1).is_some_and(|o| o.is_punct("(")) {
+                continue;
+            }
+            let category =
+                tokens.get(i + 2).map(|c| c.text.trim_start_matches('\\')).filter(|_| tokens.get(i + 3).is_some_and(|c| c.is_punct(",")));
+            if category.is_some_and(|c| ["LC_CTYPE", "LC_NUMERIC", "LC_TIME", "LC_COLLATE", "LC_MESSAGES"].contains(&c)) {
+                continue;
+            }
+            let locale = tokens.get(i + 4).and_then(|l| l.literal()).filter(|_| tokens.get(i + 5).is_some_and(|c| c.is_punct(")")));
+            let name = locale.map(|l| l.split(['.', '@']).next().unwrap_or_default().to_string());
+            match name.filter(|n| category.is_some_and(|c| c == "LC_MONETARY" || c == "LC_ALL") && !n.is_empty()) {
+                Some(n) if n == "C" || n == "POSIX" => {}
+                Some(n) if !self.monetary_locales.contains(&n) => self.monetary_locales.push(n),
+                Some(_) => {}
+                None => self.monetary_unknown = true,
+            }
+        }
         self.autoload_hooks |= tokens.iter().enumerate().any(|(i, t)| {
             let declared = tokens[..i].iter().rev().find(|p| !p.is_punct("&")).is_some_and(|p| p.is_ident_ci("function"));
             t.is_ident_ci("spl_autoload_register")

@@ -168,6 +168,13 @@ fn kuzey_magaza_triggers_every_rule() {
         "removed.numberformatter_type_currency",
         "removed.magic_variable",
         "deprecated.libxml_disable_entity_loader",
+        "deprecated.dynamic_property",
+        "deprecated.serializable",
+        "deprecated.filter_sanitize_string",
+        "deprecated.filter_sanitize_stripped",
+        "removed.convert_cyr_string",
+        "removed.builtin_arity",
+        "removed.parse_str_one_arg",
     ];
     for id in own_fixes {
         assert!(
@@ -187,8 +194,13 @@ fn kuzey_magaza_triggers_every_rule() {
         "removed.numberformatter_type_currency",
         "removed.magic_variable",
         "deprecated.libxml_disable_entity_loader",
+        "deprecated.dynamic_property",
+        "deprecated.serializable",
+        "deprecated.filter_sanitize_string",
+        "removed.money_format",
+        "removed.convert_cyr_string",
     ] {
-        assert!(result.findings.iter().any(|f| f.rule_id == id && f.options.len() == 2), "{id} offers no choice in the demo");
+        assert!(result.findings.iter().any(|f| f.rule_id == id && f.options.len() >= 2), "{id} offers no choice in the demo");
     }
 
     let summary = report::summarize(&result.findings);
@@ -324,7 +336,8 @@ fn auto_findings_are_fixed_by_rector() {
                 let deleted = |l: &ferry_core::diff::DiffLine| l.kind == ferry_core::diff::LineKind::Del && l.old_no == Some(f.line);
                 let added_above =
                     |w: &[ferry_core::diff::DiffLine]| w[0].kind == ferry_core::diff::LineKind::Add && w[1].old_no == Some(f.line);
-                change.diff.hunks.iter().any(|h| h.lines.iter().any(deleted) || h.lines.windows(2).any(added_above))
+                let attribute = f.rule_id == "deprecated.dynamic_property" && change.new_content.contains("#[\\AllowDynamicProperties]");
+                attribute || change.diff.hunks.iter().any(|h| h.lines.iter().any(deleted) || h.lines.windows(2).any(added_above))
             };
             if !touched {
                 unfixed.insert(format!("{} ({:?}) {}:{}", f.rule_id, f.fix, f.file, f.line));
