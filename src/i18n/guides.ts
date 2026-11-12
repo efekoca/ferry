@@ -532,4 +532,178 @@ export const GUIDES: Record<string, Guide> = {
     before: "extract($vars);\ninclude $template;",
     after: "extract(is_array($vars) ? $vars : [], EXTR_SKIP);\ninclude $template;",
   },
+  "removed.assign_this": {
+    steps: {
+      tr: [
+        "Değişkene başka bir ad verin (örneğin `$item`) ve fonksiyondaki bütün kullanımlarını değiştirin: parametre, `foreach`, `catch` ya da `list()` hedefi ve sonraki okumalar.",
+        "Sınıf dışındaki bir fonksiyonda `$this` eskiden sıradan bir değişkendi; yeniden adlandırmak davranışı değiştirmez.",
+        "Closure'ın `use` listesindeki `$this`'i silin: sınıf içinde oluşturulan closure nesneyi zaten `$this` olarak görür.",
+        "`extract()`, `parse_str()` ya da `$$ad` ile `this` adlı değişken yazan kod da PHP 7.1'den beri Error fırlatır ve Ferry bunları işaretlemez. Diziden `'this'` anahtarını çıkarın.",
+      ],
+      en: [
+        "Give the variable another name (for example `$item`) and change every use in the function: the parameter, the `foreach`, `catch` or `list()` target, and the reads after it.",
+        "In a function outside a class, `$this` used to be an ordinary variable, so renaming it doesn't change behavior.",
+        "Remove `$this` from a closure's `use` list: a closure created inside a class already sees the object as `$this`.",
+        "Code that writes a variable named `this` through `extract()`, `parse_str()` or `$$name` throws Error since PHP 7.1 too, and Ferry doesn't mark it. Drop the `'this'` key from the array.",
+      ],
+    },
+    before: "function total($this) {\n    return $this['price'] * $this['qty'];\n}",
+    after: "function total($item) {\n    return $item['price'] * $item['qty'];\n}",
+  },
+  "removed.globals_write": {
+    steps: {
+      tr: [
+        "Tek bir global değişkeni `$GLOBALS['ad'] = $deger;` ile değiştirin, `unset($GLOBALS['ad']);` ile silin; bunlar PHP 8.1'de de çalışır.",
+        "Dizinin tamamına atama (`$GLOBALS = $dizi;`) PHP 8.0 ve öncesinde de global değişkenleri değiştirmiyordu, yalnızca bu kapsamdaki diziyi değiştiriyordu. Diziye başka bir ad verin; değişkenleri değiştirmek istediyseniz her birini `$GLOBALS['ad']` ile atayın.",
+        "`array_pop()`, `sort()` gibi diziyi yerinde değiştiren fonksiyonlara ve referans parametrelerine `$GLOBALS` verilemez. Bir kopyayla çalışın (`$vars = $GLOBALS;`); değişkeni de silmek istediyseniz `unset($GLOBALS[$ad])` ekleyin.",
+        "`$vars = &$GLOBALS;` gibi referanslar da derleme hatası verir; o değişken yerine doğrudan `$GLOBALS['ad']` yazın.",
+        "Kopyalara da bakın: PHP 8.0 ve öncesinde `$GLOBALS`'ın kopyasına yazmak (`$vars = $GLOBALS; $vars['a'] = 2;`) global `$a`'yı da değiştiriyordu, 8.1'den beri kopya ayrı. Ferry bu kopyaları işaretlemez.",
+      ],
+      en: [
+        "Change a single global with `$GLOBALS['name'] = $value;` and remove it with `unset($GLOBALS['name']);`; both still work on PHP 8.1.",
+        "Assigning the whole array (`$GLOBALS = $array;`) didn't change the global variables on PHP 8.0 and before either, only the array in this scope. Give the array another name; if you meant to change the variables, assign each one with `$GLOBALS['name']`.",
+        "`$GLOBALS` can't be passed to functions that change an array in place, such as `array_pop()` and `sort()`, or to reference parameters. Work on a copy (`$vars = $GLOBALS;`), and add `unset($GLOBALS[$name])` if you meant to remove the variable too.",
+        "References such as `$vars = &$GLOBALS;` are compile errors too; write `$GLOBALS['name']` directly instead of that variable.",
+        "Check copies as well: on PHP 8.0 and before, writing to a copy of `$GLOBALS` (`$vars = $GLOBALS; $vars['a'] = 2;`) also changed the global `$a`; since 8.1 the copy is separate. Ferry doesn't mark these copies.",
+      ],
+    },
+    before: "$vars = &$GLOBALS;\n$vars['count']++;",
+    after: "$GLOBALS['count']++;",
+  },
+  "removed.incompatible_user_override": {
+    steps: {
+      tr: [
+        "Önerilen satır üst metodun imzasını gösterir. Alt metot üstteki her parametreyi almalı: eksikleri sona ekleyin, alt metoda eklediğiniz fazla parametrelere varsayılan değer verin (`$recalculate = null`).",
+        "Parametre tipi üsttekinden dar olamaz: aynı tipi ya da daha genişini (üst sınıf, arayüz, birleşim tipi) yazın veya tipi kaldırın. Referansla geçiş (`&`) ve `static` ikisinde de aynı olmalı.",
+        "Üst metot bir dönüş tipi bildiriyorsa alt metot da aynısını ya da daha darını bildirmeli: `?int` yerine `int` yazılabilir, tersi olmaz.",
+        "Alt metot gerçekten başka argümanlar istiyorsa ona yeni bir ad verin ve çağıranları güncelleyin; aynı adı korumak üst sınıf üzerinden yapılan çağrıları bozar.",
+      ],
+      en: [
+        "The suggested line shows the parent method's signature. The child has to take every parameter the parent takes: add the missing ones at the end, and give the extra parameters you added to the child a default (`$recalculate = null`).",
+        "A parameter type can't be narrower than the parent's: use the same type or a wider one (a parent class, an interface, a union type), or drop the type. Passing by reference (`&`) and `static` have to match too.",
+        "If the parent declares a return type, the child has to declare the same one or a narrower one: `int` can replace `?int`, not the other way round.",
+        "If the child really needs other arguments, give it a new name and update its callers; keeping the name breaks calls made through the parent class.",
+      ],
+    },
+    before: "public function fill(array $data, $recalculate)",
+    after: "public function fill(array $data, $recalculate = null)",
+  },
+  "removed.parent_without_parent": {
+    steps: {
+      tr: [
+        "Bu çağrı hiçbir sürümde çalışmadı: PHP 7.4 ve öncesinde satıra gelindiğinde Error (PHP 5'te ölümcül hata) veriyordu. PHP 8 ise dosyayı hiç yüklemiyor.",
+        "Sınıfın bir üst sınıftan türemesi gerekiyorsa ve `extends` sonradan silindiyse onu geri ekleyin.",
+        "Değilse `parent::` çağrısını silin. Çalıştığı her yol zaten hata verdiği için silmek çalışan kodu değiştirmez. Çağrı bir ifadenin içindeyse o satırın yerine ne döneceğine karar verin.",
+      ],
+      en: [
+        "This call never worked: on PHP 7.4 and before it threw Error when the line ran (a fatal error on PHP 5), and PHP 8 doesn't load the file at all.",
+        "If the class is meant to extend another class and the `extends` was removed later, add it back.",
+        "Otherwise delete the `parent::` call. Every path that reached it already failed, so deleting it doesn't change working code. If the call sits inside an expression, decide what that line should produce instead.",
+      ],
+    },
+    before: "public function __construct()\n{\n    parent::__construct();\n    $this->items = [];\n}",
+    after: "public function __construct()\n{\n    $this->items = [];\n}",
+  },
+  "removed.preg_eval_modifier": {
+    steps: {
+      tr: [
+        "Desendeki `e` belirtecini silin ve `preg_replace()` yerine `preg_replace_callback()` yazın.",
+        "Değiştirme metni PHP koduydu: onu bir fonksiyonun gövdesine taşıyın ve sonucu `return` ile döndürün. `$1`, `\\1` ya da `${1}` yerine `$m[1]`, `$0` yerine `$m[0]` yazın.",
+        "Eski kod eşleşmedeki tırnak ve ters bölü işaretlerinin önüne `\\` ekliyordu; çift tırnak içinde `it's` metni `it\\'s` olarak geliyordu. Callback eşleşmeyi olduğu gibi alır. Eski kod bu işaretleri `stripslashes()` ile siliyorduysa o çağrıyı da kaldırın.",
+        "Desen dizisinde tek bir `e`'li desen bile bütün çağrının null döndürmesine yol açar. Yalnızca bazı desenlerde `e` varsa onları ayrı bir `preg_replace_callback()` çağrısına alın ve sırayı koruyun.",
+      ],
+      en: [
+        "Remove the `e` modifier from the pattern and use `preg_replace_callback()` instead of `preg_replace()`.",
+        "The replacement was PHP code: move it into a function body and `return` the result. Write `$m[1]` instead of `$1`, `\\1` or `${1}`, and `$m[0]` instead of `$0`.",
+        "The old code put a `\\` before quotes and backslashes in the match, so inside double quotes `it's` arrived as `it\\'s`. The callback gets the match as it is. If the old code removed those backslashes with `stripslashes()`, drop that call too.",
+        "A single `e` pattern in a pattern array makes the whole call return null. If only some patterns have `e`, move them into a separate `preg_replace_callback()` call and keep the order.",
+      ],
+    },
+    before: "$title = preg_replace('/(\\w+)/e', 'ucfirst(\"$1\")', $title);",
+    after: "$title = preg_replace_callback('/(\\w+)/', function ($m) {\n    return ucfirst($m[1]);\n}, $title);",
+  },
+  "removed.reserved_alias": {
+    steps: {
+      tr: [
+        "Takma adı ayrılmış olmayan bir adla değiştirin; önerilen satır `Base` önekini kullanır (`use App\\Item as BaseObject;`).",
+        "Bu dosyada eski kısa adın geçtiği her yeri yeni adla değiştirin: `new`, `extends`, `implements`, `instanceof`, `catch`, tip bildirimleri, `::class` ve statik çağrılar. Takma ad yalnızca bu dosyada geçerli, başka dosyaya dokunmanız gerekmez.",
+        "`as` olmadan içe aktarılan sınıfın kendi adı ayrılmışsa (`use Lib\\String;`) sınıf da hedef sürümde tanımlanamaz. Projenizin sınıfıysa onu da yeniden adlandırın; bir paketten geliyorsa paketin adı değiştiren sürümüne geçin.",
+      ],
+      en: [
+        "Replace the alias with a name that isn't reserved; the suggested line uses a `Base` prefix (`use App\\Item as BaseObject;`).",
+        "Change every place in this file that uses the old short name: `new`, `extends`, `implements`, `instanceof`, `catch`, type declarations, `::class` and static calls. The alias only applies in this file, so other files stay as they are.",
+        "If the class imported without `as` has a reserved name itself (`use Lib\\String;`), the class can't be declared on the target version either. Rename it too if it's your project's class; if it comes from a package, move to a release of the package that renamed it.",
+      ],
+    },
+    before: "use App\\Item as Object;\n\nfunction save(Object $item) {}",
+    after: "use App\\Item as BaseObject;\n\nfunction save(BaseObject $item) {}",
+  },
+  "removed.resource_check": {
+    steps: {
+      tr: [
+        "Değeri oluşturduğunuz yerde başarıyı `false` ile denetleyin: bu fonksiyonlar hata olunca hâlâ false döndürür. `if (!is_resource($ch))` → `if ($ch === false)`.",
+        "Değer kapatılmış ya da silinmiş olabiliyorsa (örneğin yıkıcıda) iki sürümde de çalışan biçimi kullanın: `is_resource($ch) || $ch instanceof \\CurlHandle`. Sınıf adı fonksiyona göre değişir (`GdImage`, `PgSql\\Connection`, `Socket` gibi); hedef sürümde `get_debug_type($ch)` adı verir.",
+        "PHP 8'de `curl_close()` gibi bazı kapatma fonksiyonları bir şey yapmaz ve nesne kapatıldıktan sonra da geçerli görünür. Kapattıktan sonra değişkeni null yapın (`$ch = null;`) ki denetim false dönsün.",
+        "`get_resource_type($h)` bu değerler için TypeError fırlatır; türü `instanceof` ya da `get_debug_type()` ile öğrenin.",
+      ],
+      en: [
+        "Where the value is created, check for failure with `false`: these functions still return false on errors. `if (!is_resource($ch))` → `if ($ch === false)`.",
+        "Where the value may have been closed or removed (for example in a destructor), use a check that works on both versions: `is_resource($ch) || $ch instanceof \\CurlHandle`. The class depends on the function (`GdImage`, `PgSql\\Connection`, `Socket` and so on); `get_debug_type($ch)` names it on the target version.",
+        "On PHP 8 some close functions, such as `curl_close()`, do nothing, and the object still looks valid after closing. Set the variable to null after closing (`$ch = null;`) so the check returns false.",
+        "`get_resource_type($h)` throws TypeError for these values; find the type with `instanceof` or `get_debug_type()`.",
+      ],
+    },
+    before: "$ch = curl_init($url);\nif (!is_resource($ch)) {\n    throw new RuntimeException('curl');\n}",
+    after: "$ch = curl_init($url);\nif ($ch === false) {\n    throw new RuntimeException('curl');\n}",
+  },
+  "removed.static_call_to_instance_method": {
+    steps: {
+      tr: [
+        "Metot `$this` kullanmıyorsa bildirimine `static` ekleyin; çağrılar olduğu gibi kalır. Üst ya da alt sınıflarda aynı adlı statik olmayan bir metot varsa PHP sınıfı yüklerken hata verir, o zaman bir sonraki adıma geçin.",
+        "Metot `$this` kullanıyorsa bu satır çalıştığında zaten her sürümde hata veriyordu. Bir nesne üzerinden çağırın: elinizdeki nesneyle `$cart->total()` ya da `(new Cart())->total()`.",
+        "`['Cart', 'total']` ve `'Cart::total'` gibi çağrılabilirler PHP 8'de geçersizdir ve `is_callable()` bunlar için false döndürür. Metodu static yapın ya da nesneyle verin: `[new Cart(), 'total']`.",
+      ],
+      en: [
+        "If the method doesn't use `$this`, add `static` to its declaration and the calls stay as they are. If a parent or child class has a non-static method with the same name, PHP fails when it loads the class; go to the next step then.",
+        "If the method uses `$this`, this line already failed on every version when it ran. Call it on an object: the one you already have (`$cart->total()`) or `(new Cart())->total()`.",
+        "Callables such as `['Cart', 'total']` and `'Cart::total'` are invalid on PHP 8, and `is_callable()` returns false for them. Make the method static or pass an object: `[new Cart(), 'total']`.",
+      ],
+    },
+    before: "class Price\n{\n    public function format($amount)\n    {\n        return number_format($amount, 2);\n    }\n}\n\necho Price::format(10);",
+    after: "class Price\n{\n    public static function format($amount)\n    {\n        return number_format($amount, 2);\n    }\n}\n\necho Price::format(10);",
+  },
+  "removed.too_few_arguments": {
+    steps: {
+      tr: [
+        "Bildirime bakıp çağrının vermediği parametreleri bulun: varsayılan değeri olmayan her parametre verilmeli.",
+        "Eski davranışı korumak için eksik argümanları `null` olarak verin: `pay(10)` → `pay(10, null)`. PHP 7.0 ve öncesinde bu parametreler de null oluyordu.",
+        "Parametre her çağrıda isteğe bağlıysa bildirime varsayılan değer ekleyin (`$currency = null`). Varsayılan yalnızca sondaki parametrelere işe yarar: zorunlu bir parametreden önce gelen varsayılan yok sayılır ve PHP 8 kullanımdan kalkma uyarısı verir.",
+      ],
+      en: [
+        "Look at the declaration and find the parameters the call leaves out: every parameter without a default has to be passed.",
+        "To keep the old behavior, pass the missing arguments as `null`: `pay(10)` → `pay(10, null)`. On PHP 7.0 and before those parameters were null too.",
+        "If the parameter is optional for every caller, give it a default in the declaration (`$currency = null`). Defaults only work on trailing parameters: a default before a required parameter is ignored, and PHP 8 raises a deprecation warning for it.",
+      ],
+    },
+    before: "function pay($amount, $currency, $note = '') {}\n\npay(10);",
+    after: "function pay($amount, $currency, $note = '') {}\n\npay(10, null);",
+  },
+  "syntax.unbalanced": {
+    steps: {
+      tr: [
+        "Dosyayı projenin bugünkü PHP sürümüyle `php -l` ile denetleyin; PHP hatanın satırını söyler. Ferry eşleşmeyen ilk parantezi gösterir, asıl hata daha yukarıda olabilir.",
+        "Dosya hiçbir sürümde derlenmediği için proje onu büyük olasılıkla hiç yüklemiyor: yarım kalmış bir kopya, eski bir yedek ya da bir birleştirmede bozulmuş bir dosya olabilir. Git geçmişinde bozulduğu değişikliği bulun.",
+        "Dosya kullanılmıyorsa silin ya da taramanın dışında bırakın. Kullanılıyorsa parantezi düzeltip projeyi yeniden tarayın; Ferry dosyanın geri kalanını yanlış okumuş olabilir.",
+        "`php -l` hata bulmuyorsa Ferry dosyayı yanlış okumuştur ve bu dosyadaki bulgular eksik olabilir.",
+      ],
+      en: [
+        "Check the file with `php -l` on the PHP version the project runs today; PHP reports the line of the error. Ferry points at the first bracket it couldn't match, and the real mistake can be higher up.",
+        "Since the file doesn't compile on any version, the project most likely never loads it: it may be a half-finished copy, an old backup or a file broken in a merge. Find the change that broke it in the Git history.",
+        "If the file isn't used, delete it or leave it out of the scan. If it is, fix the bracket and scan the project again; Ferry may have misread the rest of the file.",
+        "If `php -l` finds no error, Ferry misread the file and its findings for it may be incomplete.",
+      ],
+    },
+    before: "if ($user) {\n    echo $user->name;\n",
+    after: "if ($user) {\n    echo $user->name;\n}",
+  },
 };

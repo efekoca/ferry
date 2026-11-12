@@ -3518,7 +3518,7 @@ fn serializable_without_magic(tokens: &[Token]) -> Vec<usize> {
         .collect()
 }
 
-const RESOURCE_OBJECTS: [(&str, u32, u32); 58] = [
+const RESOURCE_OBJECTS: [(&str, u32, u32); 57] = [
     ("curl_init", 8, 0),
     ("curl_multi_init", 8, 0),
     ("curl_share_init", 8, 0),
@@ -3576,7 +3576,6 @@ const RESOURCE_OBJECTS: [(&str, u32, u32); 58] = [
     ("odbc_exec", 8, 4),
     ("odbc_pconnect", 8, 4),
     ("odbc_prepare", 8, 4),
-    ("odbc_execute", 8, 4),
 ];
 
 fn resource_object(name: &str) -> Option<PhpVersion> {

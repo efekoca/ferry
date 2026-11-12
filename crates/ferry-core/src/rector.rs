@@ -380,6 +380,7 @@ const RULE_TITLES: &[(&str, Text)] = &[
     ("RemoveOverrideWithoutParent", Text::new("Karşılığı olmayan #[\\Override] silinir", "Remove #[\\Override] with nothing to override")),
     ("DeclareStaticOnce", Text::new("Tekrarlanan static değişken bir kez tanımlanır", "Declare a repeated static variable once")),
     ("GuardBuiltinFunction", Text::same("function x() → if (!function_exists('x')) { function x() }")),
+    ("LaravelArrayFirstToArr", Text::same("array_first($a, $callback) → Arr::first($a, $callback)")),
     (
         "ParenthesizeNestedTernaryRector",
         Text::new("İç içe ternary paranteze alınır (eski davranış korunur)", "Parenthesize nested ternaries (keeps the old behaviour)"),

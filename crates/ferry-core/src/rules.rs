@@ -1902,8 +1902,8 @@ pub mod patterns {
         replacement: tx("başka bir değişken adı kullanın", "use another variable name"),
         fix: FixKind::Manual,
         note: Text::new(
-            "PHP 7.1'den beri $this değişkenine atama yapmak derleme hatası verir ve dosya hiç çalışmaz.",
-            "Since PHP 7.1, assigning to $this is a compile-time error and the file never runs.",
+            "PHP 7.1'den beri $this hiçbir yoldan değer alamaz: parametre, catch ya da foreach değişkeni olarak kullanmak da derleme hatası verir ve dosya hiç çalışmaz. Doğrudan atama, global $this ve list() ile atama eski sürümlerde de derleme hatasıydı.",
+            "Since PHP 7.1, $this can't receive a value in any way: using it as a parameter, a catch variable or a foreach variable is a compile-time error too, and the file never runs. Assigning to it directly, global $this and list() assignments were compile errors on older versions as well.",
         ),
     };
     pub const OVERRIDE_WITHOUT_PARENT: PatternRule = PatternRule {
