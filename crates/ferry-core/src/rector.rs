@@ -208,6 +208,10 @@ const LIKELY_RULES: &[&str] = &[
     "MbBase64ToBase64Decode",
     "DropMtRandPhpMode",
     "RemoveDeprecatedIniSetting",
+    "ErrorReportingMaskCheck",
+    "ExceptionHandlerTakesThrowable",
+    "RemoveOverrideWithoutParent",
+    "GuardBuiltinFunction",
 ];
 
 const RULE_TITLES: &[(&str, Text)] = &[
@@ -363,6 +367,19 @@ const RULE_TITLES: &[(&str, Text)] = &[
     ("MbBase64ToBase64Decode", Text::same("mb_convert_encoding($s, …, 'BASE64') → base64_decode()")),
     ("DropMtRandPhpMode", Text::same("mt_srand($seed, MT_RAND_PHP) → mt_srand($seed)")),
     ("RemoveDeprecatedIniSetting", Text::new("Kullanımdan kalkan ini ayarı silinir", "Remove the deprecated ini setting")),
+    ("SpaceHashBracketComment", Text::same("#[ … → # [ …")),
+    ("ErrorReportingMaskCheck", Text::same("error_reporting() == 0 → !(error_reporting() & $errno)")),
+    (
+        "DropErrorContextParameter",
+        Text::new(
+            "Hata işleyicisinin kullanılmayan $errcontext parametresi silinir",
+            "Drop the error handler's unused $errcontext parameter",
+        ),
+    ),
+    ("ExceptionHandlerTakesThrowable", Text::same("set_exception_handler(function (Exception $e)) → Throwable")),
+    ("RemoveOverrideWithoutParent", Text::new("Karşılığı olmayan #[\\Override] silinir", "Remove #[\\Override] with nothing to override")),
+    ("DeclareStaticOnce", Text::new("Tekrarlanan static değişken bir kez tanımlanır", "Declare a repeated static variable once")),
+    ("GuardBuiltinFunction", Text::same("function x() → if (!function_exists('x')) { function x() }")),
     (
         "ParenthesizeNestedTernaryRector",
         Text::new("İç içe ternary paranteze alınır (eski davranış korunur)", "Parenthesize nested ternaries (keeps the old behaviour)"),

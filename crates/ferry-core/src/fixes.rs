@@ -103,6 +103,12 @@ pub const BASE64_ENCODE: &str = "Ferry\\Php82\\MbBase64ToBase64Encode";
 pub const BASE64_DECODE: &str = "Ferry\\Php82\\MbBase64ToBase64Decode";
 pub const MT_RAND_MODE: &str = "Ferry\\Php83\\DropMtRandPhpMode";
 pub const INI_REMOVE: &str = "Ferry\\RemoveDeprecatedIniSetting";
+pub const SUPPRESSED_CHECK: &str = "Ferry\\Php80\\ErrorReportingMaskCheck";
+pub const ERROR_CONTEXT: &str = "Ferry\\Php80\\DropErrorContextParameter";
+pub const THROWABLE_HANDLER: &str = "Ferry\\Php70\\ExceptionHandlerTakesThrowable";
+pub const OVERRIDE_DROP: &str = "Ferry\\Php83\\RemoveOverrideWithoutParent";
+pub const STATIC_ONCE: &str = "Ferry\\Php83\\DeclareStaticOnce";
+pub const GUARD_FUNCTION: &str = "Ferry\\GuardBuiltinFunction";
 
 /// A finding the user asked to fix with one option: its line, its rule, which of that rule's
 /// findings on the line it is, and the option.
@@ -641,7 +647,13 @@ const NO_OP_FLAGS: &[(&str, &str, Alone)] = &[
 
 /// Rules whose fix reads the code around the finding, and for three of them the version the project
 /// runs on today.
-const SITE_RULES: [&str; 51] = [
+const SITE_RULES: [&str; 57] = [
+    "behavior.error_reporting_zero",
+    "removed.error_handler_context",
+    "removed.exception_handler_type",
+    "removed.override_without_parent",
+    "removed.repeated_static",
+    "removed.redeclared_builtin",
     "deprecated.strftime",
     "deprecated.mb_encoding",
     "deprecated.mt_rand_php",
@@ -921,6 +933,11 @@ pub(crate) fn mentions(src: &str) -> bool {
         "mt_rand_php",
         "ini_set",
         "ini_alter",
+        "error_reporting",
+        "set_error_handler",
+        "set_exception_handler",
+        "override",
+        "function",
     ];
     OCI_ALIASES.iter().map(|(old, _)| *old).chain(NO_OP_CALLS.iter().map(|(_, f, _)| *f)).chain(calls).any(|name| lower.contains(name))
         || (lower.contains("unset") && src.contains("$this"))
@@ -1312,6 +1329,12 @@ fn site_fix(file: &Source, k: usize, rule: &str) -> Option<Fix> {
         "deprecated.gmstrftime" => strftime_fix(file, k, "gmstrftime", "gmdate", GMDATE, GMDATE_NAMES),
         "deprecated.strftime" => strftime_fix(file, k, "strftime", "date", STRFTIME_DATE, STRFTIME_NAMES),
         "deprecated.mb_encoding" => base64_fix(file, k),
+        "behavior.error_reporting_zero" => suppressed_check(file, k),
+        "removed.error_handler_context" => error_context(file, k),
+        "removed.exception_handler_type" => throwable_handler(file, k),
+        "removed.override_without_parent" => override_drop(file, k),
+        "removed.repeated_static" => static_once(file, k),
+        "removed.redeclared_builtin" => guard_function(file, k),
         "deprecated.http_response_header" => last_headers(file, k),
         "deprecated.null_offset" => null_key(file, k),
         "deprecated.partial_callable" => first_class_callable(file, k),
@@ -2378,6 +2401,211 @@ fn ini_choices(file: &Source, k: usize) -> [Option<Choice>; 2] {
         return [None, None];
     }
     [Some(Choice { id: "remove", fix: removal(file, call, close + 1, INI_REMOVE), recommended: false }), None]
+}
+
+/// The function a set_error_handler() or set_exception_handler() call at `call` installs: a closure
+/// written in the call, or a function of this file named in a string.
+fn installed_handler(file: &Source, call: usize) -> Option<crate::declarations::Function> {
+    let tokens = file.tokens;
+    let (_, args) = arguments(tokens, call + 1)?;
+    let &(first, last) = args.first()?;
+    let keyword = (first..=last).find(|&j| tokens[j].is_ident_ci("function"));
+    if let Some(keyword) = keyword.filter(|&j| tokens[first..j].iter().all(|t| t.is_ident_ci("static"))) {
+        return crate::declarations::function_at(tokens, keyword).filter(|f| f.body.is_some_and(|(_, close)| close <= last));
+    }
+    let name = (first == last).then(|| literal_text(&tokens[first])).flatten()?;
+    let methods = crate::analyzer::method_tokens(tokens);
+    let keyword = (0..tokens.len().saturating_sub(1)).find(|&j| {
+        tokens[j].is_ident_ci("function") && !methods.contains(&j) && tokens[j + 1].text.eq_ignore_ascii_case(name.trim_start_matches('\\'))
+    })?;
+    crate::declarations::function_at(tokens, keyword)
+}
+
+/// Whether the function holding `k` is installed with set_error_handler() in this file.
+fn error_handler_around(file: &Source, k: usize) -> Option<crate::declarations::Function> {
+    let tokens = file.tokens;
+    let function = enclosing_function(tokens, k)?;
+    (0..tokens.len())
+        .filter(|&j| function_call(tokens, j, &["set_error_handler"]).is_some())
+        .any(|j| installed_handler(file, j).is_some_and(|h| h.keyword == function.keyword))
+        .then_some(function)
+}
+
+/// `error_reporting() == 0` in an error handler, which PHP 8's `@` no longer satisfies:
+/// `!(error_reporting() & $errno)`, PHP's own way to ask whether this error is reported.
+fn suppressed_check(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    if !tokens.get(k + 2).is_some_and(|t| t.is_punct(")")) || !tokens.get(k + 1).is_some_and(|t| t.is_punct("(")) {
+        return None;
+    }
+    let function = error_handler_around(file, k)?;
+    let errno = &tokens[function.params.first()?.var].text;
+    let eq = |j: usize| tokens.get(j).is_some_and(|t| t.is_punct("==") || t.is_punct("==="));
+    let zero = |j: usize| tokens.get(j).is_some_and(|t| t.text == "0");
+    let (first, last) = if eq(k + 3) && zero(k + 4) {
+        (k, k + 4)
+    } else if k >= 2 && eq(k - 1) && zero(k - 2) {
+        (k - 2, k + 2)
+    } else if k >= 1 && tokens[k - 1].is_punct("!") {
+        (k - 1, k + 2)
+    } else {
+        return None;
+    };
+    let text = format!("!({}error_reporting() & ${errno})", lead(&tokens[k]));
+    Some(Fix { extra: Vec::new(), class: SUPPRESSED_CHECK, start: tokens[first].start, end: tokens[last].end, text })
+}
+
+/// An error handler with a required fifth parameter, which PHP 8 no longer passes: the parameter
+/// goes when the handler never reads it.
+fn error_context(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let handler = installed_handler(file, k).filter(|_| call_named(tokens, k, &["set_error_handler"]))?;
+    let (open, close) = handler.body?;
+    let [.., fourth, fifth] = &handler.params[..] else { return None };
+    if handler.params.len() != 5 || fifth.default.is_some() || tokens[fifth.var - 1].is_punct("...") {
+        return None;
+    }
+    let name = &tokens[fifth.var].text;
+    let reads = (open..close).any(|j| {
+        tokens[j].kind == TokenKind::Variable && tokens[j].text == *name
+            || tokens[j].is_ident_ci("func_get_args")
+            || tokens[j].is_ident_ci("func_get_arg")
+            || tokens[j].is_ident_ci("get_defined_vars")
+    });
+    let comma = (fourth.var..fifth.var).rev().find(|&j| tokens[j].is_punct(","))?;
+    (!reads).then(|| Fix {
+        extra: Vec::new(),
+        class: ERROR_CONTEXT,
+        start: tokens[comma].start,
+        end: tokens[fifth.var].end,
+        text: String::new(),
+    })
+}
+
+/// An exception handler typed `Exception`, which PHP 7 calls with Errors too: `Throwable`.
+fn throwable_handler(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let handler = installed_handler(file, k).filter(|_| call_named(tokens, k, &["set_exception_handler"]))?;
+    let param = handler.params.first()?;
+    let start = (0..param.var).rev().find(|&j| tokens[j].is_punct("(") || tokens[j].is_punct(","))? + 1;
+    let types: Vec<usize> = (start..param.var).filter(|&j| tokens[j].kind == TokenKind::Ident).collect();
+    let [ty] = types[..] else { return None };
+    let text = &tokens[ty].text;
+    let namespaced = !crate::index::namespace_at(&crate::index::namespaces(tokens), ty).is_empty();
+    let replacement = match text.as_str() {
+        t if t.eq_ignore_ascii_case("\\Exception") => "\\Throwable",
+        t if t.eq_ignore_ascii_case("Exception") && !namespaced => "Throwable",
+        _ => return None,
+    };
+    Some(Fix { extra: Vec::new(), class: THROWABLE_HANDLER, start: tokens[ty].start, end: tokens[ty].end, text: replacement.into() })
+}
+
+/// `#[\Override]` on a method of a class that inherits nothing: the attribute, which PHP before
+/// 8.3 ignored.
+fn override_drop(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let open = k.checked_sub(1).filter(|&o| tokens[o].is_punct("#["))?;
+    let fix = |start: usize, end: usize| Some(Fix { extra: Vec::new(), class: OVERRIDE_DROP, start, end, text: String::new() });
+    if tokens.get(k + 1).is_some_and(|t| t.is_punct("]")) {
+        let src = file.src;
+        let (start, end) = (tokens[open].start, tokens[k + 1].end);
+        let line_start = src[..start].rfind('\n').map_or(0, |i| i + 1);
+        let line_end = src[end..].find('\n').map_or(src.len(), |i| end + i + 1);
+        let blank = |s: &str| s.chars().all(char::is_whitespace);
+        if blank(&src[line_start..start]) && blank(&src[end..line_end]) {
+            return fix(line_start, line_end);
+        }
+        let trailing = src[end..].len() - src[end..].trim_start_matches([' ', '\t']).len();
+        return fix(start, end + trailing);
+    }
+    tokens.get(k + 1).filter(|t| t.is_punct(",")).and_then(|_| fix(tokens[k].start, tokens[k + 2].start))
+}
+
+/// A static variable declared more than once in a function, which PHP 8.3 refuses: one
+/// declaration with the initial value of the last one, which is what PHP used for all of them.
+fn static_once(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let name = tokens.get(k).filter(|t| t.kind == TokenKind::Variable)?.text.clone();
+    let function = enclosing_function(tokens, k)?;
+    let (open, close) = function.body?;
+    let nested = nested_bodies(tokens, open, close);
+    let mine = |j: usize| !nested.iter().any(|&(a, b)| a < j && j < b);
+    let mut decls = Vec::new();
+    for j in open + 1..close {
+        if !mine(j) || !tokens[j].is_ident_ci("static") || !starts_statement(tokens, j) || !is_var(tokens, j + 1, &name) {
+            continue;
+        }
+        let semi = (j + 2..close).find(|&e| tokens[e].is_punct(";") || tokens[e].is_punct(","))?;
+        if !tokens[semi].is_punct(";") || !(semi == j + 2 || tokens[j + 2].is_punct("=")) {
+            return None;
+        }
+        decls.push((j, semi));
+    }
+    let (&(first, first_semi), &(last, last_semi)) = (decls.first()?, decls.last()?);
+    if decls.len() < 2 {
+        return None;
+    }
+    let uses = |range: std::ops::Range<usize>| range.into_iter().any(|j| mine(j) && is_var(tokens, j, &name));
+    let rebinds = (open + 1..close).any(|j| {
+        mine(j)
+            && (tokens[j].is_ident_ci("unset") || tokens[j].is_ident_ci("global") || tokens[j].is_punct("&"))
+            && (j + 1..(j + 4).min(close)).any(|n| is_var(tokens, n, &name))
+    });
+    if uses(open + 1..first) || rebinds {
+        return None;
+    }
+    let value = if last_semi > last + 2 { format!(" = {}", file.text(last + 3, last_semi - 1)) } else { String::new() };
+    let statement = format!("static ${name}{value};");
+    let depth = (open + 1..first).fold(0isize, |d, j| d + isize::from(tokens[j].is_punct("{")) - isize::from(tokens[j].is_punct("}")));
+    let mut edits: Vec<(usize, usize, String)> = Vec::new();
+    let removals = if depth == 0 {
+        edits.push((tokens[first].start, tokens[first_semi].end, statement));
+        &decls[1..]
+    } else {
+        let src = file.src;
+        let indent = indent_before(src, tokens[open + 1].start).map(str::to_string);
+        let at = tokens[open].end;
+        edits.push((at, at, indent.map_or_else(|| format!(" {statement}"), |i| format!("{}{i}{statement}", newline(src)))));
+        &decls[..]
+    };
+    for &(j, semi) in removals {
+        let gone = removal(file, j, semi, STATIC_ONCE);
+        edits.push((gone.start, gone.end, gone.text));
+    }
+    let (start, end, text) = edits.remove(0);
+    Some(Fix { class: STATIC_ONCE, start, end, text, extra: edits })
+}
+
+/// A global function PHP has since added, declared without a check: the declaration wrapped in
+/// `if (!function_exists(...))`, so the old PHP still declares it and the new one keeps its own.
+fn guard_function(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let keyword = k.checked_sub(1).filter(|&j| tokens[j].is_ident_ci("function"))?;
+    let function = crate::declarations::function_at(tokens, keyword)?;
+    let (_, close) = function.body?;
+    let name = tokens[k].text.to_ascii_lowercase();
+    let mut depth = 0isize;
+    for (j, t) in tokens[..keyword].iter().enumerate() {
+        depth += isize::from(t.is_punct("{")) - isize::from(t.is_punct("}"));
+        let named = t.kind == TokenKind::Ident && t.text.trim_start_matches('\\').eq_ignore_ascii_case(&name);
+        let leaves = depth == 0 && ["return", "exit", "die", "__halt_compiler"].iter().any(|w| t.is_ident_ci(w));
+        if named || leaves || t.is_ident_ci("namespace") && j + 1 < keyword {
+            return None;
+        }
+    }
+    if depth != 0 || !starts_statement(tokens, keyword) {
+        return None;
+    }
+    let src = file.src;
+    let start = tokens[keyword].start;
+    let end = tokens[close].end;
+    let indent = indent_before(src, start)?;
+    let nl = newline(src);
+    let body = &src[start..end];
+    let pad = if body.contains("<<<") { "" } else { "    " };
+    let inner = body.split(nl).map(|l| if l.trim().is_empty() { l.to_string() } else { format!("{pad}{l}") }).collect::<Vec<_>>().join(nl);
+    let text = format!("if (!function_exists('{}')) {{{nl}{indent}{inner}{nl}{indent}}}", tokens[k].text);
+    Some(Fix { extra: Vec::new(), class: GUARD_FUNCTION, start, end, text })
 }
 
 /// The lines a fix touches, as it leaves them, without their common indentation.
@@ -5466,6 +5694,69 @@ mod tests {
         assert_eq!(
             out,
             "<?php\nmt_srand($seed);\n$e = new \\Random\\Engine\\Mt19937(42);\n$old = ini_set('session.sid_bits_per_character', 6);\n"
+        );
+    }
+
+    #[test]
+    fn error_handlers_ask_for_the_reported_level() {
+        let src = "<?php\nset_error_handler(function ($errno, $errstr) {\n    if (error_reporting() == 0) {\n        return false;\n    }\n});\nfunction handle($no, $str) { if (!error_reporting()) { return; } }\nset_error_handler('handle');\nfunction other() { return 0 === error_reporting(); }\n";
+        let (out, classes) = fixed(src).unwrap();
+        assert_eq!(
+            out,
+            src.replace("if (error_reporting() == 0)", "if (!(error_reporting() & $errno))")
+                .replace("if (!error_reporting())", "if (!(error_reporting() & $no))")
+        );
+        assert_eq!(classes, [SUPPRESSED_CHECK]);
+        assert_eq!(kinds_of(&fixes(src), "behavior.error_reporting_zero"), [FixKind::Likely, FixKind::Likely, FixKind::Manual]);
+    }
+
+    #[test]
+    fn handlers_take_what_php_passes() {
+        let src = "<?php\nset_error_handler(function ($no, $str, $file, $line, $context) { log_it($str); });\nset_error_handler(function ($no, $str, $file, $line, array $ctx) { return $ctx; });\nset_exception_handler(function (Exception $e) { log_it($e); });\nset_exception_handler(static function (\\Exception $e) { log_it($e); });\n";
+        let (out, classes) = fixed(src).unwrap();
+        assert_eq!(
+            out,
+            "<?php\nset_error_handler(function ($no, $str, $file, $line) { log_it($str); });\nset_error_handler(function ($no, $str, $file, $line, array $ctx) { return $ctx; });\nset_exception_handler(function (Throwable $e) { log_it($e); });\nset_exception_handler(static function (\\Throwable $e) { log_it($e); });\n"
+        );
+        assert_eq!(classes, [ERROR_CONTEXT, THROWABLE_HANDLER]);
+        assert_eq!(kinds_of(&fixes(src), "removed.error_handler_context"), [FixKind::Auto, FixKind::Manual]);
+        assert_eq!(kinds_of(&fixes(src), "removed.exception_handler_type"), [FixKind::Likely; 2]);
+    }
+
+    #[test]
+    fn override_attributes_with_nothing_to_override_go() {
+        let src =
+            "<?php\nclass A\n{\n    #[\\Override]\n    public function a() {}\n\n    #[\\Override, Pure]\n    public function b() {}\n}\n";
+        let (out, classes) = fixed(src).unwrap();
+        assert_eq!(out, "<?php\nclass A\n{\n    public function a() {}\n\n    #[Pure]\n    public function b() {}\n}\n");
+        assert_eq!(classes, [OVERRIDE_DROP]);
+    }
+
+    #[test]
+    fn repeated_statics_become_one_with_the_last_value() {
+        let src = "<?php\nfunction f() {\n    static $a = 1;\n    echo $a++;\n    static $a = 5;\n}\nfunction g($n) {\n    if ($n) {\n        static $b = 7;\n    } else {\n        static $b = 9;\n    }\n    return $b;\n}\nfunction h() { echo $c; static $c = 1; static $c = 2; }\n";
+        let (out, classes) = fixed(src).unwrap();
+        assert_eq!(
+            out,
+            "<?php\nfunction f() {\n    static $a = 5;\n    echo $a++;\n}\nfunction g($n) {\n    static $b = 9;\n    if ($n) {\n    } else {\n    }\n    return $b;\n}\nfunction h() { echo $c; static $c = 1; static $c = 2; }\n"
+        );
+        assert_eq!(classes, [STATIC_ONCE]);
+        assert_eq!(kinds_of(&fixes(src), "removed.repeated_static"), [FixKind::Auto, FixKind::Auto, FixKind::Manual]);
+    }
+
+    #[test]
+    fn builtin_function_declarations_get_a_check() {
+        let src = "<?php\nfunction str_contains($haystack, $needle)\n{\n    return strpos($haystack, $needle) !== false;\n}\n";
+        let (out, classes) = fixed(src).unwrap();
+        assert_eq!(
+            out,
+            "<?php\nif (!function_exists('str_contains')) {\n    function str_contains($haystack, $needle)\n    {\n        return strpos($haystack, $needle) !== false;\n    }\n}\n"
+        );
+        assert_eq!(classes, [GUARD_FUNCTION]);
+        assert_eq!(
+            fixed("<?php\necho str_contains('a', 'b') ? 1 : 0;\nfunction str_contains($h, $n) { return false; }\n"),
+            None,
+            "a call above the declaration needs it declared early"
         );
     }
 }
