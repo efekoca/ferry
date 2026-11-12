@@ -1486,7 +1486,7 @@ pub mod patterns {
         severity: Severity::Breaking,
         since: (8, 0),
         replacement: code("// ..."),
-        fix: FixKind::Manual,
+        fix: FixKind::Auto,
         note: Text::new(
             "PHP 8.0'dan itibaren #[ bir attribute başlatır; bu satır artık yorum sayılmaz ve ayrıştırma hatası verir. Yorumu // ile yazın.",
             "Since PHP 8.0, #[ starts an attribute, so this line is no longer a comment and becomes a parse error. Write the comment with // instead.",

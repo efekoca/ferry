@@ -357,6 +357,7 @@ fn function_imports(tokens: &[Token]) -> std::collections::HashMap<(usize, Strin
     out
 }
 
+pub const HASH_COMMENT_FIX: &str = "Ferry\\Php80\\SpaceHashBracketComment";
 pub const CURLY_FIX: &str = "Rector\\Php74\\Rector\\ArrayDimFetch\\CurlyToSquareBracketArrayStringRector";
 pub const BAREWORD_FIX: &str = "Ferry\\QuoteBarewordKeys";
 pub const NEW_BY_REF_FIX: &str = "Ferry\\Php70\\AssignNewWithoutReference";
@@ -481,6 +482,14 @@ pub fn fix_legacy_syntax_with(
     }
     if comparators > 0 {
         applied.push(SORT_COMPARATOR_FIX);
+    }
+    let hashes: Vec<usize> =
+        lex(src).comments.into_iter().map(|(start, _)| start).filter(|&start| src[start..].starts_with("#[")).collect();
+    for &start in &hashes {
+        edits.push((start + 1, start + 1, " ".into()));
+    }
+    if !hashes.is_empty() {
+        applied.push(HASH_COMMENT_FIX);
     }
     let increments = if target >= PhpVersion::new(8, 5) { crate::flow::string_increments(&tokens) } else { Vec::new() };
     for &(var, from, to) in &increments {
@@ -5710,6 +5719,18 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
         assert_eq!(count85("<?php class E { function __set($n, $v) {} function f() { $this->x = 1; } }", id), 0);
         assert_eq!(count85("<?php class F { var $x; function f() { $this->x = 1; } }", id), 0);
         assert_eq!(count85("<?php class G { function f() { return new class(1) extends V { private $a; function __construct($a) { $this->a = $a; } }; } }", id), 0);
+    }
+
+    #[test]
+    fn hash_bracket_comments_get_a_space() {
+        let src = "<?php\n#[note] old comment\n$x = 1; #[x\n#[Attribute]\nclass A {}\n";
+        let (out, applied) = fix_legacy_syntax(src).unwrap();
+        assert_eq!(out, "<?php\n# [note] old comment\n$x = 1; # [x\n#[Attribute]\nclass A {}\n");
+        assert_eq!(applied, [HASH_COMMENT_FIX]);
+        assert!(analyze_source("a.php", src, PhpVersion::new(8, 0))
+            .iter()
+            .filter(|f| f.rule_id == "removed.hash_bracket_comment")
+            .all(|f| f.fix == FixKind::Auto));
     }
 
     #[test]
