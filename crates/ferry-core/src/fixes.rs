@@ -109,6 +109,7 @@ pub const THROWABLE_HANDLER: &str = "Ferry\\Php70\\ExceptionHandlerTakesThrowabl
 pub const OVERRIDE_DROP: &str = "Ferry\\Php83\\RemoveOverrideWithoutParent";
 pub const STATIC_ONCE: &str = "Ferry\\Php83\\DeclareStaticOnce";
 pub const GUARD_FUNCTION: &str = "Ferry\\GuardBuiltinFunction";
+pub const LARAVEL_ARR: &str = "Ferry\\Php85\\LaravelArrayFirstToArr";
 
 /// A finding the user asked to fix with one option: its line, its rule, which of that rule's
 /// findings on the line it is, and the option.
@@ -647,7 +648,8 @@ const NO_OP_FLAGS: &[(&str, &str, Alone)] = &[
 
 /// Rules whose fix reads the code around the finding, and for three of them the version the project
 /// runs on today.
-const SITE_RULES: [&str; 57] = [
+const SITE_RULES: [&str; 58] = [
+    "framework.laravel_native_array_first",
     "behavior.error_reporting_zero",
     "removed.error_handler_context",
     "removed.exception_handler_type",
@@ -938,6 +940,8 @@ pub(crate) fn mentions(src: &str) -> bool {
         "set_exception_handler",
         "override",
         "function",
+        "array_first",
+        "array_last",
     ];
     OCI_ALIASES.iter().map(|(old, _)| *old).chain(NO_OP_CALLS.iter().map(|(_, f, _)| *f)).chain(calls).any(|name| lower.contains(name))
         || (lower.contains("unset") && src.contains("$this"))
@@ -1335,6 +1339,7 @@ fn site_fix(file: &Source, k: usize, rule: &str) -> Option<Fix> {
         "removed.override_without_parent" => override_drop(file, k),
         "removed.repeated_static" => static_once(file, k),
         "removed.redeclared_builtin" => guard_function(file, k),
+        "framework.laravel_native_array_first" => laravel_arr(file, k),
         "deprecated.http_response_header" => last_headers(file, k),
         "deprecated.null_offset" => null_key(file, k),
         "deprecated.partial_callable" => first_class_callable(file, k),
@@ -2574,6 +2579,29 @@ fn static_once(file: &Source, k: usize) -> Option<Fix> {
     }
     let (start, end, text) = edits.remove(0);
     Some(Fix { class: STATIC_ONCE, start, end, text, extra: edits })
+}
+
+/// Laravel's `array_first()` / `array_last()` with a callback or default, which PHP 8.5's own
+/// functions reject: the `Arr` method the helper ran.
+fn laravel_arr(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let tok = &tokens[k];
+    let method = match tok.text.trim_start_matches('\\').to_ascii_lowercase().as_str() {
+        "array_first" => "first",
+        "array_last" => "last",
+        _ => return None,
+    };
+    let call = tokens.get(k + 1).is_some_and(|t| t.is_punct("("))
+        && !k.checked_sub(1).is_some_and(|p| {
+            ["->", "?->", "::"].iter().any(|o| tokens[p].is_punct(o)) || tokens[p].is_ident_ci("function") || tokens[p].is_ident_ci("new")
+        });
+    (call && file.index.framework == Some(crate::project::Framework::Laravel)).then(|| Fix {
+        extra: Vec::new(),
+        class: LARAVEL_ARR,
+        start: tok.start,
+        end: tok.end,
+        text: format!("\\Illuminate\\Support\\Arr::{method}"),
+    })
 }
 
 /// A global function PHP has since added, declared without a check: the declaration wrapped in
@@ -5758,5 +5786,23 @@ mod tests {
             None,
             "a call above the declaration needs it declared early"
         );
+    }
+
+    #[test]
+    fn laravel_array_first_with_a_callback_calls_arr() {
+        let src = "<?php\nnamespace App;\n$a = array_first($items, fn ($i) => $i > 1);\n$b = \\array_last($items, null, 0);\n$c = array_first($items);\n$d = $list->array_first($items, 1);\n";
+        let target = PhpVersion::new(8, 5);
+        let mut index = crate::index::ProjectIndex::from_tokens_for(&crate::lexer::tokenize(src), Some(target));
+        index.framework = Some(crate::project::Framework::Laravel);
+        let index = std::sync::Arc::new(index);
+        let (out, classes) = apply("t.php", src, target, &index, &[]).unwrap();
+        assert_eq!(
+            out,
+            "<?php\nnamespace App;\n$a = \\Illuminate\\Support\\Arr::first($items, fn ($i) => $i > 1);\n$b = \\Illuminate\\Support\\Arr::last($items, null, 0);\n$c = array_first($items);\n$d = $list->array_first($items, 1);\n"
+        );
+        assert_eq!(classes, [LARAVEL_ARR]);
+        let kinds: Vec<FixKind> = crate::analyzer::analyze_source_in("t.php", src, target, &index).into_iter().map(|f| f.fix).collect();
+        assert_eq!(kinds, [FixKind::Auto; 2]);
+        assert_eq!(fixed(src), None, "only in Laravel projects");
     }
 }
