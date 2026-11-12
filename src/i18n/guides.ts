@@ -706,4 +706,294 @@ export const GUIDES: Record<string, Guide> = {
     before: "if ($user) {\n    echo $user->name;\n",
     after: "if ($user) {\n    echo $user->name;\n}",
   },
+  "deprecated.reflection_method": {
+    steps: {
+      tr: [
+        "`$param->getClass()` yerine türü `getType()` ile okuyun: tür `ReflectionNamedType` ve yerleşik değilse `new ReflectionClass($type->getName())`, değilse null.",
+        "`getName()` `self` ya da `parent` döndürebilir; eski `getClass()` bunları sınıfın kendisine çeviriyordu. Bunları `$param->getDeclaringClass()` ve onun `getParentClass()` sonucuyla çözün.",
+        "`isArray()` ve `isCallable()`'ı Ferry kendisi çevirir. Elle yazmanız gerekirse: `$type instanceof ReflectionNamedType && $type->getName() === 'array'` (ya da `'callable'`); `?array` için de true verir.",
+        "`ReflectionFunction::isDisabled()` artık her zaman false döndürür; çağrının yerine `false` yazın. Ferry bunu nesne bir değişkendeyken kendisi yapar, `(new ReflectionFunction($f))->isDisabled()` gibi ifadeleri size bırakır. PHP 8'de devre dışı bırakılan fonksiyonlar hiç tanımlanmaz, `function_exists()` onlar için false döner.",
+      ],
+      en: [
+        "Instead of `$param->getClass()`, read the type with `getType()`: when it's a `ReflectionNamedType` and not built in, `new ReflectionClass($type->getName())`, otherwise null.",
+        "`getName()` can return `self` or `parent`, which the old `getClass()` turned into the class itself. Resolve them with `$param->getDeclaringClass()` and its `getParentClass()`.",
+        "Ferry converts `isArray()` and `isCallable()` itself. To write it by hand: `$type instanceof ReflectionNamedType && $type->getName() === 'array'` (or `'callable'`); it's true for `?array` too.",
+        "`ReflectionFunction::isDisabled()` always returns false now; write `false` in place of the call. Ferry does this when the object is in a variable and leaves expressions such as `(new ReflectionFunction($f))->isDisabled()` to you. On PHP 8 disabled functions aren't defined at all, and `function_exists()` returns false for them.",
+      ],
+    },
+    before: "$class = $param->getClass();",
+    after: "$type = $param->getType();\n$class = $type instanceof ReflectionNamedType && !$type->isBuiltin()\n    ? new ReflectionClass($type->getName())\n    : null;",
+  },
+  "deprecated.xml_set_object": {
+    steps: {
+      tr: [
+        "`xml_set_*_handler()` çağrılarına metot adı yerine nesneyle birlikte bir çağrılabilir verin (`[$handler, 'start']`), sonra `xml_set_object()` satırını silin.",
+        "Eski PHP metot adlarını ayrıştırma başladığında ayarlı olan nesnede, yani en son `xml_set_object()` ile verilende çalıştırıyordu. Aynı ayrıştırıcıda birden fazla `xml_set_object()` varsa çağrılabilirlere o son nesneyi verin.",
+        "Ferry bunu kendisi yapar; ayrıştırıcıda birden fazla `xml_set_object()` varsa ya da metot adlarından biri global bir fonksiyonun da adıysa (örneğin `end`) size bırakır.",
+      ],
+      en: [
+        "Pass each `xml_set_*_handler()` call a callable with the object (`[$handler, 'start']`) instead of a method name, then delete the `xml_set_object()` line.",
+        "Old PHP ran the method names on the object set when parsing started, that is the one from the last `xml_set_object()`. With several `xml_set_object()` calls on one parser, give the callables that last object.",
+        "Ferry does this itself, and leaves it to you when the parser has several `xml_set_object()` calls or a method name is also a global function's name (such as `end`).",
+      ],
+    },
+    before: "xml_set_object($parser, $handler);\nxml_set_element_handler($parser, 'start', 'end');",
+    after: "xml_set_element_handler($parser, [$handler, 'start'], [$handler, 'end']);",
+  },
+  "deprecated.xml_handler_string": {
+    steps: {
+      tr: [
+        "Metot adını nesneyle birlikte verin: `[$handler, 'text']`. Nesne, ayrıştırma başladığında `xml_set_object()` ile ayarlı olandır.",
+        "Bir işleyiciyi kaldırmak için boş metin yerine `null` verin; PHP 8.4 boş metni de kullanımdan kalkmış sayar.",
+        "Global bir fonksiyonun da adı olan metot adlarına dikkat edin (örneğin `end`): nesne ayarlıyken PHP 7.4 nesnenin metodunu çağırıyordu, PHP 8.4 ve sonrası global fonksiyonu çağırır. Bunları da `[$handler, 'end']` biçiminde yazın.",
+      ],
+      en: [
+        "Pass the method name with its object: `[$handler, 'text']`. The object is the one `xml_set_object()` had set when parsing started.",
+        "To remove a handler, pass `null` instead of an empty string; PHP 8.4 deprecates the empty string too.",
+        "Watch for method names that are also global functions (such as `end`): with an object set, PHP 7.4 called the object's method, while PHP 8.4 and later call the global function. Write those as `[$handler, 'end']` too.",
+      ],
+    },
+    before: "xml_set_character_data_handler($parser, 'text');",
+    after: "xml_set_character_data_handler($parser, [$handler, 'text']);",
+  },
+  "deprecated.mysqli_get_client_info": {
+    steps: {
+      tr: [
+        "`$db->get_client_info()` ve `mysqli_get_client_info($db)` yerine argümansız `mysqli_get_client_info()` yazın. İstemci kütüphanesinin sürümü bağlantıya bağlı değildir, sonuç aynıdır.",
+        "Değişkenin gerçekten bir mysqli nesnesi olduğunu kontrol edin; başka bir sınıfın aynı adlı metodu ise dokunmayın.",
+      ],
+      en: [
+        "Replace `$db->get_client_info()` and `mysqli_get_client_info($db)` with `mysqli_get_client_info()` without arguments. The client library's version doesn't depend on the connection, so the result is the same.",
+        "Check that the variable really is a mysqli object; if it's another class's method of the same name, leave it alone.",
+      ],
+    },
+    before: "$client = $db->get_client_info();",
+    after: "$client = mysqli_get_client_info();",
+  },
+  "deprecated.mysqli_init": {
+    steps: {
+      tr: [
+        "mysqli'den türeyen sınıfta `parent::init()` ya da `$this->init()` yerine `parent::__construct()` yazın. Argümansız kurucu bağlanmaz, `init()` gibi yalnızca nesneyi hazırlar; ardından gelen `options()` ve `real_connect()` çağrıları olduğu gibi kalır.",
+        "Sınıf dışında, `init()` metodunu çağırmak yerine nesneyi `mysqli_init()` fonksiyonuyla oluşturun; kullanımdan kalkan yalnızca metot.",
+      ],
+      en: [
+        "In a class that extends mysqli, replace `parent::init()` or `$this->init()` with `parent::__construct()`. Without arguments the constructor doesn't connect; like `init()`, it only prepares the object, and the `options()` and `real_connect()` calls after it stay as they are.",
+        "Outside a class, create the object with the `mysqli_init()` function instead of calling the `init()` method; only the method is deprecated.",
+      ],
+    },
+    before: "public function __construct()\n{\n    parent::init();\n    $this->real_connect('db', 'user', 'secret');\n}",
+    after: "public function __construct()\n{\n    parent::__construct();\n    $this->real_connect('db', 'user', 'secret');\n}",
+  },
+  "deprecated.implicit_argument": {
+    steps: {
+      tr: [
+        "`readdir()`, `rewinddir()` ve `closedir()`'a `opendir()`'ın döndürdüğü handle'ı verin; argümansız ya da null ile son açılan dizini kullanıyorlardı. Ferry dosyada tek `opendir()` varsa bunu kendisi yapar.",
+        "Argümansız `mb_check_encoding()` yalnızca mbstring'in girdiyi çevirirken (örneğin `mb_parse_str()` içinde) bulduğu geçersiz baytları bildiriyordu; bunlar yoksa hep true döndürüyordu.",
+        "İsteği denetlemek istediyseniz dizileri açıkça verin: `mb_check_encoding($_GET, 'UTF-8') && mb_check_encoding($_POST, 'UTF-8')`.",
+      ],
+      en: [
+        "Pass `readdir()`, `rewinddir()` and `closedir()` the handle `opendir()` returned; without an argument or with null they used the last opened directory. Ferry does this itself when the file has a single `opendir()`.",
+        "`mb_check_encoding()` without arguments only reported invalid bytes mbstring found while converting input (for example in `mb_parse_str()`); otherwise it always returned true.",
+        "If you meant to check the request, pass the arrays: `mb_check_encoding($_GET, 'UTF-8') && mb_check_encoding($_POST, 'UTF-8')`.",
+      ],
+    },
+    before: "$dir = opendir($path);\nwhile (($entry = readdir()) !== false) {",
+    after: "$dir = opendir($path);\nwhile (($entry = readdir($dir)) !== false) {",
+  },
+  "removed.magic_variable": {
+    steps: {
+      tr: [
+        "`$HTTP_RAW_POST_DATA` yerine `file_get_contents('php://input')` yazın; isteğin gövdesini verir. İkisi de `multipart/form-data` isteklerinde boştur.",
+        "`$php_errormsg` yalnızca `track_errors` açıkken dolardı ve son hatanın metnini tutardı. Hata verebilen çağrıdan önce `error_clear_last();`, sonra `error_get_last()['message'] ?? null` yazın.",
+        "`track_errors` kapalıysa (varsayılan) `$php_errormsg` hiç tanımlanmazdı; o zaman yerine `null` yazın. Ferry bu ikisini seçenek olarak sunar. `$HTTP_RAW_POST_DATA` ise yalnızca global kapsamda vardı; onu `global` ile almayan fonksiyonlarda Ferry yerine kendisi `null` yazar.",
+      ],
+      en: [
+        "Replace `$HTTP_RAW_POST_DATA` with `file_get_contents('php://input')`, which gives the request body. Both are empty for `multipart/form-data` requests.",
+        "`$php_errormsg` was only set with `track_errors` on and held the text of the last error. Write `error_clear_last();` before the call that can fail and `error_get_last()['message'] ?? null` after it.",
+        "With `track_errors` off (the default), `$php_errormsg` was never set; write `null` in its place then. Ferry offers both as options. `$HTTP_RAW_POST_DATA` only existed in the global scope, so in functions that don't take it with `global`, Ferry writes `null` itself.",
+      ],
+    },
+    before: "$data = @file_get_contents($url);\nif ($data === false) {\n    log_error($php_errormsg);\n}",
+    after: "error_clear_last();\n$data = @file_get_contents($url);\nif ($data === false) {\n    log_error(error_get_last()['message'] ?? null);\n}",
+  },
+  "removed.assert_quiet_eval": {
+    steps: {
+      tr: [
+        "`assert_options(ASSERT_QUIET_EVAL, …)` satırını silin; Ferry bunu kendisi yapar. Ayar yalnızca PHP 8'in artık çalıştırmadığı metin assert'lerini etkiliyordu.",
+        "Sabit başka bir yerde geçiyorsa (bir diziye ya da değişkene konuyorsa) onu o koddan çıkarın. Yerine 5 yazmayın: 5, PHP 7.4'te `ASSERT_QUIET_EVAL`'ın, PHP 8'de `ASSERT_EXCEPTION`'ın değeri.",
+        "Metin olarak yazılmış assert'leri (`assert('$x > 0')`) ifadeye çevirin: `assert($x > 0)`.",
+      ],
+      en: [
+        "Delete the `assert_options(ASSERT_QUIET_EVAL, …)` line; Ferry does this itself. The setting only affected string assertions, which PHP 8 no longer evaluates.",
+        "Where the constant appears elsewhere (put in an array or a variable), take it out of that code. Don't write 5 instead: 5 is `ASSERT_QUIET_EVAL` on PHP 7.4 and `ASSERT_EXCEPTION` on PHP 8.",
+        "Turn assertions written as strings (`assert('$x > 0')`) into expressions: `assert($x > 0)`.",
+      ],
+    },
+    before: "$options = [ASSERT_ACTIVE, ASSERT_QUIET_EVAL];",
+    after: "$options = [ASSERT_ACTIVE];",
+  },
+  "removed.filter_sanitize_magic_quotes": {
+    steps: {
+      tr: [
+        "`FILTER_SANITIZE_MAGIC_QUOTES` yerine `FILTER_SANITIZE_ADD_SLASHES` yazın; sonuç aynıdır, ikisi de `addslashes()` gibi çalışır.",
+        "Ferry bu adı kendisi değiştirir. Değiştirmediyse aynı çağrıyı başka bir bulgunun düzeltmesi yeniden yazıyordur (örneğin `INPUT_REQUEST`); önce o bulguyu düzeltip yeniden tarayın.",
+        "`FILTER_SANITIZE_ADD_SLASHES` PHP 7.3'te geldi; proje daha eski bir sürümde çalışıyorsa değişikliği hedef sürüme geçerken yapın.",
+      ],
+      en: [
+        "Write `FILTER_SANITIZE_ADD_SLASHES` instead of `FILTER_SANITIZE_MAGIC_QUOTES`; the result is the same, both work like `addslashes()`.",
+        "Ferry renames it itself. If it didn't, another finding's fix rewrites the same call (for example `INPUT_REQUEST`); fix that finding first and scan again.",
+        "`FILTER_SANITIZE_ADD_SLASHES` came in PHP 7.3; if the project runs an older version, make the change when you move to the target.",
+      ],
+    },
+    before: "$name = filter_var($name, FILTER_SANITIZE_MAGIC_QUOTES);",
+    after: "$name = filter_var($name, FILTER_SANITIZE_ADD_SLASHES);",
+  },
+  "removed.money_format": {
+    steps: {
+      tr: [
+        "Proje parasal yerel ayar seçmiyorsa Ferry `%i` ve `%n` biçimlerini `sprintf('%.2f', $v)`'ye kendisi çevirir; C yerel ayarında sonuç aynıdır.",
+        "Proje `setlocale(LC_MONETARY, …)` ile bir yerel ayar seçiyorsa eski çıktı para birimini ve ayırıcıları o yerel ayara göre yazıyordu. intl eklentisiyle `NumberFormatter` kullanın: `(new NumberFormatter('tr_TR', NumberFormatter::CURRENCY))->formatCurrency($v, 'TRY')`.",
+        "`NumberFormatter`'ın çıktısı `money_format()`'ınkiyle birebir aynı değildir (boşluklar ve simgenin yeri değişebilir); çıktıyı karşılaştıran testleri güncelleyin.",
+        "Para birimi simgesi gerekmiyorsa `number_format($v, 2, ',', '.')` ile ayırıcıları kendiniz seçin.",
+      ],
+      en: [
+        "If the project sets no monetary locale, Ferry turns the `%i` and `%n` formats into `sprintf('%.2f', $v)` itself; in the C locale the result is the same.",
+        "If the project picks a locale with `setlocale(LC_MONETARY, …)`, the old output wrote the currency and separators for that locale. Use `NumberFormatter` from the intl extension: `(new NumberFormatter('tr_TR', NumberFormatter::CURRENCY))->formatCurrency($v, 'TRY')`.",
+        "`NumberFormatter`'s output isn't exactly `money_format()`'s (spacing and the symbol's position can differ); update tests that compare the output.",
+        "If you don't need a currency symbol, choose the separators yourself with `number_format($v, 2, ',', '.')`.",
+      ],
+    },
+    before: "setlocale(LC_MONETARY, 'tr_TR');\necho money_format('%n', $total);",
+    after: "$money = new NumberFormatter('tr_TR', NumberFormatter::CURRENCY);\necho $money->formatCurrency($total, 'TRY');",
+  },
+  "deprecated.numberformatter_type_currency": {
+    steps: {
+      tr: [
+        "`$fmt->format($v, NumberFormatter::TYPE_CURRENCY)` yerine `$fmt->formatCurrency($v, 'EUR')` yazın; para birimini ISO 4217 koduyla verin ve biçimlendiriciyi `NumberFormatter::CURRENCY` stiliyle oluşturun.",
+        "`parse($text, NumberFormatter::TYPE_CURRENCY)` yerine `parseCurrency($text, $currency)` yazın; okunan para birimi kodu ikinci argümana yazılır.",
+        "PHP 8.0'dan beri `format()` ve `parse()` bu türü kabul etmiyor. Sabit yalnızca bir değer olarak saklanıyorsa Ferry'nin seçenekleri onu yeni metoda ya da `false`'a çevirmeyi önerir.",
+      ],
+      en: [
+        "Replace `$fmt->format($v, NumberFormatter::TYPE_CURRENCY)` with `$fmt->formatCurrency($v, 'EUR')`; give the currency as an ISO 4217 code and create the formatter with the `NumberFormatter::CURRENCY` style.",
+        "Replace `parse($text, NumberFormatter::TYPE_CURRENCY)` with `parseCurrency($text, $currency)`; the currency code it reads is written to the second argument.",
+        "Since PHP 8.0, `format()` and `parse()` don't accept this type. Where the constant is only stored as a value, Ferry's options offer to change it to the new method or to `false`.",
+      ],
+    },
+    before: "$text = $fmt->format($price, NumberFormatter::TYPE_CURRENCY);",
+    after: "$text = $fmt->formatCurrency($price, 'EUR');",
+  },
+  "deprecated.splfileinfo_bad_state_ex": {
+    steps: {
+      tr: [
+        "Bu metot her çağrıldığında hata fırlatır: PHP 7'de `LogicException`, PHP 8'de `Error`. Yani sonrasındaki kod hiç çalışmıyordu.",
+        "Sonraki kodun çalışması gerekiyorsa çağrıyı silin (*Çağrıyı sil* seçeneği).",
+        "Hata isteniyorsa kendiniz fırlatın (*Hatayı koru* seçeneği): `throw new \\Error('The parent constructor was not called: the object is in an invalid state');`. PHP 7'de `LogicException` yakalayan kod varsa onu `\\Error` yakalayacak şekilde değiştirin.",
+      ],
+      en: [
+        "This method throws every time it's called: `LogicException` on PHP 7, `Error` on PHP 8. So the code after it never ran.",
+        "If the code after it should run, delete the call (the *Delete the call* option).",
+        "If the error is wanted, throw it yourself (the *Keep the error* option): `throw new \\Error('The parent constructor was not called: the object is in an invalid state');`. If code catches `LogicException` from it on PHP 7, change it to catch `\\Error`.",
+      ],
+    },
+    before: "$file->_bad_state_ex();",
+    after: "throw new \\Error('The parent constructor was not called: the object is in an invalid state');",
+  },
+  "server.php_version_pin": {
+    steps: {
+      tr: [
+        "Düzeltmeler ekranında **Sürüm dosyaları**'nı seçin: Ferry Dockerfile, CI ve Compose dosyalarındaki PHP sürümünü hedefe taşır ve kodla aynı önizleme, yedek ve geri alma ile yazar.",
+        "CI'daki sürüm listelerine hedef eklenir, eski sürümler kalır; digest ile sabitlenmiş imajlara dokunulmaz, onları kendiniz güncelleyin.",
+        "Tam yama sürümü yazan satırlarda (`8.5.0`) kullandığınız yama sürümünü yazın.",
+        "Sunucunun ya da barındırma panelinin PHP sürümünü ayrıca değiştirin; Ferry yalnızca projedeki dosyaları günceller.",
+      ],
+      en: [
+        "On the Fixes screen, choose **Version files**: Ferry moves the PHP version in Dockerfile, CI and Compose files to the target and writes it with the same preview, backup and undo as the code.",
+        "Version lists in CI get the target added and keep the old versions; images pinned by digest aren't touched, so update those yourself.",
+        "Where a line names an exact release (`8.5.0`), write the patch release you use.",
+        "Change the PHP version of the server or hosting panel too; Ferry only updates files in the project.",
+      ],
+    },
+    before: "FROM php:7.4-apache",
+    after: "FROM php:8.5-apache",
+  },
+  "server.composer1_lock": {
+    steps: {
+      tr: [
+        "Composer 2'yi kurun ya da güncelleyin: `composer self-update --2`. CI ve Dockerfile'da da Composer 2 kullanın (örneğin `composer:2` imajı).",
+        "`composer update --lock` çalıştırın: Composer 2 kilitli sürümleri değiştirmeden dosyayı kendi biçiminde yeniden yazar.",
+        "Composer 1'e bağlı eklentiler Composer 2'de çalışmaz; Ferry bunları ayrı bulgu olarak gösterir, önce onları güncelleyin.",
+        "Ardından paketleri hedef PHP sürümünü destekleyen sürümlere yükseltin; Bağımlılıklar ekranı hangilerinin desteklemediğini gösterir.",
+      ],
+      en: [
+        "Install or update Composer 2: `composer self-update --2`. Use Composer 2 in CI and Dockerfiles too (for example the `composer:2` image).",
+        "Run `composer update --lock`: Composer 2 rewrites the file in its own format without changing the locked versions.",
+        "Plugins tied to Composer 1 don't work on Composer 2; Ferry lists them as separate findings, so update those first.",
+        "Then move packages to releases that support the target PHP; the Dependencies screen shows which ones don't.",
+      ],
+    },
+  },
+  "server.php_value_outside_mod_php": {
+    steps: {
+      tr: [
+        "Ayarları `.htaccess` ile aynı klasördeki bir `.user.ini` dosyasına `ad = değer` biçiminde taşıyın: `php_value upload_max_filesize 16M` → `upload_max_filesize = 16M`, `php_flag display_errors off` → `display_errors = Off`. PHP-FPM ve CGI bu dosyayı okur.",
+        "`.htaccess`'teki satırları `<IfModule mod_php.c>` … `</IfModule>` içine alın; böylece mod_php kullanan sunucular da ayarları almaya devam eder ve PHP-FPM'de 500 hatası çıkmaz.",
+        "PHP `.user.ini`'yi varsayılan olarak beş dakikada bir yeniden okur (`user_ini.cache_ttl`); değişiklik hemen görünmezse bekleyin ya da PHP-FPM'i yeniden başlatın.",
+        "`php_admin_value` ve `php_admin_flag` `.user.ini`'de kullanılamaz; bunları sunucunun PHP-FPM havuz yapılandırmasına yazın.",
+      ],
+      en: [
+        "Move the settings to a `.user.ini` file in the same folder as `.htaccess`, as `name = value`: `php_value upload_max_filesize 16M` → `upload_max_filesize = 16M`, `php_flag display_errors off` → `display_errors = Off`. PHP-FPM and CGI read this file.",
+        "Wrap the lines in `.htaccess` in `<IfModule mod_php.c>` … `</IfModule>`, so servers that use mod_php keep the settings and PHP-FPM doesn't answer with a 500 error.",
+        "PHP rereads `.user.ini` every five minutes by default (`user_ini.cache_ttl`); if the change doesn't show at once, wait or restart PHP-FPM.",
+        "`php_admin_value` and `php_admin_flag` can't go in `.user.ini`; put those in the server's PHP-FPM pool configuration.",
+      ],
+    },
+    before: "php_value upload_max_filesize 16M\nphp_flag display_errors off",
+    after: "<IfModule mod_php.c>\n    php_value upload_max_filesize 16M\n    php_flag display_errors off\n</IfModule>",
+  },
+  "server.old_php_module": {
+    steps: {
+      tr: [
+        "`<IfModule mod_php7.c>`'yi `<IfModule mod_php.c>` yapın; PHP 8'in Apache modülü bu adı kullanır.",
+        "Sunucu geçiş sırasında bir süre eski sürümle çalışacaksa bloğu ikiye çoğaltın, biri eski adla, biri `mod_php.c` ile; ayarlar iki sürümde de uygulanır.",
+        "Sunucu PHP-FPM kullanıyorsa bu blok hiç uygulanmaz; içindeki ayarları `.user.ini` dosyasına taşıyın.",
+      ],
+      en: [
+        "Change `<IfModule mod_php7.c>` to `<IfModule mod_php.c>`; PHP 8's Apache module uses that name.",
+        "If the server keeps running the old version for a while during the move, duplicate the block, one with the old name and one with `mod_php.c`, so the settings apply on both.",
+        "If the server uses PHP-FPM, this block never applies; move the settings inside it to a `.user.ini` file.",
+      ],
+    },
+    before: "<IfModule mod_php7.c>\n    php_value memory_limit 256M\n</IfModule>",
+    after: "<IfModule mod_php.c>\n    php_value memory_limit 256M\n</IfModule>",
+  },
+  "framework.wordpress_version": {
+    steps: {
+      tr: [
+        "Yedek alın, sonra WordPress'i yönetim panelindeki Güncellemeler sayfasından ya da WP-CLI ile güncelleyin: `wp core update`.",
+        "`wp-includes/version.php` WordPress'in kendi dosyasıdır; sürüm numarasını elle değiştirmeyin.",
+        "Eklentileri ve temaları da güncelleyin. Ferry `wp-content` altındaki eklenti ve tema kodunu da tarar; güncellemeden sonra projeyi yeniden tarayın.",
+      ],
+      en: [
+        "Take a backup, then update WordPress from the Updates page in the dashboard or with WP-CLI: `wp core update`.",
+        "`wp-includes/version.php` is WordPress's own file; don't change the version number by hand.",
+        "Update plugins and themes too. Ferry also scans plugin and theme code under `wp-content`; scan the project again after updating.",
+      ],
+    },
+  },
+  "framework.laravel_version": {
+    steps: {
+      tr: [
+        "Önerilen satırdaki komutla Laravel'i hedef PHP sürümünü destekleyen sürüme yükseltin.",
+        "Birden fazla ana sürüm atlanıyorsa sürüm sürüm ilerleyin ve her adımda Laravel'in resmi yükseltme kılavuzunu izleyin.",
+        "Laravel'e bağlı paketleri de güncelleyin; Bağımlılıklar ekranı hangilerinin hedefi desteklemediğini gösterir.",
+        "Testleri çalıştırın; Gerçek test ekranı onları eski ve yeni sürümde karşılaştırabilir.",
+      ],
+      en: [
+        "Upgrade Laravel to a release that supports the target PHP with the command in the suggested line.",
+        "If you skip more than one major release, go one at a time and follow Laravel's official upgrade guide at each step.",
+        "Update the packages that depend on Laravel too; the Dependencies screen shows which of them don't support the target.",
+        "Run the tests; the Real test screen can compare them on the old and new version.",
+      ],
+    },
+  },
 };
