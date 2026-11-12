@@ -1974,8 +1974,8 @@ pub mod patterns {
         replacement: None,
         fix: FixKind::Manual,
         note: Text::new(
-            "Bu metot projedeki bir üst sınıfın, trait'in ya da arayüzün metodunu eziyor ama imzası onunla uyumlu değil: parametre sayısı, tipleri, referansla geçiş, static olması ya da dönüş tipi farklı. PHP 7 üst sınıf metotlarında bunu yalnızca uyarıyla geçiyordu (arayüz ve soyut metotlarda zaten hataydı); PHP 8 her durumda sınıfı yüklerken ölümcül hata verir. İmzayı aşağıdakine uyacak şekilde düzenleyin.",
-            "This method overrides a method of a parent class, trait or interface in the project, but its signature doesn't match it: the parameter count, types, by-reference passing, static modifier or return type differ. PHP 7 only warned for parent class methods (interface and abstract methods were already fatal); PHP 8 throws a fatal error in every case when it loads the class. Make the signature compatible with the one below.",
+            "Bu metot projedeki ya da bir Composer paketindeki bir üst sınıfın, trait'in veya arayüzün metodunu eziyor ama imzası onunla uyumlu değil: parametre sayısı, tipleri, referansla geçiş, static olması ya da dönüş tipi farklı. PHP 7 üst sınıf metotlarında bunu yalnızca uyarıyla geçiyordu (arayüz ve soyut metotlarda zaten hataydı); PHP 8 her durumda sınıfı yüklerken ölümcül hata verir. İmzayı aşağıdakine uyacak şekilde düzenleyin.",
+            "This method overrides a method of a parent class, trait or interface in the project or one of its Composer packages, but its signature doesn't match it: the parameter count, types, by-reference passing, static modifier or return type differ. PHP 7 only warned for parent class methods (interface and abstract methods were already fatal); PHP 8 throws a fatal error in every case when it loads the class. Make the signature compatible with the one below.",
         ),
     };
     pub const HTTP_RESPONSE_HEADER: PatternRule = PatternRule {
