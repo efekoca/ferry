@@ -117,6 +117,8 @@ Findings Ferry can't fix on its own get step-by-step help in their detail, with 
 
 On the three demo projects scanned for PHP 8.5, Ferry's own fixes brought the findings left to you from 171 of 246 down to 57. 125 are now automatic and 64 marked for review, up from 52 and 23, and all 57 come with a guide, a package or options to choose from.
 
+On the 13 old releases `scripts/fetch-corpus.sh` downloads, framework core included, Ferry reports 15,358 findings for PHP 8.5: 11,604 automatic, 817 for review and 2,937 manual, of which 2,210 come with a guide, a package or options. Of the 5,667 files the preview changes, all but three pass `php -l` on PHP 8.5, and each of those three still holds a finding Ferry leaves manual.
+
 ### Dependencies that block the upgrade
 
 The **Dependencies** page checks every locked package against the target version, using the PHP requirement each package declares in `composer.lock`. The project's own PHP constraint in `composer.json` is checked too. A `conflict` entry for `php`, in `composer.json` or in a locked package, is taken into account as well.
@@ -361,7 +363,7 @@ pnpm tauri build          # installers → target/release/bundle/
 
 To run the tests against real Rector, point `FERRY_TEST_TOOLS` to a folder where Rector is installed: `FERRY_TEST_TOOLS=/path/to/tools cargo test --workspace`.
 
-`scripts/fetch-corpus.sh` downloads old releases of WordPress, Drupal, CodeIgniter, phpBB, Joomla, Magento, PrestaShop, Laravel, Symfony, CakePHP, Yii, MediaWiki and Moodle, and `CORPUS=<folder> CORPUS_PHP=$(which php) cargo test -p ferry-core --test corpus -- --ignored --nocapture` compares the scanner with what that PHP itself reports for them.
+`scripts/fetch-corpus.sh` downloads old releases of WordPress, Drupal, CodeIgniter, phpBB, Joomla, Magento, PrestaShop, Laravel, Symfony, CakePHP, Yii, MediaWiki and Moodle, and `CORPUS=<folder> CORPUS_PHP=$(which php) cargo test -p ferry-core --test corpus -- --ignored --nocapture` compares the scanner with what that PHP itself reports for them. With `FERRY_TEST_TOOLS` and `MEASURE_OUT=<folder>` set, `cargo test -p ferry-core --test corpus fix_measure -- --ignored` also prepares the compatibility preview for each project and writes its findings and every changed file, before and after, so the result can be counted and linted.
 
 `crates/ferry-core/src/symbols.rs` is generated from PHP itself: `scripts/php-symbols/dump.sh <folder>` builds a Docker image per PHP version from 7.0 to 8.5 with the same extensions and dumps every built-in function, class, method, constant and ini setting with reflection, and `node scripts/php-symbols/generate.mjs <folder> > crates/ferry-core/src/symbols.rs` lists what each version removed or deprecated. `scripts/php-symbols/verify.php` checks the table against a PHP, and the `symbols` test fails if the scanner misses any of them. When a new PHP version comes out, add it to `dump.sh` and regenerate.
 

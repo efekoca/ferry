@@ -40,6 +40,7 @@ pub(crate) struct Param {
     pub(crate) var: usize,
     types: Vec<String>,
     pub(crate) default: Option<usize>,
+    variadic: bool,
 }
 
 fn params(tokens: &[Token], open: usize, close: usize) -> Vec<Param> {
@@ -54,7 +55,7 @@ fn params(tokens: &[Token], open: usize, close: usize) -> Vec<Param> {
                 let modifiers = ["public", "protected", "private", "readonly"];
                 let ty: Vec<Token> = part[..v].iter().filter(|t| !modifiers.iter().any(|m| t.is_ident_ci(m))).cloned().collect();
                 let default = part.iter().position(|t| t.is_punct("=")).filter(|&e| e + 2 == part.len()).map(|e| start + e + 1);
-                out.push(Param { var: start + v, types: type_parts(&ty), default });
+                out.push(Param { var: start + v, types: type_parts(&ty), default, variadic: part[..v].iter().any(|t| t.is_punct("...")) });
             }
             start = k + 1;
         } else if t.is_punct("(") || t.is_punct("[") || t.is_punct("{") || t.is_punct("#[") {
@@ -184,7 +185,11 @@ const MAGIC_RETURNS: &[(&str, &[&str])] = &[
     ("__wakeup", &["void"]),
 ];
 
+/// Magic methods whose argument count PHP checks since 8.0; the others were checked before.
+const MAGIC_ARITY: &[(&str, usize)] = &[("__serialize", 0), ("__set_state", 1), ("__sleep", 0), ("__unserialize", 1), ("__wakeup", 0)];
+
 fn magic_mismatch(name: &str, f: &Function) -> bool {
+    let arity = MAGIC_ARITY.iter().find(|(n, _)| *n == name).is_some_and(|&(_, n)| f.params.iter().filter(|p| !p.variadic).count() != n);
     let wide = |types: &[String], need: &str| types.iter().any(|t| t == need || t == "mixed" || (need == "array" && t == "iterable"));
     let params = MAGIC_PARAMS.iter().find(|(n, _)| *n == name).is_some_and(|(_, need)| {
         f.params.iter().zip(need.iter()).any(|(p, need)| !p.types.is_empty() && *need != "mixed" && !wide(&p.types, need))
@@ -194,7 +199,7 @@ fn magic_mismatch(name: &str, f: &Function) -> bool {
         .find(|(n, _)| *n == name)
         .zip(f.returns.as_ref())
         .is_some_and(|((_, allowed), got)| !got.is_empty() && got.iter().any(|t| !allowed.contains(&t.as_str())));
-    params || returns
+    arity || params || returns
 }
 
 fn header_names(tokens: &[Token], body: &TypeBody, keyword: &str) -> Vec<usize> {
@@ -704,13 +709,13 @@ pub(crate) const FINAL_PRIVATE: PatternRule = rule(
 
 pub(crate) const MAGIC_SIGNATURE: PatternRule = rule(
     "removed.magic_method_signature",
-    Text::new("Sihirli metot tipi uyuşmuyor", "Magic method type mismatch"),
+    Text::new("Sihirli metot imzası uyuşmuyor", "Magic method signature mismatch"),
     Severity::Breaking,
     (8, 0),
-    Some(Text::new("tipi PHP'nin beklediği tiple değiştirin", "use the type PHP expects")),
+    Some(Text::new("imzayı PHP'nin beklediği gibi yazın", "write the signature PHP expects")),
     Text::new(
-        "PHP 8.0'dan beri sihirli metotların parametre ve dönüş tipleri, yazıldıklarında kontrol edilir; uymayan bir tip derleme hatası verir.",
-        "Since PHP 8.0 the declared parameter and return types of magic methods are checked, and a mismatch is a compile error.",
+        "PHP 8.0'dan beri sihirli metotların parametre ve dönüş tipleri, yazıldıklarında kontrol edilir. __set_state() ve __unserialize() tam olarak bir, __serialize(), __sleep() ve __wakeup() hiç argüman almalıdır. Uymayan imza derleme hatası verir.",
+        "Since PHP 8.0 the declared parameter and return types of magic methods are checked. __set_state() and __unserialize() must take exactly one argument, and __serialize(), __sleep() and __wakeup() none. A mismatch is a compile error.",
     ),
 );
 

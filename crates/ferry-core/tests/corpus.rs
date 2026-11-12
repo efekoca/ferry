@@ -274,3 +274,76 @@ fn preview_speed() {
         }
     }
 }
+
+/// Scans each project, prepares Ferry's and Rector's compatibility preview for the target, and
+/// writes what a later step lints and counts to MEASURE_OUT: the findings, the preview's changes
+/// and each changed file before and after. Framework core folders count too, since the point is
+/// real legacy code; only vendor and node_modules stay out.
+#[test]
+#[ignore = "needs CORPUS, FERRY_TEST_TOOLS and MEASURE_OUT"]
+fn fix_measure() {
+    let corpus = PathBuf::from(std::env::var_os("CORPUS").expect("set CORPUS"));
+    let tools = PathBuf::from(std::env::var_os("FERRY_TEST_TOOLS").expect("set FERRY_TEST_TOOLS"));
+    let out = PathBuf::from(std::env::var_os("MEASURE_OUT").expect("set MEASURE_OUT"));
+    let target: PhpVersion = std::env::var("MEASURE_TARGET").unwrap_or_else(|_| "8.5".into()).parse().unwrap();
+    let only: Vec<String> =
+        std::env::var("PREVIEW_PROJECTS").unwrap_or_default().split(',').filter(|s| !s.is_empty()).map(String::from).collect();
+    let php = ferry_core::toolchain::find_php(None).expect("php");
+    let mut projects: Vec<PathBuf> = std::fs::read_dir(&corpus).unwrap().flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect();
+    projects.sort();
+    for root in projects {
+        let name = root.file_name().unwrap().to_string_lossy().to_string();
+        if !only.is_empty() && !only.contains(&name) {
+            continue;
+        }
+        let dir = out.join(&name);
+        std::fs::create_dir_all(&dir).unwrap();
+        let excluded: Vec<String> = Vec::new();
+        let files = project::collect_php_files(&root, &excluded);
+        let result = analyzer::analyze_files(&root, &files, target, |_, _, _| {});
+        std::fs::write(dir.join("findings.json"), serde_json::to_string(&result.findings).unwrap()).unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let started = std::time::Instant::now();
+        let preview = ferry_core::rector::preview(
+            &php,
+            &ferry_core::toolchain::rector_entry(&tools),
+            &root,
+            target,
+            ferry_core::rector::RectorMode::Compat,
+            &excluded,
+            work.path(),
+            &std::sync::atomic::AtomicBool::new(false),
+        );
+        let preview = match preview {
+            Ok(p) => p,
+            Err(e) => {
+                println!("MEASURE {name}: preview failed after {:.0}s: {e}", started.elapsed().as_secs_f64());
+                continue;
+            }
+        };
+        let mut changes = Vec::new();
+        for change in &preview.changes {
+            for (side, text) in
+                [("before", std::fs::read_to_string(root.join(&change.file)).unwrap_or_default()), ("after", change.new_content.clone())]
+            {
+                let path = dir.join(side).join(&change.file);
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(path, text).unwrap();
+            }
+            changes.push(serde_json::json!({
+                "file": change.file,
+                "fix": change.fix,
+                "rules": change.rules.iter().map(|r| r.name.clone()).collect::<Vec<_>>(),
+            }));
+        }
+        let summary = serde_json::json!({ "changes": changes, "errors": preview.errors, "seconds": started.elapsed().as_secs_f64() });
+        std::fs::write(dir.join("preview.json"), summary.to_string()).unwrap();
+        println!(
+            "MEASURE {name}: {} findings, {} changed files, {} errors, {:.0}s",
+            result.findings.len(),
+            preview.changes.len(),
+            preview.errors.len(),
+            started.elapsed().as_secs_f64()
+        );
+    }
+}

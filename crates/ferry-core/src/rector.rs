@@ -109,13 +109,16 @@ const MODERNIZATION_RULES: &[&str] = &[
 ];
 
 /// Rules from Rector's PHP sets that change what the code does instead of keeping it: tried on the
-/// code they target, each left it broken or silently different. Their findings stay manual.
+/// code they target, each left it broken or silently different. Their findings stay manual, except
+/// casts: RenameCastRector dropped the parentheses of `(double) ($a ? $b : $c)`, so Ferry renames
+/// casts itself before Rector runs.
 const BREAKING_RULES: &[&str] = &[
     "Rector\\Php72\\Rector\\FuncCall\\ParseStrWithResultArgumentRector",
     "Rector\\Php74\\Rector\\StaticCall\\ExportToReflectionFunctionRector",
     "Rector\\Php74\\Rector\\FuncCall\\FilterVarToAddSlashesRector",
     "Rector\\Php74\\Rector\\FuncCall\\MoneyFormatToNumberFormatRector",
     "Rector\\Php70\\Rector\\Break_\\BreakNotInLoopOrSwitchToReturnRector",
+    "Rector\\Renaming\\Rector\\Cast\\RenameCastRector",
 ];
 
 /// Rector renames png2wbmp() and jpeg2wbmp() to the image readers and then drops their extra
@@ -129,6 +132,7 @@ const LIKELY_RULES: &[&str] = &[
     "BooleanComparatorToSpaceship",
     "StringIncrementToFunction",
     "ParenthesizeNestedTernaryRector",
+    "ParenthesizeNestedTernary",
     "SensitiveDefineRector",
     "SensitiveConstantNameRector",
     "EregToPregMatchRector",
@@ -228,6 +232,11 @@ const RULE_TITLES: &[(&str, Text)] = &[
     ("RemoveGetClassGetParentClassNoArgsRector", Text::same("get_class() → self::class")),
     ("NullToStrictStringFuncCallArgRector", Text::new("Metin parametrelerine null gitmesin", "Stop passing null to string params")),
     ("CurlyToSquareBracketArrayStringRector", Text::same("$x{0} → $x[0]")),
+    ("CanonicalCastName", Text::same("(double) → (float), (integer) → (int), (boolean) → (bool)")),
+    (
+        "ParenthesizeNestedTernary",
+        Text::new("İç içe ternary PHP 7'nin okuduğu gibi paranteze alınır", "Parenthesize nested ternaries the way PHP 7 read them"),
+    ),
     ("QuoteBarewordKeys", Text::same("$row[id] → $row['id']")),
     ("AssignNewWithoutReference", Text::same("= &new → = new")),
     ("DefaultColonAfterSwitch", Text::same("default; → default:")),
