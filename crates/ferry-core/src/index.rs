@@ -108,6 +108,8 @@ pub struct ProjectIndex {
     monetary_locales: Vec<String>,
     overridden_by_all: std::sync::OnceLock<HashMap<String, HashSet<String>>>,
     redefines_checks: std::sync::OnceLock<bool>,
+    vendor_types: HashMap<String, TypeInfo>,
+    vendor_interfaces: HashMap<String, InterfaceInfo>,
 }
 
 #[derive(Debug, Clone)]
@@ -165,7 +167,67 @@ impl ProjectIndex {
                 }
             }
         }
+        index.add_package_parents(root, &mut seen, cancel);
         index
+    }
+
+    /// Classes, interfaces and traits from Composer packages that the project's types extend,
+    /// implement or use, and their ancestors, so checks against a parent see the package's
+    /// signatures. They're kept apart from the project's own types and only found by full name.
+    fn add_package_parents(&mut self, root: &Path, seen: &mut HashSet<PathBuf>, cancel: &std::sync::atomic::AtomicBool) {
+        let autoload = Autoload::read(root);
+        if autoload.is_empty() {
+            return;
+        }
+        let mut queue = self.parents_to_find();
+        let mut tried = HashSet::new();
+        while let Some(fqn) = queue.pop() {
+            if cancel.load(std::sync::atomic::Ordering::Relaxed) || tried.len() >= 4096 {
+                break;
+            }
+            if !tried.insert(fqn.clone()) || self.knows(&fqn) {
+                continue;
+            }
+            let Some(path) = autoload.file_for(&fqn) else { continue };
+            if !seen.insert(std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone())) {
+                continue;
+            }
+            if std::fs::metadata(&path).is_ok_and(|m| m.len() > crate::project::MAX_FILE_BYTES) {
+                continue;
+            }
+            let Ok(text) = crate::safefs::read_text(&path) else { continue };
+            let mut file = ProjectIndex { target: self.target, ..Self::default() };
+            file.add(&lex(&text).tokens);
+            let types: Vec<TypeInfo> = file.types.into_values().flatten().collect();
+            let interfaces: Vec<InterfaceInfo> = file.interfaces.into_values().flatten().collect();
+            let once =
+                |name: &str| types.iter().filter(|t| t.fqn == name).count() + interfaces.iter().filter(|i| i.fqn == name).count() == 1;
+            for t in types.iter().filter(|t| once(&t.fqn)) {
+                queue.extend(t.parent_fqn.iter().chain(&t.related_fqns).chain(&t.trait_fqns).cloned());
+                self.vendor_types.entry(t.fqn.clone()).or_insert_with(|| t.clone());
+            }
+            for i in interfaces.iter().filter(|i| once(&i.fqn)) {
+                queue.extend(i.parent_fqns.iter().cloned());
+                self.vendor_interfaces.entry(i.fqn.clone()).or_insert_with(|| i.clone());
+            }
+        }
+    }
+
+    fn parents_to_find(&self) -> Vec<String> {
+        let types = self.types.values().flatten().flat_map(|t| t.parent_fqn.iter().chain(&t.related_fqns).chain(&t.trait_fqns));
+        let interfaces = self.interfaces.values().flatten().flat_map(|i| i.parent_fqns.iter());
+        types.chain(interfaces).filter(|f| !self.knows(f)).cloned().collect()
+    }
+
+    /// Whether `fqn` is a type of the project, a package type already read, or built into PHP.
+    fn knows(&self, fqn: &str) -> bool {
+        let key = short(fqn);
+        self.types.get(&key).is_some_and(|v| v.iter().any(|t| t.fqn == fqn))
+            || self.interfaces.get(&key).is_some_and(|v| v.iter().any(|i| i.fqn == fqn))
+            || self.vendor_types.contains_key(fqn)
+            || self.vendor_interfaces.contains_key(fqn)
+            || ["stdclass", "traversable"].contains(&fqn)
+            || crate::builtin::CLASSES.binary_search_by(|(c, _, _)| (*c).cmp(fqn)).is_ok()
     }
 
     /// The version the project runs on today, when its composer.json says.
@@ -538,8 +600,10 @@ impl ProjectIndex {
         if self.interfaces.get(&key).is_some_and(|v| v.iter().any(|i| i.fqn == fqn)) {
             return None;
         }
-        match self.types.get(&key)?.iter().filter(|t| t.fqn == fqn).collect::<Vec<_>>().as_slice() {
+        let found: Vec<&TypeInfo> = self.types.get(&key).map(|v| v.iter().filter(|t| t.fqn == fqn).collect()).unwrap_or_default();
+        match found.as_slice() {
             [only] => Some(only),
+            [] => self.vendor_types.get(fqn).filter(|_| !self.vendor_interfaces.contains_key(fqn)),
             _ => None,
         }
     }
@@ -556,10 +620,13 @@ impl ProjectIndex {
         if self.types.get(&key).is_some_and(|v| v.iter().any(|t| t.fqn == fqn)) {
             return None;
         }
-        match self.interfaces.get(&key)?.iter().filter(|i| i.fqn == fqn).collect::<Vec<_>>().as_slice() {
-            [only] => Some((only.name.as_str(), &only.signatures, &only.parent_fqns)),
+        let found: Vec<&InterfaceInfo> = self.interfaces.get(&key).map(|v| v.iter().filter(|i| i.fqn == fqn).collect()).unwrap_or_default();
+        let only = match found.as_slice() {
+            [only] => Some(*only),
+            [] => self.vendor_interfaces.get(fqn).filter(|_| !self.vendor_types.contains_key(fqn)),
             _ => None,
-        }
+        }?;
+        Some((only.name.as_str(), &only.signatures, &only.parent_fqns))
     }
 
     fn unique(&self, name: &str) -> Option<&TypeInfo> {
@@ -602,6 +669,124 @@ fn qualify(namespace: &str, name: &str) -> String {
     } else {
         format!("{}\\{name}", namespace.to_ascii_lowercase())
     }
+}
+
+/// Where Composer's autoloader finds classes, read from the maps Composer writes to
+/// vendor/composer: PSR-4 and PSR-0 prefixes and the class map, with names in lower case.
+#[derive(Default)]
+struct Autoload {
+    psr4: Vec<(String, Vec<PathBuf>)>,
+    psr0: Vec<(String, Vec<PathBuf>)>,
+    classmap: HashMap<String, PathBuf>,
+}
+
+impl Autoload {
+    fn read(root: &Path) -> Self {
+        let dir = root.join("vendor/composer");
+        let map = |file: &str| crate::safefs::read_text(dir.join(file)).map(|text| composer_map(&text, root)).unwrap_or_default();
+        let longest_first = |mut v: Vec<(String, Vec<PathBuf>)>| {
+            v.sort_by_key(|(prefix, _)| std::cmp::Reverse(prefix.len()));
+            v
+        };
+        Autoload {
+            psr4: longest_first(map("autoload_psr4.php")),
+            psr0: longest_first(map("autoload_namespaces.php")),
+            classmap: map("autoload_classmap.php")
+                .into_iter()
+                .filter_map(|(name, paths)| Some((name, paths.into_iter().next()?)))
+                .collect(),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.psr4.is_empty() && self.psr0.is_empty() && self.classmap.is_empty()
+    }
+
+    /// The file the autoloader would load for `fqn`.
+    fn file_for(&self, fqn: &str) -> Option<PathBuf> {
+        if let Some(path) = self.classmap.get(fqn) {
+            return Some(path.clone());
+        }
+        for (prefix, dirs) in &self.psr4 {
+            let Some(rest) = fqn.strip_prefix(prefix.as_str()) else { continue };
+            let parts: Vec<&str> = rest.split('\\').collect();
+            if let Some(found) = dirs.iter().find_map(|d| file_in(d, &parts)) {
+                return Some(found);
+            }
+        }
+        for (prefix, dirs) in &self.psr0 {
+            if !fqn.starts_with(prefix.as_str()) {
+                continue;
+            }
+            let (space, class) = fqn.rsplit_once('\\').unwrap_or(("", fqn));
+            let parts: Vec<&str> = space.split('\\').filter(|p| !p.is_empty()).chain(class.split('_')).collect();
+            if let Some(found) = dirs.iter().find_map(|d| file_in(d, &parts)) {
+                return Some(found);
+            }
+        }
+        None
+    }
+}
+
+/// `dir/Part/Part.php` with each part matched regardless of case, as names are kept in lower case.
+fn file_in(dir: &Path, parts: &[&str]) -> Option<PathBuf> {
+    let mut at = dir.to_path_buf();
+    for (i, part) in parts.iter().enumerate() {
+        let want = if i + 1 == parts.len() { format!("{part}.php") } else { (*part).to_string() };
+        let exact = at.join(&want);
+        at = if exact.exists() {
+            exact
+        } else {
+            std::fs::read_dir(&at).ok()?.flatten().find(|e| e.file_name().to_string_lossy().eq_ignore_ascii_case(&want))?.path()
+        };
+    }
+    at.is_file().then_some(at)
+}
+
+/// The entries of a map Composer writes, `'Name\\' => $vendorDir . '/path'` or
+/// `=> array($vendorDir . '/a', $baseDir . '/b')`, with each name in lower case.
+fn composer_map(text: &str, root: &Path) -> Vec<(String, Vec<PathBuf>)> {
+    let tokens = lex(text).tokens;
+    let mut out = Vec::new();
+    let mut k = 0;
+    while k + 1 < tokens.len() {
+        let Some(key) = tokens[k].literal().filter(|_| tokens[k + 1].is_punct("=>")) else {
+            k += 1;
+            continue;
+        };
+        let key = key.replace("\\\\", "\\").to_ascii_lowercase();
+        let mut paths = Vec::new();
+        let mut depth = 0usize;
+        let mut j = k + 2;
+        while let Some(t) = tokens.get(j) {
+            if t.is_punct("(") {
+                depth += 1;
+            } else if t.is_punct(")") {
+                if depth == 0 {
+                    break;
+                }
+                depth -= 1;
+            } else if t.is_punct(",") && depth == 0 {
+                break;
+            } else if t.kind == TokenKind::Variable && tokens.get(j + 1).is_some_and(|d| d.is_punct(".")) {
+                let base = match t.text.as_str() {
+                    "vendorDir" => Some(root.join("vendor")),
+                    "baseDir" => Some(root.to_path_buf()),
+                    _ => None,
+                };
+                let rel = tokens.get(j + 2).and_then(|r| r.literal()).map(|r| r.trim_start_matches('/'));
+                if let (Some(base), Some(rel)) = (base, rel.filter(|r| !r.split('/').any(|p| p == ".."))) {
+                    paths.push(base.join(rel));
+                }
+            }
+            j += 1;
+        }
+        if !paths.is_empty() {
+            out.push((key, paths));
+        }
+        k = j.max(k + 1);
+    }
+    out
 }
 
 fn short(name: &str) -> String {

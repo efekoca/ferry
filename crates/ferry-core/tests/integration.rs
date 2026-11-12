@@ -326,3 +326,55 @@ fn rector_leaves_alone_what_it_would_break() {
     assert!(wbmp.new_content.contains("exif_read_data($png)"), "{}", wbmp.new_content);
     assert!(wbmp.new_content.contains("    })($png, 'png.wbmp', 32, 32, 7);"), "{}", wbmp.new_content);
 }
+
+#[test]
+fn overrides_are_checked_against_composer_package_parents() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let files = [
+        ("composer.json", "{\"require\": {\"php\": \"^7.4\"}}"),
+        (
+            "vendor/composer/autoload_psr4.php",
+            "<?php\n\n$vendorDir = dirname(__DIR__);\n$baseDir = dirname($vendorDir);\n\nreturn array(\n    'Acme\\\\Lib\\\\' => array($vendorDir . '/acme/lib/src'),\n    'App\\\\' => array($baseDir . '/app'),\n);\n",
+        ),
+        (
+            "vendor/composer/autoload_classmap.php",
+            "<?php\n\n$vendorDir = dirname(__DIR__);\n$baseDir = dirname($vendorDir);\n\nreturn array(\n    'Legacy_Base' => $vendorDir . '/old/lib/Legacy/Base.php',\n);\n",
+        ),
+        ("vendor/acme/lib/src/Model.php", "<?php\nnamespace Acme\\Lib;\n\nabstract class Model extends Base implements Contracts\\Saves\n{\n    public function save(array $options = []) {}\n}\n"),
+        ("vendor/acme/lib/src/Base.php", "<?php\nnamespace Acme\\Lib;\n\nclass Base\n{\n    public function fill(array $data) {}\n}\n"),
+        ("vendor/acme/lib/src/Contracts/Saves.php", "<?php\nnamespace Acme\\Lib\\Contracts;\n\ninterface Saves\n{\n    public function touch($at);\n}\n"),
+        ("vendor/old/lib/Legacy/Base.php", "<?php\nclass Legacy_Base\n{\n    public function render($view, $data) {}\n}\n"),
+        ("app/Base.php", "<?php\nnamespace App;\n\nclass Base\n{\n    public function fill() {}\n}\n"),
+        (
+            "app/User.php",
+            "<?php\nnamespace App;\n\nuse Acme\\Lib\\Model;\n\nclass User extends Model\n{\n    public function save() {}\n    public function fill(array $data, $force) {}\n    public function touch() {}\n}\n",
+        ),
+        ("app/Widget.php", "<?php\nclass Widget extends \\Legacy_Base\n{\n    public function render($view) {}\n}\n"),
+    ];
+    for (rel, text) in files {
+        let path = root.join(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    }
+    let info = project::inspect(root).unwrap();
+    let scanned = project::collect_php_files(root, &info.excluded_dirs);
+    let scan = analyzer::analyze_files(root, &scanned, PhpVersion::new(8, 5), |_, _, _| {});
+    let mut found: Vec<(String, usize, ferry_core::rules::FixKind)> = scan
+        .findings
+        .iter()
+        .filter(|f| f.rule_id == "removed.incompatible_user_override")
+        .map(|f| (f.file.clone(), f.line, f.fix))
+        .collect();
+    found.sort();
+    let likely = ferry_core::rules::FixKind::Likely;
+    assert_eq!(
+        found,
+        [
+            ("app/User.php".to_string(), 8, likely),
+            ("app/User.php".to_string(), 9, likely),
+            ("app/User.php".to_string(), 10, likely),
+            ("app/Widget.php".to_string(), 4, likely)
+        ]
+    );
+}
