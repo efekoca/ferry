@@ -54,6 +54,7 @@ pub const SESSION_HANDLER: &str = "Ferry\\Php84\\SessionHandlerObject";
 pub const AUTOLOAD_REGISTER: &str = "Ferry\\Php80\\AutoloadToSplRegister";
 pub const WBMP_PORT: &str = "Ferry\\Php80\\InlineWbmpConversion";
 pub const WIDEN_OVERRIDE: &str = "Ferry\\Php80\\WidenBuiltinOverride";
+pub const WIDEN_USER_OVERRIDE: &str = "Ferry\\Php80\\WidenProjectOverride";
 pub const RFC_LITERAL: &str = "Ferry\\Php85\\Rfc7231Literal";
 pub const RFC_UTC: &str = "Ferry\\Php85\\Rfc7231InUtc";
 pub const DATE_WAKEUP_DROP: &str = "Ferry\\Php85\\RemoveDateWakeup";
@@ -648,7 +649,8 @@ const NO_OP_FLAGS: &[(&str, &str, Alone)] = &[
 
 /// Rules whose fix reads the code around the finding, and for three of them the version the project
 /// runs on today.
-const SITE_RULES: [&str; 58] = [
+const SITE_RULES: [&str; 59] = [
+    "removed.incompatible_user_override",
     "framework.laravel_native_array_first",
     "behavior.error_reporting_zero",
     "removed.error_handler_context",
@@ -1354,6 +1356,7 @@ fn site_fix(file: &Source, k: usize, rule: &str) -> Option<Fix> {
         "removed.png2wbmp" => wbmp_port(file, k, "png2wbmp", "imagecreatefrompng", "PNG"),
         "removed.jpeg2wbmp" => wbmp_port(file, k, "jpeg2wbmp", "imagecreatefromjpeg", "JPEG"),
         "removed.incompatible_override" => widen_override(file, k),
+        "removed.incompatible_user_override" => widen_user_override(file, k),
         "deprecated.date_wakeup" => date_wakeup(file, k),
         "behavior.concat_precedence" => concat_groups(file, k),
         "removed.parse_str_one_arg" => parse_str_fix(file, k),
@@ -2702,6 +2705,48 @@ fn widen_override(file: &Source, k: usize) -> Option<Fix> {
     let over = crate::analyzer::builtin_overrides(tokens, file.index, file.target).into_iter().find(|o| o.name == k)?;
     let crate::analyzer::Override::Incompatible(method) = over.problem else { return None };
     let &(_, parent_static, required, params, variadic, returns, tentative, ..) = method;
+    let (first, keyword) = method_head(tokens, k)?;
+    let is_static = tokens[first..keyword].iter().any(|t| t.is_ident_ci("static"));
+    let open = k + 1;
+    let close = crate::declarations::close_of(tokens, open).filter(|_| tokens[open].is_punct("("))?;
+    let child_return = crate::analyzer::return_type(tokens, close);
+    let return_fits = child_return.as_deref().is_some_and(|r| crate::analyzer::covariant(r, returns));
+    if is_static != parent_static || !tentative && !returns.is_empty() && !return_fits {
+        return None;
+    }
+    let params: Vec<(bool, String)> = params.iter().map(|&(by_ref, ty)| (by_ref, ty.to_string())).collect();
+    let texts = wider_params(file, open, close, required, &params, variadic, &[])?;
+    let src = file.src;
+    let header = format!("{}{})", &src[tokens[first].start..tokens[open].end], texts.join(", "));
+    let marked =
+        tokens[first.saturating_sub(8)..first].iter().any(|t| t.text.trim_start_matches('\\').eq_ignore_ascii_case("ReturnTypeWillChange"));
+    let returned = &src[tokens[close].end..return_end(tokens, close)];
+    let check = crate::lexer::tokenize(&format!("<?php class C {{ {header}{returned} {{}} }}"));
+    let name_at = check.iter().position(|t| t.text.eq_ignore_ascii_case(&tokens[k].text) && t.kind == TokenKind::Ident)?;
+    let check_close = crate::declarations::close_of(&check, name_at + 1)?;
+    let new_shapes = crate::analyzer::param_shapes(&check, name_at + 1, check_close);
+    if !crate::analyzer::compatible(&new_shapes, is_static, crate::analyzer::return_type(&check, check_close).as_deref(), method) {
+        return None;
+    }
+    let attribute = if tentative && !return_fits && !marked {
+        let line = &src[src[..tokens[first].start].rfind('\n').map_or(0, |i| i + 1)..tokens[first].start];
+        let indent: String = line.chars().take_while(|c| *c == ' ' || *c == '\t').collect();
+        let nl = if src.contains("\r\n") { "\r\n" } else { "\n" };
+        format!("#[\\ReturnTypeWillChange]{nl}{indent}")
+    } else {
+        String::new()
+    };
+    Some(Fix {
+        extra: Vec::new(),
+        class: WIDEN_OVERRIDE,
+        start: tokens[first].start,
+        end: tokens[close].end,
+        text: format!("{attribute}{header}"),
+    })
+}
+
+/// The `function` keyword before the method name at `k`, and the first modifier before it.
+fn method_head(tokens: &[Token], k: usize) -> Option<(usize, usize)> {
     let keyword = match tokens.get(k.checked_sub(1)?) {
         Some(t) if t.is_ident_ci("function") => k - 1,
         Some(t) if t.is_punct("&") && k >= 2 && tokens[k - 2].is_ident_ci("function") => k - 2,
@@ -2712,21 +2757,30 @@ fn widen_override(file: &Source, k: usize) -> Option<Fix> {
     while first > 0 && modifiers.iter().any(|m| tokens[first - 1].is_ident_ci(m)) {
         first -= 1;
     }
-    let is_static = tokens[first..keyword].iter().any(|t| t.is_ident_ci("static"));
-    let open = k + 1;
-    let close = crate::declarations::close_of(tokens, open).filter(|_| tokens[open].is_punct("("))?;
-    let child_return = crate::analyzer::return_type(tokens, close);
-    let return_fits = child_return.as_deref().is_some_and(|r| crate::analyzer::covariant(r, returns));
-    if is_static != parent_static || !tentative && !returns.is_empty() && !return_fits {
-        return None;
-    }
+    Some((first, keyword))
+}
+
+/// The parameters of the list opening at `open`, rewritten to accept what a parent with these
+/// parameters accepts: wider types, a default where the parent's parameter is optional, and the
+/// parent's missing and variadic parameters, under the parent's names when the method doesn't use
+/// them.
+fn wider_params(
+    file: &Source,
+    open: usize,
+    close: usize,
+    required: usize,
+    params: &[(bool, String)],
+    variadic: bool,
+    parent_names: &[String],
+) -> Option<Vec<String>> {
+    let tokens = file.tokens;
+    let src = file.src;
     let shapes = crate::analyzer::param_shapes(tokens, open, close);
     let (_, ranges) = arguments(tokens, open)?;
     if ranges.len() != shapes.len() {
         return None;
     }
     let child_variadic = shapes.iter().any(|s| s.variadic);
-    let src = file.src;
     let mut texts = Vec::new();
     for (i, (shape, &(f, l))) in shapes.iter().zip(&ranges).enumerate() {
         let mut text = file.text(f, l).to_string();
@@ -2734,8 +2788,8 @@ fn widen_override(file: &Source, k: usize) -> Option<Fix> {
             texts.push(text);
             continue;
         }
-        if let Some(&(by_ref, ty)) = params.get(i) {
-            if shape.by_ref != by_ref {
+        if let Some((by_ref, ty)) = params.get(i) {
+            if shape.by_ref != *by_ref {
                 return None;
             }
             if !crate::analyzer::accepts(&shape.ty, ty) {
@@ -2764,43 +2818,95 @@ fn widen_override(file: &Source, k: usize) -> Option<Fix> {
         }
         texts.push(text);
     }
-    let names: HashSet<&str> = shapes.iter().map(|s| s.name.as_str()).collect();
+    let body = (close..tokens.len()).find(|&j| tokens[j].is_punct("{") || tokens[j].is_punct(";")).filter(|&j| tokens[j].is_punct("{"));
+    let body_end = body.and_then(|b| crate::declarations::close_of(tokens, b)).unwrap_or(close);
+    let names: HashSet<&str> = shapes
+        .iter()
+        .map(|s| s.name.as_str())
+        .chain(tokens[close..body_end].iter().filter(|t| t.kind == TokenKind::Variable).map(|t| t.text.as_str()))
+        .collect();
     let free =
         |base: &str| std::iter::once(base.to_string()).chain((2..).map(|n| format!("{base}{n}"))).find(|n| !names.contains(n.as_str()));
     if !child_variadic {
+        let named = |i: usize, fallback: String| match parent_names.get(i).filter(|n| !names.contains(n.as_str())) {
+            Some(name) => Some(name.clone()),
+            None => free(&fallback),
+        };
         for i in shapes.len()..params.len() {
-            texts.push(format!("${} = null", free(&format!("arg{}", i + 1))?));
+            texts.push(format!("${} = null", named(i, format!("arg{}", i + 1))?));
         }
         if variadic {
-            texts.push(format!("...${}", free("rest")?));
+            texts.push(format!("...${}", named(params.len(), "rest".into())?));
         }
     }
-    let header = format!("{}{})", &src[tokens[first].start..tokens[open].end], texts.join(", "));
-    let marked =
-        tokens[first.saturating_sub(8)..first].iter().any(|t| t.text.trim_start_matches('\\').eq_ignore_ascii_case("ReturnTypeWillChange"));
-    let returned = &src[tokens[close].end..return_end(tokens, close)];
-    let check = crate::lexer::tokenize(&format!("<?php class C {{ {header}{returned} {{}} }}"));
-    let name_at = check.iter().position(|t| t.text.eq_ignore_ascii_case(&tokens[k].text) && t.kind == TokenKind::Ident)?;
-    let check_close = crate::declarations::close_of(&check, name_at + 1)?;
-    let new_shapes = crate::analyzer::param_shapes(&check, name_at + 1, check_close);
-    if !crate::analyzer::compatible(&new_shapes, is_static, crate::analyzer::return_type(&check, check_close).as_deref(), method) {
+    Some(texts)
+}
+
+/// A method whose signature a parent class, interface or trait in the project rejects since PHP 8:
+/// the same changes as for a built-in parent, as long as no class type has to be added. No class
+/// below may override the method, since a wider signature here could reject theirs, and the edited
+/// file has to pass the scan's own check.
+fn widen_user_override(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let user = |o: crate::analyzer::BuiltinOverride| match o.problem {
+        crate::analyzer::Override::UserIncompatible(_, sig) if o.name == k => Some(sig),
+        _ => None,
+    };
+    let overrides = |tokens: &[Token]| {
+        crate::analyzer::builtin_overrides(tokens, file.index, file.target)
+            .into_iter()
+            .chain(crate::analyzer::trait_abstract_overrides(tokens, file.index))
+    };
+    let sig = overrides(tokens).find_map(user)?;
+    let (first, keyword) = method_head(tokens, k)?;
+    let is_static = tokens[first..keyword].iter().any(|t| t.is_ident_ci("static"));
+    let open = k + 1;
+    let close = crate::declarations::close_of(tokens, open).filter(|_| tokens[open].is_punct("("))?;
+    if is_static != sig.is_static || sig.returns.is_some() && crate::analyzer::return_type(tokens, close).is_none() {
         return None;
     }
-    let attribute = if tentative && !return_fits && !marked {
-        let line = &src[src[..tokens[first].start].rfind('\n').map_or(0, |i| i + 1)..tokens[first].start];
-        let indent: String = line.chars().take_while(|c| *c == ' ' || *c == '\t').collect();
-        let nl = if src.contains("\r\n") { "\r\n" } else { "\n" };
-        format!("#[\\ReturnTypeWillChange]{nl}{indent}")
-    } else {
-        String::new()
-    };
-    Some(Fix {
-        extra: Vec::new(),
-        class: WIDEN_OVERRIDE,
-        start: tokens[first].start,
-        end: tokens[close].end,
-        text: format!("{attribute}{header}"),
-    })
+    let class = crate::index::class_decls(tokens).into_iter().rfind(|d| d.open < k && k < d.close)?;
+    if file.index.overridden_below(&class.info.fqn, &tokens[k].text.to_ascii_lowercase()) {
+        return None;
+    }
+    let names = crate::index::Names::new(tokens);
+    let shapes = crate::analyzer::param_shapes(tokens, open, close);
+    let builtin =
+        ["int", "float", "string", "bool", "array", "null", "callable", "iterable", "false", "true", "void", "mixed", "object", "never"];
+    let mut params = Vec::new();
+    for (i, (p, fqns)) in sig.params.iter().zip(&sig.param_fqns).enumerate().take_while(|(_, (p, _))| !p.variadic) {
+        if fqns.iter().any(|t| ["self", "static", "parent"].contains(&t.as_str())) {
+            return None;
+        }
+        let classes: Vec<String> = fqns.iter().filter(|t| !builtin.contains(&t.as_str())).map(|t| t.to_ascii_lowercase()).collect();
+        let typed = shapes.get(i).filter(|c| !c.ty.is_empty() && !c.ty.iter().any(|t| t == "mixed"));
+        if let Some(child) = typed.filter(|_| !classes.is_empty()) {
+            let own: Vec<String> =
+                child.ty_at.iter().map(|&j| crate::index::resolve_type(tokens, j, &names).to_ascii_lowercase()).collect();
+            if !classes.iter().all(|c| own.contains(c)) {
+                return None;
+            }
+        }
+        let mut types = fqns.clone();
+        if p.ty.iter().any(|t| t == "null") && !types.iter().any(|t| t == "mixed" || t == "null") {
+            types.push("null".into());
+        }
+        params.push((p.by_ref, types.join("|")));
+    }
+    let fixed: Vec<&crate::analyzer::ParamShape> = sig.params.iter().filter(|p| !p.variadic).collect();
+    let required = fixed.iter().rposition(|p| !p.optional).map_or(0, |i| i + 1);
+    let parent_names: Vec<String> = sig.params.iter().map(|p| p.name.clone()).collect();
+    let texts = wider_params(file, open, close, required, &params, sig.params.iter().any(|p| p.variadic), &parent_names)?;
+    let src = file.src;
+    let header = format!("{}{})", &src[tokens[first].start..tokens[open].end], texts.join(", "));
+    let mut edited = src.to_string();
+    edited.replace_range(tokens[first].start..tokens[close].end, &header);
+    let check = crate::lexer::tokenize(&edited);
+    let at = check.iter().position(|t| t.start == tokens[k].start && t.text == tokens[k].text)?;
+    if overrides(&check).any(|o| o.name == at && matches!(o.problem, crate::analyzer::Override::UserIncompatible(..))) {
+        return None;
+    }
+    Some(Fix { extra: Vec::new(), class: WIDEN_USER_OVERRIDE, start: tokens[first].start, end: tokens[close].end, text: header })
 }
 
 /// Where the return type after the parameter list closing at `close` ends.
@@ -5786,6 +5892,32 @@ mod tests {
             None,
             "a call above the declaration needs it declared early"
         );
+    }
+
+    #[test]
+    fn overrides_of_project_methods_take_the_parent_signature() {
+        let src = "<?php\nclass Model\n{\n    public function fill(array $data) {}\n    public function find($id, $columns, ...$with) {}\n    public function save(?int $at, $options = []) {}\n    public function load($key) {}\n}\nclass Order extends Model\n{\n    public function fill(array $data, $recalculate) {}\n    public function find($id) { $columns = 1; }\n    public function save(int $at) {}\n    public function load(array $key) {}\n}\ninterface Shows { public function show($what, $how); }\nclass Page implements Shows { public function show($what) {} }\ntrait Sizes { abstract public function size($unit); }\nclass Box { use Sizes; public function size() {} }\n";
+        let (out, classes) = fixed(src).unwrap();
+        assert_eq!(
+            out,
+            "<?php\nclass Model\n{\n    public function fill(array $data) {}\n    public function find($id, $columns, ...$with) {}\n    public function save(?int $at, $options = []) {}\n    public function load($key) {}\n}\nclass Order extends Model\n{\n    public function fill(array $data, $recalculate = null) {}\n    public function find($id, $arg2 = null, ...$with) { $columns = 1; }\n    public function save(int|null $at, $options = null) {}\n    public function load($key) {}\n}\ninterface Shows { public function show($what, $how); }\nclass Page implements Shows { public function show($what, $how = null) {} }\ntrait Sizes { abstract public function size($unit); }\nclass Box { use Sizes; public function size($unit = null) {} }\n"
+        );
+        assert_eq!(classes, [WIDEN_USER_OVERRIDE]);
+        assert_eq!(kinds_of(&fixes(src), "removed.incompatible_user_override"), [FixKind::Likely; 6]);
+        let manual = [
+            "class A { function f($a) {} } class B extends A { function f($a, $b) {} } class C extends B { function f($a, $b) {} }",
+            "class X {} class Y extends X {} class A { function f(X $a) {} } class B extends A { function f(Y $a) {} }",
+            "class A { function f(): int { return 1; } } class B extends A { function f() {} }",
+            "class A { function f(&$a) {} } class B extends A { function f($a) {} }",
+            "class A { function f($a) {} } class B extends A { function f(int $a) {} }",
+            "class A { function f($a) {} } class B extends A { function f($a, int $b) {} }",
+            "class A { static function f($a) {} } class B extends A { function f($a) {} }",
+        ];
+        for src in manual {
+            let src = format!("<?php\n{src}\n");
+            assert_eq!(kinds_of(&fixes(&src), "removed.incompatible_user_override"), [FixKind::Manual], "{src}");
+            assert_eq!(fixed(&src), None, "{src}");
+        }
     }
 
     #[test]

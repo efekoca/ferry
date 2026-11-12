@@ -287,6 +287,19 @@ impl ProjectIndex {
         by_all.get(&short(class)).is_some_and(|common| !common.contains(&method.to_ascii_lowercase()))
     }
 
+    /// Whether a project class below `fqn`, or one whose ancestry can't be followed, declares `method`
+    /// itself or through a trait.
+    pub(crate) fn overridden_below(&self, fqn: &str, method: &str) -> bool {
+        let declares = |t: &TypeInfo| {
+            t.methods.contains(method) || t.trait_fqns.iter().any(|f| self.type_by_fqn(f).is_none_or(|tr| tr.methods.contains(method)))
+        };
+        self.types
+            .values()
+            .flatten()
+            .filter(|t| !t.is_trait && !t.fqn.eq_ignore_ascii_case(fqn) && declares(t))
+            .any(|t| t.parent_fqn.as_ref().is_some_and(|p| self.extends_or_is(p, fqn) != Some(false)))
+    }
+
     pub(crate) fn sets_mysqli_report(&self) -> bool {
         self.mysqli_report
     }

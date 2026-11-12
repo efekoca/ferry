@@ -2469,7 +2469,7 @@ fn render_signature(
     format!("{}function {name}({}){ret}", if is_static { "static " } else { "" }, args.join(", "))
 }
 
-fn trait_abstract_overrides(tokens: &[Token], index: &crate::index::ProjectIndex) -> Vec<BuiltinOverride> {
+pub(crate) fn trait_abstract_overrides(tokens: &[Token], index: &crate::index::ProjectIndex) -> Vec<BuiltinOverride> {
     let mut out = Vec::new();
     for decl in crate::index::class_decls(tokens) {
         let abstracts: Vec<(&str, &String, &crate::index::MethodSig)> = decl

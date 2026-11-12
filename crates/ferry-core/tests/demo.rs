@@ -155,6 +155,7 @@ fn kuzey_magaza_triggers_every_rule() {
         "removed.png2wbmp",
         "removed.jpeg2wbmp",
         "removed.incompatible_override",
+        "removed.incompatible_user_override",
         "deprecated.date_rfc7231",
         "deprecated.e_user_error",
         "removed.input_request",

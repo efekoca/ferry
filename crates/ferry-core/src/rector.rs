@@ -173,6 +173,7 @@ const LIKELY_RULES: &[&str] = &[
     "AutoloadToSplRegister",
     "InlineWbmpConversion",
     "WidenBuiltinOverride",
+    "WidenProjectOverride",
     "Rfc7231InUtc",
     "RemoveDateWakeup",
     "RemoveBadStateCall",
@@ -305,6 +306,13 @@ const RULE_TITLES: &[(&str, Text)] = &[
     (
         "WidenBuiltinOverride",
         Text::new("Yerleşik metodu ezen imza PHP 8'e uyacak şekilde genişletilir", "Widen signatures that override built-in methods"),
+    ),
+    (
+        "WidenProjectOverride",
+        Text::new(
+            "Projedeki bir üst metodu ezen imza PHP 8'e uyacak şekilde genişletilir",
+            "Widen signatures that override a method in the project",
+        ),
     ),
     ("Rfc7231Literal", Text::same("DATE_RFC7231 → 'D, d M Y H:i:s \\G\\M\\T'")),
     ("Rfc7231InUtc", Text::new("RFC 7231 tarihi UTC'de yazılır", "Write the RFC 7231 date in UTC")),
