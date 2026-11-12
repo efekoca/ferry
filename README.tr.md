@@ -117,6 +117,8 @@ Ferry'nin kendi başına düzeltemediği bulguların ayrıntısında adım adım
 
 PHP 8.5 için taranan üç demo projedeki 246 bulgudan size kalanlar, Ferry'nin kendi düzeltmeleriyle 171'den 57'ye indi. 125'i artık otomatik, 64'ü gözden geçirilecek olarak işaretli (önceden 52 ve 23); kalan 57'nin hepsinde bir rehber, bir paket ya da seçilecek seçenekler var.
 
+`scripts/fetch-corpus.sh`'ın indirdiği 13 eski sürümde, çatıların çekirdeği de dahil, Ferry PHP 8.5 için 15.358 bulgu bildiriyor: 11.604'ü otomatik, 817'si gözden geçirilecek, 2.937'si elle; elle olanların 2.210'unda bir rehber, bir paket ya da seçenekler var. Önizlemenin değiştirdiği 5.667 dosyanın üçü dışında hepsi PHP 8.5'te `php -l`'den geçiyor; o üç dosyanın her birinde Ferry'nin elle bıraktığı bir bulgu duruyor.
+
 ### Geçişi engelleyen bağımlılıklar
 
 **Bağımlılıklar** sayfası, kilitli her paketi `composer.lock`'ta bildirdiği PHP gereksinimine göre hedef sürümle karşılaştırır. Projenin `composer.json`'daki kendi PHP kısıtı da kontrol edilir. `composer.json`'da ya da kilitli bir pakette `php` için yazılmış bir `conflict` kaydı da hesaba katılır.
@@ -361,7 +363,7 @@ pnpm tauri build          # kurulum dosyaları → target/release/bundle/
 
 Testleri gerçek Rector'la çalıştırmak için `FERRY_TEST_TOOLS` değişkenini Rector'ın kurulu olduğu klasöre yönlendirin: `FERRY_TEST_TOOLS=/yol/tools cargo test --workspace`.
 
-`scripts/fetch-corpus.sh` WordPress, Drupal, CodeIgniter, phpBB, Joomla, Magento, PrestaShop, Laravel, Symfony, CakePHP, Yii, MediaWiki ve Moodle'ın eski sürümlerini indirir; `CORPUS=<klasör> CORPUS_PHP=$(which php) cargo test -p ferry-core --test corpus -- --ignored --nocapture` tarayıcının bulduklarını o PHP'nin kendisinin bu projeler için bildirdikleriyle karşılaştırır.
+`scripts/fetch-corpus.sh` WordPress, Drupal, CodeIgniter, phpBB, Joomla, Magento, PrestaShop, Laravel, Symfony, CakePHP, Yii, MediaWiki ve Moodle'ın eski sürümlerini indirir; `CORPUS=<klasör> CORPUS_PHP=$(which php) cargo test -p ferry-core --test corpus -- --ignored --nocapture` tarayıcının bulduklarını o PHP'nin kendisinin bu projeler için bildirdikleriyle karşılaştırır. `FERRY_TEST_TOOLS` ve `MEASURE_OUT=<klasör>` ayarlıyken `cargo test -p ferry-core --test corpus fix_measure -- --ignored` her proje için uyumluluk önizlemesini de hazırlar; sonucun sayılıp lint edilebilmesi için bulguları ve değişen her dosyanın önceki ve sonraki hâlini yazar.
 
 `crates/ferry-core/src/symbols.rs` PHP'nin kendisinden üretilir: `scripts/php-symbols/dump.sh <klasör>` 7.0'dan 8.5'e her PHP sürümü için aynı extension'larla bir Docker imajı kurar ve reflection ile bütün yerleşik fonksiyonları, sınıfları, metotları, sabitleri ve ini ayarlarını döker; `node scripts/php-symbols/generate.mjs <klasör> > crates/ferry-core/src/symbols.rs` her sürümün neyi kaldırdığını ya da kullanımdan kaldırdığını çıkarır. `scripts/php-symbols/verify.php` tabloyu bir PHP'ye karşı doğrular; `symbols` testi de tarayıcı bunlardan birini kaçırırsa başarısız olur. Yeni bir PHP sürümü çıktığında onu `dump.sh`'e ekleyip tabloyu yeniden üretin.
 

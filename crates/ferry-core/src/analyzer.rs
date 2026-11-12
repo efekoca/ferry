@@ -367,6 +367,37 @@ pub const NAME_WHITESPACE_FIX: &str = "Ferry\\Php80\\NamespacedNameWithoutWhites
 pub const INDIRECT_ACCESS_FIX: &str = "Ferry\\Php70\\KeepIndirectAccessOrder";
 pub const SORT_COMPARATOR_FIX: &str = "Ferry\\Php80\\BooleanComparatorToSpaceship";
 pub const STRING_INCREMENT_FIX: &str = "Ferry\\Php85\\StringIncrementToFunction";
+pub const CAST_NAME_FIX: &str = "Ferry\\CanonicalCastName";
+pub const NESTED_TERNARY_FIX: &str = "Ferry\\Php74\\ParenthesizeNestedTernary";
+
+/// Whether the name at `k` is a cast such as `(double)` or `( integer )`, not a call or a
+/// parenthesized constant.
+pub(crate) fn is_cast(tokens: &[Token], src: &str, k: usize) -> bool {
+    let (Some(open), Some(close)) = (k.checked_sub(1).map(|p| &tokens[p]), tokens.get(k + 1)) else { return false };
+    if tokens[k].kind != TokenKind::Ident || !open.is_punct("(") || !close.is_punct(")") {
+        return false;
+    }
+    let call = k.checked_sub(2).map(|p| &tokens[p]).is_some_and(|b| {
+        b.kind == TokenKind::Variable
+            || (b.kind == TokenKind::Ident && !EXPR_KEYWORDS.iter().any(|w| b.is_ident_ci(w)))
+            || b.is_punct(")")
+            || b.is_punct("]")
+    });
+    let tight = |a: usize, b: usize| src.get(a..b).is_some_and(|gap| gap.bytes().all(|c| c == b' ' || c == b'\t'));
+    !call && tight(open.end, tokens[k].start) && tight(tokens[k].end, close.start)
+}
+
+/// The canonical name for a cast PHP removed or deprecated by `target`.
+fn canonical_cast(name: &str, target: PhpVersion) -> Option<&'static str> {
+    match name.to_ascii_lowercase().as_str() {
+        "real" if target >= PhpVersion::new(7, 4) => Some("float"),
+        "double" if target >= PhpVersion::new(8, 5) => Some("float"),
+        "integer" if target >= PhpVersion::new(8, 5) => Some("int"),
+        "boolean" if target >= PhpVersion::new(8, 5) => Some("bool"),
+        "binary" if target >= PhpVersion::new(8, 5) => Some("string"),
+        _ => None,
+    }
+}
 
 pub fn fix_legacy_syntax(src: &str) -> Option<(String, Vec<&'static str>)> {
     fix_legacy_syntax_with(src, &std::collections::HashSet::new(), PhpVersion::new(8, 5), None)
@@ -490,6 +521,24 @@ pub fn fix_legacy_syntax_with(
     }
     if !hashes.is_empty() {
         applied.push(HASH_COMMENT_FIX);
+    }
+    let casts: Vec<(usize, &str)> = (1..tokens.len())
+        .filter(|&k| is_cast(&tokens, src, k))
+        .filter_map(|k| Some((k, canonical_cast(&tokens[k].text, target)?)))
+        .collect();
+    for &(k, name) in &casts {
+        edits.push((tokens[k].start, tokens[k].end, name.into()));
+    }
+    if !casts.is_empty() {
+        applied.push(CAST_NAME_FIX);
+    }
+    let groups = if target >= PhpVersion::new(7, 4) { nested_ternary_groups(&tokens) } else { Vec::new() };
+    for &(start, k) in &groups {
+        edits.push((tokens[start].start, tokens[start].start, "(".into()));
+        edits.push((tokens[k - 1].end, tokens[k - 1].end, ")".into()));
+    }
+    if !groups.is_empty() {
+        applied.push(NESTED_TERNARY_FIX);
     }
     let increments = if target >= PhpVersion::new(8, 5) { crate::flow::string_increments(&tokens) } else { Vec::new() };
     for &(var, from, to) in &increments {
@@ -1160,23 +1209,13 @@ impl<'a> Ctx<'a> {
             self.function_params(tokens, i);
         }
 
-        if prev.is_some_and(|p| p.is_punct("(")) && next.is_some_and(|n| n.is_punct(")")) {
-            let before_paren = i.checked_sub(2).map(|p| &tokens[p]);
-            let paren_is_call = before_paren.is_some_and(|b| {
-                b.kind == TokenKind::Variable
-                    || (b.kind == TokenKind::Ident && !EXPR_KEYWORDS.iter().any(|k| b.is_ident_ci(k)))
-                    || b.is_punct(")")
-                    || b.is_punct("]")
-            });
+        if is_cast(tokens, self.src, i) {
             let open = &tokens[i - 1];
-            let tight = |a: usize, b: usize| self.src.get(a..b).is_some_and(|gap| gap.bytes().all(|c| c == b' ' || c == b'\t'));
-            if !paren_is_call && tight(open.end, tok.start) && tight(tok.end, next.map_or(tok.end, |n| n.start)) {
-                match lower.as_str() {
-                    "real" => return self.pattern(&patterns::REAL_CAST, open, None),
-                    "unset" => return self.pattern(&patterns::UNSET_CAST, open, None),
-                    "boolean" | "integer" | "double" | "binary" => return self.pattern(&patterns::NON_CANONICAL_CAST, open, None),
-                    _ => {}
-                }
+            match lower.as_str() {
+                "real" => return self.pattern(&patterns::REAL_CAST, open, None),
+                "unset" => return self.pattern(&patterns::UNSET_CAST, open, None),
+                "boolean" | "integer" | "double" | "binary" => return self.pattern(&patterns::NON_CANONICAL_CAST, open, None),
+                _ => {}
             }
         }
 
@@ -1992,14 +2031,22 @@ struct TernaryLevel {
     open: usize,
     done: bool,
     done_short: bool,
+    start: usize,
 }
 
 fn nested_ternaries(tokens: &[Token]) -> Vec<usize> {
+    nested_ternary_groups(tokens).into_iter().map(|(_, k)| k).collect()
+}
+
+/// Each `?` that PHP 7 read as the start of a ternary whose condition is the ternary before it,
+/// with the first token of that left-hand side: `a ? b : c ? d : e` meant `(a ? b : c) ? d : e`.
+fn nested_ternary_groups(tokens: &[Token]) -> Vec<(usize, usize)> {
+    let assignments = ["=", "+=", "-=", "*=", "/=", ".=", "%=", "**=", "??=", "&=", "|=", "^=", "<<=", ">>="];
     let mut out = Vec::new();
     let mut stack = vec![TernaryLevel::default()];
     for (k, t) in tokens.iter().enumerate() {
         if t.is_punct("(") || t.is_punct("[") || t.is_punct("{") || t.is_punct("#[") {
-            stack.push(TernaryLevel::default());
+            stack.push(TernaryLevel { start: k + 1, ..TernaryLevel::default() });
             continue;
         }
         if t.is_punct(")") || t.is_punct("]") || t.is_punct("}") {
@@ -2013,12 +2060,14 @@ fn nested_ternaries(tokens: &[Token]) -> Vec<usize> {
             && ["and", "or", "xor", "return", "echo", "print", "case", "yield", "throw"].iter().any(|k| t.is_ident_ci(k));
         let label = t.is_punct(":") && level.open == 0 && !(k > 0 && tokens[k - 1].is_punct("?"));
         if t.is_punct(";") || t.is_punct(",") || t.is_punct("=>") || t.kind == TokenKind::CloseTag || keyword || label {
-            *level = TernaryLevel::default();
+            *level = TernaryLevel { start: k + 1, ..TernaryLevel::default() };
+        } else if level.open == 0 && !level.done && assignments.iter().any(|a| t.is_punct(a)) {
+            level.start = k + 1;
         } else if t.is_punct("?") && k > 0 && expression_end(&tokens[k - 1]) {
             let short = tokens.get(k + 1).is_some_and(|n| n.is_punct(":"));
             if level.open == 0 {
                 if level.done && !(short && level.done_short) {
-                    out.push(k);
+                    out.push((level.start, k));
                 }
                 if short {
                     level.done_short = !level.done || level.done_short;
@@ -4922,6 +4971,11 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
                 "removed.magic_method_signature",
                 3,
             ),
+            (
+                "<?php class A { function __set_state() {} function __sleep($x) {} function __wakeup() {} function __unserialize(array $d, $e = 1) {} static function __set_state(...$a) {} function __serialize(): array { return []; } }",
+                "removed.magic_method_signature",
+                4,
+            ),
             ("<?php class A { function __debugInfo() { return null; } } class B { function __debugInfo() { return []; } }", "deprecated.debug_info_null", 1),
             ("<?php interface I { const X = 1; const Y = 2; } class C implements I { protected const X = 2; public const Y = 3; }", "removed.interface_constant_visibility", 1),
             ("<?php class D extends DateTime { const ATOM = 'x'; const MINE = 1; } class E extends \\DateTime { const string ATOM = 'y'; } class F extends PDO { const PARAM_INT = 'x'; }", "removed.typed_constant_override", 2),
@@ -5730,6 +5784,37 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
             .iter()
             .filter(|f| f.rule_id == "removed.hash_bracket_comment")
             .all(|f| f.fix == FixKind::Auto));
+    }
+
+    #[test]
+    fn casts_are_renamed_without_touching_their_operand() {
+        let src = "<?php\n$a = (double) ($x ? $x : 0);\n$b = ( integer )$y;\n$c = (Boolean) (int) $z;\n$d = (real) 1;\n$e = (binary) $s;\n$f = foo(double);\n$g = (float) 2;\n";
+        let (out, applied) = fix_legacy_syntax(src).unwrap();
+        assert_eq!(
+            out,
+            "<?php\n$a = (float) ($x ? $x : 0);\n$b = ( int )$y;\n$c = (bool) (int) $z;\n$d = (float) 1;\n$e = (string) $s;\n$f = foo(double);\n$g = (float) 2;\n"
+        );
+        assert_eq!(applied, [CAST_NAME_FIX]);
+        let (out, _) = fix_legacy_syntax_with(src, &std::collections::HashSet::new(), PhpVersion::new(8, 4), None).unwrap();
+        assert!(out.contains("(double) ($x") && out.contains("$d = (float) 1;"), "{out}");
+        let casts: Vec<FixKind> = analyze_source("a.php", src, PhpVersion::new(8, 5))
+            .into_iter()
+            .filter(|f| f.rule_id.ends_with("_cast"))
+            .map(|f| f.fix)
+            .collect();
+        assert_eq!(casts, [FixKind::Auto; 5]);
+    }
+
+    #[test]
+    fn nested_ternaries_get_the_parentheses_php_7_read_them_with() {
+        let src = "<?php\nreturn ($a == $b) ? 0 : ($a > $b) ? 1 : -1;\n$x = $a ? 1 : $b ? 2 : 3;\necho $a ? 1 : $b ? 2 : $c ? 3 : 4;\n$r = ['x' => f() ? 1 : (g()) ? 2 : 3, 'y' => 0];\n$y = $a ?: $b ? 1 : 2;\n$z = $a ?: $b ?: $c;\n$w = $a ? 1 : ($b ? 2 : 3);\nf($a ? 1 : $b ? 2 : 3);\n$s .= $a && $b ? 'x' : $c ? 'y' : 'z';\n";
+        let (out, applied) = fix_legacy_syntax(src).unwrap();
+        assert_eq!(
+            out,
+            "<?php\nreturn (($a == $b) ? 0 : ($a > $b)) ? 1 : -1;\n$x = ($a ? 1 : $b) ? 2 : 3;\necho (($a ? 1 : $b) ? 2 : $c) ? 3 : 4;\n$r = ['x' => (f() ? 1 : (g())) ? 2 : 3, 'y' => 0];\n$y = ($a ?: $b) ? 1 : 2;\n$z = $a ?: $b ?: $c;\n$w = $a ? 1 : ($b ? 2 : 3);\nf(($a ? 1 : $b) ? 2 : 3);\n$s .= ($a && $b ? 'x' : $c) ? 'y' : 'z';\n"
+        );
+        assert_eq!(applied, [NESTED_TERNARY_FIX]);
+        assert!(analyze_source("a.php", &out, PhpVersion::new(8, 5)).iter().all(|f| f.rule_id != "removed.nested_ternary"));
     }
 
     #[test]
