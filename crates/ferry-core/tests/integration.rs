@@ -378,3 +378,38 @@ fn overrides_are_checked_against_composer_package_parents() {
         ]
     );
 }
+
+#[test]
+fn rector_knows_classes_declared_in_inc_files() {
+    let Some(tools) = ferry_core::toolchain::test_tools() else {
+        eprintln!("FERRY_TEST_TOOLS ayarlı değil; Rector testi atlandı");
+        return;
+    };
+    let php = toolchain::find_php(None).expect("php gerekli");
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("legacy");
+    std::fs::create_dir_all(root.join("includes")).unwrap();
+    std::fs::write(
+        root.join("includes/query.inc"),
+        "<?php\nclass BaseQuery\n{\n    function execute()\n    {\n        return 1;\n    }\n}\n\nclass InsertQuery extends BaseQuery\n{\n    function execute()\n    {\n        return 2;\n    }\n}\n",
+    )
+    .unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let preview = rector::preview(
+        &php,
+        &toolchain::rector_entry(&tools),
+        &root,
+        PhpVersion::new(8, 4),
+        rector::RectorMode::Compat,
+        &[],
+        work.path(),
+        &std::sync::atomic::AtomicBool::new(false),
+    )
+    .unwrap();
+    assert!(preview.errors.is_empty(), "{:?}", preview.errors);
+    assert!(
+        preview.changes.iter().any(|c| c.file == "includes/query.inc"),
+        "{:?}",
+        preview.changes.iter().map(|c| &c.file).collect::<Vec<_>>()
+    );
+}

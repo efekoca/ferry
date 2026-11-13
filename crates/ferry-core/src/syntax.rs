@@ -87,10 +87,24 @@ fn continues_on_switch(tokens: &[Token]) -> Vec<usize> {
         } else if t.is_punct("}") {
             stack.pop();
         } else if t.is_ident_ci("continue") {
+            let header = k.checked_sub(1).filter(|&p| tokens[p].is_punct(")")).and_then(|p| {
+                let mut depth = 0usize;
+                (0..=p).rev().find(|&j| {
+                    if tokens[j].is_punct(")") {
+                        depth += 1;
+                    } else if tokens[j].is_punct("(") {
+                        depth -= 1;
+                    }
+                    depth == 0
+                })
+            });
+            let braceless = header
+                .is_some_and(|open| open > 0 && ["for", "foreach", "while"].iter().any(|w| tokens[open - 1].is_ident_ci(w)))
+                || k > 0 && tokens[k - 1].is_ident_ci("do");
             let plain = tokens.get(k + 1).is_some_and(|n| n.is_punct(";"))
                 || tokens.get(k + 1).is_some_and(|n| n.text == "1") && tokens.get(k + 2).is_some_and(|n| n.is_punct(";"));
             let target = stack.iter().rev().find(|b| matches!(b, Block::Loop | Block::Switch | Block::Function));
-            if plain && target == Some(&Block::Switch) {
+            if plain && !braceless && target == Some(&Block::Switch) {
                 out.push(k);
             }
         }
@@ -277,17 +291,20 @@ pub(crate) const EMPTY_LIST: PatternRule = rule(
     ),
 );
 
-pub(crate) const CONTINUE_SWITCH: PatternRule = rule(
-    "deprecated.continue_switch",
-    Text::new("switch'i hedefleyen continue", "continue targeting a switch"),
-    Severity::Deprecated,
-    (7, 3),
-    Some(Text::new("break ya da continue 2", "break or continue 2")),
-    Text::new(
-        "switch içindeki continue break gibi davranır. PHP 7.3'ten beri bu derlenirken uyarı verir; döngüye devam etmek için continue 2 yazın.",
-        "continue inside a switch acts like break. Since PHP 7.3 it raises a warning when compiled; use continue 2 to continue the loop.",
-    ),
-);
+pub(crate) const CONTINUE_SWITCH: PatternRule = PatternRule {
+    fix: FixKind::Auto,
+    ..rule(
+        "deprecated.continue_switch",
+        Text::new("switch'i hedefleyen continue", "continue targeting a switch"),
+        Severity::Deprecated,
+        (7, 3),
+        Some(Text::new("break", "break")),
+        Text::new(
+            "switch içindeki continue break gibi davranır ve PHP 7.3'ten beri derlenirken uyarı verir. Rector onu aynı işi yapan break ile değiştirir. Döngüye devam etmek istenmişse bunun yerine continue 2 yazın.",
+            "continue inside a switch acts like break, and since PHP 7.3 it raises a warning when compiled. Rector replaces it with break, which does the same. If the loop was meant to go on, write continue 2 instead.",
+        ),
+    )
+};
 
 pub(crate) const SCRIPT_TAG: PatternRule = rule(
     "removed.script_tag",
