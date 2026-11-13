@@ -1140,4 +1140,36 @@ export const GUIDES: Record<string, Guide> = {
     before: "return array_key_exists($index, $this);",
     after: "return $this->offsetExists($index);",
   },
+  "removed.builtin_constant": {
+    steps: {
+      tr: [
+        "Bu sabit PHP'den kaldırıldı; onu kullanan satır hedef sürümde `Undefined constant` Error fırlatır.",
+        "Sabit kaldırılan bir eklentiye aitse kodu o eklentinin yerine geçene taşırken karşılığını kullanın. `MYSQL_ASSOC`, `MYSQL_NUM`, `MYSQL_BOTH`, `MYSQL_CLIENT_COMPRESS` ve `MYSQL_CLIENT_SSL`'in `MYSQLI_` karşılıkları aynı değerleri taşır.",
+        "Sabitin bir karşılığı yoksa kaldırılan özelliğe bağlı olan kodu kaldırın ya da yeniden yazın.",
+      ],
+      en: [
+        "This constant was removed from PHP; a line that uses it throws an `Undefined constant` Error on the target version.",
+        "If it belongs to a removed extension, use its counterpart when you move the code to what replaced the extension. `MYSQL_ASSOC`, `MYSQL_NUM`, `MYSQL_BOTH`, `MYSQL_CLIENT_COMPRESS` and `MYSQL_CLIENT_SSL` have `MYSQLI_` counterparts with the same values.",
+        "If the constant has no counterpart, remove or rewrite the code that depends on the removed feature.",
+      ],
+    },
+    before: "$row = mysql_fetch_array($result, MYSQL_ASSOC);",
+    after: "$row = mysqli_fetch_array($result, MYSQLI_ASSOC);",
+  },
+  "removed.builtin_arity": {
+    steps: {
+      tr: [
+        "PHP 8.0'dan beri yerleşik bir fonksiyona fazla ya da eksik argüman vermek ArgumentCountError fırlatır. PHP 7'de çoğu fonksiyon uyarı verip null ya da false döndürüyor ve hiç çalışmıyordu; bazıları ise fazla argümanı yok sayıp çalışıyordu (`mysqli_connect_errno($link)` gibi).",
+        "Çağrının amacına göre fazla argümanı silin ya da eksik olanı ekleyin. Proje bugün PHP 8'den eski bir sürümde çalışıyorsa Ferry, bilinen durumlarda eski sonucu korumayı ya da fazla argümanı silmeyi seçenek olarak sunar.",
+        "`openssl_seal()` ve `openssl_open()` artık şifre yöntemini ister; eski varsayılan RC4'tü. OpenSSL 3 RC4'ü varsayılan olarak kapattığı için PHP 8.5'in resmî imajında `'RC4'` vermek de false döndürdü. Yeni veri için `'AES-256-CBC'` ve bir IV kullanın, IV'yi de saklayıp `openssl_open()`'a verin.",
+      ],
+      en: [
+        "Since PHP 8.0, passing too many or too few arguments to a built-in function throws ArgumentCountError. On PHP 7 most functions warned and returned null or false without running; some ignored the extra arguments and ran (such as `mysqli_connect_errno($link)`).",
+        "Depending on what the call is for, remove the extra argument or add the missing one. When the project runs a version older than PHP 8 today, Ferry offers to keep the old result or drop the extra arguments where it knows them.",
+        "`openssl_seal()` and `openssl_open()` now require the cipher; the old default was RC4. OpenSSL 3 disables RC4 by default, so passing `'RC4'` returned false too on PHP 8.5's official image. Use `'AES-256-CBC'` with an IV for new data, and store the IV to pass to `openssl_open()`.",
+      ],
+    },
+    before: "openssl_seal($data, $sealed, $keys, $publicKeys);",
+    after: "$iv = random_bytes(16);\nopenssl_seal($data, $sealed, $keys, $publicKeys, 'AES-256-CBC', $iv);",
+  },
 };
