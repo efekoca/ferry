@@ -339,6 +339,16 @@ pub(crate) fn check(tokens: &[Token], index: &crate::index::ProjectIndex) -> Vec
         .filter(|(_, _, v)| tokens.get(*v).is_some_and(|t| t.is_ident_ci("null")))
         .map(|(_, n, _)| n.as_str())
         .collect();
+    let spaces = crate::index::namespaces(tokens);
+    let exact = |at: usize| {
+        let raw = if tokens[at].is_ident_ci("define") {
+            tokens.get(at + 2).and_then(string_value).unwrap_or_default().trim_start_matches('\\').to_string()
+        } else {
+            format!("{}\\{}", crate::index::namespace_at(&spaces, at), tokens[at].text)
+        };
+        let (space, short) = raw.rsplit_once('\\').unwrap_or(("", raw.as_str()));
+        format!("{}\\{short}", space.to_ascii_lowercase())
+    };
     let mut seen_constants = HashSet::new();
     for (at, name, _) in &constants_here {
         let guarded = tokens.windows(3).any(|w| {
@@ -346,7 +356,7 @@ pub(crate) fn check(tokens: &[Token], index: &crate::index::ProjectIndex) -> Vec
                 && w[1].is_punct("(")
                 && string_value(&w[2]).is_some_and(|n| n.trim_start_matches('\\').eq_ignore_ascii_case(name))
         });
-        if !seen_constants.insert(name.as_str()) && !guarded {
+        if !seen_constants.insert(exact(*at)) && !guarded {
             out.push(issue(*at, &CONSTANT_REDECLARED));
         }
     }

@@ -143,7 +143,24 @@ const LAST_LINK: Record<Lang, string> = {
   en: "Calls without a link used the last connection opened; pass the connection object to every call.",
 };
 
+const MAGIC_QUOTES_SETTER: Guide = {
+  steps: {
+    tr: [
+      "Magic quotes PHP 5.4'te kaldırıldı; `set_magic_quotes_runtime()` ve takma adı `magic_quotes_runtime()` PHP 7.0'da tamamen silindi. PHP 5.4'ten beri onları false ile çağırmak hiçbir şey yapmıyordu, true ile çağırmak ise ölümcül hataydı.",
+      "Çağrıyı silin. Ferry tek başına duran çağrıları kendisi siler; çağrı `if (get_magic_quotes_runtime()) { ... }` gibi hiç çalışmayan bir bloğun içindeyse bloğu bütünüyle siler.",
+    ],
+    en: [
+      "Magic quotes were removed in PHP 5.4, and `set_magic_quotes_runtime()` and its alias `magic_quotes_runtime()` were deleted in PHP 7.0. Since PHP 5.4, calling them with false did nothing and calling them with true was a fatal error.",
+      "Remove the call. Ferry removes calls that stand alone; when the call sits in a block that never runs, such as `if (get_magic_quotes_runtime()) { ... }`, it removes the whole block.",
+    ],
+  },
+  before: "if (get_magic_quotes_runtime()) {\n    set_magic_quotes_runtime(0);\n}\n$data = fread($fp, $size);",
+  after: "$data = fread($fp, $size);",
+};
+
 export const GUIDES: Record<string, Guide> = {
+  "removed.set_magic_quotes_runtime": MAGIC_QUOTES_SETTER,
+  "removed.magic_quotes_runtime": MAGIC_QUOTES_SETTER,
   "removed.mysql": {
     steps: {
       tr: [
@@ -1171,5 +1188,719 @@ export const GUIDES: Record<string, Guide> = {
     },
     before: "openssl_seal($data, $sealed, $keys, $publicKeys);",
     after: "$iv = random_bytes(16);\nopenssl_seal($data, $sealed, $keys, $publicKeys, 'AES-256-CBC', $iv);",
+  },
+  "behavior.idn_default_variant": {
+    steps: {
+      tr: [
+        "PHP 7.4'ten beri `idn_to_ascii()` ve `idn_to_utf8()` varsayılan olarak IDNA2003 yerine UTS #46 kurallarını kullanır. Çoğu alan adı aynı sonucu verir.",
+        "Farklar şunlar: büyük harfli ASCII küçültülür (`FASS.de` → `fass.de`), emoji gibi semboller kabul edilir (`☕.example` → `xn--53h.example`), başta ya da sonda tire ve 3. ile 4. karakterde `--` taşıyan etiketler ile geçersiz `xn--` etiketleri false döner. `idn_to_utf8()` artık `xn--fa-hia.de` gibi adları `faß.de`'ye çözer.",
+        "Sonuç PHP'nin kullandığı ICU sürümüne de bağlıdır: PHP 7.4'ün ICU 71'i `faß.de`'yi `fass.de`'ye çevirdi, PHP 8.5 resmî imajının ICU 76'sı `xn--fa-hia.de` verdi. `ς` ve görünmez birleştiriciler (ZWJ) için de aynı fark var.",
+        "IDNA2003 PHP 8.0'da kaldırıldı; eski sonuca dönmenin yolu yok. Bu çağrılara giden alan adlarını hedef sunucuda deneyin, false dönenleri ve büyük-küçük harfe dayanan karşılaştırmaları kontrol edin. Varyantı açıkça yazmak sonucu değiştirmez.",
+      ],
+      en: [
+        "Since PHP 7.4, `idn_to_ascii()` and `idn_to_utf8()` use UTS #46 instead of IDNA2003 by default. Most domains convert the same.",
+        "The differences: uppercase ASCII is lowercased (`FASS.de` → `fass.de`), symbols such as emoji are accepted (`☕.example` → `xn--53h.example`), and labels with a leading or trailing hyphen, `--` in the 3rd and 4th characters, or an invalid `xn--` return false. `idn_to_utf8()` now decodes names like `xn--fa-hia.de` to `faß.de`.",
+        "The result also depends on the ICU version PHP uses: PHP 7.4's ICU 71 turned `faß.de` into `fass.de`, while ICU 76 in PHP 8.5's official image gave `xn--fa-hia.de`. The same goes for `ς` and invisible joiners (ZWJ).",
+        "IDNA2003 was removed in PHP 8.0, so there is no way back to the old result. Try the domains these calls get on the target server, and check the ones that return false and any comparison that relies on letter case. Writing the variant out changes nothing.",
+      ],
+    },
+    before: "$host = idn_to_ascii($host);",
+    after: "$host = idn_to_ascii($host, IDNA_DEFAULT, INTL_IDNA_VARIANT_UTS46);",
+  },
+  "behavior.error_reporting_zero": {
+    steps: {
+      tr: [
+        "PHP 8'de `@` hata seviyesini 0'a indirmez; ölümcül hata bitlerini (`E_ERROR`, `E_PARSE`, `E_CORE_ERROR`, `E_COMPILE_ERROR`, `E_USER_ERROR`, `E_RECOVERABLE_ERROR`) açık bırakır. `error_reporting() == 0` kontrolü bu yüzden susturulan hatalarda artık doğru olmaz.",
+        "Kontrol `set_error_handler()` ile kurulan bir işleyicinin içindeyse hata numarasına bakın: `if (!(error_reporting() & $errno)) { return false; }`.",
+        "Hata numarası yoksa ölümcül bitleri maskeleyin: `(error_reporting() & ~(E_ERROR | E_PARSE | E_CORE_ERROR | E_COMPILE_ERROR | E_USER_ERROR | E_RECOVERABLE_ERROR)) === 0`. Bu kontrol PHP 5.6'dan 8.5'e kadar `@` altında doğru, normalde yanlış verdi. Ferry ikisini de kendisi yazar.",
+      ],
+      en: [
+        "On PHP 8, `@` no longer drops the error level to 0; it keeps the fatal bits (`E_ERROR`, `E_PARSE`, `E_CORE_ERROR`, `E_COMPILE_ERROR`, `E_USER_ERROR`, `E_RECOVERABLE_ERROR`). So an `error_reporting() == 0` check is no longer true for silenced errors.",
+        "When the check is inside a handler installed with `set_error_handler()`, test the error number: `if (!(error_reporting() & $errno)) { return false; }`.",
+        "Without an error number, mask out the fatal bits: `(error_reporting() & ~(E_ERROR | E_PARSE | E_CORE_ERROR | E_COMPILE_ERROR | E_USER_ERROR | E_RECOVERABLE_ERROR)) === 0`. On PHP 5.6 through 8.5 this was true under `@` and false otherwise. Ferry writes both itself.",
+      ],
+    },
+    before: "if (error_reporting() === 0) {\n    return;\n}",
+    after: "if (!(error_reporting() & $errno)) {\n    return;\n}",
+  },
+  "deprecated.pg_implicit_connection": {
+    steps: {
+      tr: [
+        "PHP 8.1'den beri pgsql fonksiyonlarını bağlantı vermeden çağırmak kullanımdan kalktı; bu çağrılar son açılan bağlantıyı kullanıyordu.",
+        "`pg_connect()`'in döndürdüğü bağlantıyı ilk argüman olarak verin. Sınıf bağlantıyı tek bir özellikte tutuyorsa Ferry o özelliği kendisi ekler.",
+        "`pg_query_params()`, `pg_prepare()` ve `pg_execute()` iki argümanla çağrıldığında ilk argüman sorgu ya da ifade adıdır; bağlantıyı onun önüne ekleyin, yerine koymayın.",
+      ],
+      en: [
+        "Since PHP 8.1, calling pgsql functions without a connection is deprecated; these calls used the connection opened last.",
+        "Pass the connection `pg_connect()` returned as the first argument. When the class keeps its connection in one property, Ferry adds that property itself.",
+        "When `pg_query_params()`, `pg_prepare()` and `pg_execute()` get two arguments, the first is the query or statement name; add the connection before it, don't replace it.",
+      ],
+    },
+    before: "pg_query('SET search_path TO app');",
+    after: "pg_query($this->connection, 'SET search_path TO app');",
+  },
+  "removed.builtin_ini": {
+    steps: {
+      tr: [
+        "Bu ayar PHP'den kaldırıldı. `ini_set()` onu değiştirmeden false döndürür, `ini_get()` false verir; ayarın yaptığı iş artık yapılmaz.",
+        "Ferry ayarı yazan ya da okuyan basit çağrıları kendisi kaldırır ya da false yapar. Kalan çağrılarda, ayarın sağladığı şey hâlâ gerekiyorsa onu sağlayan güncel yolu kullanın.",
+        "`magic_quotes_runtime` PHP 5.4'ten beri yok; okunan veri zaten olduğu gibi gelir. `session.hash_function` ve `session.hash_bits_per_character` PHP 7.1'de kaldırıldı; oturum kimliği artık PHP'nin varsayılanıyla üretilir.",
+      ],
+      en: [
+        "PHP removed this setting. `ini_set()` returns false without changing anything and `ini_get()` returns false; whatever the setting did no longer happens.",
+        "Ferry removes simple calls that write or read it, or turns them into false. For the rest, if what the setting provided is still needed, use the current way to get it.",
+        "`magic_quotes_runtime` has been gone since PHP 5.4; data read comes back as it is anyway. `session.hash_function` and `session.hash_bits_per_character` were removed in PHP 7.1; session IDs now come from PHP's default.",
+      ],
+    },
+  },
+  "deprecated.mhash": {
+    steps: {
+      tr: [
+        "mhash fonksiyonları PHP 8.1'de, `MHASH_*` sabitleri PHP 8.5'te kullanımdan kalktı. hash eklentisi aynı algoritmaları verir.",
+        "`mhash(MHASH_SHA1, $data)` yerine `hash('sha1', $data, true)`, anahtarlı çağrı yerine `hash_hmac('sha1', $data, $key, true)` yazın; ikisi de ham bayt döndürür. Ferry sabit algoritmalı çağrıları ve `mhash_keygen_s2k()`'yı kendisi çevirir.",
+        "Algoritma bir değişkenden geliyorsa `MHASH_*` adını hash adına çevirin: çoğu küçük harfle aynıdır (`sha256`, `md5`, `whirlpool`); `MHASH_TIGER` `tiger192,3`, `MHASH_HAVAL256` `haval256,3`, `MHASH_SNEFRU256` `snefru` olur. Kullanılabilen adları `hash_algos()` listeler.",
+        "`mhash_count()` ve `mhash_get_hash_name()` ile algoritma listesi kuran kod `hash_algos()` ile kurulabilir.",
+      ],
+      en: [
+        "The mhash functions were deprecated in PHP 8.1 and the `MHASH_*` constants in PHP 8.5. The hash extension gives the same algorithms.",
+        "Write `hash('sha1', $data, true)` instead of `mhash(MHASH_SHA1, $data)`, and `hash_hmac('sha1', $data, $key, true)` for a keyed call; both return raw bytes. Ferry converts calls with a constant algorithm and `mhash_keygen_s2k()` itself.",
+        "When the algorithm comes from a variable, map the `MHASH_*` name to the hash name: most are the same in lower case (`sha256`, `md5`, `whirlpool`); `MHASH_TIGER` is `tiger192,3`, `MHASH_HAVAL256` is `haval256,3` and `MHASH_SNEFRU256` is `snefru`. `hash_algos()` lists the names available.",
+        "Code that builds a list of algorithms with `mhash_count()` and `mhash_get_hash_name()` can use `hash_algos()` instead.",
+      ],
+    },
+    before: "$mac = mhash(MHASH_SHA256, $data, $key);",
+    after: "$mac = hash_hmac('sha256', $data, $key, true);",
+  },
+  "deprecated.gmstrftime": {
+    steps: {
+      tr: [
+        "`gmstrftime()` PHP 8.1'de kullanımdan kalktı. Ferry yerel ayardan bağımsız biçimleri `gmdate()`'e kendisi çevirir: `%Y→Y, %m→m, %d→d, %H→H, %M→i, %S→s`.",
+        "Biçim bir değişkenden geliyorsa çeviriyi o değişkenin değerleri için yapın. `%x`, `%X` ve `%c` yerel ayara bağlıdır; C yerel ayarında `%x` `m/d/y`, `%X` `H:i:s` demektir.",
+        "Ay ve gün adları yerel dilde gerekiyorsa `IntlDateFormatter`'ı saat dilimi `'UTC'` olacak şekilde kullanın; desen eşlemesi `strftime()` rehberindekiyle aynıdır.",
+      ],
+      en: [
+        "`gmstrftime()` was deprecated in PHP 8.1. Ferry converts locale-independent formats to `gmdate()` itself: `%Y→Y, %m→m, %d→d, %H→H, %M→i, %S→s`.",
+        "When the format comes from a variable, convert the values it takes. `%x`, `%X` and `%c` depend on the locale; in the C locale `%x` means `m/d/y` and `%X` means `H:i:s`.",
+        "If month and day names are needed in a language, use `IntlDateFormatter` with the time zone `'UTC'`; the pattern mapping is the same as in the `strftime()` guide.",
+      ],
+    },
+    before: "echo gmstrftime('%Y-%m-%d %H:%M:%S', $ts);",
+    after: "echo gmdate('Y-m-d H:i:s', $ts);",
+  },
+  "behavior.stream_set_option_missing": {
+    steps: {
+      tr: [
+        "PHP 7.4'ten beri bir akış sarmalayıcısından `include` ya da `require` yapılırken PHP `stream_set_option()` metodunu çağırır; metot yoksa her seferinde `stream_set_option is not implemented!` uyarısı verir.",
+        "Sarmalayıcı sınıfa false döndüren bir `stream_set_option($option, $arg1, $arg2)` metodu ekleyin. Metot yokken PHP de false kabul ediyordu; `stream_set_blocking()` ve `stream_set_timeout()` gibi çağrıların sonucu değişmez, yalnızca uyarı kalkar.",
+        "Ferry sınıf aynı dosyadaysa metodu kendisi ekler; başka dosyadaki sınıflara elle ekleyin.",
+      ],
+      en: [
+        "Since PHP 7.4, PHP calls the `stream_set_option()` method when you `include` or `require` from a stream wrapper; without it, it warns `stream_set_option is not implemented!` every time.",
+        "Add a `stream_set_option($option, $arg1, $arg2)` method that returns false to the wrapper class. PHP took a missing method as false too, so calls like `stream_set_blocking()` and `stream_set_timeout()` return the same; only the warning goes.",
+        "Ferry adds the method itself when the class is in the same file; add it by hand to classes in other files.",
+      ],
+    },
+    before: "class TemplateStream\n{\n    public function stream_open($path, $mode, $options, &$opened)\n    {\n        return true;\n    }\n}",
+    after: "class TemplateStream\n{\n    public function stream_open($path, $mode, $options, &$opened)\n    {\n        return true;\n    }\n\n    public function stream_set_option($option, $arg1, $arg2)\n    {\n        return false;\n    }\n}",
+  },
+  "deprecated.ldap_connect_port": {
+    steps: {
+      tr: [
+        "PHP 8.3'ten beri `ldap_connect()`'e host ve portu ayrı vermek kullanımdan kalktı; tek bir URI verin.",
+        "PHP iki argümanla `ldap://host:port` adresini kuruyordu; host zaten `ldap://`, `ldaps://` ya da `ldapi://` ile başlıyorsa portu yok sayıp hostu olduğu gibi kullanıyordu. Ferry aynı kuralı yazar. Host her zaman düz bir adsa `'ldap://' . $host . ':' . $port` yeterlidir.",
+        "Bağlantı şifreli olmalıysa `ldaps://host:636` verin ya da bağlandıktan sonra `ldap_start_tls()` çağırın.",
+      ],
+      en: [
+        "Since PHP 8.3, passing host and port separately to `ldap_connect()` is deprecated; pass one URI.",
+        "With two arguments PHP built `ldap://host:port`; when the host already started with `ldap://`, `ldaps://` or `ldapi://`, it ignored the port and used the host as it was. Ferry writes the same rule. If the host is always a plain name, `'ldap://' . $host . ':' . $port` is enough.",
+        "If the connection has to be encrypted, pass `ldaps://host:636` or call `ldap_start_tls()` after connecting.",
+      ],
+    },
+    before: "$link = ldap_connect($host, 389);",
+    after: "$link = ldap_connect('ldap://' . $host . ':389');",
+  },
+  "review.variable_variable": {
+    steps: {
+      tr: [
+        "`$$a[k]` PHP 5'te `${$a[k]}` (adı dizideki değerden gelen değişken), PHP 7'den beri `${$a}[k]` (adını `$a`'nın verdiği değişkenin `k` elemanı) olarak okunur.",
+        "Proje bugün PHP 5'te çalışıyorsa Ferry PHP 5 okumasını, PHP 7'de çalışıyorsa PHP 7 okumasını süslü parantezle yazar. Sürüm bilinmiyorsa iki seçeneği gösterir; `$a` bir diziyse PHP 5 okuması önerilir.",
+        "Hangisinin kastedildiğine `$a`'nın ne tuttuğuna bakarak karar verin: dizi tutuyorsa PHP 5 okuması, değişken adı tutuyorsa PHP 7 okuması doğrudur.",
+      ],
+      en: [
+        "`$$a[k]` reads as `${$a[k]}` on PHP 5 (the variable named by the array value) and as `${$a}[k]` since PHP 7 (element `k` of the variable `$a` names).",
+        "When the project runs PHP 5 today, Ferry writes the PHP 5 reading with braces; when it runs PHP 7, the PHP 7 one. When the version is unknown it shows both; the PHP 5 reading is recommended when `$a` is an array.",
+        "Decide from what `$a` holds: an array means the PHP 5 reading, a variable name means the PHP 7 one.",
+      ],
+    },
+    before: "$$names[$i] = 1;",
+    after: "${$names[$i]} = 1;",
+  },
+  "deprecated.http_response_header": {
+    steps: {
+      tr: [
+        "PHP 8.5'te `$http_response_header` değişkeni kullanımdan kalktı. PHP 8.4'ten beri aynı başlıkları `http_get_last_response_headers()` döndürür; istek yapılmadıysa null döner.",
+        "Okuma, değişkeni dolduran isteğin hemen ardındaysa değişkeni bu çağrıyla değiştirin. Ferry arada başka bir istek yapabilecek kod yoksa bunu kendisi yapar.",
+        "İstekle okuma arasında başka çağrılar ya da bloklar varsa başlıkları isteğin hemen ardından bir değişkene alın ve sonraki okumalarda onu kullanın.",
+      ],
+      en: [
+        "PHP 8.5 deprecated the `$http_response_header` variable. Since PHP 8.4, `http_get_last_response_headers()` returns the same headers, or null when no request was made.",
+        "When the read comes right after the request that filled the variable, replace the variable with that call. Ferry does this itself when nothing in between could make another request.",
+        "When other calls or blocks sit between the request and the read, store the headers in a variable right after the request and read that later.",
+      ],
+    },
+    before: "$body = file_get_contents($url);\nlog_body($body);\nforeach ($http_response_header as $line) {",
+    after: "$body = file_get_contents($url);\n$headers = http_get_last_response_headers() ?? [];\nlog_body($body);\nforeach ($headers as $line) {",
+  },
+  "behavior.locale_case": {
+    steps: {
+      tr: [
+        "PHP 8.2'den beri `strtolower()`, `strtoupper()`, `ucfirst()`, `ucwords()` ve `lcfirst()` yerel ayardan etkilenmez, yalnızca ASCII harfleri çevirir. Bu `setlocale()` çağrısı artık o fonksiyonları değiştirmez.",
+        "ASCII dışı harfler için `mb_strtolower()` ve `mb_strtoupper()` kullanın. `mb_strtolower()` Türkçe kuralları bilmez; önce `I` ve `İ`'yi değiştirin: `mb_strtolower(str_replace(['I', 'İ'], ['ı', 'i'], $s))`.",
+        "`setlocale()` tarih, sayı biçimi ya da `strcoll()` gibi başka işler için de gerekiyorsa çağrıyı tutun.",
+      ],
+      en: [
+        "Since PHP 8.2, `strtolower()`, `strtoupper()`, `ucfirst()`, `ucwords()` and `lcfirst()` ignore the locale and change ASCII letters only. This `setlocale()` call no longer affects them.",
+        "Use `mb_strtolower()` and `mb_strtoupper()` for other letters. `mb_strtolower()` doesn't know Turkish rules; replace `I` and `İ` first: `mb_strtolower(str_replace(['I', 'İ'], ['ı', 'i'], $s))`.",
+        "Keep the `setlocale()` call if it's also needed for other things, such as dates, number formats or `strcoll()`.",
+      ],
+    },
+    before: "setlocale(LC_CTYPE, 'tr_TR.UTF-8');\n$lower = strtolower($name);",
+    after: "$lower = mb_strtolower(str_replace(['I', 'İ'], ['ı', 'i'], $name));",
+  },
+  "deprecated.oci8_alias": {
+    steps: {
+      tr: [
+        "OCI8'in eski `oci*` adları kullanımdan kalktı; Ferry bunları `oci_*` adlarına kendisi çevirir.",
+        "`ocifetchinto()`'nun karşılığı yok. Ferry onu OCI8'in yaptığını yapan bir kapanışla `oci_fetch_array()`'e çevirir: mod `OCI_ASSOC` ya da `OCI_NUM` içermiyorsa `OCI_NUM` eklenir, satır yalnızca okuma başarılıysa değişir, sonuç sütun sayısıdır.",
+        "Elle yazarken çoğu döngü için `while ($row = oci_fetch_array($stmt, OCI_ASSOC + OCI_RETURN_NULLS))` yeterlidir. Döngüden sonraki kod `$row`'un son satırı tuttuğuna güveniyorsa okumayı ayrı bir değişkene alın.",
+      ],
+      en: [
+        "OCI8's old `oci*` names are deprecated; Ferry renames them to the `oci_*` names itself.",
+        "`ocifetchinto()` has no counterpart. Ferry turns it into `oci_fetch_array()` through a closure that does what OCI8 did: `OCI_NUM` is added when the mode has neither `OCI_ASSOC` nor `OCI_NUM`, the row changes only on a successful fetch, and the result is the column count.",
+        "By hand, `while ($row = oci_fetch_array($stmt, OCI_ASSOC + OCI_RETURN_NULLS))` is enough for most loops. If code after the loop relies on `$row` holding the last row, fetch into a separate variable.",
+      ],
+    },
+    before: "while (ocifetchinto($stmt, $row, OCI_ASSOC)) {",
+    after: "while ($row = oci_fetch_array($stmt, OCI_ASSOC)) {",
+  },
+  "behavior.compact_undefined_variable": {
+    steps: {
+      tr: [
+        "PHP 7.3'ten beri `compact()` tanımsız bir değişken adında uyarı verir. Sonuç değişmez: o ad dizide yer almaz.",
+        "Fonksiyonda hiç geçmeyen adları listeden çıkarın; Ferry bunu kendisi yapar ve hiçbir ad kalmazsa boş dizi yazar.",
+        "Ad yalnızca bazı yollarda tanımlanıyorsa değişkeni başta tanımlayın; o zaman anahtar dizide o değerle yer alır, bunun kodu etkileyip etkilemediğine bakın.",
+      ],
+      en: [
+        "Since PHP 7.3, `compact()` warns about an undefined variable name. The result doesn't change: the name is left out of the array.",
+        "Remove the names the function never has; Ferry does this itself and writes an empty array when no name is left.",
+        "If the name is set on some paths only, define the variable up front; the key then appears in the array with that value, so check whether that affects the code.",
+      ],
+    },
+    before: "$this->wheres[] = compact('type', 'operator', 'query', 'boolean');",
+    after: "$this->wheres[] = compact('type', 'query', 'boolean');",
+  },
+  "deprecated.final_private_method": {
+    steps: {
+      tr: [
+        "PHP 8.0'dan beri private metotlar alt sınıfta ezilmiş sayılmaz, bu yüzden `final` onlarda bir şey yapmaz ve uyarı verir. Kurucu metot (`__construct`) bunun dışındadır.",
+        "`final` sözcüğünü silin; Ferry bunu kendisi yapar. Alt sınıflar artık aynı adla kendi private metodunu tanımlayabilir; PHP 7'de bu derleme hatasıydı.",
+      ],
+      en: [
+        "Since PHP 8.0, private methods aren't considered overridden in subclasses, so `final` does nothing on them and warns. The constructor (`__construct`) is the exception.",
+        "Remove the `final` keyword; Ferry does this itself. Subclasses can now declare their own private method with the same name, which was a compile error on PHP 7.",
+      ],
+    },
+    before: "final private function hashToken($token)",
+    after: "private function hashToken($token)",
+  },
+  "removed.ldap_control_paged_result_response": {
+    steps: {
+      tr: [
+        "PHP 8.0'da `ldap_control_paged_result()` ve `ldap_control_paged_result_response()` kaldırıldı. Sayfalama denetimi artık `LDAP_CONTROL_PAGEDRESULTS` ile verilir ve okunur.",
+        "İsteği `ldap_set_option($link, LDAP_OPT_SERVER_CONTROLS, [['oid' => LDAP_CONTROL_PAGEDRESULTS, 'value' => ['size' => 100, 'cookie' => $cookie]]])` ile verin, yanıtı `ldap_parse_result($link, $result, $code, $dn, $message, $referrals, $controls)` ile okuyun; çerez `$controls[LDAP_CONTROL_PAGEDRESULTS]['value']['cookie']`'dedir. Ferry iki tarafı da böyle yazar.",
+        "Ferry argümanları basit değişken olmayan çağrılara dokunmaz; onları aynı kalıpla elle yazın. Bu kalıpla OpenLDAP'ta 25 kayıt 10'arlık 3 sayfada eksiksiz geldi.",
+      ],
+      en: [
+        "PHP 8.0 removed `ldap_control_paged_result()` and `ldap_control_paged_result_response()`. The paging control is now set and read through `LDAP_CONTROL_PAGEDRESULTS`.",
+        "Send the request with `ldap_set_option($link, LDAP_OPT_SERVER_CONTROLS, [['oid' => LDAP_CONTROL_PAGEDRESULTS, 'value' => ['size' => 100, 'cookie' => $cookie]]])` and read the response with `ldap_parse_result($link, $result, $code, $dn, $message, $referrals, $controls)`; the cookie is in `$controls[LDAP_CONTROL_PAGEDRESULTS]['value']['cookie']`. Ferry writes both sides this way.",
+        "Ferry leaves calls whose arguments aren't plain variables; write those by hand with the same pattern. With it, 25 entries came back complete in 3 pages of 10 on OpenLDAP.",
+      ],
+    },
+    before: "ldap_control_paged_result_response($link, $result, $cookie);",
+    after: "ldap_parse_result($link, $result, $code, $dn, $message, $referrals, $controls);\n$cookie = $controls[LDAP_CONTROL_PAGEDRESULTS]['value']['cookie'] ?? '';",
+  },
+  "deprecated.builtin_function": {
+    steps: {
+      tr: [
+        "Bu fonksiyon hedef sürümde kullanımdan kalktı: hâlâ çalışır ama uyarı verir ve sonraki ana sürümde kaldırılabilir. Bulgunun önerilen satırı varsa yerine geçen çağrıyı gösterir.",
+        "Yalnızca bir kaynağı kapatan fonksiyonlar (`enchant_broker_free()`, `curl_close()`, `imagedestroy()` gibi) PHP 8'den beri nesneyle çalışır; nesne son referansı gidince kendiliğinden kapanır. Çağrıyı silin ya da yerel değişkeni hemen bırakmak için `unset()` yazın.",
+        "Fonksiyonun bir karşılığı yoksa onu kullanan özelliği hedef sürümde neyin karşıladığını PHP kılavuzundaki fonksiyon sayfasında arayın.",
+      ],
+      en: [
+        "This function is deprecated on the target version: it still runs but warns, and a later major version may remove it. The finding's suggested line shows the replacement when there is one.",
+        "Functions that only close a resource (such as `enchant_broker_free()`, `curl_close()` and `imagedestroy()`) work on objects since PHP 8, which close on their own when the last reference goes. Remove the call, or write `unset()` to drop a local variable right away.",
+        "If the function has no counterpart, look for what replaces the feature on the function's page in the PHP manual.",
+      ],
+    },
+    before: "enchant_broker_free_dict($dict);",
+    after: "unset($dict);",
+  },
+  "deprecated.session_set_save_handler": {
+    steps: {
+      tr: [
+        "Altı ayrı çağrılabilirle `session_set_save_handler()` çağırmak PHP 8.4'te kullanımdan kalktı; `SessionHandlerInterface` uygulayan bir nesne verilmeli.",
+        "İşleyici zaten bir sınıfın metotlarıysa o sınıfa `implements SessionHandlerInterface` ekleyip nesneyi verin: `session_set_save_handler($handler, false)`. Eski biçim kapanışta oturumu kendisi kaydetmediği için ikinci argüman false olmalıdır.",
+        "Ferry altı çağrılabiliri onları sırayla çağıran anonim bir sınıfa sarar; metotlar public olmalıdır. Kapanışlar, fonksiyon adları ve `[$nesne, 'metot']` biçimindeki çağrılabilirler için bunu kendisi yapar.",
+      ],
+      en: [
+        "Calling `session_set_save_handler()` with six separate callables was deprecated in PHP 8.4; pass an object that implements `SessionHandlerInterface`.",
+        "If the handler already is a class's methods, add `implements SessionHandlerInterface` to that class and pass the object: `session_set_save_handler($handler, false)`. The second argument is false because the old form didn't register a shutdown save.",
+        "Ferry wraps the six callables in an anonymous class that calls them in turn; the methods have to be public. It does this itself for closures, function names and `[$object, 'method']` callables.",
+      ],
+    },
+    before: "session_set_save_handler([$h, 'open'], [$h, 'close'], [$h, 'read'], [$h, 'write'], [$h, 'destroy'], [$h, 'gc']);",
+    after: "class DbSession implements SessionHandlerInterface\n{\n    // open, close, read, write, destroy, gc\n}\nsession_set_save_handler($h, false);",
+  },
+  "removed.error_handler_context": {
+    steps: {
+      tr: [
+        "PHP 8.0 hata işleyicisine beşinci argümanı (`$errcontext`) artık vermiyor. Bu parametre zorunluysa işleyici her hatada ArgumentCountError fırlatır.",
+        "İşleyici parametreyi kullanmıyorsa silin, kullanıyorsa varsayılan değer verin: `$errcontext = array()`. İşleyici aynı dosyadaysa Ferry ikisini de kendisi yapar.",
+        "Kod değişkenlerin değerlerine ihtiyaç duyuyorsa (hata kaydına eklemek gibi) bu bilgi PHP 8'de yok; çağrı zincirini ve argümanları `debug_backtrace()` verir.",
+      ],
+      en: [
+        "PHP 8.0 no longer passes the fifth argument (`$errcontext`) to error handlers. If the parameter is required, the handler throws ArgumentCountError on every error.",
+        "Remove the parameter if the handler doesn't use it, or give it a default if it does: `$errcontext = array()`. When the handler is in the same file, Ferry does both itself.",
+        "If the code needs the variables' values (to add them to a log, say), PHP 8 doesn't provide them; `debug_backtrace()` gives the call chain and its arguments.",
+      ],
+    },
+    before: "function handler($no, $str, $file, $line, $context) {",
+    after: "function handler($no, $str, $file, $line, $context = array()) {",
+  },
+  "behavior.pdo_default_exceptions": {
+    steps: {
+      tr: [
+        "PHP 8.0'dan beri PDO'nun varsayılan hata modu `PDO::ERRMODE_EXCEPTION`'dır: başarısız sorgu false döndürmek yerine `PDOException` fırlatır ve bu `=== false` kontrolü hiç çalışmaz.",
+        "Eski davranışı korumak için bağlantıyı kurarken `PDO::ATTR_ERRMODE => PDO::ERRMODE_SILENT` verin ya da hemen ardından `$pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_SILENT)` çağırın. Bu o bağlantıdaki bütün çağrıları etkiler.",
+        "Ya da çağrıyı `try { ... } catch (PDOException $e) { ... }` içine alın; hata bilgisi `$e->getMessage()` ve `$e->errorInfo`'dadır.",
+      ],
+      en: [
+        "Since PHP 8.0, PDO's default error mode is `PDO::ERRMODE_EXCEPTION`: a failed query throws `PDOException` instead of returning false, so this `=== false` check never runs.",
+        "To keep the old behaviour, pass `PDO::ATTR_ERRMODE => PDO::ERRMODE_SILENT` when connecting, or call `$pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_SILENT)` right after. This affects every call on that connection.",
+        "Or wrap the call in `try { ... } catch (PDOException $e) { ... }`; the error details are in `$e->getMessage()` and `$e->errorInfo`.",
+      ],
+    },
+    before: "if ($pdo->exec($sql) === false) {\n    log_error($pdo->errorInfo());\n}",
+    after: "try {\n    $pdo->exec($sql);\n} catch (PDOException $e) {\n    log_error($e->errorInfo);\n}",
+  },
+  "behavior.indirect_access_order": {
+    steps: {
+      tr: [
+        "PHP 7 değişken değişkenleri soldan sağa okur: `$obj->$f[1]()` PHP 5'te `$obj->{$f[1]}()`, PHP 7'den beri `($obj->$f)[1]()` demektir.",
+        "Proje bugün PHP 5'te çalışıyorsa Ferry PHP 5 okumasını süslü parantezle yazar. Sürüm bilinmiyorsa bunu seçenek olarak sunar; `$f` bir diziyse önerilir.",
+        "Kod PHP 7'de zaten çalışıyorsa okuma değişmemiştir; dokunmayın.",
+      ],
+      en: [
+        "PHP 7 reads variable variables left to right: `$obj->$f[1]()` meant `$obj->{$f[1]}()` on PHP 5 and means `($obj->$f)[1]()` since PHP 7.",
+        "When the project runs PHP 5 today, Ferry writes the PHP 5 reading with braces. When the version is unknown it offers it as an option, recommended when `$f` is an array.",
+        "If the code already runs on PHP 7, its reading hasn't changed; leave it.",
+      ],
+    },
+    before: "return $plugin->$function[1]($args);",
+    after: "return $plugin->{$function[1]}($args);",
+  },
+  "deprecated.null_offset": {
+    steps: {
+      tr: [
+        "PHP 8.5'ten beri dizi anahtarı olarak `null` kullanmak kullanımdan kalktı. Dizilerde `null` anahtarı her zaman `''`'e çevriliyordu.",
+        "Değişken kesin bir diziyse `[null]` yerine `['']` yazın; sonuç aynıdır. Ferry bunu dizinin hemen önce oluşturulduğu yerlerde kendisi yapar.",
+        "Değer `ArrayAccess` uygulayan bir nesneyse `null` olduğu gibi `offsetGet()`'e gider; `''` vermek davranışı değiştirebilir. Nesnenin `null`'u nasıl ele aldığına bakıp ona göre karar verin.",
+      ],
+      en: [
+        "Since PHP 8.5, using `null` as an array key is deprecated. On arrays, a `null` key always became `''`.",
+        "If the variable is surely an array, write `['']` instead of `[null]`; the result is the same. Ferry does this itself where the array was created just before.",
+        "If the value is an object implementing `ArrayAccess`, `null` reaches `offsetGet()` as it is, and `''` may change what happens. Check how the object handles `null` and decide from that.",
+      ],
+    },
+    before: "unset($this->domains[$domain][null]);",
+    after: "unset($this->domains[$domain]['']);",
+  },
+  "removed.__autoload": {
+    steps: {
+      tr: [
+        "PHP 8.0'da `__autoload()` kaldırıldı; bu adla fonksiyon tanımlamak derleme hatasıdır.",
+        "Proje başka bir yükleyici kaydetmiyorsa Ferry fonksiyonu `spl_autoload_register(function ($class) { ... })` biçimine çevirir.",
+        "Proje kendi yükleyicisini `spl_autoload_register()` ya da Composer'ın `autoload.php`'siyle kuruyorsa PHP 7 `__autoload()`'ı zaten yok sayıyordu; Ferry fonksiyonu siler. Kod `__autoload()`'ı adıyla çağırıyorsa ya da `spl_autoload_register('__autoload')` ile kaydediyorsa fonksiyonu yeniden adlandırıp o yerleri de değiştirin.",
+      ],
+      en: [
+        "PHP 8.0 removed `__autoload()`; declaring a function with that name is a compile error.",
+        "When the project registers no other autoloader, Ferry turns the function into `spl_autoload_register(function ($class) { ... })`.",
+        "When the project sets up its own autoloader with `spl_autoload_register()` or Composer's `autoload.php`, PHP 7 already ignored `__autoload()`, so Ferry removes it. If code calls `__autoload()` by name or registers it with `spl_autoload_register('__autoload')`, rename the function and change those places too.",
+      ],
+    },
+    before: "function __autoload($class) {\n    require 'classes/' . $class . '.php';\n}",
+    after: "spl_autoload_register(function ($class) {\n    require 'classes/' . $class . '.php';\n});",
+  },
+  "deprecated.builtin_method": {
+    steps: {
+      tr: [
+        "Bu metot hedef sürümde kullanımdan kalktı; bulgunun önerilen satırı varsa yerine geçeni gösterir.",
+        "PHP 8.5'te `SplObjectStorage::attach()`, `detach()` ve `contains()` yerine aynı işi yapan `offsetSet()`, `offsetUnset()` ve `offsetExists()` kullanılır. Ferry `parent::` çağrılarını kendisi çevirir.",
+        "`ReflectionParameter::getClass()` PHP 8.0'da kullanımdan kalktı. Türü okuyun: tür `ReflectionNamedType` ve yerleşik değilse `new ReflectionClass($type->getName())`. Tür `self` ya da `parent` ise adı bildiren sınıftan çözün.",
+      ],
+      en: [
+        "This method is deprecated on the target version; the finding's suggested line shows the replacement when there is one.",
+        "On PHP 8.5, `SplObjectStorage::attach()`, `detach()` and `contains()` give way to `offsetSet()`, `offsetUnset()` and `offsetExists()`, which do the same. Ferry converts `parent::` calls itself.",
+        "`ReflectionParameter::getClass()` was deprecated in PHP 8.0. Read the type instead: when it's a `ReflectionNamedType` and not built in, `new ReflectionClass($type->getName())`. Resolve `self` and `parent` from the declaring class.",
+      ],
+    },
+    before: "$class = $param->getClass();",
+    after: "$type = $param->getType();\n$class = $type instanceof ReflectionNamedType && !$type->isBuiltin() ? new ReflectionClass($type->getName()) : null;",
+  },
+  "deprecated.partial_callable": {
+    steps: {
+      tr: [
+        "PHP 8.2'de `'self::m'`, `'parent::m'`, `'static::m'` ve `['self', 'm']` gibi çağrılabilirler kullanımdan kalktı.",
+        "Hemen çalıştırılan çağrılarda Ferry bunları `self::m(...)` biçimine, `is_callable()` içindekileri `parent::class . '::m'` biçimine çevirir; ikisi de aynı kapsamda aynı sonucu verir.",
+        "Çağrılabilir saklanıp başka yerde çalıştırılıyorsa sınıf adını açıkça yazın: `[self::class, 'm']` ya da nesne metodu için `[$this, 'm']`.",
+      ],
+      en: [
+        "PHP 8.2 deprecated callables such as `'self::m'`, `'parent::m'`, `'static::m'` and `['self', 'm']`.",
+        "For calls that run them right away, Ferry writes `self::m(...)`, and inside `is_callable()` it writes `parent::class . '::m'`; both give the same result from the same scope.",
+        "When the callable is stored and run somewhere else, write the class out: `[self::class, 'm']`, or `[$this, 'm']` for an instance method.",
+      ],
+    },
+    before: "set_error_handler('self::handle');",
+    after: "set_error_handler([self::class, 'handle']);",
+  },
+  "removed.recode": {
+    steps: {
+      tr: [
+        "recode eklentisi PHP 7.4'te kaldırıldı.",
+        "Ferry istek metni sabit ve bilinen bir karakter kümesi çiftiyse çağrıyı `iconv()`'a çevirir. İstek bir değişkenden geliyorsa `iconv($from, $to, $text)` ya da `mb_convert_encoding($text, $to, $from)` kullanın.",
+        "iconv dönüştüremediği bir karakterde false döndürür; `//TRANSLIT` ya da `//IGNORE` eki bunu değiştirir. Karakter kümesi adlarını hedef sunucuda deneyin.",
+      ],
+      en: [
+        "PHP 7.4 removed the recode extension.",
+        "When the request is a fixed, known pair of character sets, Ferry turns the call into `iconv()`. When it comes from a variable, use `iconv($from, $to, $text)` or `mb_convert_encoding($text, $to, $from)`.",
+        "iconv returns false on a character it can't convert; the `//TRANSLIT` or `//IGNORE` suffix changes that. Try the character set names on the target server.",
+      ],
+    },
+    before: "$out = recode_string($from . '..utf-8', $text);",
+    after: "$out = iconv($from, 'UTF-8', $text);",
+  },
+  "behavior.openssl_default_cipher": {
+    steps: {
+      tr: [
+        "PHP 8.1'den beri `openssl_pkcs7_encrypt()` ve `openssl_cms_encrypt()` şifre verilmezse RC2-40 yerine AES-128-CBC kullanır. Çok eski alıcılar AES'i açamayabilir.",
+        "Alıcılar AES'i destekliyorsa değişiklik gerekmez; varsayılanı açıkça yazmak için son argüman olarak `OPENSSL_CIPHER_AES_128_CBC` verin.",
+        "RC2-40'a bağlı bir alıcı için `OPENSSL_CIPHER_RC2_40` verilebilir, ama RC2-40 zayıftır ve OpenSSL 3 RC2'yi varsayılan olarak kapattığı için çağrı başarısız olabilir; alıcıyı güncellemek daha doğrudur.",
+      ],
+      en: [
+        "Since PHP 8.1, `openssl_pkcs7_encrypt()` and `openssl_cms_encrypt()` use AES-128-CBC instead of RC2-40 when no cipher is given. Very old recipients may not open AES.",
+        "If the recipients support AES, nothing needs to change; to write the default out, pass `OPENSSL_CIPHER_AES_128_CBC` as the last argument.",
+        "A recipient tied to RC2-40 could get `OPENSSL_CIPHER_RC2_40`, but RC2-40 is weak and OpenSSL 3 disables RC2 by default, so the call may fail; updating the recipient is the better fix.",
+      ],
+    },
+    before: "openssl_pkcs7_encrypt($in, $out, $cert, $headers);",
+    after: "openssl_pkcs7_encrypt($in, $out, $cert, $headers, 0, OPENSSL_CIPHER_AES_128_CBC);",
+  },
+  "removed.redeclared_builtin": {
+    steps: {
+      tr: [
+        "Bu ad hedef PHP'de yerleşik bir fonksiyona ya da sınıfa ait; aynı adla tanım yapmak `Cannot redeclare` ya da `Cannot declare class` hatası verir.",
+        "Fonksiyonsa ve aynı işi yapıyorsa tanımı `if (!function_exists('ad')) { ... }` içine alın; Ferry bunu kendisi yapar. O zaman hedef sürümde PHP'nin kendi fonksiyonu çalışır, sonuçların aynı olduğundan emin olun.",
+        "Sınıfsa (PHP 8.0'daki `XMLParser` gibi) onu kullanıldığı her yerle birlikte yeniden adlandırın ya da bir namespace içine taşıyın. Rector'un `RenameClassRector` kuralı bütün kullanımları birlikte değiştirebilir.",
+      ],
+      en: [
+        "This name belongs to a built-in function or class on the target PHP; declaring it again fails with `Cannot redeclare` or `Cannot declare class`.",
+        "If it's a function that does the same job, wrap the declaration in `if (!function_exists('name')) { ... }`; Ferry does this itself. PHP's own function then runs on the target version, so make sure the results match.",
+        "If it's a class (such as `XMLParser` in PHP 8.0), rename it together with every place that uses it, or move it into a namespace. Rector's `RenameClassRector` can change all the uses at once.",
+      ],
+    },
+    before: "class XMLParser {",
+    after: "class LegacyXmlParser {",
+  },
+  "removed.magic_method_signature": {
+    steps: {
+      tr: [
+        "PHP 8.0'dan beri sihirli metotların imzası denetlenir: `__set_state()` statik olmalı ve bir dizi almalı, `__sleep()`, `__wakeup()` ve `__serialize()` argüman almaz, `__unserialize()` bir dizi alır. Uymayan sınıf derlenmez.",
+        "Parametreleri ve `static` sözcüğünü bu imzaya uydurun.",
+        "Gövde imzayla birlikte çalışamıyorsa (statik olması gereken `__set_state()` içinde `$this` kullanmak gibi) metot sihirli metot olarak zaten hiç çalışmıyordu. Onu başka bir adla yeniden adlandırıp çağrıldığı yerleri değiştirin.",
+      ],
+      en: [
+        "Since PHP 8.0, magic method signatures are checked: `__set_state()` must be static and take an array, `__sleep()`, `__wakeup()` and `__serialize()` take no arguments, and `__unserialize()` takes an array. A class that doesn't match doesn't compile.",
+        "Make the parameters and the `static` keyword match that signature.",
+        "If the body can't work with the signature (such as `$this` inside a `__set_state()` that must be static), the method never worked as a magic method anyway. Rename it and change the places that call it.",
+      ],
+    },
+    before: "public function __set_state() {\n    return $this->get_string();\n}",
+    after: "public function export_string() {\n    return $this->get_string();\n}",
+  },
+  "deprecated.trait_static_access": {
+    steps: {
+      tr: [
+        "PHP 8.1'den beri bir trait'in statik üyesine trait adıyla doğrudan erişmek (`Trait::metot()`, `Trait::$x`) kullanımdan kalktı.",
+        "Trait'i kullanan bir sınıfın adıyla erişin: `Sinif::metot()`. Kod trait'in kendi içindeyse `static::` ya da `self::` kullanın.",
+        "Trait'i kullanan uygun bir sınıf yoksa metodu bir sınıfa ya da düz bir fonksiyona taşıyıp trait'in onu çağırmasını sağlayın.",
+      ],
+      en: [
+        "Since PHP 8.1, reaching a trait's static member through the trait's name (`Trait::method()`, `Trait::$x`) is deprecated.",
+        "Go through a class that uses the trait: `SomeClass::method()`. Inside the trait itself, use `static::` or `self::`.",
+        "If no class that uses the trait fits, move the method into a class or a plain function and have the trait call that.",
+      ],
+    },
+    before: "$themes = SkinThemesTrait::getSkinThemeMap();",
+    after: "$themes = SkinModule::getSkinThemeMap();",
+  },
+  "deprecated.filter_sanitize_string": {
+    steps: {
+      tr: [
+        "PHP 8.1'de `FILTER_SANITIZE_STRING` ve `FILTER_SANITIZE_STRIPPED` kullanımdan kalktı. Filtre etiketleri siliyor, tek ve çift tırnağı `&#39;` ile `&#34;` olarak kodluyordu.",
+        "Tek değerde Ferry seçenek sunar. `filter_var_array()` ya da `filter_input_array()` gibi dizi çağrılarında aynı dönüşümü her elemana uygulayın: `str_replace([\"'\", '\"'], ['&#39;', '&#34;'], strip_tags($v))`.",
+        "Değer HTML'e yazılacaksa çıkışta `htmlspecialchars()` kullanmak daha güvenlidir; o zaman `&`, `<` ve `>` de kodlanır.",
+      ],
+      en: [
+        "PHP 8.1 deprecated `FILTER_SANITIZE_STRING` and `FILTER_SANITIZE_STRIPPED`. The filter stripped tags and encoded single and double quotes as `&#39;` and `&#34;`.",
+        "For a single value, Ferry offers options. For array calls such as `filter_var_array()` and `filter_input_array()`, apply the same conversion to each element: `str_replace([\"'\", '\"'], ['&#39;', '&#34;'], strip_tags($v))`.",
+        "If the value ends up in HTML, `htmlspecialchars()` on output is safer; it also encodes `&`, `<` and `>`.",
+      ],
+    },
+    before: "$clean = filter_var_array($input, FILTER_SANITIZE_STRING);",
+    after: "array_walk_recursive($input, function (&$v) {\n    $v = str_replace([\"'\", '\"'], ['&#39;', '&#34;'], strip_tags($v));\n});",
+  },
+  "deprecated.openssl_free_key": {
+    steps: {
+      tr: [
+        "PHP 8.0'dan beri OpenSSL anahtarları nesnedir ve son referans gidince kendiliğinden serbest kalır; `openssl_free_key()` hiçbir şey yapmaz ve kullanımdan kalktı.",
+        "Çağrıyı silin. Ferry tek başına duran çağrıları kendisi siler; çağrı süslü parantezsiz bir `if` gövdesiyse `if`'i de silin.",
+        "Anahtarı hemen bırakmak istiyorsanız değişkene null atayın ya da `unset()` kullanın.",
+      ],
+      en: [
+        "Since PHP 8.0, OpenSSL keys are objects that free themselves when the last reference goes; `openssl_free_key()` does nothing and is deprecated.",
+        "Remove the call. Ferry removes calls that stand alone; when the call is the body of an `if` without braces, remove the `if` too.",
+        "To let go of the key right away, set the variable to null or `unset()` it.",
+      ],
+    },
+    before: "if ($key !== false)\n    openssl_free_key($key);",
+    after: "$key = null;",
+  },
+  "server.composer_plugin_api": {
+    steps: {
+      tr: [
+        "Bu Composer eklentisi yalnızca Composer 1'in eklenti arayüzünü (`composer-plugin-api` 1.x) destekliyor; Composer 2 onu yüklemez.",
+        "Önerilen satırdaki `composer update` komutuyla eklentiyi Composer 2'yi destekleyen sürüme yükseltin. Yeni sürümü yoksa ve projenin ona ihtiyacı kalmadıysa `composer remove` ile kaldırın.",
+        "Composer 2.2'den beri eklentilerin `composer.json`'daki `config.allow-plugins` listesinde izinli olması gerekir; güncellemeden sonra Composer sorarsa izin verin.",
+      ],
+      en: [
+        "This Composer plugin supports only Composer 1's plugin API (`composer-plugin-api` 1.x); Composer 2 won't load it.",
+        "Update it to a release that supports Composer 2 with the `composer update` command in the suggested line. If there is none and the project no longer needs it, remove it with `composer remove`.",
+        "Since Composer 2.2, plugins have to be allowed in `config.allow-plugins` in `composer.json`; allow it if Composer asks after the update.",
+      ],
+    },
+  },
+  "deprecated.constant_redeclared": {
+    steps: {
+      tr: [
+        "Aynı sabit aynı dosyada ikinci kez tanımlanıyor. İkinci tanım her zaman uyarı verip yok sayıldı; PHP 8.5'ten beri kullanımdan kalktı.",
+        "İkinci tanımı silin ya da `if (!defined('AD')) { ... }` içine alın. Kod ikinci değere güveniyorsa o değer hiç kullanılmadı demektir; sabiti yeniden adlandırın.",
+      ],
+      en: [
+        "The same constant is declared a second time in this file. The second declaration always warned and was ignored; since PHP 8.5 it's deprecated.",
+        "Remove the second declaration or wrap it in `if (!defined('NAME')) { ... }`. If code relies on the second value, that value was never used; rename the constant.",
+      ],
+    },
+    before: "define('CACHE_DIR', '/tmp/a');\ndefine('CACHE_DIR', '/tmp/b');",
+    after: "define('CACHE_DIR', '/tmp/a');",
+  },
+  "removed.builtin_override_signature": {
+    steps: {
+      tr: [
+        "Yerleşik bir sınıfın metodunu ezen bu metodun imzası hedef sürümdekiyle uyuşmuyor; sınıf derlenmez.",
+        "`SoapClient::__doRequest()` PHP 8.5'te altıncı bir parametre aldı; sonuna varsayılanı null olan bir parametre ekleyin. `SplFileObject::fwrite()`'ın `$length`'i PHP 8.5'te `?int` oldu. Ferry bu ikisini kendisi düzeltir.",
+        "`tidy::repairString()` ve `repairFile()` PHP 8.0'da statik oldu; ezen metot da `static` olmalı. Gövde `$this` kullanıyorsa metodu başka bir adla yeniden adlandırın.",
+      ],
+      en: [
+        "This method overrides a built-in class's method with a signature that doesn't match the target version's, so the class doesn't compile.",
+        "`SoapClient::__doRequest()` gained a sixth parameter in PHP 8.5; add one at the end with a null default. `SplFileObject::fwrite()`'s `$length` became `?int` in PHP 8.5. Ferry fixes both itself.",
+        "`tidy::repairString()` and `repairFile()` became static in PHP 8.0; the overriding method must be `static` too. If its body uses `$this`, rename the method.",
+      ],
+    },
+    before: "function __doRequest($request, $location, $action, $version, $one_way = 0)",
+    after: "function __doRequest($request, $location, $action, $version, $one_way = 0, $uriParserClass = null)",
+  },
+  "framework.drupal_version": {
+    steps: {
+      tr: [
+        "Yedek alın ve güncellemeyi önce bir kopyada deneyin.",
+        "Drupal 8 ve sonrası Composer ile güncellenir: `composer update \"drupal/core-*\" --with-all-dependencies`, ardından `drush updatedb` ve `drush cache:rebuild`.",
+        "Drupal 7 yerinde yeni bir ana sürüme yükseltilemez; Drupal 10 ya da 11'e geçiş Migrate modülleriyle yapılan bir taşımadır. O zamana kadar bulgunun gösterdiği Drupal 7 sürümüne güncelleyin.",
+        "Modülleri ve temaları da güncelleyin, sonra projeyi yeniden tarayın.",
+      ],
+      en: [
+        "Take a backup and try the update on a copy first.",
+        "Drupal 8 and later update through Composer: `composer update \"drupal/core-*\" --with-all-dependencies`, then `drush updatedb` and `drush cache:rebuild`.",
+        "Drupal 7 can't be upgraded in place to a new major version; moving to Drupal 10 or 11 is a migration done with the Migrate modules. Until then, update to the Drupal 7 release the finding names.",
+        "Update modules and themes too, then scan the project again.",
+      ],
+    },
+  },
+  "framework.joomla_version": {
+    steps: {
+      tr: [
+        "Yedek alın, sonra Joomla'yı yönetim panelindeki Joomla Güncelleme (Joomla! Update) bileşeninden güncelleyin.",
+        "Ana sürüm atlarken önce bulunduğunuz serinin son sürümüne çıkın (Joomla 4'e geçmek için 3.10, 5'e geçmek için 4.4); bu sürümler geçişten önce uyumluluk denetimini gösterir.",
+        "Eklentileri ve şablonları hedef Joomla sürümüyle uyumlu olanlarla değiştirin, sonra projeyi yeniden tarayın.",
+      ],
+      en: [
+        "Take a backup, then update Joomla from the Joomla Update (Joomla! Update) component in the administrator.",
+        "When skipping a major version, first move to the last release of your series (3.10 before Joomla 4, 4.4 before 5); those releases show the compatibility check before the jump.",
+        "Replace extensions and templates with ones compatible with the target Joomla release, then scan the project again.",
+      ],
+    },
+  },
+  "framework.moodle_version": {
+    steps: {
+      tr: [
+        "Veritabanını, `moodledata` klasörünü ve kodu yedekleyin; siteyi bakım moduna alın.",
+        "Yeni Moodle sürümünün kodunu eskisinin yerine koyun; `config.php`'yi ve sonradan kurduğunuz eklentileri koruyun. Git kullanıyorsanız ilgili `MOODLE_XXX_STABLE` dalına geçin.",
+        "Yükseltmeyi `php admin/cli/upgrade.php` ile çalıştırın ve bakım modunu kapatın.",
+        "Her Moodle sürümü yalnızca belirli bir sürümden ve sonrasından yükseltilebilir; aradaki fark büyükse sürüm notlarına bakıp ara sürümlerden geçin.",
+      ],
+      en: [
+        "Back up the database, the `moodledata` folder and the code; put the site in maintenance mode.",
+        "Put the new Moodle release's code in place of the old; keep `config.php` and the plugins you added. With Git, switch to the matching `MOODLE_XXX_STABLE` branch.",
+        "Run the upgrade with `php admin/cli/upgrade.php` and turn maintenance mode off.",
+        "Each Moodle release can only be upgraded from a certain release onward; if the gap is large, check the release notes and go through the releases in between.",
+      ],
+    },
+  },
+  "framework.mediawiki_version": {
+    steps: {
+      tr: [
+        "Veritabanını, `LocalSettings.php`'yi, `images` klasörünü ve uzantıları yedekleyin.",
+        "Yeni MediaWiki sürümünü ayrı bir klasöre açın; `LocalSettings.php`'yi, `images` klasörünü ve uzantıları oraya taşıyın.",
+        "Veritabanını `php maintenance/run.php update` ile güncelleyin; 1.40'tan eski sürümlerde komut `php maintenance/update.php`'dir.",
+        "Uzantıları yeni sürümle uyumlu sürümlerine güncelleyin, sonra projeyi yeniden tarayın.",
+      ],
+      en: [
+        "Back up the database, `LocalSettings.php`, the `images` folder and the extensions.",
+        "Unpack the new MediaWiki release into its own folder and move `LocalSettings.php`, the `images` folder and the extensions there.",
+        "Update the database with `php maintenance/run.php update`; before 1.40 the command is `php maintenance/update.php`.",
+        "Update the extensions to releases that work with the new version, then scan the project again.",
+      ],
+    },
+  },
+  "framework.phpbb_version": {
+    steps: {
+      tr: [
+        "Yedek alın; eklentileri (extensions) kapatın ve varsayılan stile geçin.",
+        "phpBB'nin sitesindeki otomatik güncelleme paketini yükleyin ve güncellemeyi tarayıcıda `install/app.php/update` adresinden çalıştırın. Tam paketle güncellerken `config.php`'yi, `files`, `images` ve `store` klasörlerini, kendi eklenti ve stillerinizi koruyun.",
+        "Bitince `install` klasörünü silin, eklentileri yeniden açın ve projeyi yeniden tarayın.",
+      ],
+      en: [
+        "Take a backup; disable extensions and switch to the default style.",
+        "Upload the automatic update package from phpBB's site and run the update in the browser at `install/app.php/update`. When updating with the full package, keep `config.php`, the `files`, `images` and `store` folders, and your own extensions and styles.",
+        "Delete the `install` folder when done, re-enable extensions and scan the project again.",
+      ],
+    },
+  },
+  "framework.prestashop_version": {
+    steps: {
+      tr: [
+        "Yedek alın ve siteyi bakım moduna alın.",
+        "PrestaShop'un resmî yükseltme modülü `autoupgrade` (1-Click Upgrade) dosyaları ve veritabanını birlikte yükseltir. Büyük geçişlerden önce (1.6'dan 1.7'ye, 1.7'den 8'e) bulunduğunuz serinin son sürümüne çıkın.",
+        "Modülleri ve temayı hedef sürümle uyumlu olanlarla değiştirin; 1.6 temaları 1.7 ve sonrasında çalışmaz. Sonra projeyi yeniden tarayın.",
+      ],
+      en: [
+        "Take a backup and put the shop in maintenance mode.",
+        "PrestaShop's official upgrade module `autoupgrade` (1-Click Upgrade) upgrades the files and the database together. Before a big jump (1.6 to 1.7, 1.7 to 8), move to the last release of your series first.",
+        "Replace modules and the theme with ones compatible with the target release; 1.6 themes don't work on 1.7 and later. Then scan the project again.",
+      ],
+    },
+  },
+  "framework.magento_version": {
+    steps: {
+      tr: [
+        "Magento 1'in desteği Haziran 2020'de bitti ve PHP 8 için resmî bir sürümü yok. Topluluğun sürdürdüğü OpenMage (Magento LTS) Magento 1 veritabanıyla çalışır ve PHP 8'i destekler; diğer yol Magento 2'ye taşınmaktır.",
+        "Magento 2'de sürümü Composer ile yükseltin: `composer require magento/product-community-edition=<sürüm> --no-update`, `composer update`, ardından `bin/magento setup:upgrade`.",
+        "Eklentileri hedef sürümle uyumlu olanlarla değiştirin ve projeyi yeniden tarayın.",
+      ],
+      en: [
+        "Magento 1 support ended in June 2020 and it has no official release for PHP 8. The community-maintained OpenMage (Magento LTS) works with a Magento 1 database and supports PHP 8; the other way is moving to Magento 2.",
+        "On Magento 2, upgrade with Composer: `composer require magento/product-community-edition=<version> --no-update`, `composer update`, then `bin/magento setup:upgrade`.",
+        "Replace extensions with ones compatible with the target release and scan the project again.",
+      ],
+    },
+  },
+  "framework.codeigniter_version": {
+    steps: {
+      tr: [
+        "CodeIgniter 3'te `system` klasörünü en son 3.1.x sürümününkiyle değiştirin; `application` klasörünüz olduğu gibi kalır. Kullanım kılavuzundaki yükseltme notlarını sırayla uygulayın.",
+        "CodeIgniter 4 ayrı bir çatıdır; 3'ten 4'e geçmek kodu yeniden yazmayı gerektirir.",
+        "Güncelledikten sonra projeyi yeniden tarayın.",
+      ],
+      en: [
+        "On CodeIgniter 3, replace the `system` folder with the latest 3.1.x release's; your `application` folder stays as it is. Apply the upgrade notes in the user guide in order.",
+        "CodeIgniter 4 is a separate framework; moving from 3 to 4 means rewriting the code.",
+        "Scan the project again after the update.",
+      ],
+    },
+  },
+  "framework.cakephp_version": {
+    steps: {
+      tr: [
+        "Aynı ana sürüm içinde CakePHP'yi Composer ile güncelleyin: `composer update cakephp/cakephp`. Çatı `lib/Cake` klasöründeyse o klasörü yeni sürümünkiyle değiştirin.",
+        "Ana sürüm atlarken CakePHP'nin geçiş kılavuzunu izleyin; 3'ten sonraki geçişlerde `cakephp/upgrade` aracı kodun çoğunu kendisi günceller. 2'den 3'e geçiş büyük ölçüde yeniden yazmadır.",
+        "Eklentileri hedef sürümle uyumlu olanlara güncelleyin ve projeyi yeniden tarayın.",
+      ],
+      en: [
+        "Within a major version, update CakePHP with Composer: `composer update cakephp/cakephp`. If the framework lives in `lib/Cake`, replace that folder with the new release's.",
+        "When moving to a new major version, follow CakePHP's migration guide; from 3 onward the `cakephp/upgrade` tool updates most of the code itself. Moving from 2 to 3 is largely a rewrite.",
+        "Update plugins to releases compatible with the target and scan the project again.",
+      ],
+    },
+  },
+  "framework.yii_version": {
+    steps: {
+      tr: [
+        "Yii 2'yi Composer ile güncelleyin: `composer update yiisoft/yii2`; her sürüm için paketin `UPGRADE.md` dosyasındaki notları izleyin.",
+        "Yii 1.1'de çatıyı `composer update yiisoft/yii` ile ya da `framework` klasörünü en son 1.1.x sürümününkiyle değiştirerek güncelleyin.",
+        "Yii 1'den 2'ye geçiş yeniden yazmadır. Güncelledikten sonra projeyi yeniden tarayın.",
+      ],
+      en: [
+        "Update Yii 2 with Composer: `composer update yiisoft/yii2`, following the notes in the package's `UPGRADE.md` for each release.",
+        "On Yii 1.1, update the framework with `composer update yiisoft/yii` or by replacing the `framework` folder with the latest 1.1.x release's.",
+        "Moving from Yii 1 to 2 is a rewrite. Scan the project again after the update.",
+      ],
+    },
+  },
+  "framework.symfony_version": {
+    steps: {
+      tr: [
+        "`composer.json`'daki `symfony/*` kısıtlarını ve varsa `extra.symfony.require` değerini hedef sürüme çekip `composer update \"symfony/*\" --with-all-dependencies` çalıştırın.",
+        "Ana sürüm atlamadan önce bulunduğunuz sürümdeki kullanımdan kaldırma uyarılarını giderin; değişiklikler Symfony'nin `UPGRADE-X.Y.md` dosyalarında listelenir.",
+        "Testleri çalıştırın ve projeyi yeniden tarayın.",
+      ],
+      en: [
+        "Raise the `symfony/*` constraints in `composer.json`, and `extra.symfony.require` if present, to the target release, then run `composer update \"symfony/*\" --with-all-dependencies`.",
+        "Before a major jump, clear the deprecation warnings of your current release; Symfony's `UPGRADE-X.Y.md` files list the changes.",
+        "Run the tests and scan the project again.",
+      ],
+    },
+  },
+  "framework.opencart_version": {
+    steps: {
+      tr: [
+        "Yedek alın. Yeni OpenCart sürümünün dosyalarını yükleyin; `config.php` ve `admin/config.php` dosyalarınızı koruyun.",
+        "Tarayıcıda `install` klasöründeki yükseltme adımlarını çalıştırın, bitince `install` klasörünü silin.",
+        "OpenCart 3 eklentileri ve temaları 4'te çalışmaz; uyumlu sürümlerini kurun ve projeyi yeniden tarayın.",
+      ],
+      en: [
+        "Take a backup. Upload the new OpenCart release's files, keeping your `config.php` and `admin/config.php`.",
+        "Run the upgrade steps under the `install` folder in the browser, then delete the `install` folder.",
+        "OpenCart 3 extensions and themes don't work on 4; install compatible versions and scan the project again.",
+      ],
+    },
   },
 };

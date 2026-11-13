@@ -156,8 +156,17 @@ impl Check {
             }
             Check::Lacks(_, name) => !Check::Has(n, name).holds(args),
             Check::StringKeys(_) => {
+                let mut depth = 0usize;
+                let integer = |t: &Token| t.literal().is_some_and(|s| s.parse::<i64>().is_ok_and(|n| n.to_string() == s));
                 arg.first().is_some_and(|t| t.is_punct("[") || t.is_ident_ci("array"))
-                    && arg.windows(2).any(|w| matches!(w[0].kind, TokenKind::Str { .. }) && w[1].is_punct("=>"))
+                    && arg.windows(2).any(|w| {
+                        if w[0].is_punct("(") || w[0].is_punct("[") || w[0].is_punct("{") {
+                            depth += 1;
+                        } else if w[0].is_punct(")") || w[0].is_punct("]") || w[0].is_punct("}") {
+                            depth = depth.saturating_sub(1);
+                        }
+                        depth == 1 && matches!(w[0].kind, TokenKind::Str { .. }) && w[1].is_punct("=>") && !integer(&w[0])
+                    })
             }
             Check::StrStarts(_, list) => text().is_some_and(|s| list.iter().any(|p| s.to_ascii_lowercase().starts_with(p))),
             Check::InvalidForBase(_, from) => {

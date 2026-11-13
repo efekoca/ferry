@@ -5023,14 +5023,14 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
             ("<?php class A { function t() { reset($this); reset($a); } } key(new A);", "deprecated.array_pointer_on_object", 2),
             ("<?php curl_getinfo($c, CURLINFO_CERTINFO); curl_getinfo($c, CURLINFO_HTTP_CODE);", "behavior.curl_certinfo_format", 1),
             ("<?php idn_to_ascii('x'); idn_to_utf8('x', 0); idn_to_ascii('x', 0, INTL_IDNA_VARIANT_UTS46);", "behavior.idn_default_variant", 2),
-            ("<?php call_user_func_array('f', ['a' => 1]); call_user_func_array('f', [1, 2]); call_user_func_array('f', $a);", "behavior.call_user_func_array_named", 1),
+            ("<?php call_user_func_array('f', ['a' => 1]); call_user_func_array('f', [1, 2]); call_user_func_array('f', $a); call_user_func_array('f', [null, ['id' => 1]]); call_user_func_array('f', array('1' => 1));", "behavior.call_user_func_array_named", 1),
             ("<?php PASSWORD_BCRYPT === 1; 2 == PASSWORD_ARGON2I; PASSWORD_BCRYPT === '2y'; $a === 1;", "behavior.password_algo_integer", 2),
             ("<?php namespace Foo \\ Bar; echo A\\B::C; echo \\Foo\\bar();", "removed.namespaced_name_whitespace", 1),
             ("<?php $a\x7fb = 1;", "removed.delete_in_identifier", 1),
             ("<?php $x = 1;\0", "removed.nul_byte_in_source", 1),
             ("<?php // a\0b\n$x = \"a\0b\";", "removed.nul_byte_in_source", 0),
             ("<?php $x = <<<FOO\n  a\n  FOO b\nFOO;\n$y = <<<BAR\n c\n BAR . 'x';\n", "removed.heredoc_label_in_body", 1),
-            ("<?php define('A', 1); define('A', 2); const B = 1, C = 2; const C = 3; if (!defined('D')) define('D', 1); if (!defined('D')) define('D', 2); if ($x) { define('E', 1); } else { define('E', 2); }", "deprecated.constant_redeclared", 2),
+            ("<?php define('A', 1); define('A', 2); const B = 1, C = 2; const C = 3; if (!defined('D')) define('D', 1); if (!defined('D')) define('D', 2); if ($x) { define('E', 1); } else { define('E', 2); } define('OBJECT', 1); define('object', 1); const c = 4;", "deprecated.constant_redeclared", 2),
             ("<?php namespace N { const X = 1; } namespace M { const X = 1; }", "deprecated.constant_redeclared", 0),
             ("<?php class A { function f($a) { return function ($b) use ($this, $_GET, $b, $c) {}; } }", "removed.closure_use_variable", 3),
             ("<?php namespace N; function assert($a) {} class C { function assert() {} }", "removed.custom_assert", 1),
@@ -5932,7 +5932,11 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
         let titles: Vec<&str> = found.iter().map(|(_, t)| t.as_str()).collect();
         assert_eq!(titles, ["'utf8_encode'", "'each'", "'create_function'", "'is_real'"]);
         let fixes: Vec<_> = analyze_source("a.php", src, PhpVersion::new(8, 5)).into_iter().map(|f| f.fix).collect();
-        assert!(fixes.iter().all(|f| *f == FixKind::Manual), "Rector doesn't rewrite strings");
+        assert_eq!(
+            fixes,
+            [FixKind::Likely, FixKind::Manual, FixKind::Manual, FixKind::Manual],
+            "Rector doesn't rewrite strings; Ferry does utf8_encode"
+        );
         assert!(at("<?php function each($a) {} array_map('each', $x);", (8, 5)).is_empty());
     }
 
