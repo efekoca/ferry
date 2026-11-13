@@ -996,4 +996,148 @@ export const GUIDES: Record<string, Guide> = {
       ],
     },
   },
+  "behavior.inherited_static_variable": {
+    steps: {
+      tr: [
+        "Alt sınıfta ezilmeyen bir metottaki `static $x`, PHP 8.1'den beri bütün sınıflar için tek kopyadır. PHP 8.0 ve öncesinde her alt sınıfın kendi kopyası vardı; örneğin `B::instance()` artık `A`'nın nesnesini döndürür.",
+        "Değer her sınıf için ayrı kalmalıysa sınıf adını anahtar yapın: `static $instances = []; return $instances[static::class] ??= new static();`.",
+        "Ortak tek bir değer zaten istenen buysa (sınıftan bağımsız bir önbellek gibi) değişiklik gerekmez.",
+      ],
+      en: [
+        "A `static $x` in a method the subclass doesn't override is a single copy for every class since PHP 8.1. On PHP 8.0 and before, each subclass had its own copy; `B::instance()`, for example, now returns `A`'s object.",
+        "If the value has to stay separate per class, key it by class name: `static $instances = []; return $instances[static::class] ??= new static();`.",
+        "If one shared value is what was meant (a cache that doesn't depend on the class, say), nothing needs to change.",
+      ],
+    },
+    before: "public static function instance()\n{\n    static $instance = null;\n    return $instance ??= new static();\n}",
+    after: "public static function instance()\n{\n    static $instances = [];\n    return $instances[static::class] ??= new static();\n}",
+  },
+  "behavior.func_get_args_current_value": {
+    steps: {
+      tr: [
+        "PHP 5'te `func_get_args()` parametrelerin çağrıdaki değerini veriyordu. PHP 7.0'dan beri, fonksiyon parametreyi daha önce değiştirdiyse güncel değerini verir.",
+        "Eski değer gerekiyorsa `func_get_args()`'ı fonksiyonun başında, parametreler değişmeden önce bir değişkene alın. Ferry bunu proje bugün PHP 5'te çalışıyorsa kendisi yapar.",
+        "Proje zaten PHP 7 ya da sonrasında çalışıyorsa bugünkü davranış değişmez ve bulgu yok sayılabilir.",
+      ],
+      en: [
+        "On PHP 5, `func_get_args()` gave the values the parameters were called with. Since PHP 7.0 it gives the current value when the function changed a parameter first.",
+        "If the old value is needed, read `func_get_args()` into a variable at the start of the function, before any parameter changes. Ferry does this itself when the project runs PHP 5 today.",
+        "If the project already runs PHP 7 or later, today's behavior doesn't change and the finding can be ignored.",
+      ],
+    },
+    before: "function save($data)\n{\n    $data = trim($data);\n    log_call(func_get_args());\n}",
+    after: "function save($data)\n{\n    $args = func_get_args();\n    $data = trim($data);\n    log_call($args);\n}",
+  },
+  "deprecated.libxml_disable_entity_loader": {
+    steps: {
+      tr: [
+        "PHP 8 en az libxml 2.9 ile gelir ve bu sürüm dış varlıkları zaten yüklemez; çağrı bir şey yapmaz. Çağrıyı silin.",
+        "Değer saklanıp sonra geri veriliyorsa (`$old = libxml_disable_entity_loader(true); … libxml_disable_entity_loader($old);`) iki satırı da silin.",
+        "Kod `LIBXML_NOENT` ile dış varlıkları açıkça istiyorsa libxml onları yükler. Bunları yine engellemek istiyorsanız bir yükleyici verin: `libxml_set_external_entity_loader(static fn () => null);`.",
+      ],
+      en: [
+        "PHP 8 ships with at least libxml 2.9, which doesn't load external entities anyway, so the call does nothing. Delete it.",
+        "If the value is stored and restored later (`$old = libxml_disable_entity_loader(true); … libxml_disable_entity_loader($old);`), delete both lines.",
+        "If the code asks for external entities with `LIBXML_NOENT`, libxml loads them. To keep blocking them, set a loader: `libxml_set_external_entity_loader(static fn () => null);`.",
+      ],
+    },
+    before: "$old = libxml_disable_entity_loader(true);\n$doc->loadXML($xml);\nlibxml_disable_entity_loader($old);",
+    after: "$doc->loadXML($xml);",
+  },
+  "behavior.locale_float": {
+    steps: {
+      tr: [
+        "PHP 8.0'dan beri `echo`, birleştirme ve `(string)` ondalık sayıları yerel ayardan bağımsız olarak noktayla yazar: `setlocale(LC_NUMERIC, 'de_DE')` olsa bile `1.5`. PHP 7 `1,5` yazıyordu.",
+        "Kullanıcıya gösterilen sayıların ayırıcılarını açıkça seçin: `number_format($x, 2, ',', '.')` ya da intl ile `NumberFormatter`.",
+        "`printf('%f')` hâlâ yerel ayara uyar; ayardan bağımsız biçim için `%F` yazın.",
+        "Veritabanına, JSON'a ya da CSV'ye giden sayılar artık her zaman noktalı; virgülü düzeltmek için yazılmış `str_replace(',', '.', $x)` gibi satırlar gereksizleşir.",
+      ],
+      en: [
+        "Since PHP 8.0, `echo`, concatenation and `(string)` write floats with a dot whatever the locale: `1.5` even with `setlocale(LC_NUMERIC, 'de_DE')`. PHP 7 wrote `1,5`.",
+        "Choose the separators of numbers shown to users explicitly: `number_format($x, 2, ',', '.')` or `NumberFormatter` from intl.",
+        "`printf('%f')` still follows the locale; write `%F` for a format that doesn't.",
+        "Numbers going to a database, JSON or CSV always have a dot now, so lines written to fix the comma, such as `str_replace(',', '.', $x)`, become unnecessary.",
+      ],
+    },
+    before: "setlocale(LC_NUMERIC, 'tr_TR');\necho 'Toplam: ' . $total;",
+    after: "echo 'Toplam: ' . number_format($total, 2, ',', '.');",
+  },
+  "behavior.locale_conversions": {
+    steps: {
+      tr: [
+        "Sayılar: PHP 8.0'dan beri ondalık sayılar yerel ayardan bağımsız olarak noktayla yazılır; gösterilen sayıları `number_format()` ya da `NumberFormatter` ile biçimlendirin.",
+        "Harfler: PHP 8.2'den beri `strtolower()`, `strtoupper()`, `ucfirst()` ve benzerleri yerel ayara bakmaz, yalnızca ASCII harfleri değiştirir. ASCII dışı harfler için `mb_strtolower()` ve `mb_strtoupper()` kullanın.",
+        "`mb_strtolower()` Türkçe kuralları bilmez: `IŞIK` → `işik` olur. Türkçe metinde önce `I` ve `İ`'yi değiştirin: `mb_strtolower(str_replace(['I', 'İ'], ['ı', 'i'], $s))`.",
+      ],
+      en: [
+        "Numbers: since PHP 8.0 floats are written with a dot whatever the locale; format numbers you show with `number_format()` or `NumberFormatter`.",
+        "Letters: since PHP 8.2 `strtolower()`, `strtoupper()`, `ucfirst()` and similar functions ignore the locale and change ASCII letters only. Use `mb_strtolower()` and `mb_strtoupper()` for other letters.",
+        "`mb_strtolower()` doesn't know Turkish rules: `IŞIK` becomes `işik`. For Turkish text, replace `I` and `İ` first: `mb_strtolower(str_replace(['I', 'İ'], ['ı', 'i'], $s))`.",
+      ],
+    },
+    before: "setlocale(LC_ALL, 'tr_TR');\n$slug = strtolower($title);",
+    after: "$slug = mb_strtolower(str_replace(['I', 'İ'], ['ı', 'i'], $title));",
+  },
+  "deprecated.e_user_error": {
+    steps: {
+      tr: [
+        "`trigger_error($msg, E_USER_ERROR)` yerine istisna fırlatın: `throw new \\ErrorException($msg, 0, E_USER_ERROR);`. İşleyicisi olmayan bir `E_USER_ERROR` betiği 255 koduyla durduruyordu; yakalanmayan istisna da aynı kodla durdurur.",
+        "Bir hata işleyicisi bu hatayı yakalayıp betiği sürdürüyorsa `E_USER_WARNING` kullanın ve betiğin durması gerekiyorsa ardından `exit(255)` yazın.",
+        "Ferry tek başına duran `trigger_error(…, E_USER_ERROR);` satırları için bu iki yolu seçenek olarak sunar. `E_USER_ERROR` başka bir yerde, örneğin bir hata maskesinde geçiyorsa onu elle kaldırın.",
+      ],
+      en: [
+        "Throw an exception instead of `trigger_error($msg, E_USER_ERROR)`: `throw new \\ErrorException($msg, 0, E_USER_ERROR);`. An `E_USER_ERROR` with no handler stopped the script with code 255, and an uncaught exception stops it with the same code.",
+        "If an error handler catches it and lets the script go on, use `E_USER_WARNING`, followed by `exit(255)` if the script has to stop.",
+        "Ferry offers both as options for `trigger_error(…, E_USER_ERROR);` lines that stand alone. Where `E_USER_ERROR` appears elsewhere, such as in an error mask, remove it by hand.",
+      ],
+    },
+    before: "trigger_error('Config missing', E_USER_ERROR);",
+    after: "throw new \\ErrorException('Config missing', 0, E_USER_ERROR);",
+  },
+  "deprecated.false_to_array": {
+    steps: {
+      tr: [
+        "Değeri `false` olan bir değişkene `$x[] = …` ya da `$x['k'] = …` ile yazmak PHP 8.1'de kullanımdan kalktı; değişkeni yazmadan önce `[]` ile başlatın. Ferry bunu değişken aynı akışta `false` aldığında kendisi yapar.",
+        "Değer bir fonksiyondan `false` olarak gelebiliyorsa (`file()`, `strpos()`, veritabanı sonuçları) yazmadan önce denetleyin: `if ($rows === false) { $rows = []; }`.",
+        "`null` ve tanımsız değişkenler etkilenmez, yalnızca `false`.",
+      ],
+      en: [
+        "Writing to a variable that holds `false` with `$x[] = …` or `$x['k'] = …` is deprecated since PHP 8.1; initialize the variable with `[]` before writing. Ferry does this itself when the variable gets `false` in the same flow.",
+        "If the value can come back `false` from a function (`file()`, `strpos()`, database results), check it before writing: `if ($rows === false) { $rows = []; }`.",
+        "`null` and undefined variables aren't affected, only `false`.",
+      ],
+    },
+    before: "$rows = $db->fetchAll($sql);\n$rows[] = $extra;",
+    after: "$rows = $db->fetchAll($sql);\nif ($rows === false) {\n    $rows = [];\n}\n$rows[] = $extra;",
+  },
+  "removed.regex_class_range": {
+    steps: {
+      tr: [
+        "PHP 7.3'teki PCRE2, `\\w`, `\\d` ya da `\\s` gibi bir sınıfla başlayan aralığı (`[\\w-.]`) derlemez; desen uyarı verip false döndürür. Eskiden tire düz bir karakter sayılıyordu.",
+        "Tireyi kaçırın (`[\\w\\-.]`) ya da sınıfın sonuna yazın (`[\\w.-]`); ikisi de eski anlamı korur. Rector desen doğrudan bir `preg_*` çağrısında metin olarak yazılmışsa bunu kendisi yapar.",
+        "Desen bir değişkenden ya da birleştirilmiş metinden geliyorsa onu tanımlandığı yerde düzeltin.",
+      ],
+      en: [
+        "PCRE2 in PHP 7.3 doesn't compile a range that starts at a class such as `\\w`, `\\d` or `\\s` (`[\\w-.]`); the pattern warns and returns false. The hyphen used to count as a plain character.",
+        "Escape the hyphen (`[\\w\\-.]`) or put it last (`[\\w.-]`); both keep the old meaning. Rector does this itself when the pattern is written as a string right in a `preg_*` call.",
+        "If the pattern comes from a variable or joined strings, fix it where it's defined.",
+      ],
+    },
+    before: "preg_match('/^[\\w-.]+$/', $name);",
+    after: "preg_match('/^[\\w\\-.]+$/', $name);",
+  },
+  "removed.array_key_exists_object": {
+    steps: {
+      tr: [
+        "`ArrayObject` ya da `ArrayIterator`'da (ve onlardan türeyen sınıflarda) `$obj->offsetExists($key)` yazın; değeri null olan anahtarlar dahil eski sonucu verir.",
+        "Diğer nesnelerde `property_exists($obj, $key)` yazın. Tek fark: private ve protected özellikler için `property_exists()` true döndürür, eski çağrı sınıfın dışından false veriyordu.",
+      ],
+      en: [
+        "On `ArrayObject` or `ArrayIterator` (and classes extending them), write `$obj->offsetExists($key)`; it gives the old result, keys with a null value included.",
+        "On other objects, write `property_exists($obj, $key)`. The one difference: `property_exists()` returns true for private and protected properties, where the old call gave false from outside the class.",
+      ],
+    },
+    before: "return array_key_exists($index, $this);",
+    after: "return $this->offsetExists($index);",
+  },
 };

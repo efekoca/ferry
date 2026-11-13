@@ -4946,7 +4946,7 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
             ("<?php $a = 0 ** -1; $b = 0.0 ** -2; $c = 2 ** -1; $d = 0 ** 1;", "deprecated.pow_zero_negative", 2),
             ("<?php list() = $a; list(,,) = $a; list($x) = $a; list(, $y) = $a;", "removed.empty_list", 2),
             (
-                "<?php foreach ($a as $v) { switch ($v) { case 1: continue; case 2: continue 2; } } switch ($x) { case 1: foreach ($a as $v) { continue; } }",
+                "<?php foreach ($a as $v) { switch ($v) { case 1: continue; case 2: continue 2; } } switch ($x) { case 1: foreach ($a as $v) { continue; } } switch ($y) { case 1: while ($z) continue; case 2: do continue; while ($z); case 3: for (;;) continue 1; }",
                 "deprecated.continue_switch",
                 1,
             ),
@@ -5066,7 +5066,7 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
             ("<?php new FilesystemIterator($p, FilesystemIterator::KEY_AS_PATHNAME); new FilesystemIterator($p, FilesystemIterator::KEY_AS_PATHNAME | FilesystemIterator::SKIP_DOTS); new FilesystemIterator($p); new FilesystemIterator($p, $flags);", "behavior.filesystem_iterator_dots", 1),
             ("<?php $r = new ReflectionProperty('A', 'b'); $r->setValue(1); $r->setValue($o, 1);", "deprecated.reflection_set_value_single", 1),
             ("<?php $d = new PDO('sqlite::memory:'); $d->sqliteCreateFunction('f', 'g'); $d->pgsqlGetPid(); $d->query('x');", "deprecated.pdo_driver_method", 2),
-            ("<?php preg_match('/[\\\\w-.]+/', $s); preg_match('/[a\\\\d-z]/', $s); preg_match('/[\\\\w-]+/', $s); preg_match('/[\\\\w\\\\-.]+/', $s); preg_match('/\\\\w-.[a-z]/', $s); preg_match('/[a-z\\\\s]/', $s);", "removed.regex_class_range", 2),
+            ("<?php preg_match('/[\\\\w-.]+/', $s); preg_match('/[a\\\\d-z]/', $s); preg_match('/[\\\\w-]+/', $s); preg_match('/[\\\\w\\\\-.]+/', $s); preg_match('/\\\\w-.[a-z]/', $s); preg_match('/[a-z\\\\s]/', $s); preg_match('/[a-z-\\\\s]/', $s); preg_match('/[0-9-\\\\d]/', $s);", "removed.regex_class_range", 2),
             ("<?php $d = new PDO($s); $r = $d->query('x'); if ($r === false) {} $d->query('y') === false; $d->exec('z') or die('no'); if (!$d->prepare('p')) {} $d->query('fine');", "behavior.pdo_default_exceptions", 4),
             ("<?php $d = new PDO($s, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_SILENT]); $d->query('y') === false;", "behavior.pdo_default_exceptions", 0),
             ("<?php function f($d) { $d->query('y') === false; }", "behavior.pdo_default_exceptions", 0),
@@ -5683,7 +5683,8 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
                 "<?php preg_match('/[a-\\d]/', $x); preg_match('/[-\\d]/', $x); preg_match('/[a\\-\\d]/', $x);",
                 "removed.regex_class_range"
             ),
-            1
+            0,
+            "PCRE1 already rejected [a-\\d], so nothing changes in 7.3"
         );
     }
 

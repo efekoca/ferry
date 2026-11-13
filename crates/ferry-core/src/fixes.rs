@@ -111,6 +111,8 @@ pub const OVERRIDE_DROP: &str = "Ferry\\Php83\\RemoveOverrideWithoutParent";
 pub const STATIC_ONCE: &str = "Ferry\\Php83\\DeclareStaticOnce";
 pub const GUARD_FUNCTION: &str = "Ferry\\GuardBuiltinFunction";
 pub const LARAVEL_ARR: &str = "Ferry\\Php85\\LaravelArrayFirstToArr";
+pub const SET_VALUE_NULL: &str = "Ferry\\Php83\\ReflectionSetValueWithNull";
+pub const POLYGON_POINTS: &str = "Ferry\\Php81\\PolygonPointsFromArray";
 
 /// A finding the user asked to fix with one option: its line, its rule, which of that rule's
 /// findings on the line it is, and the option.
@@ -649,7 +651,9 @@ const NO_OP_FLAGS: &[(&str, &str, Alone)] = &[
 
 /// Rules whose fix reads the code around the finding, and for three of them the version the project
 /// runs on today.
-const SITE_RULES: [&str; 59] = [
+const SITE_RULES: [&str; 61] = [
+    "deprecated.reflection_set_value_single",
+    "deprecated.polygon_num_points",
     "removed.incompatible_user_override",
     "framework.laravel_native_array_first",
     "behavior.error_reporting_zero",
@@ -944,6 +948,8 @@ pub(crate) fn mentions(src: &str) -> bool {
         "function",
         "array_first",
         "array_last",
+        "setvalue",
+        "polygon",
     ];
     OCI_ALIASES.iter().map(|(old, _)| *old).chain(NO_OP_CALLS.iter().map(|(_, f, _)| *f)).chain(calls).any(|name| lower.contains(name))
         || (lower.contains("unset") && src.contains("$this"))
@@ -1342,6 +1348,17 @@ fn site_fix(file: &Source, k: usize, rule: &str) -> Option<Fix> {
         "removed.repeated_static" => static_once(file, k),
         "removed.redeclared_builtin" => guard_function(file, k),
         "framework.laravel_native_array_first" => laravel_arr(file, k),
+        "deprecated.reflection_set_value_single" => {
+            let open = k + 1;
+            if !tok.text.eq_ignore_ascii_case("setValue") || !tokens.get(open).is_some_and(|t| t.is_punct("(")) {
+                return None;
+            }
+            let (_, args) = arguments(tokens, open)?;
+            let [(first, _)] = args[..] else { return None };
+            let at = tokens[first].start;
+            Some(Fix { extra: Vec::new(), class: SET_VALUE_NULL, start: at, end: at, text: "null, ".into() })
+        }
+        "deprecated.polygon_num_points" => polygon_points(file, k),
         "deprecated.http_response_header" => last_headers(file, k),
         "deprecated.null_offset" => null_key(file, k),
         "deprecated.partial_callable" => first_class_callable(file, k),
@@ -2605,6 +2622,47 @@ fn laravel_arr(file: &Source, k: usize) -> Option<Fix> {
         end: tok.end,
         text: format!("\\Illuminate\\Support\\Arr::{method}"),
     })
+}
+
+/// `imagefilledpolygon($im, $points, 4, $color)` without the point count PHP 8 takes from the
+/// array: the array alone when it holds exactly that many points, otherwise its first points, the
+/// ones the old call drew.
+fn polygon_points(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let (_, args) = function_call(tokens, k, &["imagepolygon", "imagefilledpolygon", "imageopenpolygon"])?;
+    let [_, points, count, _] = args[..] else { return None };
+    let number = (count.0 == count.1).then(|| tokens[count.0].text.parse::<usize>().ok()).flatten();
+    let open = match &tokens[points.0..=points.1] {
+        [b, ..] if b.is_punct("[") => Some(points.0),
+        [a, p, ..] if a.is_ident_ci("array") && p.is_punct("(") => Some(points.0 + 1),
+        _ => None,
+    };
+    let elements = open.filter(|&o| crate::declarations::close_of(tokens, o) == Some(points.1)).map(|o| {
+        let mut depth = 0usize;
+        let mut commas = 0;
+        for t in &tokens[o + 1..points.1] {
+            if t.is_punct("(") || t.is_punct("[") || t.is_punct("{") {
+                depth += 1;
+            } else if t.is_punct(")") || t.is_punct("]") || t.is_punct("}") {
+                depth -= 1;
+            } else if depth == 0 && t.is_punct(",") {
+                commas += 1;
+            }
+        }
+        let trailing = tokens[points.1 - 1].is_punct(",");
+        if points.1 == o + 1 {
+            0
+        } else {
+            commas + usize::from(!trailing)
+        }
+    });
+    let array = file.text(points.0, points.1);
+    let text = match (number, elements) {
+        (Some(n), Some(e)) if e == 2 * n => array.to_string(),
+        (Some(n), _) => format!("array_slice({array}, 0, {})", 2 * n),
+        (None, _) => format!("array_slice({array}, 0, 2 * ({}))", file.text(count.0, count.1)),
+    };
+    Some(Fix { extra: Vec::new(), class: POLYGON_POINTS, start: tokens[points.0].start, end: tokens[count.1].end, text })
 }
 
 /// A global function PHP has since added, declared without a check: the declaration wrapped in
@@ -5918,6 +5976,19 @@ mod tests {
             assert_eq!(kinds_of(&fixes(&src), "removed.incompatible_user_override"), [FixKind::Manual], "{src}");
             assert_eq!(fixed(&src), None, "{src}");
         }
+    }
+
+    #[test]
+    fn static_set_value_gets_null_and_polygons_drop_their_count() {
+        let src = "<?php\n$r = new ReflectionProperty('A', 'b');\n$r->setValue(5);\n$r->setValue($o, 5);\nimagefilledpolygon($im, $points, 4, $c);\nimagepolygon($im, [0, 0, 9, 0, 9, 9], 3, $c);\nimageopenpolygon($im, $p, $n, $c);\nimagefilledpolygon($im, $points, $c);\n";
+        let (out, classes) = fixed(src).unwrap();
+        assert_eq!(
+            out,
+            "<?php\n$r = new ReflectionProperty('A', 'b');\n$r->setValue(null, 5);\n$r->setValue($o, 5);\nimagefilledpolygon($im, array_slice($points, 0, 8), $c);\nimagepolygon($im, [0, 0, 9, 0, 9, 9], $c);\nimageopenpolygon($im, array_slice($p, 0, 2 * ($n)), $c);\nimagefilledpolygon($im, $points, $c);\n"
+        );
+        assert_eq!(classes, [SET_VALUE_NULL, POLYGON_POINTS]);
+        assert_eq!(kinds_of(&fixes(src), "deprecated.reflection_set_value_single"), [FixKind::Auto]);
+        assert_eq!(kinds_of(&fixes(src), "deprecated.polygon_num_points"), [FixKind::Likely; 3]);
     }
 
     #[test]

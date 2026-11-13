@@ -100,9 +100,7 @@ fn class_range(body: &str) -> bool {
                     && b"wWdDsShHvV".contains(&b[i + 1])
                     && b.get(i + 2) == Some(&b'-')
                     && b.get(i + 3).is_some_and(|&c| c != b']');
-                let ends_range =
-                    in_class && b"wWdDsShHvV".contains(&b[i + 1]) && i >= 2 && b[i - 1] == b'-' && b[i - 2] != b'[' && b[i - 2] != b'\\';
-                if starts_range || ends_range {
+                if starts_range {
                     return true;
                 }
                 i += 2;
