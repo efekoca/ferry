@@ -101,6 +101,7 @@ pub struct ProjectIndex {
     target: Option<crate::version::PhpVersion>,
     current: Option<crate::version::PhpVersion>,
     autoload_hooks: bool,
+    autoload_named: bool,
     error_handler: bool,
     entity_options: bool,
     monetary_unknown: bool,
@@ -239,6 +240,11 @@ impl ProjectIndex {
     /// but its declaration.
     pub(crate) fn hooks_autoload(&self) -> bool {
         self.autoload_hooks
+    }
+
+    /// Whether the project names `__autoload` anywhere but its declaration.
+    pub(crate) fn names_autoload(&self) -> bool {
+        self.autoload_named
     }
 
     /// Whether the project installs its own error handler anywhere.
@@ -423,12 +429,15 @@ impl ProjectIndex {
                 None => self.monetary_unknown = true,
             }
         }
-        self.autoload_hooks |= tokens.iter().enumerate().any(|(i, t)| {
+        let named = tokens.iter().enumerate().any(|(i, t)| {
             let declared = tokens[..i].iter().rev().find(|p| !p.is_punct("&")).is_some_and(|p| p.is_ident_ci("function"));
-            t.is_ident_ci("spl_autoload_register")
-                || t.is_ident_ci("__autoload") && !declared
-                || t.literal().is_some_and(|s| s.to_ascii_lowercase().ends_with("autoload.php") || s.eq_ignore_ascii_case("__autoload"))
+            t.is_ident_ci("__autoload") && !declared || t.literal().is_some_and(|s| s.eq_ignore_ascii_case("__autoload"))
         });
+        self.autoload_named |= named;
+        self.autoload_hooks |= named
+            || tokens.iter().any(|t| {
+                t.is_ident_ci("spl_autoload_register") || t.literal().is_some_and(|s| s.to_ascii_lowercase().ends_with("autoload.php"))
+            });
         let methods = crate::analyzer::method_tokens(tokens);
         let spaces = namespaces(tokens);
         let names = Names::new(tokens);

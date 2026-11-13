@@ -101,6 +101,23 @@ fn appends(tokens: &[Token], k: usize) -> bool {
         && tokens.get(k + 3).is_some_and(|t| t.is_punct("="))
 }
 
+/// The names compact() at `call` asks for that function `f` never mentions as a variable, when
+/// nothing in it can reach its scope another way.
+pub(crate) fn compact_unknown(tokens: &[Token], f: &crate::declarations::Function, call: usize) -> Vec<usize> {
+    let Some((open, close)) = f.body else { return Vec::new() };
+    let body = &tokens[open..close];
+    let reads_scope = body.iter().any(|t| t.is_punct("$") || t.kind == TokenKind::Ident && SCOPE_READERS.contains(&name_of(t).as_str()));
+    let Some(end) = close_of(tokens, call + 1).filter(|_| !reads_scope && open < call && call < close) else { return Vec::new() };
+    let known: HashSet<&str> = body
+        .iter()
+        .chain(f.params.iter().map(|p| &tokens[p.var]))
+        .filter(|t| t.kind == TokenKind::Variable)
+        .map(|t| t.text.as_str())
+        .chain(f.uses.iter().map(|&u| tokens[u].text.as_str()))
+        .collect();
+    (call + 2..end).filter(|&a| string_value(&tokens[a]).is_some_and(|s| s != "this" && !known.contains(s))).collect()
+}
+
 /// Literal values followed through a block, and calls that depend on what a function's scope contains.
 pub(crate) fn check(tokens: &[Token]) -> Vec<(usize, &'static PatternRule)> {
     let mut out = Vec::new();
@@ -141,27 +158,9 @@ pub(crate) fn check(tokens: &[Token]) -> Vec<(usize, &'static PatternRule)> {
             }
         }
 
-        let body = &tokens[open..close];
-        let reads_scope =
-            body.iter().any(|t| t.is_punct("$") || t.kind == TokenKind::Ident && SCOPE_READERS.contains(&name_of(t).as_str()));
-        if !reads_scope {
-            let known: HashSet<&str> = body
-                .iter()
-                .chain(f.params.iter().map(|p| &tokens[p.var]))
-                .filter(|t| t.kind == TokenKind::Variable)
-                .map(|t| t.text.as_str())
-                .chain(f.uses.iter().map(|&u| tokens[u].text.as_str()))
-                .collect();
-            for j in open..close {
-                if !(called(tokens, j) && tokens[j].is_ident_ci("compact")) {
-                    continue;
-                }
-                let Some(end) = close_of(tokens, j + 1) else { continue };
-                for (a, arg) in tokens.iter().enumerate().take(end).skip(j + 2) {
-                    if string_value(arg).is_some_and(|s| s != "this" && !known.contains(s)) {
-                        out.push((a, &COMPACT_UNDEFINED));
-                    }
-                }
+        for j in open..close {
+            if called(tokens, j) && tokens[j].is_ident_ci("compact") {
+                out.extend(compact_unknown(tokens, &f, j).into_iter().map(|a| (a, &COMPACT_UNDEFINED)));
             }
         }
     }

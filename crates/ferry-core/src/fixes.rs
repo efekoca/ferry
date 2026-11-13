@@ -113,6 +113,39 @@ pub const GUARD_FUNCTION: &str = "Ferry\\GuardBuiltinFunction";
 pub const LARAVEL_ARR: &str = "Ferry\\Php85\\LaravelArrayFirstToArr";
 pub const SET_VALUE_NULL: &str = "Ferry\\Php83\\ReflectionSetValueWithNull";
 pub const POLYGON_POINTS: &str = "Ferry\\Php81\\PolygonPointsFromArray";
+pub const MAGIC_QUOTES_SETTER: &str = "Ferry\\Php70\\RemoveMagicQuotesSetter";
+pub const ENCHANT_UNSET: &str = "Ferry\\Php80\\UnsetEnchantObject";
+pub const AUTOLOAD_DEAD: &str = "Ferry\\Php80\\RemoveUnreachableAutoload";
+pub const AUTOLOAD_DROP: &str = "Ferry\\Php80\\RemoveReplacedAutoload";
+pub const ERROR_CONTEXT_DEFAULT: &str = "Ferry\\Php80\\DefaultErrorContext";
+pub const CURL_OPTION_DROP: &str = "Ferry\\DropNoOpCurlOption";
+pub const FINAL_PRIVATE: &str = "Ferry\\Php80\\RemoveFinalFromPrivateMethod";
+pub const SUPPRESSED_MASK: &str = "Ferry\\Php80\\ErrorReportingWithoutFatalBits";
+pub const LDAP_URI: &str = "Ferry\\Php83\\LdapConnectUri";
+pub const PG_NULL_ROW: &str = "Ferry\\Php83\\PgsqlNullRow";
+pub const CONTEXT_OPTIONS: &str = "Ferry\\Php84\\StreamContextSetOptions";
+pub const CALLABLE_CLASS_NAME: &str = "Ferry\\Php82\\CallableWithClassName";
+pub const SPL_STORAGE_METHOD: &str = "Ferry\\Php85\\SplObjectStorageArrayAccess";
+pub const ARRAY_VALUES: &str = "Ferry\\Php80\\PositionalCallUserFuncArray";
+pub const CHAR_CODE: &str = "Ferry\\Php80\\IntNeedleToChr";
+pub const NULL_LENGTH_ZERO: &str = "Ferry\\Php80\\NullLengthToZero";
+pub const CONSTANT_INT: &str = "Ferry\\Php84\\CastBoolConstantToInt";
+pub const BARE_PRECISION: &str = "Ferry\\Php85\\ExplicitDefaultPrecision";
+pub const ORD_VALUE: &str = "Ferry\\Php85\\OrdLiteralToValue";
+pub const OFFSET_BEFORE_ENCODING: &str = "Ferry\\Php80\\MbStrrposOffsetBeforeEncoding";
+pub const UTF8_CALLABLE: &str = "Ferry\\Php82\\Utf8CallableToClosure";
+pub const DOM_PROPERTY: &str = "Ferry\\Php84\\DomDocumentProperty";
+pub const VERSION_OPERATOR: &str = "Ferry\\Php81\\VersionCompareMeantOperator";
+pub const VERSION_NULL: &str = "Ferry\\Php81\\VersionCompareOldResult";
+pub const SSL_SCHEME: &str = "Ferry\\Php70\\SslStreamScheme";
+pub const OCI_CLASS: &str = "Ferry\\Php80\\OciClassName";
+pub const STREAM_SET_OPTION: &str = "Ferry\\Php74\\AddStreamSetOption";
+pub const MHASH_S2K: &str = "Ferry\\Php81\\MhashKeygenS2kPort";
+pub const INI_GONE: &str = "Ferry\\RemoveRemovedIniSetting";
+pub const COMPACT_DEFINED: &str = "Ferry\\Php73\\CompactDefinedNames";
+pub const LDAP_RESPONSE: &str = "Ferry\\Php80\\LdapParsePagedResult";
+pub const OCI_FETCH_INTO: &str = "Ferry\\Php80\\OciFetchIntoToFetchArray";
+pub const PG_CONNECTION: &str = "Ferry\\Php81\\PgsqlExplicitConnection";
 
 /// A finding the user asked to fix with one option: its line, its rule, which of that rule's
 /// findings on the line it is, and the option.
@@ -132,7 +165,10 @@ struct Choice {
 }
 
 /// Rules whose findings can come with options.
-const OPTION_RULES: [&str; 21] = [
+const OPTION_RULES: [&str; 24] = [
+    "review.variable_variable",
+    "behavior.indirect_access_order",
+    "removed.version_compare_operator",
     "deprecated.mt_rand_php",
     "deprecated.ini_setting",
     "deprecated.dynamic_property",
@@ -158,6 +194,51 @@ const OPTION_RULES: [&str; 21] = [
 
 /// (rule, option, title, what it changes).
 const OPTION_TEXTS: &[(&str, &str, crate::i18n::Text, crate::i18n::Text)] = &[
+    (
+        "review.variable_variable",
+        "php5",
+        crate::i18n::Text::new("PHP 5 okuması", "PHP 5 reading"),
+        crate::i18n::Text::new(
+            "${$a[k]} yazılır: değişkenin adı dizideki değerden gelir, PHP 5'te olduğu gibi. Dizi PHP 7 okumasında metne çevrilip boşa gideceği için $a bir diziyse doğrusu budur.",
+            "Writes ${$a[k]}: the variable's name comes from the array value, as on PHP 5. When $a is an array this is the right one, since the PHP 7 reading turns the array into a string.",
+        ),
+    ),
+    (
+        "review.variable_variable",
+        "php7",
+        crate::i18n::Text::new("PHP 7 okuması", "PHP 7 reading"),
+        crate::i18n::Text::new(
+            "${$a}[k] yazılır: $a'nın adını verdiği değişken indekslenir. Proje PHP 7'de zaten böyle çalışıyordu.",
+            "Writes ${$a}[k]: the variable $a names is indexed. That's how the project already ran on PHP 7.",
+        ),
+    ),
+    (
+        "behavior.indirect_access_order",
+        "php5",
+        crate::i18n::Text::new("PHP 5 okuması", "PHP 5 reading"),
+        crate::i18n::Text::new(
+            "->{$f[1]} yazılır: özellik ya da metodun adı dizideki değerden gelir, PHP 5'te olduğu gibi. Proje PHP 7'de çalışıyorsa kod zaten öbür okumayla çalışıyordu; o zaman dokunmayın.",
+            "Writes ->{$f[1]}: the property or method name comes from the array value, as on PHP 5. If the project already runs on PHP 7, the code already used the other reading; leave it then.",
+        ),
+    ),
+    (
+        "removed.version_compare_operator",
+        "meant",
+        crate::i18n::Text::new("Kastedilen operatör", "The operator meant"),
+        crate::i18n::Text::new(
+            "PHP'nin bildiği operatör yazılır ve karşılaştırma yapılır. PHP 8.1 öncesinde bu çağrı hiç karşılaştırmayıp null döndürüyordu, yani sonuç değişebilir.",
+            "Writes the operator PHP knows, so the comparison happens. Before PHP 8.1 this call compared nothing and returned null, so the result can change.",
+        ),
+    ),
+    (
+        "removed.version_compare_operator",
+        "old",
+        crate::i18n::Text::new("Eski sonuç", "Old result"),
+        crate::i18n::Text::new(
+            "Çağrının yerine PHP 8.1 öncesinde döndürdüğü null yazılır; kod eskisi gibi çalışır.",
+            "Writes the null the call returned before PHP 8.1; the code runs as it did.",
+        ),
+    ),
     (
         "behavior.html_default_flags",
         "old",
@@ -651,7 +732,30 @@ const NO_OP_FLAGS: &[(&str, &str, Alone)] = &[
 
 /// Rules whose fix reads the code around the finding, and for three of them the version the project
 /// runs on today.
-const SITE_RULES: [&str; 61] = [
+const SITE_RULES: [&str; 84] = [
+    "deprecated.final_private_method",
+    "removed.builtin_override_signature",
+    "deprecated.ldap_connect_port",
+    "deprecated.pg_implicit_row",
+    "deprecated.pg_implicit_connection",
+    "deprecated.stream_context_option_array",
+    "deprecated.builtin_method",
+    "behavior.call_user_func_array_named",
+    "behavior.int_as_char_code",
+    "behavior.null_length",
+    "behavior.php_debug_bool",
+    "behavior.printf_bare_precision",
+    "deprecated.ord_length",
+    "removed.mb_strrpos_encoding",
+    "deprecated.utf8_encode",
+    "deprecated.utf8_decode",
+    "deprecated.dom_document_property",
+    "removed.version_compare_operator",
+    "removed.sslv2_stream",
+    "behavior.oci_class_name",
+    "behavior.stream_set_option_missing",
+    "removed.builtin_ini",
+    "behavior.compact_undefined_variable",
     "deprecated.reflection_set_value_single",
     "deprecated.polygon_num_points",
     "removed.incompatible_user_override",
@@ -848,6 +952,7 @@ fn handles(rule: &str) -> bool {
         || rule == "deprecated.oci8_alias"
         || rule == "deprecated.curlopt_binarytransfer"
         || rule == "removed.unset_this"
+        || rule == "deprecated.builtin_function"
         || CONSTANT_VALUES.iter().chain(RENAMED_CONSTANTS).any(|(r, ..)| *r == rule)
         || NO_OP_CALLS.iter().any(|(r, ..)| *r == rule)
         || NO_OP_FLAGS.iter().any(|(r, ..)| *r == rule)
@@ -950,6 +1055,37 @@ pub(crate) fn mentions(src: &str) -> bool {
         "array_last",
         "setvalue",
         "polygon",
+        "enchant_broker_free",
+        "final",
+        "stream_wrapper_register",
+        "pg_",
+        "stream_context_set_option",
+        "ldap_connect",
+        "is_callable",
+        "attach",
+        "detach",
+        "contains",
+        "call_user_func_array",
+        "strpos",
+        "strrpos",
+        "stripos",
+        "strstr",
+        "strchr",
+        "php_zts",
+        "php_debug",
+        "printf",
+        "ord",
+        "mb_strrpos",
+        "utf8_",
+        "actualencoding",
+        "config",
+        "version_compare",
+        "sslv2",
+        "oci-",
+        "ini_get",
+        "ini_restore",
+        "compact",
+        "ocifetchinto",
     ];
     OCI_ALIASES.iter().map(|(old, _)| *old).chain(NO_OP_CALLS.iter().map(|(_, f, _)| *f)).chain(calls).any(|name| lower.contains(name))
         || (lower.contains("unset") && src.contains("$this"))
@@ -1029,6 +1165,9 @@ pub(crate) fn at(file: &Source, k: usize, rule: &str) -> Option<Fix> {
         return fix(CONSTANT_VALUE, class.start, value.into());
     }
     if rule == "deprecated.oci8_alias" {
+        if bare.eq_ignore_ascii_case("ocifetchinto") {
+            return oci_fetch_into(file, k);
+        }
         let (_, new) = OCI_ALIASES.iter().find(|(old, _)| bare.eq_ignore_ascii_case(old))?;
         let call = tokens.get(k + 1).is_some_and(|n| n.is_punct("("));
         let member = k.checked_sub(1).is_some_and(|p| tokens[p].is_punct("->") || tokens[p].is_punct("::"));
@@ -1324,7 +1463,10 @@ fn site_fix(file: &Source, k: usize, rule: &str) -> Option<Fix> {
         }
         "behavior.substr_false" => substr_false(file, k).filter(|_| php5),
         "behavior.indirect_access_order" => {
-            if !php5 || !crate::calls::indirect_access(tokens, k) {
+            if !php5 {
+                return choices(file, k, rule).into_iter().find(|c| c.recommended).map(|c| c.fix);
+            }
+            if !crate::calls::indirect_access(tokens, k) {
                 return None;
             }
             let end = dimensions_end(tokens, k)?;
@@ -1336,13 +1478,54 @@ fn site_fix(file: &Source, k: usize, rule: &str) -> Option<Fix> {
                 text: format!("{{{}}}", file.text(k, end)),
             })
         }
-        "review.variable_variable" => variable_variable(file, k),
+        "review.variable_variable" => {
+            variable_variable(file, k).or_else(|| choices(file, k, rule).into_iter().find(|c| c.recommended).map(|c| c.fix))
+        }
         "deprecated.false_to_array" => false_to_array(file, k),
         "deprecated.gmstrftime" => strftime_fix(file, k, "gmstrftime", "gmdate", GMDATE, GMDATE_NAMES),
         "deprecated.strftime" => strftime_fix(file, k, "strftime", "date", STRFTIME_DATE, STRFTIME_NAMES),
         "deprecated.mb_encoding" => base64_fix(file, k),
-        "behavior.error_reporting_zero" => suppressed_check(file, k),
+        "behavior.error_reporting_zero" => suppressed_check(file, k).or_else(|| suppressed_mask(file, k)),
         "removed.error_handler_context" => error_context(file, k),
+        "deprecated.final_private_method" => final_private(file, k),
+        "removed.builtin_override_signature" => widen_override(file, k),
+        "deprecated.ldap_connect_port" => ldap_uri(file, k),
+        "deprecated.pg_implicit_row" => pg_null_row(file, k),
+        "deprecated.pg_implicit_connection" => pg_connection(file, k),
+        "deprecated.stream_context_option_array" => {
+            let (_, args) = function_call(tokens, k, &["stream_context_set_option"])?;
+            (args.len() == 2).then(|| Fix {
+                extra: Vec::new(),
+                class: CONTEXT_OPTIONS,
+                start: tok.start,
+                end: tok.end,
+                text: format!("{}stream_context_set_options", lead(tok)),
+            })
+        }
+        "deprecated.builtin_method" => spl_storage_method(file, k),
+        "behavior.call_user_func_array_named" => positional_arguments(file, k),
+        "behavior.int_as_char_code" => {
+            let signed = k.checked_sub(1).is_some_and(|p| tokens[p].is_punct("-") || tokens[p].is_punct("+"));
+            char_code(file, k).filter(|_| !signed)
+        }
+        "behavior.null_length" => {
+            if tok.is_ident_ci("null") {
+                replace(NULL_LENGTH_ZERO, "0".into())
+            } else {
+                None
+            }
+        }
+        "behavior.php_debug_bool" => constant_int(file, k),
+        "behavior.printf_bare_precision" => explicit_precision(file, k),
+        "deprecated.ord_length" => ord_value(file, k),
+        "removed.mb_strrpos_encoding" => offset_before_encoding(file, k),
+        "deprecated.utf8_encode" | "deprecated.utf8_decode" => utf8_callable(file, k),
+        "deprecated.dom_document_property" => dom_property(file, k),
+        "removed.sslv2_stream" => ssl_scheme(file, k),
+        "behavior.oci_class_name" => oci_class(file, k),
+        "behavior.stream_set_option_missing" => stream_set_option(file, k),
+        "removed.builtin_ini" => removed_ini(file, k),
+        "behavior.compact_undefined_variable" => compact_defined(file, k),
         "removed.exception_handler_type" => throwable_handler(file, k),
         "removed.override_without_parent" => override_drop(file, k),
         "removed.repeated_static" => static_once(file, k),
@@ -1361,7 +1544,7 @@ fn site_fix(file: &Source, k: usize, rule: &str) -> Option<Fix> {
         "deprecated.polygon_num_points" => polygon_points(file, k),
         "deprecated.http_response_header" => last_headers(file, k),
         "deprecated.null_offset" => null_key(file, k),
-        "deprecated.partial_callable" => first_class_callable(file, k),
+        "deprecated.partial_callable" => first_class_callable(file, k).or_else(|| callable_class_name(file, k)),
         "deprecated.implicit_argument" => directory_handle(file, k),
         "behavior.func_get_args_current_value" => original_args(file, k).filter(|_| php5),
         "deprecated.splfixedarray_wakeup" => wakeup_call(file, k),
@@ -1421,6 +1604,9 @@ fn choices(file: &Source, k: usize, rule: &str) -> Vec<Choice> {
         "removed.builtin_arity" => arity_choices(file, k).into(),
         "deprecated.mt_rand_php" => mt_rand_choices(file, k).into(),
         "deprecated.ini_setting" => ini_choices(file, k).into(),
+        "review.variable_variable" => variable_choices(file, k).into(),
+        "behavior.indirect_access_order" => indirect_choices(file, k).into(),
+        "removed.version_compare_operator" => version_choices(file, k).into(),
         _ => Vec::new(),
     };
     options.into_iter().flatten().collect()
@@ -2498,13 +2684,13 @@ fn error_context(file: &Source, k: usize) -> Option<Fix> {
             || tokens[j].is_ident_ci("get_defined_vars")
     });
     let comma = (fourth.var..fifth.var).rev().find(|&j| tokens[j].is_punct(","))?;
-    (!reads).then(|| Fix {
-        extra: Vec::new(),
-        class: ERROR_CONTEXT,
-        start: tokens[comma].start,
-        end: tokens[fifth.var].end,
-        text: String::new(),
-    })
+    if reads {
+        let typed = (comma + 1..fifth.var)
+            .any(|j| tokens[j].kind == TokenKind::Ident && !["array", "iterable", "mixed"].iter().any(|w| tokens[j].is_ident_ci(w)));
+        let at = tokens[fifth.var].end;
+        return (!typed).then(|| Fix { extra: Vec::new(), class: ERROR_CONTEXT_DEFAULT, start: at, end: at, text: " = array()".into() });
+    }
+    Some(Fix { extra: Vec::new(), class: ERROR_CONTEXT, start: tokens[comma].start, end: tokens[fifth.var].end, text: String::new() })
 }
 
 /// An exception handler typed `Exception`, which PHP 7 calls with Errors too: `Throwable`.
@@ -3265,7 +3451,23 @@ fn session_handler(file: &Source, k: usize) -> Option<Fix> {
                 && comma.is_punct(",")
                 && literal_text(m).is_some_and(|m| public_method(&m))
         });
-        closure || name || own
+        let object = {
+            let (open, close) = if tokens[f].is_punct("[") {
+                (f, l)
+            } else if tokens[f].is_ident_ci("array") && tokens.get(f + 1).is_some_and(|t| t.is_punct("(")) {
+                (f + 1, l)
+            } else {
+                (f, f)
+            };
+            let inner = if close > open + 1 && (tokens[close].is_punct("]") || tokens[close].is_punct(")")) {
+                &tokens[open + 1..close]
+            } else {
+                &[][..]
+            };
+            let inner = if inner.first().is_some_and(|t| t.is_punct("&")) { &inner[1..] } else { inner };
+            matches!(inner, [v, comma, m] if v.kind == TokenKind::Variable && v.text != "this" && comma.is_punct(",") && literal_text(m).is_some())
+        };
+        closure || name || own || object
     };
     if !args.iter().all(callable) {
         return None;
@@ -3303,10 +3505,28 @@ fn session_handler(file: &Source, k: usize) -> Option<Fix> {
 fn autoload_register(file: &Source, k: usize) -> Option<Fix> {
     let tokens = file.tokens;
     let keyword = (0..k).rev().find(|&j| !tokens[j].is_punct("&"))?;
-    if !tokens[keyword].is_ident_ci("function") || !tokens[k].text.eq_ignore_ascii_case("__autoload") || file.index.hooks_autoload() {
+    if !tokens[keyword].is_ident_ci("function") || !tokens[k].text.eq_ignore_ascii_case("__autoload") {
         return None;
     }
     let (_, close) = crate::declarations::function_at(tokens, keyword)?.body?;
+    if file.index.hooks_autoload() {
+        if file.index.names_autoload() {
+            return None;
+        }
+        let at = (tokens[keyword].line, tokens[keyword].column);
+        let dead = crate::guards::dead_spans(tokens, file.target).iter().any(|&(from, to)| from <= at && at <= to);
+        let mut fix = removal(file, keyword, close, if dead { AUTOLOAD_DEAD } else { AUTOLOAD_DROP });
+        fix.start = with_doc_comment(file.src, fix.start);
+        let src = file.src;
+        if src[..fix.start].ends_with("\n\n") && src[..fix.end].ends_with('\n') {
+            let rest = &src[fix.end..];
+            let next = rest.find('\n').map_or(rest.len(), |i| i + 1);
+            if rest[..next].trim().is_empty() {
+                fix.end += next;
+            }
+        }
+        return Some(fix);
+    }
     let mut depth = 0isize;
     for t in &tokens[..keyword] {
         if t.is_punct("{") {
@@ -4078,6 +4298,648 @@ fn removal(file: &Source, first: usize, semi: usize, class: &'static str) -> Fix
     Fix { extra: Vec::new(), class, start, end: end + trailing, text: String::new() }
 }
 
+/// Whether variable `name` holds an array around `k`: the function indexes it or assigns it an
+/// array literal somewhere else.
+fn indexed_elsewhere(tokens: &[Token], k: usize, name: &str) -> bool {
+    let (from, to) = enclosing_function(tokens, k).and_then(|f| f.body).unwrap_or((0, tokens.len()));
+    (from..to).any(|j| {
+        let own = j != k
+            && is_var(tokens, j, name)
+            && !j.checked_sub(1).is_some_and(|p| ["$", "->", "?->", "::"].iter().any(|s| tokens[p].is_punct(s)));
+        let next = |n: usize| tokens.get(j + n);
+        own && (next(1).is_some_and(|t| t.is_punct("["))
+            || next(1).is_some_and(|t| t.is_punct("=")) && next(2).is_some_and(|t| t.is_punct("[") || t.is_ident_ci("array")))
+    })
+}
+
+/// `$$a[k]` in a project whose PHP version is unknown: the PHP 5 reading `${$a[k]}` or the PHP 7
+/// one `${$a}[k]`. The first is recommended when `$a` holds an array.
+fn variable_choices(file: &Source, k: usize) -> [Option<Choice>; 2] {
+    let tokens = file.tokens;
+    let Some(name) = tokens.get(k + 1).filter(|t| t.kind == TokenKind::Variable) else { return [None, None] };
+    let nested =
+        k.checked_sub(1).is_some_and(|p| ["$", "->", "?->", "::"].iter().any(|s| tokens[p].is_punct(s)) || tokens[p].is_ident_ci("global"));
+    let Some(end) = dimensions_end(tokens, k + 1).filter(|&e| e > k + 1) else { return [None, None] };
+    if file.current.is_some() || !tokens[k].is_punct("$") || nested {
+        return [None, None];
+    }
+    let old = Fix {
+        extra: Vec::new(),
+        class: VARIABLE_ORDER,
+        start: tokens[k].start,
+        end: tokens[end].end,
+        text: format!("${{{}}}", file.text(k + 1, end)),
+    };
+    let new = Fix {
+        extra: Vec::new(),
+        class: VARIABLE_BRACES,
+        start: tokens[k].start,
+        end: name.end,
+        text: format!("${{{}}}", file.text(k + 1, k + 1)),
+    };
+    let array = indexed_elsewhere(tokens, k + 1, &name.text);
+    [Some(Choice { id: "php5", fix: old, recommended: array }), Some(Choice { id: "php7", fix: new, recommended: false })]
+}
+
+/// `->$f[1]()` in a project whose PHP version is unknown: the PHP 5 reading `->{$f[1]}()`,
+/// recommended when `$f` holds an array.
+fn indirect_choices(file: &Source, k: usize) -> [Option<Choice>; 2] {
+    let tokens = file.tokens;
+    if file.current.is_some() || !crate::calls::indirect_access(tokens, k) {
+        return [None, None];
+    }
+    let Some(end) = dimensions_end(tokens, k) else { return [None, None] };
+    let fix = Fix {
+        extra: Vec::new(),
+        class: crate::analyzer::INDIRECT_ACCESS_FIX,
+        start: tokens[k].start,
+        end: tokens[end].end,
+        text: format!("{{{}}}", file.text(k, end)),
+    };
+    [Some(Choice { id: "php5", fix, recommended: indexed_elsewhere(tokens, k, &tokens[k].text) }), None]
+}
+
+/// The start of the doc comment right above `start`, when `start` begins a line.
+fn with_doc_comment(src: &str, start: usize) -> usize {
+    let before = src[..start].trim_end();
+    if start > 0 && !src[..start].ends_with('\n') || !before.ends_with("*/") {
+        return start;
+    }
+    let Some(open) = before.rfind("/**") else { return start };
+    let line = src[..open].rfind('\n').map_or(0, |i| i + 1);
+    let alone = src[line..open].trim().is_empty() && !before[open..before.len() - 2].contains("*/");
+    if alone {
+        line
+    } else {
+        start
+    }
+}
+
+/// `final` on a private method, which PHP 8 ignores and warns about.
+fn final_private(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let (first, keyword) = method_head(tokens, k)?;
+    let head = &tokens[first..keyword];
+    let at = (first..keyword).find(|&j| tokens[j].is_ident_ci("final"))?;
+    if !head.iter().any(|t| t.is_ident_ci("private")) || tokens[k].text.eq_ignore_ascii_case("__construct") {
+        return None;
+    }
+    Some(Fix { extra: Vec::new(), class: FINAL_PRIVATE, start: tokens[at].start, end: tokens[at + 1].start, text: String::new() })
+}
+
+/// `error_reporting()` compared with 0 outside a handler this file installs: PHP 8 keeps the fatal
+/// bits under `@`, so they are masked out.
+fn suppressed_mask(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let (open, close) = (k + 1, k + 2);
+    if !tokens.get(open).is_some_and(|t| t.is_punct("("))
+        || !tokens.get(close).is_some_and(|t| t.is_punct(")"))
+        || error_handler_around(file, k).is_some()
+    {
+        return None;
+    }
+    let eq = |j: usize| tokens.get(j).is_some_and(|t| t.is_punct("==") || t.is_punct("==="));
+    let zero = |j: usize| tokens.get(j).is_some_and(|t| t.text == "0");
+    let negated = k >= 1 && tokens[k - 1].is_punct("!");
+    if !(eq(close + 1) && zero(close + 2) || k >= 2 && eq(k - 1) && zero(k - 2) || negated) {
+        return None;
+    }
+    let text = format!(
+        "({}error_reporting() & ~(E_ERROR | E_PARSE | E_CORE_ERROR | E_COMPILE_ERROR | E_USER_ERROR | E_RECOVERABLE_ERROR))",
+        lead(&tokens[k])
+    );
+    Some(Fix { extra: Vec::new(), class: SUPPRESSED_MASK, start: tokens[k].start, end: tokens[close].end, text })
+}
+
+/// ldap_connect($host, $port) → one URI, built the way PHP built it: a host that is already an
+/// LDAP URL is used as it is.
+fn ldap_uri(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let (close, args) = function_call(tokens, k, &["ldap_connect"])?;
+    let [host, port] = args[..] else { return None };
+    let inert = |a: (usize, usize)| plain(tokens, a) || literal(tokens, a);
+    if !inert(host) || !inert(port) || tokens[host.0].is_ident_ci("null") {
+        return None;
+    }
+    let port_text = match literal_text(&tokens[port.0]) {
+        Some(p) if port.0 == port.1 && !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()) => p,
+        _ if port.0 == port.1 && tokens[port.0].kind == TokenKind::Number => tokens[port.0].text.clone(),
+        _ => String::new(),
+    };
+    let h = file.text(host.0, host.1);
+    let uri = match (literal_text(&tokens[host.0]).filter(|_| host.0 == host.1), port_text.is_empty()) {
+        (Some(name), _) if name.to_ascii_lowercase().starts_with("ldap") && name.contains("://") => h.to_string(),
+        (Some(name), false) if !name.contains(['\'', '\\', '$']) => format!("'ldap://{name}:{port_text}'"),
+        (Some(name), true) if !name.contains(['\'', '\\', '$']) => format!("'ldap://{name}:' . {}", file.text(port.0, port.1)),
+        (None, false) => format!("preg_match('#^ldap[is]?://#i', {h}) ? {h} : 'ldap://' . {h} . ':{port_text}'"),
+        (None, true) => format!("preg_match('#^ldap[is]?://#i', {h}) ? {h} : 'ldap://' . {h} . ':' . {}", file.text(port.0, port.1)),
+        _ => return None,
+    };
+    Some(Fix {
+        extra: Vec::new(),
+        class: LDAP_URI,
+        start: tokens[k].start,
+        end: tokens[close].end,
+        text: format!("{}ldap_connect({uri})", lead(&tokens[k])),
+    })
+}
+
+/// pg_fetch_result(), pg_field_prtlen() and pg_field_is_null() with two arguments read the current
+/// row; a null row says the same.
+fn pg_null_row(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let (_, args) = function_call(tokens, k, &["pg_fetch_result", "pg_field_prtlen", "pg_field_is_null"])?;
+    let [_, field] = args[..] else { return None };
+    let at = tokens[field.0].start;
+    Some(Fix { extra: Vec::new(), class: PG_NULL_ROW, start: at, end: at, text: "null, ".into() })
+}
+
+/// The class property holding the connection pg_connect() opens, when the class has exactly one.
+fn pg_connection_property(tokens: &[Token], class: &crate::index::TypeDecl) -> Option<String> {
+    let mut found: Vec<&str> = Vec::new();
+    for j in class.open..class.close {
+        let assigned = tokens[j].kind == TokenKind::Variable
+            && tokens[j].text == "this"
+            && tokens.get(j + 1).is_some_and(|t| t.is_punct("->"))
+            && tokens.get(j + 2).is_some_and(|t| t.kind == TokenKind::Ident)
+            && tokens.get(j + 3).is_some_and(|t| t.is_punct("="));
+        if !assigned {
+            continue;
+        }
+        let end = (j + 4..class.close).find(|&e| tokens[e].is_punct(";")).unwrap_or(class.close);
+        let opens = (j + 4..end).any(|v| {
+            (tokens[v].is_ident_ci("pg_connect") || tokens[v].is_ident_ci("pg_pconnect"))
+                && tokens.get(v + 1).is_some_and(|t| t.is_punct("("))
+        });
+        let name = tokens[j + 2].text.as_str();
+        if opens && !found.contains(&name) {
+            found.push(name);
+        }
+    }
+    let [name] = found[..] else { return None };
+    Some(name.to_string())
+}
+
+/// A pg_* call without its connection inside an instance method of a class that keeps one
+/// pg_connect() connection in a property: that property.
+fn pg_connection(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    if !tokens.get(k + 1).is_some_and(|t| t.is_punct("(")) || !call_named(tokens, k, &[tokens[k].text.trim_start_matches('\\')]) {
+        return None;
+    }
+    let (close, args) = arguments(tokens, k + 1)?;
+    let named_first = ["pg_execute", "pg_prepare", "pg_query_params", "pg_send_execute", "pg_send_prepare", "pg_send_query_params"]
+        .iter()
+        .any(|n| tokens[k].text.trim_start_matches('\\').eq_ignore_ascii_case(n));
+    if named_first && !args.first().is_some_and(|&a| literal(tokens, a)) {
+        return None;
+    }
+    let function = enclosing_function(tokens, k)?;
+    let (first, keyword) = method_head(tokens, function.name?)?;
+    if tokens[first..keyword].iter().any(|t| t.is_ident_ci("static")) || tokens[keyword].is_ident_ci("fn") {
+        return None;
+    }
+    let class = crate::index::class_decls(tokens).into_iter().filter(|d| d.open < keyword && keyword < d.close).max_by_key(|d| d.open)?;
+    let property = pg_connection_property(tokens, &class)?;
+    let connection = format!("$this->{property}");
+    if args.iter().any(|&(f, l)| file.text(f, l).replace(' ', "") == connection) {
+        return None;
+    }
+    let (at, text) = match args.first() {
+        Some(&(f, _)) => (tokens[f].start, format!("{connection}, ")),
+        None => (tokens[close].start, connection),
+    };
+    Some(Fix { extra: Vec::new(), class: PG_CONNECTION, start: at, end: at, text })
+}
+
+/// `is_callable('parent::m')` → `is_callable(parent::class . '::m')`, which checks the same thing
+/// from the same scope.
+fn callable_class_name(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let value = literal_text(&tokens[k])?;
+    let (call, index, arg) = argument_of(tokens, k)?;
+    if index != 0 || arg != (k, k) || !call_named(tokens, call, &["is_callable"]) {
+        return None;
+    }
+    let (class, method) = value.split_once("::")?;
+    let class = class.to_ascii_lowercase();
+    let named =
+        !method.is_empty() && method.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') && !method.as_bytes()[0].is_ascii_digit();
+    if !["self", "parent"].contains(&class.as_str()) || !named {
+        return None;
+    }
+    let decl = crate::index::class_decls(tokens).into_iter().filter(|d| d.open < k && k < d.close).max_by_key(|d| d.open)?;
+    if class == "parent" && decl.info.parent.is_none() {
+        return None;
+    }
+    Some(Fix {
+        extra: Vec::new(),
+        class: CALLABLE_CLASS_NAME,
+        start: tokens[k].start,
+        end: tokens[k].end,
+        text: format!("{class}::class . '::{method}'"),
+    })
+}
+
+/// `parent::attach()`, `detach()` and `contains()` in a direct SplObjectStorage subclass → the
+/// ArrayAccess methods PHP 8.5 points to, which do the same.
+fn spl_storage_method(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let new = match tokens[k].text.to_ascii_lowercase().as_str() {
+        "attach" => "offsetSet",
+        "detach" => "offsetUnset",
+        "contains" => "offsetExists",
+        _ => return None,
+    };
+    let parent_call =
+        k >= 2 && tokens[k - 1].is_punct("::") && tokens[k - 2].is_ident_ci("parent") && tokens.get(k + 1).is_some_and(|t| t.is_punct("("));
+    let decl = crate::index::class_decls(tokens).into_iter().filter(|d| d.open < k && k < d.close).max_by_key(|d| d.open)?;
+    let storage = decl.info.parent.as_deref().is_some_and(|p| p.trim_start_matches('\\').eq_ignore_ascii_case("SplObjectStorage"));
+    (parent_call && storage).then(|| Fix {
+        extra: Vec::new(),
+        class: SPL_STORAGE_METHOD,
+        start: tokens[k].start,
+        end: tokens[k].end,
+        text: new.into(),
+    })
+}
+
+/// The array call_user_func_array() gets with string keys, wrapped in array_values() so its
+/// values go by position as before PHP 8.
+fn positional_arguments(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let (call, index, (first, last)) = argument_of(tokens, k)?;
+    if index != 1 || first != k || !call_named(tokens, call, &["call_user_func_array"]) {
+        return None;
+    }
+    Some(Fix {
+        extra: Vec::new(),
+        class: ARRAY_VALUES,
+        start: tokens[first].start,
+        end: tokens[last].end,
+        text: format!("array_values({})", file.text(first, last)),
+    })
+}
+
+/// An integer needle, which PHP 7 read as a character code → chr() of it.
+fn char_code(file: &Source, k: usize) -> Option<Fix> {
+    let tok = &file.tokens[k];
+    (tok.kind == TokenKind::Number && !tok.text.contains(['.', 'e', 'E']) || tok.text.to_ascii_lowercase().starts_with("0x")).then(|| Fix {
+        extra: Vec::new(),
+        class: CHAR_CODE,
+        start: tok.start,
+        end: tok.end,
+        text: format!("chr({})", tok.text),
+    })
+}
+
+/// PHP_ZTS or PHP_DEBUG compared with a number → `(int)` of it, which is what PHP before 8.4 gave.
+fn constant_int(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let from = k.saturating_sub(2);
+    let at = (from..(k + 3).min(tokens.len()))
+        .find(|&j| ["PHP_ZTS", "PHP_DEBUG"].contains(&tokens[j].text.trim_start_matches('\\')) && is_atom(tokens, j))?;
+    Some(Fix { extra: Vec::new(), class: CONSTANT_INT, start: tokens[at].start, end: tokens[at].start, text: "(int) ".into() })
+}
+
+/// Byte offsets, in the raw text of a printf format, of `%.` precisions with no digits on a
+/// floating point conversion: PHP 8.5 reads them as 0, before as 6.
+fn bare_precisions(raw: &str) -> Option<Vec<usize>> {
+    let b = raw.as_bytes();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] != b'%' {
+            i += 1;
+            continue;
+        }
+        i += 1;
+        if b.get(i) == Some(&b'%') {
+            i += 1;
+            continue;
+        }
+        let digits = |mut j: usize| {
+            while b.get(j).is_some_and(u8::is_ascii_digit) {
+                j += 1;
+            }
+            j
+        };
+        let argnum = digits(i);
+        if argnum > i && b.get(argnum) == Some(&b'$') {
+            i = argnum + 1;
+        }
+        loop {
+            match b.get(i)? {
+                b'-' | b'+' | b' ' | b'0' => i += 1,
+                b'\'' => i += 2,
+                _ => break,
+            }
+        }
+        i = if b.get(i) == Some(&b'*') { i + 1 } else { digits(i) };
+        if b.get(i) == Some(&b'.') {
+            let dot = i;
+            i += 1;
+            let after = if b.get(i) == Some(&b'*') { i + 1 } else { digits(i) };
+            if after == i && b.get(i).is_some_and(|c| b"eEfFgGhH".contains(c)) {
+                out.push(dot + 1);
+            }
+            i = after;
+        }
+    }
+    Some(out)
+}
+
+/// A printf format with `%.E`-style precisions → `%.6E`, the precision PHP before 8.5 used.
+fn explicit_precision(file: &Source, k: usize) -> Option<Fix> {
+    let tok = &file.tokens[k];
+    let TokenKind::Str { interpolates: false, backtick: false } = tok.kind else { return None };
+    let quote = tok.text.chars().next()?;
+    if quote != '\'' && quote != '"' || quote == '"' && tok.text.contains('\\') {
+        return None;
+    }
+    let raw = &tok.text[1..tok.text.len() - 1];
+    let spots = bare_precisions(raw)?;
+    if spots.is_empty() {
+        return None;
+    }
+    let mut text = String::from(quote);
+    let mut from = 0;
+    for at in spots {
+        text.push_str(&raw[from..at]);
+        text.push('6');
+        from = at;
+    }
+    text.push_str(&raw[from..]);
+    text.push(quote);
+    Some(Fix { extra: Vec::new(), class: BARE_PRECISION, start: tok.start, end: tok.end, text })
+}
+
+/// `ord('')` or `ord('ab')` → the byte value it returned.
+fn ord_value(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let value = literal_text(&tokens[k])?;
+    let (call, index, arg) = argument_of(tokens, k)?;
+    let (close, args) = function_call(tokens, call, &["ord"])?;
+    if index != 0 || arg != (k, k) || args.len() != 1 {
+        return None;
+    }
+    let byte = value.as_bytes().first().copied().unwrap_or(0);
+    Some(Fix { extra: Vec::new(), class: ORD_VALUE, start: tokens[call].start, end: tokens[close].end, text: byte.to_string() })
+}
+
+/// An encoding passed as mb_strrpos()'s third argument, which PHP 7 took as the encoding: it moves
+/// after an offset of 0.
+fn offset_before_encoding(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let value = literal_text(&tokens[k])?;
+    let (call, index, arg) = argument_of(tokens, k)?;
+    let (_, args) = function_call(tokens, call, &["mb_strrpos", "mb_strripos"])?;
+    if index != 2 || arg != (k, k) || args.len() != 3 || value.trim().parse::<f64>().is_ok() {
+        return None;
+    }
+    Some(Fix { extra: Vec::new(), class: OFFSET_BEFORE_ENCODING, start: tokens[k].start, end: tokens[k].start, text: "0, ".into() })
+}
+
+/// 'utf8_encode' or 'utf8_decode' passed to a call that runs it → the mb_convert_encoding()
+/// closure Rector writes for direct calls.
+fn utf8_callable(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let (from, to) = match literal_text(&tokens[k])?.trim_start_matches('\\').to_ascii_lowercase().as_str() {
+        "utf8_encode" => ("ISO-8859-1", "UTF-8"),
+        "utf8_decode" => ("UTF-8", "ISO-8859-1"),
+        _ => return None,
+    };
+    let (call, index, arg) = argument_of(tokens, k)?;
+    if arg != (k, k) || !INVOKING_CALLS.iter().any(|&(f, slot)| slot == index && call_named(tokens, call, &[f])) {
+        return None;
+    }
+    let text = format!("static fn ($string) => mb_convert_encoding($string, '{to}', '{from}')");
+    Some(Fix { extra: Vec::new(), class: UTF8_CALLABLE, start: tokens[k].start, end: tokens[k].end, text })
+}
+
+/// DOMDocument::$actualEncoding → $encoding, which holds the same; $config → null, which it
+/// always was.
+fn dom_property(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let arrow = k.checked_sub(1).filter(|&p| tokens[p].is_punct("->"))?;
+    if tokens.get(k + 1).is_some_and(|t| t.is_punct("(") || t.is_punct("=")) {
+        return None;
+    }
+    match tokens[k].text.as_str() {
+        "actualEncoding" => {
+            Some(Fix { extra: Vec::new(), class: DOM_PROPERTY, start: tokens[k].start, end: tokens[k].end, text: "encoding".into() })
+        }
+        "config" => {
+            let first = receiver_start(tokens, arrow)?;
+            plain(tokens, (first, arrow - 1)).then(|| Fix {
+                extra: Vec::new(),
+                class: DOM_PROPERTY,
+                start: tokens[first].start,
+                end: tokens[k].end,
+                text: "null".into(),
+            })
+        }
+        _ => None,
+    }
+}
+
+/// Operators people write for version_compare() that PHP never knew, and the one meant.
+const MEANT_OPERATORS: [(&str, &str); 8] =
+    [("gte", ">="), ("lte", "<="), ("=>", ">="), ("=<", "<="), ("=", "=="), ("===", "=="), ("!==", "!="), ("neq", "!=")];
+
+/// version_compare() with an operator PHP doesn't know: the operator meant, or the null PHP
+/// returned before 8.1.
+fn version_choices(file: &Source, k: usize) -> [Option<Choice>; 2] {
+    let tokens = file.tokens;
+    let Some(op) = literal_text(&tokens[k]) else { return [None, None] };
+    let Some((call, 2, arg)) = argument_of(tokens, k) else { return [None, None] };
+    let Some((close, args)) = function_call(tokens, call, &["version_compare"]) else { return [None, None] };
+    if arg != (k, k)
+        || args.len() != 3
+        || !args[..2].iter().all(|&a| plain(tokens, a) || literal(tokens, a) || a.0 == a.1 && is_atom(tokens, a.0))
+    {
+        return [None, None];
+    }
+    let meant = MEANT_OPERATORS.iter().find(|(o, _)| o.eq_ignore_ascii_case(op.trim())).map(|(_, m)| Choice {
+        id: "meant",
+        fix: Fix { extra: Vec::new(), class: VERSION_OPERATOR, start: tokens[k].start, end: tokens[k].end, text: format!("'{m}'") },
+        recommended: false,
+    });
+    let old = Choice {
+        id: "old",
+        fix: Fix { extra: Vec::new(), class: VERSION_NULL, start: tokens[call].start, end: tokens[close].end, text: "null".into() },
+        recommended: false,
+    };
+    [meant, Some(old)]
+}
+
+/// 'sslv2://' → 'ssl://': no OpenSSL PHP builds with still speaks SSLv2, and ssl:// takes the best
+/// protocol both sides know.
+fn ssl_scheme(file: &Source, k: usize) -> Option<Fix> {
+    let tok = &file.tokens[k];
+    let TokenKind::Str { interpolates: false, backtick: false } = tok.kind else { return None };
+    let at = tok.text.to_ascii_lowercase().find("sslv2://")?;
+    let text = format!("{}ssl://{}", &tok.text[..at], &tok.text[at + "sslv2://".len()..]);
+    Some(Fix { extra: Vec::new(), class: SSL_SCHEME, start: tok.start, end: tok.end, text })
+}
+
+/// 'OCI-Lob' and 'OCI-Collection', the class names OCI8 3 renamed.
+fn oci_class(file: &Source, k: usize) -> Option<Fix> {
+    let tok = &file.tokens[k];
+    let new = match literal_text(tok)?.to_ascii_lowercase().as_str() {
+        "oci-lob" => "OCILob",
+        "oci-collection" => "OCICollection",
+        _ => return None,
+    };
+    let quote = &tok.text[..1];
+    Some(Fix { extra: Vec::new(), class: OCI_CLASS, start: tok.start, end: tok.end, text: format!("{quote}{new}{quote}") })
+}
+
+/// stream_wrapper_register() with a class of this file that has no stream_set_option(): the
+/// method, returning false like PHP did when it was missing.
+fn stream_set_option(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let (_, args) = function_call(tokens, k, &["stream_wrapper_register"])?;
+    let &(first, last) = args.get(1)?;
+    let name = if first == last {
+        literal_text(&tokens[first])?
+    } else if last == first + 2 && tokens[first + 1].is_punct("::") && tokens[last].is_ident_ci("class") {
+        tokens[first].text.clone()
+    } else {
+        return None;
+    };
+    let short = name.trim_start_matches('\\').rsplit('\\').next()?.to_ascii_lowercase();
+    let decls: Vec<_> = crate::index::class_decls(tokens).into_iter().filter(|d| d.info.name.eq_ignore_ascii_case(&short)).collect();
+    let [decl] = &decls[..] else { return None };
+    if decl.info.parent.is_some() || (decl.open..decl.close).any(|j| tokens[j].text.eq_ignore_ascii_case("stream_set_option")) {
+        return None;
+    }
+    let method = (decl.open..decl.close).find(|&j| tokens[j].is_ident_ci("function"))?;
+    let (first_mod, _) = method_head(tokens, method + 1).unwrap_or((method, method));
+    let src = file.src;
+    let line_start = src[..tokens[first_mod].start].rfind('\n').map_or(0, |i| i + 1);
+    let indent: String = src[line_start..tokens[first_mod].start].chars().take_while(|c| *c == ' ' || *c == '\t').collect();
+    let nl = newline(src);
+    let close = tokens[decl.close].start;
+    let body_end = src[..close].trim_end_matches([' ', '\t']).len();
+    let text = format!(
+        "{nl}{indent}public function stream_set_option($option, $arg1, $arg2){nl}{indent}{{{nl}{indent}{indent}return false;{nl}{indent}}}{nl}"
+    );
+    Some(Fix { extra: Vec::new(), class: STREAM_SET_OPTION, start: body_end, end: body_end, text })
+}
+
+/// mhash_keygen_s2k() with a constant algorithm → the same salted S2K written with hash(). JOAAT
+/// is left out: before PHP 8.1 it hashed in pieces differently.
+fn mhash_s2k(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let (close, args) = function_call(tokens, k, &["mhash_keygen_s2k"])?;
+    let [algo, password, salt, bytes] = args[..] else { return None };
+    let algo = mhash_algo(tokens, algo).filter(|a| a.0 != "JOAAT")?;
+    let text = format!(
+        "(static function ($algo, $password, $salt, $bytes) {{ $salt = str_pad(substr($salt, 0, 8), 8, \"\\0\"); $key = ''; for ($i = 0; strlen($key) < $bytes; $i++) {{ $key .= hash($algo, str_repeat(\"\\0\", $i) . $salt . $password, true); }} return substr($key, 0, $bytes); }})('{}', {}, {}, {})",
+        algo.2,
+        file.text(password.0, password.1),
+        file.text(salt.0, salt.1),
+        file.text(bytes.0, bytes.1)
+    );
+    Some(Fix { extra: Vec::new(), class: MHASH_S2K, start: tokens[k].start, end: tokens[close].end, text })
+}
+
+/// A removed ini setting: ini_set(), ini_alter() and ini_restore() of it go, ini_get() of it is
+/// false. Both are what those calls do on the versions that removed it.
+fn removed_ini(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let (call, index, arg) = argument_of(tokens, k)?;
+    if index != 0 || arg != (k, k) || literal_text(&tokens[k]).is_none() {
+        return None;
+    }
+    let (close, args) = function_call(tokens, call, &["ini_set", "ini_alter", "ini_restore", "ini_get"])?;
+    let inert = |a: &(usize, usize)| plain(tokens, *a) || literal(tokens, *a) || a.0 == a.1 && is_atom(tokens, a.0);
+    if !args.iter().all(inert) {
+        return None;
+    }
+    let first = if call >= 1 && tokens[call - 1].is_punct("@") { call - 1 } else { call };
+    if !call_named(tokens, call, &["ini_get"]) && starts_statement(tokens, first) && tokens.get(close + 1).is_some_and(|t| t.is_punct(";"))
+    {
+        return Some(removal(file, first, close + 1, INI_GONE));
+    }
+    let reads = call_named(tokens, call, &["ini_get"]) || call_named(tokens, call, &["ini_set", "ini_alter"]);
+    reads.then(|| Fix { extra: Vec::new(), class: INI_GONE, start: tokens[first].start, end: tokens[close].end, text: "false".into() })
+}
+
+/// compact() asking for names the function never has → compact() of the rest, or an empty array.
+fn compact_defined(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let (call, ..) = argument_of(tokens, k)?;
+    let (close, args) = function_call(tokens, call, &["compact"])?;
+    let function = enclosing_function(tokens, call).filter(|f| tokens[f.keyword].is_ident_ci("function"))?;
+    let unknown = crate::flow::compact_unknown(tokens, &function, call);
+    if !unknown.contains(&k) || !unknown.iter().all(|u| args.iter().any(|&(f, l)| f == *u && l == *u)) {
+        return None;
+    }
+    let kept: Vec<(usize, usize)> = args.iter().copied().filter(|&(f, _)| !unknown.contains(&f)).collect();
+    if kept.is_empty() {
+        return Some(Fix {
+            extra: Vec::new(),
+            class: COMPACT_DEFINED,
+            start: tokens[call].start,
+            end: tokens[close].end,
+            text: "array()".into(),
+        });
+    }
+    let mut text = String::new();
+    for (i, &(f, l)) in kept.iter().enumerate() {
+        if i > 0 {
+            let before = args.iter().position(|a| a.0 == f)?;
+            text.push_str(file.between(args[before - 1].1, f));
+        }
+        text.push_str(file.text(f, l));
+    }
+    let (start, end) = (args[0].0, args[args.len() - 1].1);
+    Some(Fix { extra: Vec::new(), class: COMPACT_DEFINED, start: tokens[start].start, end: tokens[end].end, text })
+}
+
+/// ldap_control_paged_result_response($link, $result, $cookie[, $estimated]) → the same values
+/// read with ldap_parse_result(); the cookie stays as it was when the result has no paging control.
+fn paged_response(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let (close, args) = function_call(tokens, k, &["ldap_control_paged_result_response"])?;
+    if !(3..=4).contains(&args.len()) || !args.iter().all(|&a| plain(tokens, a)) {
+        return None;
+    }
+    let text = |a: (usize, usize)| file.text(a.0, a.1);
+    let estimated = if args.len() == 4 { "$estimated = $controls[LDAP_CONTROL_PAGEDRESULTS]['value']['size']; " } else { "" };
+    let params = if args.len() == 4 { ", &$cookie, &$estimated" } else { ", &$cookie" };
+    let passed = args[2..].iter().map(|&a| text(a)).collect::<Vec<_>>().join(", ");
+    let body = format!(
+        "(static function ($link, $result{params}) {{ if (!ldap_parse_result($link, $result, $code, $dn, $message, $referrals, $controls) || $code !== 0 || !isset($controls[LDAP_CONTROL_PAGEDRESULTS])) {{ return false; }} $cookie = $controls[LDAP_CONTROL_PAGEDRESULTS]['value']['cookie']; {estimated}return true; }})({}, {}, {passed})",
+        text(args[0]),
+        text(args[1])
+    );
+    Some(Fix {
+        extra: Vec::new(),
+        class: LDAP_RESPONSE,
+        start: tokens[k].start,
+        end: tokens[close].end,
+        text: format!("{}{body}", lead(&tokens[k])),
+    })
+}
+
+/// ocifetchinto($statement, $row[, $mode]) → oci_fetch_array() the way OCI8 ran it: OCI_NUM unless
+/// the mode names OCI_ASSOC, $row untouched at the end, the column count on success.
+fn oci_fetch_into(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let (close, args) = function_call(tokens, k, &["ocifetchinto"])?;
+    if !(2..=3).contains(&args.len()) {
+        return None;
+    }
+    let passed = args.iter().map(|&(f, l)| file.text(f, l)).collect::<Vec<_>>().join(", ");
+    let text = format!(
+        "(static function ($statement, &$row, $mode = OCI_NUM) {{ $fetched = oci_fetch_array($statement, $mode | ($mode & (OCI_NUM | OCI_ASSOC) ? 0 : OCI_NUM)); if ($fetched === false) {{ return false; }} $row = $fetched; return oci_num_fields($statement); }})({passed})"
+    );
+    Some(Fix { extra: Vec::new(), class: OCI_FETCH_INTO, start: tokens[k].start, end: tokens[close].end, text })
+}
+
 /// The innermost function whose body holds token `k`: its closing brace.
 fn body_end(tokens: &[Token], k: usize) -> Option<usize> {
     (0..k)
@@ -4094,22 +4956,25 @@ fn statement_fix(file: &Source, k: usize, rule: &str) -> Option<Fix> {
         .iter()
         .find(|(r, name, _)| *r == rule && tokens.get(k).is_some_and(|t| t.text.trim_start_matches('\\').eq_ignore_ascii_case(name)))
     {
+        let first = if k >= 1 && tokens[k - 1].is_punct("@") { k - 1 } else { k };
         if !tokens.get(k + 1).is_some_and(|t| t.is_punct("("))
-            || !starts_statement(tokens, k)
+            || !starts_statement(tokens, first)
             || !call_named(tokens, k, &[tokens[k].text.trim_start_matches('\\')])
         {
             return None;
         }
         let (close, given) = arguments(tokens, k + 1)?;
+        let setter = args == Args::Falsy && given.len() == 1 && !falsy(tokens, given[0]) && plain(tokens, given[0]);
         let fits = |a: &(usize, usize)| match args {
             Args::Plain => plain(tokens, *a),
             Args::PlainOrLiteral => plain(tokens, *a) || literal(tokens, *a),
-            Args::Falsy => falsy(tokens, *a),
+            Args::Falsy => falsy(tokens, *a) || setter,
         };
         let expected = if args == Args::Plain { 1 } else { given.len().min(1) };
         let semi = close + 1;
+        let class = if setter { MAGIC_QUOTES_SETTER } else { NO_OP_CALL };
         return (given.len() == expected && given.iter().all(fits) && tokens.get(semi).is_some_and(|t| t.is_punct(";")))
-            .then(|| removal(file, k, semi, NO_OP_CALL));
+            .then(|| removal(file, first, semi, class));
     }
     match rule {
         "deprecated.curlopt_binarytransfer" => {
@@ -4121,6 +4986,18 @@ fn statement_fix(file: &Source, k: usize, rule: &str) -> Option<Fix> {
             let simple = |a: &(usize, usize)| plain(tokens, *a) || literal(tokens, *a);
             let fits = given.len() == 3 && given[1] == (k, k) && simple(&given[0]) && simple(&given[2]);
             (fits && tokens.get(close + 1).is_some_and(|t| t.is_punct(";"))).then(|| removal(file, call, close + 1, NO_OP_CALL))
+        }
+        "deprecated.builtin_function" => {
+            let (close, given) = function_call(tokens, k, &["enchant_broker_free", "enchant_broker_free_dict"])?;
+            let [(arg, last)] = given[..] else { return None };
+            let local = arg == last && tokens[arg].kind == TokenKind::Variable && tokens[arg].text != "this";
+            (local && is_statement(tokens, k, close)).then(|| Fix {
+                extra: Vec::new(),
+                class: ENCHANT_UNSET,
+                start: tokens[k].start,
+                end: tokens[close].end,
+                text: format!("unset({})", file.text(arg, arg)),
+            })
         }
         "removed.mysqli_embedded_server" => {
             let (close, given) = function_call(tokens, k, &["mysqli_embedded_server_start", "mysqli_embedded_server_end"])?;
@@ -4370,8 +5247,12 @@ fn curl_option_item(file: &Source, k: usize) -> Option<Fix> {
         return None;
     }
     let (first, close) = array_around(tokens, k)?;
-    let (call, index, arg) = argument_of(tokens, first)?;
-    if !call_named(tokens, call, &["curl_setopt_array"]) || index != 1 || arg != (first, close) {
+    let direct = argument_of(tokens, first)
+        .is_some_and(|(call, index, arg)| call_named(tokens, call, &["curl_setopt_array"]) && index == 1 && arg == (first, close));
+    let curl_keys = (first..close).any(|j| {
+        j != k && tokens[j].text.trim_start_matches('\\').starts_with("CURLOPT_") && tokens.get(j + 1).is_some_and(|t| t.is_punct("=>"))
+    });
+    if !direct && !curl_keys {
         return None;
     }
     let before = &tokens[k - 1];
@@ -4383,7 +5264,7 @@ fn curl_option_item(file: &Source, k: usize) -> Option<Fix> {
     } else {
         (tokens[k].start, tokens[value.1].end)
     };
-    Some(Fix { extra: Vec::new(), class: NO_OP_FLAG, start, end, text: String::new() })
+    Some(Fix { extra: Vec::new(), class: if direct { NO_OP_FLAG } else { CURL_OPTION_DROP }, start, end, text: String::new() })
 }
 
 fn call_fix(file: &Source, k: usize, rule: &str) -> Option<Fix> {
@@ -4392,13 +5273,14 @@ fn call_fix(file: &Source, k: usize, rule: &str) -> Option<Fix> {
     let bare = tok.text.trim_start_matches('\\');
     let value = |text: &str, class| Some(Fix { extra: Vec::new(), class, start: tok.start, end: tok.end, text: text.to_string() });
     match rule {
-        "deprecated.mhash" => mhash_fix(file, k),
+        "deprecated.mhash" => mhash_fix(file, k).or_else(|| mhash_s2k(file, k)),
         "deprecated.mhash_constant" => {
             let algo = mhash_algo(tokens, (k, k))?;
             match argument_of(tokens, k) {
                 Some((call, 0, _)) if call_named(tokens, call, &["mhash", "mhash_get_hash_name", "mhash_get_block_size"]) => {
                     mhash_fix(file, call)
                 }
+                Some((call, 0, _)) if call_named(tokens, call, &["mhash_keygen_s2k"]) => mhash_s2k(file, call),
                 Some((call, ..)) if tokens[call].text.trim_start_matches('\\').to_ascii_lowercase().starts_with("mhash") => None,
                 _ => value(&algo.1.to_string(), CONSTANT_VALUE),
             }
@@ -4543,6 +5425,9 @@ fn call_fix(file: &Source, k: usize, rule: &str) -> Option<Fix> {
         "removed.ldap_control_paged_result" => paged_result_fix(file, k),
         "removed.ldap_control_paged_result_response" => {
             let (close, args) = function_call(tokens, k, &["ldap_control_paged_result_response"])?;
+            if args.len() > 2 {
+                return paged_response(file, k);
+            }
             let fits = args.len() == 2 && args.iter().all(|&a| plain(tokens, a)) && is_statement(tokens, k, close);
             fits.then(|| removal(file, k, close + 1, NO_OP_CALL))
         }
@@ -4892,11 +5777,15 @@ mod tests {
         let src =
             "<?php\n$c = OCILogon('u', 'p');\n$s = \\ociparse($c, 'x');\nocifetchinto($s, $row);\n$cb = 'ociexecute';\n$o->ocicommit();\n";
         let (out, classes) = fixed(src).unwrap();
-        assert_eq!(out, "<?php\n$c = oci_connect('u', 'p');\n$s = \\oci_parse($c, 'x');\nocifetchinto($s, $row);\n$cb = 'ociexecute';\n$o->ocicommit();\n");
-        assert_eq!(classes, [OCI_ALIAS]);
+        assert!(
+            out.starts_with("<?php\n$c = oci_connect('u', 'p');\n$s = \\oci_parse($c, 'x');\n(static function ($statement, &$row"),
+            "{out}"
+        );
+        assert!(out.ends_with("})($s, $row);\n$cb = 'ociexecute';\n$o->ocicommit();\n"), "{out}");
+        assert_eq!(classes, [OCI_ALIAS, OCI_FETCH_INTO]);
         let kinds = fixes(src);
         assert!(kinds.contains(&("deprecated.oci8_alias".to_string(), FixKind::Auto)));
-        assert!(kinds.contains(&("deprecated.oci8_alias".to_string(), FixKind::Manual)), "ocifetchinto() stays manual: {kinds:?}");
+        assert!(kinds.contains(&("deprecated.oci8_alias".to_string(), FixKind::Likely)), "ocifetchinto() has no alias: {kinds:?}");
     }
 
     #[test]
@@ -5017,7 +5906,7 @@ mod tests {
     fn paged_results_and_assert_options() {
         let src = "<?php\nfunction p($l, $r, $c) {\n    ldap_control_paged_result($l, 100);\n    $ok = ldap_control_paged_result($l, 50, true, $c);\n    ldap_control_paged_result($l, size(), $crit);\n    ldap_control_paged_result_response($l, $r);\n    ldap_control_paged_result_response($l, $r, $c);\n    assert_options(ASSERT_ACTIVE, 1);\n    assert_options(ASSERT_BAIL, false);\n    assert_options(ASSERT_ACTIVE, 0);\n    $old = assert_options(ASSERT_WARNING, 1);\n    assert_options(ASSERT_QUIET_EVAL, 1);\n    return [ASSERT_EXCEPTION, ASSERT_QUIET_EVAL];\n}\n";
         let (out, _) = fixed(src).unwrap();
-        assert_eq!(out, "<?php\nfunction p($l, $r, $c) {\n    ldap_set_option($l, LDAP_OPT_SERVER_CONTROLS, [['oid' => LDAP_CONTROL_PAGEDRESULTS, 'iscritical' => false, 'value' => ['size' => 100, 'cookie' => '']]]);\n    $ok = ldap_set_option($l, LDAP_OPT_SERVER_CONTROLS, [['oid' => LDAP_CONTROL_PAGEDRESULTS, 'iscritical' => true, 'value' => ['size' => 50, 'cookie' => $c]]]);\n    ldap_control_paged_result($l, size(), $crit);\n    ldap_control_paged_result_response($l, $r, $c);\n    assert_options(ASSERT_ACTIVE, 0);\n    $old = assert_options(ASSERT_WARNING, 1);\n    return [5, ASSERT_QUIET_EVAL];\n}\n");
+        assert_eq!(out, "<?php\nfunction p($l, $r, $c) {\n    ldap_set_option($l, LDAP_OPT_SERVER_CONTROLS, [['oid' => LDAP_CONTROL_PAGEDRESULTS, 'iscritical' => false, 'value' => ['size' => 100, 'cookie' => '']]]);\n    $ok = ldap_set_option($l, LDAP_OPT_SERVER_CONTROLS, [['oid' => LDAP_CONTROL_PAGEDRESULTS, 'iscritical' => true, 'value' => ['size' => 50, 'cookie' => $c]]]);\n    ldap_control_paged_result($l, size(), $crit);\n    (static function ($link, $result, &$cookie) { if (!ldap_parse_result($link, $result, $code, $dn, $message, $referrals, $controls) || $code !== 0 || !isset($controls[LDAP_CONTROL_PAGEDRESULTS])) { return false; } $cookie = $controls[LDAP_CONTROL_PAGEDRESULTS]['value']['cookie']; return true; })($l, $r, $c);\n    assert_options(ASSERT_ACTIVE, 0);\n    $old = assert_options(ASSERT_WARNING, 1);\n    return [5, ASSERT_QUIET_EVAL];\n}\n");
         assert_eq!(
             kinds(src, "deprecated.assert_options"),
             [FixKind::Likely, FixKind::Likely, FixKind::Manual, FixKind::Manual, FixKind::Auto]
@@ -5280,12 +6169,12 @@ mod tests {
             ),
             "{out}"
         );
-        assert!(out.contains("is_callable('self::report')") && out.contains("set_error_handler('self::handle')"), "{out}");
+        assert!(out.contains("is_callable(self::class . '::report')") && out.contains("set_error_handler('self::handle')"), "{out}");
         assert!(out.contains("call_user_func('parent::b')") && out.contains("call_user_func('self::x')"), "{out}");
-        assert_eq!(classes, [FIRST_CLASS_CALLABLE]);
+        assert_eq!(classes, [FIRST_CLASS_CALLABLE, CALLABLE_CLASS_NAME]);
         let kinds = kinds_of(&fixes(src), "deprecated.partial_callable");
-        assert_eq!(kinds[..3], [FixKind::Auto; 3]);
-        assert_eq!(kinds[3..], [FixKind::Manual; 4]);
+        assert_eq!(kinds[..4], [FixKind::Auto; 4]);
+        assert_eq!(kinds[4..], [FixKind::Manual; 3]);
     }
 
     #[test]
@@ -5401,9 +6290,12 @@ mod tests {
         assert_eq!(out, "<?php\nerror_reporting(E_ALL);\n\nspl_autoload_register(function ($class)\n{\n    require __DIR__ . '/' . $class . '.php';\n});\n\n$x = new Foo();\n");
         assert_eq!(classes, [AUTOLOAD_REGISTER]);
         assert_eq!(kinds_of(&fixes(src), "removed.__autoload"), [FixKind::Likely]);
+        for registered in [format!("{src}spl_autoload_register('load');\n"), format!("{src}require __DIR__ . '/vendor/autoload.php';\n")] {
+            let (out, classes) = fixed(&registered).unwrap();
+            assert!(out.starts_with("<?php\nerror_reporting(E_ALL);\n\n$x = new Foo();\n"), "{out}");
+            assert_eq!(classes, [AUTOLOAD_DROP]);
+        }
         for other in [
-            format!("{src}spl_autoload_register('load');\n"),
-            format!("{src}require __DIR__ . '/vendor/autoload.php';\n"),
             src.replace("error_reporting(E_ALL);", "$early = new Bar();"),
             src.replace("require __DIR__", "echo __FUNCTION__; require __DIR__"),
         ] {
@@ -5897,9 +6789,10 @@ mod tests {
             out,
             src.replace("if (error_reporting() == 0)", "if (!(error_reporting() & $errno))")
                 .replace("if (!error_reporting())", "if (!(error_reporting() & $no))")
+                .replace("0 === error_reporting()", "0 === (error_reporting() & ~(E_ERROR | E_PARSE | E_CORE_ERROR | E_COMPILE_ERROR | E_USER_ERROR | E_RECOVERABLE_ERROR))")
         );
-        assert_eq!(classes, [SUPPRESSED_CHECK]);
-        assert_eq!(kinds_of(&fixes(src), "behavior.error_reporting_zero"), [FixKind::Likely, FixKind::Likely, FixKind::Manual]);
+        assert_eq!(classes, [SUPPRESSED_CHECK, SUPPRESSED_MASK]);
+        assert_eq!(kinds_of(&fixes(src), "behavior.error_reporting_zero"), [FixKind::Likely; 3]);
     }
 
     #[test]
@@ -5908,10 +6801,10 @@ mod tests {
         let (out, classes) = fixed(src).unwrap();
         assert_eq!(
             out,
-            "<?php\nset_error_handler(function ($no, $str, $file, $line) { log_it($str); });\nset_error_handler(function ($no, $str, $file, $line, array $ctx) { return $ctx; });\nset_exception_handler(function (Throwable $e) { log_it($e); });\nset_exception_handler(static function (\\Throwable $e) { log_it($e); });\n"
+            "<?php\nset_error_handler(function ($no, $str, $file, $line) { log_it($str); });\nset_error_handler(function ($no, $str, $file, $line, array $ctx = array()) { return $ctx; });\nset_exception_handler(function (Throwable $e) { log_it($e); });\nset_exception_handler(static function (\\Throwable $e) { log_it($e); });\n"
         );
-        assert_eq!(classes, [ERROR_CONTEXT, THROWABLE_HANDLER]);
-        assert_eq!(kinds_of(&fixes(src), "removed.error_handler_context"), [FixKind::Auto, FixKind::Manual]);
+        assert_eq!(classes, [ERROR_CONTEXT, ERROR_CONTEXT_DEFAULT, THROWABLE_HANDLER]);
+        assert_eq!(kinds_of(&fixes(src), "removed.error_handler_context"), [FixKind::Auto, FixKind::Likely]);
         assert_eq!(kinds_of(&fixes(src), "removed.exception_handler_type"), [FixKind::Likely; 2]);
     }
 
@@ -6007,5 +6900,163 @@ mod tests {
         let kinds: Vec<FixKind> = crate::analyzer::analyze_source_in("t.php", src, target, &index).into_iter().map(|f| f.fix).collect();
         assert_eq!(kinds, [FixKind::Auto; 2]);
         assert_eq!(fixed(src), None, "only in Laravel projects");
+    }
+
+    #[test]
+    fn private_methods_lose_final_and_wrappers_get_stream_set_option() {
+        let src = "<?php\nclass P { final private function f() {} private final static function g() {} final private function __construct() {} }\n";
+        let (out, classes) = fixed(src).unwrap();
+        assert_eq!(
+            out,
+            "<?php\nclass P { private function f() {} private static function g() {} final private function __construct() {} }\n"
+        );
+        assert_eq!(classes, [FINAL_PRIVATE]);
+        let wrapper = "<?php\nclass W {\n    public function stream_open($p, $m, $o, &$x)\n    {\n        return true;\n    }\n}\nstream_wrapper_register('w', 'W');\n";
+        let (out, classes) = fixed(wrapper).unwrap();
+        assert_eq!(
+            out,
+            "<?php\nclass W {\n    public function stream_open($p, $m, $o, &$x)\n    {\n        return true;\n    }\n\n    public function stream_set_option($option, $arg1, $arg2)\n    {\n        return false;\n    }\n}\nstream_wrapper_register('w', 'W');\n"
+        );
+        assert_eq!(classes, [STREAM_SET_OPTION]);
+        assert_eq!(kinds(wrapper, "behavior.stream_set_option_missing"), [FixKind::Auto]);
+        let empty = "<?php\nclass W {}\nstream_wrapper_register('w', 'W');\n";
+        assert_eq!(kinds(empty, "behavior.stream_set_option_missing"), [FixKind::Manual]);
+    }
+
+    #[test]
+    fn rewrites_that_keep_what_php_7_returned() {
+        let src = "<?php\n$n = strpos($s, 0x00);\n$r = array_splice($a, 1, null, true);\nif (1 === PHP_ZTS) {}\necho sprintf('%.E|%5.f|%.s|%.2f|%%.f', 1.5, 2, 'a', 3), ord(''), ord('ab'), mb_strrpos($h, $n, 'utf-8');\n$d = new DOMDocument(); echo $d->actualEncoding, $d->config;\nstream_context_set_option($c, array('ssl' => array()));\npg_field_is_null($r, 1);\ncall_user_func_array('f', array('a' => 1));\nfunction cf($a) { return compact('a', 'nope', 'zip'); }\nfunction cg() { return compact('x', 'y'); }\nclass St extends SplObjectStorage { function a($o) { parent::attach($o); return parent::contains($o); } }\nclass B extends St { function t() { return is_callable('parent::a'); } }\n";
+        let (out, _) = fixed(src).unwrap();
+        assert_eq!(
+            out,
+            "<?php\n$n = strpos($s, chr(0x00));\n$r = array_splice($a, 1, 0, true);\nif (1 === (int) PHP_ZTS) {}\necho sprintf('%.6E|%5.6f|%.s|%.2f|%%.f', 1.5, 2, 'a', 3), 0, 97, mb_strrpos($h, $n, 0, 'utf-8');\n$d = new DOMDocument(); echo $d->encoding, null;\nstream_context_set_options($c, array('ssl' => array()));\npg_field_is_null($r, null, 1);\ncall_user_func_array('f', array_values(array('a' => 1)));\nfunction cf($a) { return compact('a'); }\nfunction cg() { return array(); }\nclass St extends SplObjectStorage { function a($o) { parent::offsetSet($o); return parent::offsetExists($o); } }\nclass B extends St { function t() { return is_callable(parent::class . '::a'); } }\n"
+        );
+        assert!(fixes(src).iter().all(|(_, f)| *f == FixKind::Auto), "{:?}", fixes(src));
+        let signed = "<?php\n$n = strpos($s, -1);\n";
+        assert_eq!(fixed(signed), None);
+    }
+
+    #[test]
+    fn rewrites_to_review() {
+        let src = "<?php\n$a = ldap_connect($h, $p);\n$b = @ldap_connect($this->host, 389);\n$c = ldap_connect('ldaps://x', 636);\n$d = ldap_connect('example.com', '1389');\n$h = 'sslv2://' . $h;\n$t = 'OCI-Lob';\n$x = array_map('utf8_encode', $rows);\nif (error_reporting() === 0) {}\nif (!error_reporting()) {}\n";
+        let (out, _) = fixed(src).unwrap();
+        let mask = "error_reporting() & ~(E_ERROR | E_PARSE | E_CORE_ERROR | E_COMPILE_ERROR | E_USER_ERROR | E_RECOVERABLE_ERROR)";
+        assert_eq!(
+            out,
+            format!("<?php\n$a = ldap_connect(preg_match('#^ldap[is]?://#i', $h) ? $h : 'ldap://' . $h . ':' . $p);\n$b = @ldap_connect(preg_match('#^ldap[is]?://#i', $this->host) ? $this->host : 'ldap://' . $this->host . ':389');\n$c = ldap_connect('ldaps://x');\n$d = ldap_connect('ldap://example.com:1389');\n$h = 'ssl://' . $h;\n$t = 'OCILob';\n$x = array_map(static fn ($string) => mb_convert_encoding($string, 'UTF-8', 'ISO-8859-1'), $rows);\nif (({mask}) === 0) {{}}\nif (!({mask})) {{}}\n")
+        );
+        assert!(fixes(src).iter().all(|(_, f)| *f == FixKind::Likely), "{:?}", fixes(src));
+        let handler = "<?php\nfunction h($no, $msg) { if (error_reporting() == 0) { return; } }\nset_error_handler('h');\n";
+        assert!(fixed(handler).unwrap().0.contains("!(error_reporting() & $no)"));
+    }
+
+    #[test]
+    fn calls_with_no_direct_replacement_get_their_old_logic() {
+        let s2k = "<?php\n$k = mhash_keygen_s2k(MHASH_SHA1, $p, $s, 4);\n$j = mhash_keygen_s2k(MHASH_JOAAT, $p, $s, 4);\n";
+        let (out, classes) = fixed(s2k).unwrap();
+        assert!(out.contains("for ($i = 0; strlen($key) < $bytes; $i++) { $key .= hash($algo, str_repeat(\"\\0\", $i) . $salt . $password, true); } return substr($key, 0, $bytes); })('sha1', $p, $s, 4);\n"));
+        assert!(out.contains("$j = mhash_keygen_s2k(MHASH_JOAAT"), "JOAAT hashed in pieces differently before 8.1");
+        assert_eq!(classes, [MHASH_S2K]);
+        assert_eq!(kinds_of(&fixes(s2k), "deprecated.mhash"), [FixKind::Likely, FixKind::Manual]);
+        let paged = "<?php\nfunction f($c, $r) { ldap_control_paged_result_response($c, $r, $cookie); ldap_control_paged_result_response($c, $r, $cookie, $n); }\n";
+        let (out, classes) = fixed(paged).unwrap();
+        assert!(out.contains("(static function ($link, $result, &$cookie) { if (!ldap_parse_result($link, $result, $code, $dn, $message, $referrals, $controls) || $code !== 0 || !isset($controls[LDAP_CONTROL_PAGEDRESULTS])) { return false; } $cookie = $controls[LDAP_CONTROL_PAGEDRESULTS]['value']['cookie']; return true; })($c, $r, $cookie);"));
+        assert!(out.contains("$estimated = $controls[LDAP_CONTROL_PAGEDRESULTS]['value']['size']; return true; })($c, $r, $cookie, $n);"));
+        assert_eq!(classes, [LDAP_RESPONSE]);
+        let oci = "<?php\nwhile (ocifetchinto($s, $row, OCI_ASSOC + OCI_RETURN_NULLS)) {}\n";
+        let (out, _) = fixed(oci).unwrap();
+        assert!(out.starts_with("<?php\nwhile ((static function ($statement, &$row, $mode = OCI_NUM) { $fetched = oci_fetch_array($statement, $mode | ($mode & (OCI_NUM | OCI_ASSOC) ? 0 : OCI_NUM));"));
+        assert!(out.ends_with("})($s, $row, OCI_ASSOC + OCI_RETURN_NULLS)) {}\n"));
+        assert_eq!(kinds(oci, "deprecated.oci8_alias"), [FixKind::Likely]);
+    }
+
+    #[test]
+    fn pgsql_calls_take_the_connection_their_class_keeps() {
+        let src = "<?php\nclass D { function connect() { $this->conn = @pg_connect('x'); pg_query('SET x'); } function esc($s) { return pg_escape_string($s); } function err() { return pg_last_error(); } function run($p) { return pg_execute($this->conn, $p); } static function s() { return pg_last_error(); } }\n";
+        let (out, _) = fixed(src).unwrap();
+        assert!(out.contains("pg_query($this->conn, 'SET x'); } function esc($s) { return pg_escape_string($this->conn, $s); } function err() { return pg_last_error($this->conn); } function run($p) { return pg_execute($this->conn, $p); } static function s() { return pg_last_error(); }"));
+        assert_eq!(
+            kinds(src, "deprecated.pg_implicit_connection"),
+            [FixKind::Likely, FixKind::Likely, FixKind::Likely, FixKind::Manual, FixKind::Manual]
+        );
+        let ternary = "<?php\nclass P { function c($n) { $this->id = $n ? @pg_pconnect('a') : @pg_connect('a'); } function e($s) { return @pg_escape_string($s); } }\n";
+        assert!(fixed(ternary).unwrap().0.contains("@pg_escape_string($this->id, $s)"));
+        let two = "<?php\nclass D { function a() { $this->r = pg_connect('a'); $this->w = pg_connect('b'); } function q() { return pg_last_error(); } }\n";
+        assert_eq!(kinds(two, "deprecated.pg_implicit_connection"), [FixKind::Manual]);
+    }
+
+    #[test]
+    fn calls_on_removed_settings_and_setters_go() {
+        let src = "<?php\nini_set('session.hash_function', 1);\n@ini_set('opcache.load_comments', 1);\nif ($m) {\n    set_magic_quotes_runtime($m);\n}\n@set_magic_quotes_runtime(0);\nfunction e() { $r = enchant_broker_init(); $d = enchant_broker_request_dict($r, 'en'); enchant_broker_free_dict($d); enchant_broker_free($r); }\n$o = array(\n    CURLOPT_URL => $u,\n    CURLOPT_BINARYTRANSFER => 1,\n    CURLOPT_RETURNTRANSFER => 1,\n);\n";
+        let (out, classes) = fixed(src).unwrap();
+        assert_eq!(
+            out,
+            "<?php\nif ($m) {\n}\nfunction e() { $r = enchant_broker_init(); $d = enchant_broker_request_dict($r, 'en'); unset($d); unset($r); }\n$o = array(\n    CURLOPT_URL => $u,\n    CURLOPT_RETURNTRANSFER => 1,\n);\n"
+        );
+        assert_eq!(classes, [INI_GONE, MAGIC_QUOTES_SETTER, NO_OP_CALL, ENCHANT_UNSET, CURL_OPTION_DROP]);
+        assert_eq!(kinds(src, "removed.set_magic_quotes_runtime"), [FixKind::Likely, FixKind::Auto]);
+        let other = "<?php\n$o = array('a' => 1, CURLOPT_BINARYTRANSFER => 1);\n";
+        assert_eq!(fixed(other), None);
+    }
+
+    #[test]
+    fn autoload_goes_where_the_project_registers_its_own() {
+        let src =
+            "<?php\n/**\n * Old loader.\n */\nfunction __autoload($c) { include $c . '.php'; }\nspl_autoload_register(function ($c) {});\n";
+        let (out, classes) = fixed(src).unwrap();
+        assert_eq!(out, "<?php\nspl_autoload_register(function ($c) {});\n");
+        assert_eq!(classes, [AUTOLOAD_DROP]);
+        assert_eq!(kinds(src, "removed.__autoload"), [FixKind::Likely]);
+        let named = "<?php\nfunction __autoload($c) {}\nspl_autoload_register('__autoload');\n";
+        assert_eq!(kinds(named, "removed.__autoload"), [FixKind::Manual]);
+    }
+
+    #[test]
+    fn handlers_of_other_objects_and_handlers_that_read_the_context() {
+        let src = "<?php\nclass S { function go() { $h = new H; session_set_save_handler(array(&$h, 'open'), array(&$h, 'close'), array(&$h, 'read'), array(&$h, 'write'), array(&$h, 'destroy'), array(&$h, 'gc')); } }\n";
+        let (out, classes) = fixed(src).unwrap();
+        assert!(out.contains("session_set_save_handler(new class(array(&$h, 'open'), array(&$h, 'close'), array(&$h, 'read'), array(&$h, 'write'), array(&$h, 'destroy'), array(&$h, 'gc')) implements \\SessionHandlerInterface {"));
+        assert_eq!(classes, [SESSION_HANDLER]);
+        let context = "<?php\nfunction _h($no, $msg, $file, $line, $context) { log_it($context); }\nset_error_handler('_h');\nset_error_handler(function ($a, $b, $c, $d, \\stdClass $e) { return $e; });\n";
+        let (out, classes) = fixed(context).unwrap();
+        assert!(out.contains("function _h($no, $msg, $file, $line, $context = array()) { log_it($context); }"));
+        assert!(out.contains("\\stdClass $e) {"), "a typed context can't default to an array");
+        assert_eq!(classes, [ERROR_CONTEXT_DEFAULT]);
+    }
+
+    #[test]
+    fn readings_and_operators_to_choose() {
+        let names = "<?php\n$names = array('a', 'b');\nfor ($i = 0; $i < 2; $i++) { if (isset($$names[$i])) {} }\n";
+        assert_eq!(
+            fixed(names).unwrap().0,
+            "<?php\n$names = array('a', 'b');\nfor ($i = 0; $i < 2; $i++) { if (isset(${$names[$i]})) {} }\n"
+        );
+        let unknown = "<?php\nfunction f($names) { return $$names[0]; }\n";
+        let options = options_of(unknown, "review.variable_variable");
+        assert_eq!(
+            options[0].iter().map(|o| (o.0.as_str(), o.1, o.2, o.3.as_str())).collect::<Vec<_>>(),
+            [
+                ("php5", FixKind::Likely, false, "function f($names) { return ${$names[0]}; }"),
+                ("php7", FixKind::Auto, false, "function f($names) { return ${$names}[0]; }"),
+            ]
+        );
+        let known = "<?php\nfunction f($names) { return $$names[0]; }\n";
+        assert!(fixed_from(known, PhpVersion::new(7, 4)).unwrap().0.contains("${$names}[0]"));
+        let indirect = "<?php\nfunction f($o, $function) { if (is_object($function[0])) { return $o->$function[1](1); } }\n";
+        assert_eq!(
+            fixed(indirect).unwrap().0,
+            "<?php\nfunction f($o, $function) { if (is_object($function[0])) { return $o->{$function[1]}(1); } }\n"
+        );
+        let version = "<?php\n$v = version_compare(PHP_VERSION, '5.6', 'gte');\n";
+        assert_eq!(fixed(version), None);
+        let options = options_of(version, "removed.version_compare_operator");
+        assert_eq!(
+            options[0].iter().map(|o| (o.0.as_str(), o.1, o.2, o.3.as_str())).collect::<Vec<_>>(),
+            [
+                ("meant", FixKind::Likely, false, "$v = version_compare(PHP_VERSION, '5.6', '>=');"),
+                ("old", FixKind::Auto, false, "$v = null;"),
+            ]
+        );
+        assert_eq!(fixed_choosing(version, &[(2, "removed.version_compare_operator", "old")]).unwrap().0, "<?php\n$v = null;\n");
     }
 }
