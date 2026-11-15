@@ -21,12 +21,12 @@ The data lives in `docs/coverage.json`; this page is generated from it with
 | [7.3](#php-73) | 16 | 0 | 0 | 12 | 6 | 34 |
 | [7.4](#php-74) | 36 | 0 | 0 | 25 | 4 | 65 |
 | [8.0](#php-80) | 124 | 1 | 0 | 48 | 11 | 184 |
-| [8.1](#php-81) | 52 | 0 | 2 | 6 | 2 | 62 |
+| [8.1](#php-81) | 53 | 1 | 0 | 6 | 2 | 62 |
 | [8.2](#php-82) | 11 | 0 | 0 | 7 | 0 | 18 |
 | [8.3](#php-83) | 23 | 1 | 0 | 9 | 2 | 35 |
 | [8.4](#php-84) | 72 | 0 | 0 | 22 | 5 | 99 |
 | [8.5](#php-85) | 52 | 0 | 0 | 22 | 5 | 79 |
-| **All** | **468** | **4** | **3** | **183** | **62** | **720** |
+| **All** | **469** | **5** | **1** | **183** | **62** | **720** |
 
 ## PHP 7.0
 
@@ -505,7 +505,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.1/UPGRADING)
 | --- | --- | --- | --- | --- |
 | Core | Access to the $GLOBALS array is now subject to a number of restrictions. | Covered | `removed.globals_write` | array_pop($GLOBALS) and $GLOBALS = [] are reported. |
 | Core | Passing null to a non-nullable argument of a built-in function is deprecated. | Covered | `deprecated.null_to_internal` | str_contains('foobar', null) and strlen(null) are reported; null from variables is runtime. |
-| Core | When a method using static variables is inherited (but not overridden), the inherited method will now share static variables with the parent method. | Gap |  | Statically detectable, but deliberately not reported: calling an inherited method that has a static variable matched 877 lines across the corpus, and for nearly all of them sharing the variable changes nothing. |
+| Core | When a method using static variables is inherited (but not overridden), the inherited method will now share static variables with the parent method. | Covered | `behavior.inherited_static_variable` | A static variable in a non-private method that a project class inherits without overriding is reported. |
 | Core | Most non-final internal methods now require overriding methods to declare a compatible return type, otherwise a deprecated notice is emitted during inheritance validation. | Covered | `deprecated.tentative_return_type` | Override of ArrayIterator::current() without a return type is reported. |
 | Fileinfo | The fileinfo functions now accept and return, respectively, finfo objects instead of resources. | Covered | `removed.resource_check` | is_resource(finfo_open()) result is reported. |
 | FTP | The FTP functions now accept and return, respectively, FTP\Connection objects instead of resources. | Covered | `removed.resource_check` | is_resource(ftp_connect()) result is reported. |
@@ -533,7 +533,7 @@ Source: [UPGRADING](https://github.com/php/php-src/blob/PHP-8.1/UPGRADING)
 | PSpell | The PSpell functions now accept and return, respectively, PSpell\Dictionary objects instead of "pspell" resources. | Covered | `removed.pspell`<br>`removed.resource_check` | is_resource(pspell_new()) result is reported, plus the pspell removal. |
 | PSpell | The PSpell functions now accept and return, respectively, PSpell\Config objects instead of "pspell config" resources. | Covered | `removed.pspell` | pspell_config_create() is reported via the pspell removal, though the is_resource() check on it is not tracked. |
 | Standard | version_compare() no longer accepts undocumented operator abbreviations. | Covered | `removed.version_compare_operator` | version_compare('1.0', '2.0', 'l') is reported. |
-| Standard | htmlspecialchars(), htmlentities(), htmlspecialchars_decode(), html_entity_decode() and get_html_translation_table() now use ENT_QUOTES \| ENT_SUBSTITUTE rather than ENT_COMPAT by default. | Gap |  | Statically detectable, but deliberately not reported: one-argument calls matched 445 lines across the corpus, and for most of them the only difference is that single quotes are now encoded. |
+| Standard | htmlspecialchars(), htmlentities(), htmlspecialchars_decode(), html_entity_decode() and get_html_translation_table() now use ENT_QUOTES \| ENT_SUBSTITUTE rather than ENT_COMPAT by default. | Partial | `behavior.html_default_flags` | htmlspecialchars(), htmlentities(), htmlspecialchars_decode() and html_entity_decode() without flags are reported, once per file, with the old or the new flags written out as the fix; get_html_translation_table() is not reported. |
 | Standard | debug_zval_dump() will now print reference wrappers with their refcount, instead of only prepending a "&" to the value. | Not applicable |  | debug_zval_dump() debugging output format only. |
 | Standard | debug_zval_dump() will now print "interned" instead of a dummy refcount of one for interned strings and immutable arrays. | Not applicable |  | debug_zval_dump() debugging output format only. |
 | SPL | SplFixedArray will now be JSON encoded like an array. | Runtime only |  | json_encode() of an SplFixedArray depends on the runtime value type. |
