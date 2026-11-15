@@ -117,7 +117,7 @@ Ferry'nin kendi başına düzeltemediği bulguların ayrıntısında adım adım
 
 PHP 8.5 için taranan üç demo projedeki 246 bulgudan size kalanlar, Ferry'nin kendi düzeltmeleriyle 171'den 57'ye indi. 125'i artık otomatik, 64'ü gözden geçirilecek olarak işaretli (önceden 52 ve 23); kalan 57'nin hepsinde bir rehber, bir paket ya da seçilecek seçenekler var.
 
-`scripts/fetch-corpus.sh`'ın indirdiği 13 eski sürümde, çatıların çekirdeği de dahil, Ferry PHP 8.5 için 15.354 bulgu bildiriyor: 11.740'ı otomatik, 892'si gözden geçirilecek, 2.722'si elle; elle olanların hepsinde bir rehber, bir paket ya da seçenekler var. Önizlemenin değiştirdiği 5.716 dosyanın ikisi dışında hepsi PHP 8.5'te `php -l`'den geçiyor; o iki dosyanın her birinde Ferry'nin elle bıraktığı bir bulgu duruyor.
+`scripts/fetch-corpus.sh`'ın indirdiği 13 eski sürümde, çatıların çekirdeği de dahil, Ferry PHP 8.5 için 15.323 bulgu bildiriyor: 11.912'si otomatik, 902'si gözden geçirilecek, 2.509'u elle; elle olanların hepsinde bir rehber, bir paket ya da seçenekler var. Önizlemenin değiştirdiği 5.729 dosyanın ikisi dışında hepsi PHP 8.5'te `php -l`'den geçiyor; o iki dosyanın her birinde Ferry'nin elle bıraktığı bir bulgu duruyor.
 
 ### Geçişi engelleyen bağımlılıklar
 

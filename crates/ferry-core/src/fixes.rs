@@ -132,6 +132,8 @@ pub const NULL_LENGTH_ZERO: &str = "Ferry\\Php80\\NullLengthToZero";
 pub const CONSTANT_INT: &str = "Ferry\\Php84\\CastBoolConstantToInt";
 pub const BARE_PRECISION: &str = "Ferry\\Php85\\ExplicitDefaultPrecision";
 pub const ORD_VALUE: &str = "Ferry\\Php85\\OrdLiteralToValue";
+pub const KEY_EXISTS_CAST: &str = "Ferry\\Php80\\KeyExistsOnObjectArray";
+pub const KEY_EXISTS_CAST_ANY: &str = "Ferry\\Php80\\KeyExistsOnObjectArrayAnyKey";
 pub const OFFSET_BEFORE_ENCODING: &str = "Ferry\\Php80\\MbStrrposOffsetBeforeEncoding";
 pub const UTF8_CALLABLE: &str = "Ferry\\Php82\\Utf8CallableToClosure";
 pub const DOM_PROPERTY: &str = "Ferry\\Php84\\DomDocumentProperty";
@@ -732,7 +734,7 @@ const NO_OP_FLAGS: &[(&str, &str, Alone)] = &[
 
 /// Rules whose fix reads the code around the finding, and for three of them the version the project
 /// runs on today.
-const SITE_RULES: [&str; 84] = [
+const SITE_RULES: [&str; 85] = [
     "deprecated.final_private_method",
     "removed.builtin_override_signature",
     "deprecated.ldap_connect_port",
@@ -746,6 +748,7 @@ const SITE_RULES: [&str; 84] = [
     "behavior.php_debug_bool",
     "behavior.printf_bare_precision",
     "deprecated.ord_length",
+    "removed.array_key_exists_object",
     "removed.mb_strrpos_encoding",
     "deprecated.utf8_encode",
     "deprecated.utf8_decode",
@@ -1518,6 +1521,7 @@ fn site_fix(file: &Source, k: usize, rule: &str) -> Option<Fix> {
         "behavior.php_debug_bool" => constant_int(file, k),
         "behavior.printf_bare_precision" => explicit_precision(file, k),
         "deprecated.ord_length" => ord_value(file, k),
+        "removed.array_key_exists_object" => key_exists_cast(file, k),
         "removed.mb_strrpos_encoding" => offset_before_encoding(file, k),
         "deprecated.utf8_encode" | "deprecated.utf8_decode" => utf8_callable(file, k),
         "deprecated.dom_document_property" => dom_property(file, k),
@@ -2060,11 +2064,41 @@ fn magic_choices(file: &Source, k: usize) -> [Option<Choice>; 2] {
         .windows(2)
         .any(|w| w[0].is_ident_ci("global") && w[1].kind == TokenKind::Variable && w[1].text == tok.text);
     let never_set = raw && scope != (0, tokens.len()) && !global;
+    let on = |t: &Token| {
+        t.is_ident_ci("true")
+            || t.kind == TokenKind::Number && t.text.bytes().any(|b| (b'1'..=b'9').contains(&b))
+            || literal_text(t).is_some_and(|s| !matches!(s.to_ascii_lowercase().as_str(), "" | "0" | "off" | "false" | "no" | "none"))
+    };
+    const ASSIGN: &[&str] = &["=", ".=", "+=", "-=", "*=", "/=", "%=", "**=", "??=", "|=", "&=", "^=", "<<=", ">>="];
+    let assigned = (scope.0..scope.1).any(|j| {
+        tokens[j].kind == TokenKind::Variable
+            && tokens[j].text == tok.text
+            && (tokens.get(j + 1).is_some_and(|n| ASSIGN.iter().any(|a| n.is_punct(a))) || tokens[j - 1].is_punct("&"))
+    });
+    let tracked = !raw
+        && !assigned
+        && (scope.0..k).any(|j| {
+            function_call(tokens, j, &["ini_set", "ini_alter"]).is_some_and(|(_, args)| match args[..] {
+                [(n, n_end), (v, v_end)] => {
+                    n == n_end
+                        && v == v_end
+                        && literal_text(&tokens[n]).is_some_and(|s| s.eq_ignore_ascii_case("track_errors"))
+                        && on(&tokens[v])
+                }
+                _ => false,
+            })
+        });
     let span = |class, text: &str| Fix { extra: Vec::new(), class, start: tok.start, end: tok.end, text: text.to_string() };
-    let read = if raw { "file_get_contents('php://input')" } else { "(error_get_last()['message'] ?? null)" };
+    let alone = (tokens[k - 1].is_ident_ci("return") || ["(", ",", "[", "=", "=>"].iter().any(|p| tokens[k - 1].is_punct(p)))
+        && after.is_some_and(|t| [")", ",", ";", "]"].iter().any(|p| t.is_punct(p)));
+    let read = match (raw, alone) {
+        (true, _) => "file_get_contents('php://input')",
+        (false, true) => "error_get_last()['message'] ?? null",
+        (false, false) => "(error_get_last()['message'] ?? null)",
+    };
     [
         Some(Choice { id: "old", fix: span(if never_set { MAGIC_NULL_EXACT } else { MAGIC_NULL }, "null"), recommended: never_set }),
-        Some(Choice { id: "read", fix: span(MAGIC_READ, read), recommended: false }),
+        Some(Choice { id: "read", fix: span(MAGIC_READ, read), recommended: tracked }),
     ]
 }
 
@@ -3341,6 +3375,7 @@ fn xml_object_of(file: &Source, open: usize, end: usize, parser: &str) -> Result
 fn xml_handler_edits(file: &Source, k: usize, object: Option<&str>) -> Option<Vec<(usize, String)>> {
     let tokens = file.tokens;
     let (_, args) = function_call(tokens, k, XML_HANDLER_CALLS)?;
+    let methods = crate::analyzer::method_tokens(tokens);
     let mut edits = Vec::new();
     for &(f, l) in args.iter().skip(1) {
         if f != l || !matches!(tokens[f].kind, TokenKind::Str { .. }) {
@@ -3352,7 +3387,8 @@ fn xml_handler_edits(file: &Source, k: usize, object: Option<&str>) -> Option<Ve
         let lower = value.to_ascii_lowercase();
         let global = crate::arity::ARITY.binary_search_by(|(n, _, _)| (*n).cmp(lower.as_str())).is_ok()
             || file.index.declares_function("", &lower, true)
-            || tokens.windows(2).any(|w| w[0].is_ident_ci("function") && w[1].text.eq_ignore_ascii_case(&value));
+            || (0..tokens.len().saturating_sub(1))
+                .any(|j| tokens[j].is_ident_ci("function") && !methods.contains(&j) && tokens[j + 1].text.eq_ignore_ascii_case(&value));
         let text = match object {
             _ if value.is_empty() => "null".to_string(),
             Some(o) if named && !global => format!("[{o}, {}]", quoted(&value)),
@@ -3567,7 +3603,7 @@ fn reaches_scope(tokens: &[Token], from: usize, to: usize) -> bool {
 }
 
 /// The loops whose span holds `k`: from the keyword to the end of the body.
-fn loops_around(tokens: &[Token], from: usize, k: usize) -> Vec<(usize, usize)> {
+pub(crate) fn loops_around(tokens: &[Token], from: usize, k: usize) -> Vec<(usize, usize)> {
     (from..k)
         .filter(|&j| LOOP_WORDS.iter().any(|w| tokens[j].is_ident_ci(w)))
         .filter_map(|j| {
@@ -4685,6 +4721,23 @@ fn ord_value(file: &Source, k: usize) -> Option<Fix> {
     }
     let byte = value.as_bytes().first().copied().unwrap_or(0);
     Some(Fix { extra: Vec::new(), class: ORD_VALUE, start: tokens[call].start, end: tokens[close].end, text: byte.to_string() })
+}
+
+/// `array_key_exists($k, $object)` → the same lookup in `(array) $object`: the properties the old call
+/// searched, an ArrayObject's storage included. Old PHP never found a numeric key in an object, so
+/// only a non-numeric string key is certain.
+fn key_exists_cast(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    let (call, index, (first, _)) = argument_of(tokens, k)?;
+    let (_, args) = function_call(tokens, call, &["array_key_exists", "key_exists"])?;
+    let [(key, key_end), _] = args[..] else { return None };
+    if index != 1 || first != k {
+        return None;
+    }
+    let numeric = |s: &str| s.trim_start_matches('-').bytes().all(|b| b.is_ascii_digit());
+    let named = key == key_end && literal_text(&tokens[key]).is_some_and(|s| !numeric(&s));
+    let class = if named { KEY_EXISTS_CAST } else { KEY_EXISTS_CAST_ANY };
+    Some(Fix { extra: Vec::new(), class, start: tokens[k].start, end: tokens[k].start, text: "(array) ".into() })
 }
 
 /// An encoding passed as mb_strrpos()'s third argument, which PHP 7 took as the encoding: it moves
@@ -6267,6 +6320,16 @@ mod tests {
         let found = fixes(src);
         assert_eq!(kinds_of(&found, "deprecated.xml_handler_string"), [FixKind::Auto, FixKind::Auto, FixKind::Auto, FixKind::Manual]);
         assert_eq!(kinds_of(&found, "deprecated.xml_set_object"), [FixKind::Auto, FixKind::Manual]);
+
+        let own = "<?php\nclass Msg {\n    public function parse($data) {\n        $parser = xml_parser_create();\n        xml_set_object($parser, $this);\n        xml_set_element_handler($parser, 'open_tag', 'closing_tag');\n        xml_parse($parser, $data);\n    }\n    public function open_tag($p, $name, $attrs) {}\n    public function closing_tag($p, $name) {}\n}\n";
+        let (out, _) = fixed(own).unwrap();
+        assert!(out.contains("        $parser = xml_parser_create();\n        xml_set_element_handler($parser, [$this, 'open_tag'], [$this, 'closing_tag']);\n"), "{out}");
+        let global = format!("{own}function closing_tag($p, $name) {{}}\n");
+        assert_eq!(
+            kinds_of(&fixes(&global), "deprecated.xml_handler_string"),
+            [FixKind::Manual],
+            "a global function of that name wins in 8.4"
+        );
     }
 
     #[test]
@@ -6559,9 +6622,45 @@ mod tests {
             [vec![true, false], vec![false, false], vec![false, false]]
         );
         assert_eq!(options[0][1].3, "return [file_get_contents('php://input'), $php_errormsg];");
-        assert_eq!(options[1][1].3, "return [$HTTP_RAW_POST_DATA, (error_get_last()['message'] ?? null)];");
+        assert_eq!(options[1][1].3, "return [$HTTP_RAW_POST_DATA, error_get_last()['message'] ?? null];");
         assert_eq!(kinds_of(&fixes(src), rule), [FixKind::Auto, FixKind::Manual, FixKind::Manual]);
         assert_eq!(fixed(src).unwrap().0, src.replacen("[$HTTP_RAW_POST_DATA,", "[null,", 1));
+
+        let tracked = "<?php\nfunction open($p) {\n    $track = ini_get('track_errors');\n    ini_set('track_errors', true);\n    $h = @fopen($p, 'r');\n    if (!$h) {\n        return $php_errormsg;\n    }\n    ini_set('track_errors', $track);\n    return $h;\n}\n";
+        let found = fixes(tracked);
+        assert_eq!(kinds_of(&found, rule), [FixKind::Likely]);
+        assert_eq!(kinds_of(&found, "removed.builtin_ini"), [FixKind::Auto, FixKind::Auto]);
+        assert_eq!(
+            fixed(tracked).unwrap().0,
+            "<?php\nfunction open($p) {\n    $track = ini_get('track_errors');\n    $h = @fopen($p, 'r');\n    if (!$h) {\n        return error_get_last()['message'] ?? null;\n    }\n    return $h;\n}\n"
+        );
+        assert_eq!(kinds_of(&fixes(&tracked.replace("'track_errors', true", "'track_errors', 'Off'")), rule), [FixKind::Manual]);
+        let global = tracked
+            .replace("return $php_errormsg;", "throw new E('read: ' . $php_errormsg);")
+            .replace("{\n    $track", "{\n    global $php_errormsg;\n    $track");
+        assert!(fixed(&global).unwrap().0.contains("throw new E('read: ' . (error_get_last()['message'] ?? null));"), "{global}");
+        let own = tracked.replace("{\n    $track", "{\n    $php_errormsg = '';\n    $track");
+        assert_eq!(
+            kinds_of(&fixes(&own), rule),
+            [FixKind::Manual],
+            "an own value made it an ordinary variable, which no error changes in PHP 8"
+        );
+    }
+
+    #[test]
+    fn key_exists_on_an_object_looks_in_its_array() {
+        let src = "<?php\nclass M extends ArrayObject {\n    public function has($k) {\n        return array_key_exists($k, $this) || key_exists('date_upd', $this) || array_key_exists('0', $this);\n    }\n}\n$x = array_key_exists('a', new M());\n";
+        let (out, classes) = fixed(src).unwrap();
+        assert_eq!(
+            out,
+            "<?php\nclass M extends ArrayObject {\n    public function has($k) {\n        return array_key_exists($k, (array) $this) || key_exists('date_upd', (array) $this) || array_key_exists('0', (array) $this);\n    }\n}\n$x = array_key_exists('a', (array) new M());\n"
+        );
+        assert_eq!(classes, [KEY_EXISTS_CAST_ANY, KEY_EXISTS_CAST]);
+        assert_eq!(
+            kinds_of(&fixes(src), "removed.array_key_exists_object"),
+            [FixKind::Likely, FixKind::Auto, FixKind::Likely, FixKind::Auto],
+            "old PHP never found a numeric key in an object"
+        );
     }
 
     #[test]

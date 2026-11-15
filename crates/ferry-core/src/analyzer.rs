@@ -4994,7 +4994,7 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
             ("<?php xml_set_default_handler($p, ''); xml_set_default_handler($p, 'cb');", "deprecated.xml_handler_string", 1),
             ("<?php class S extends SNMP { const VERSION_1 = 'x'; const int VERSION_3 = 3; }", "removed.typed_constant_override", 1),
             ("<?php $a = [1]; foreach ($a as &$v) { echo current($a), key($a), current($b); } foreach ($a as $v) echo key($a);", "behavior.foreach_array_pointer", 3),
-            ("<?php function f($x) { $x++; return func_get_args(); } function g($x) { $y = func_get_args(); $x = 1; return $y; } function h($x) { $z = $x; return func_get_arg(0); } function j($x, $y) { $x++; return func_get_arg(1); } function k($x) { $x++; return array_slice(func_get_args(), 1); } function i($x) { $x = is_array($x) ? $x : func_get_args(); }", "behavior.func_get_args_current_value", 1),
+            ("<?php function f($x) { $x++; return func_get_args(); } function g($x) { $y = func_get_args(); $x = 1; return $y; } function h($x) { $z = $x; return func_get_arg(0); } function j($x, $y) { $x++; return func_get_arg(1); } function k($x) { $x++; return array_slice(func_get_args(), 1); } function i($x) { $x = is_array($x) ? $x : func_get_args(); } function z($o = null) { if ($o instanceof C) { $o = $o->toArray(); } else if (!is_array($o)) { $o = func_get_args(); } } function y($o) { if ($o) { $o = 1; } elseif ($p) { return func_get_args(); } else { return func_get_args(); } } function w($o) { foreach ($a as $v) { if ($v) { $o = 1; } else { return func_get_args(); } } } function v($o) { if ($o) { $o = 1; } return func_get_args(); } function u($o) { if ($o) { $f = #[Pure] fn () => 1; $o = 1; } else { return func_get_args(); } }", "behavior.func_get_args_current_value", 3),
             ("<?php call_user_func('compact', 'x'); array_map('func_get_args', $a); call_user_func('strtolower', 'x'); function h() { $f = 'extract'; $f([]); } function i() { $f = 'trim'; $f(''); }", "removed.dynamic_scope_call", 3),
             ("<?php mt_srand(5); srand(42); mt_srand(); mt_srand(time()); mt_srand($s);", "behavior.seeded_random_sequence", 2),
             ("<?php function a($p) { $l = 1; return compact('p', 'l', 'nope'); } function b() { extract($_GET); return compact('x'); } function c() { global $g; return compact('g'); } function d() { $$n = 1; return compact('x'); }", "behavior.compact_undefined_variable", 1),
@@ -5723,14 +5723,14 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
                 "<?php ini_set('session.sid_length', 64); ini_get('mbstring.func_overload'); ini_set('mbstring.func_overload', 1);",
                 "deprecated.ini_setting"
             ),
-            2
+            1
         );
         assert_eq!(
             count85(
-                "<?php ini_set('session.hash_function', 1); ini_set('opcache.fast_shutdown', $on); ini_set('safe_mode', 0); ini_get('sql.safe_mode'); ini_set('memory_limit', '1G');",
+                "<?php ini_set('session.hash_function', 1); ini_set('opcache.fast_shutdown', $on); ini_set('safe_mode', 0); ini_get('sql.safe_mode'); ini_set('memory_limit', '1G'); ini_set('mbstring.func_overload', 1); ini_set('track_errors', true); ini_set('track_errors', 0);",
                 "removed.builtin_ini"
             ),
-            2
+            4
         );
         assert_eq!(count85("<?php $a[null] = 1; array_key_exists(null, $a); $b = [null]; $c[0];", "deprecated.null_offset"), 2);
         assert_eq!(count85("<?php pg_numrows($r); pg_num_rows($r); pg_query($c, $q);", "deprecated.pg_alias"), 1);

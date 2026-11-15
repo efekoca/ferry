@@ -353,10 +353,8 @@ pub const NULL_STRING_ARGS: &[(&str, &[usize])] = &[
     ("strtotime", &[0]),
 ];
 
-pub const DEPRECATED_INI: [(&str, u32, u32); 21] = [
+pub const DEPRECATED_INI: [(&str, u32, u32); 19] = [
     ("allow_url_include", 7, 4),
-    ("mbstring.func_overload", 8, 0),
-    ("track_errors", 8, 0),
     ("filter.default", 8, 1),
     ("filter.default_flags", 8, 1),
     ("auto_detect_line_endings", 8, 1),

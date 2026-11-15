@@ -118,6 +118,65 @@ pub(crate) fn compact_unknown(tokens: &[Token], f: &crate::declarations::Functio
     (call + 2..end).filter(|&a| string_value(&tokens[a]).is_some_and(|s| s != "this" && !known.contains(s))).collect()
 }
 
+fn opener_of(tokens: &[Token], close: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    for k in (0..=close).rev() {
+        if tokens[k].is_punct(")") || tokens[k].is_punct("}") || tokens[k].is_punct("]") {
+            depth += 1;
+        } else if tokens[k].is_punct("(") || tokens[k].is_punct("{") || tokens[k].is_punct("[") || tokens[k].is_punct("#[") {
+            depth = depth.checked_sub(1)?;
+            if depth == 0 {
+                return Some(k);
+            }
+        }
+    }
+    None
+}
+
+/// The keyword that starts the if/elseif/else chain whose branch is the `{` at `open`.
+fn chain_head(tokens: &[Token], open: usize) -> Option<usize> {
+    let before = open.checked_sub(1)?;
+    let kw = if tokens[before].is_ident_ci("else") {
+        before
+    } else if tokens[before].is_punct(")") {
+        let kw = opener_of(tokens, before)?.checked_sub(1)?;
+        if !tokens[kw].is_ident_ci("if") && !tokens[kw].is_ident_ci("elseif") {
+            return None;
+        }
+        kw
+    } else {
+        return None;
+    };
+    let link = if tokens[kw].is_ident_ci("if") {
+        match kw.checked_sub(1) {
+            Some(e) if tokens[e].is_ident_ci("else") => e,
+            _ => return Some(kw),
+        }
+    } else {
+        kw
+    };
+    let previous = link.checked_sub(1).filter(|&c| tokens[c].is_punct("}"))?;
+    chain_head(tokens, opener_of(tokens, previous)?)
+}
+
+/// Whether `m` and `j` sit in different branches of one if/elseif/else chain that nothing in the
+/// body `(open, close)` can run twice.
+fn exclusive(tokens: &[Token], open: usize, close: usize, m: usize, j: usize) -> bool {
+    if tokens[open..close].iter().any(|t| t.is_ident_ci("goto")) {
+        return false;
+    }
+    let branches = |k: usize| -> Vec<(usize, usize)> {
+        (open + 1..k)
+            .filter(|&b| tokens[b].is_punct("{") && close_of(tokens, b).is_some_and(|e| k < e))
+            .filter_map(|b| chain_head(tokens, b).map(|head| (b, head)))
+            .collect()
+    };
+    let (of_m, of_j) = (branches(m), branches(j));
+    of_m.iter().any(|&(bm, head)| {
+        of_j.iter().any(|&(bj, other)| other == head && bj != bm) && crate::fixes::loops_around(tokens, open, head).is_empty()
+    })
+}
+
 /// Literal values followed through a block, and calls that depend on what a function's scope contains.
 pub(crate) fn check(tokens: &[Token]) -> Vec<(usize, &'static PatternRule)> {
     let mut out = Vec::new();
@@ -131,29 +190,30 @@ pub(crate) fn check(tokens: &[Token]) -> Vec<(usize, &'static PatternRule)> {
         }
         let Some((open, close)) = f.body else { continue };
 
-        let changed: Vec<Option<usize>> = f
+        let changed: Vec<Vec<(usize, usize)>> = f
             .params
             .iter()
             .map(|p| {
                 let same = |j: &usize| tokens[*j].kind == TokenKind::Variable && tokens[*j].text == tokens[p.var].text;
-                let at = (open..close).filter(same).find(|&j| modifies(tokens, j));
-                at.and_then(|m| (m..close).find(|&j| tokens[j].is_punct(";")))
+                (open..close)
+                    .filter(same)
+                    .filter(|&j| modifies(tokens, j))
+                    .filter_map(|m| (m..close).find(|&j| tokens[j].is_punct(";")).map(|end| (m, end)))
+                    .collect()
             })
             .collect();
         for j in open..close {
             if !called(tokens, j) {
                 continue;
             }
-            let from = match name_of(&tokens[j]).as_str() {
-                "func_get_args" if !(tokens[j - 1].is_punct("(") && tokens[j - 2].is_ident_ci("array_slice")) => {
-                    changed.iter().flatten().min().copied()
-                }
+            let params: Vec<&Vec<(usize, usize)>> = match name_of(&tokens[j]).as_str() {
+                "func_get_args" if !(tokens[j - 1].is_punct("(") && tokens[j - 2].is_ident_ci("array_slice")) => changed.iter().collect(),
                 "func_get_arg" => {
-                    tokens.get(j + 2).and_then(|n| n.text.parse::<usize>().ok()).and_then(|n| changed.get(n).copied().flatten())
+                    tokens.get(j + 2).and_then(|n| n.text.parse::<usize>().ok()).and_then(|n| changed.get(n)).into_iter().collect()
                 }
-                _ => None,
+                _ => Vec::new(),
             };
-            if from.is_some_and(|f| f < j) {
+            if params.iter().flat_map(|c| c.iter()).any(|&(m, end)| end < j && !exclusive(tokens, open, close, m, j)) {
                 out.push((j, &FUNC_GET_ARGS));
             }
         }
