@@ -225,7 +225,7 @@ const OBJECT_KEY_EXISTS: PatternRule = rule(
     Text::new("array_key_exists() nesneyle", "array_key_exists() on an object"),
     R,
     (8, 0),
-    code("property_exists($object, $key)"),
+    code("array_key_exists($key, (array) $object)"),
     Text::new(
         "array_key_exists() nesnelerde PHP 7.4'te kullanımdan kalktı ve PHP 8.0'dan beri TypeError fırlatıyor.",
         "array_key_exists() on objects was deprecated in PHP 7.4 and throws a TypeError since PHP 8.0.",

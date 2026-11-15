@@ -1146,16 +1146,16 @@ export const GUIDES: Record<string, Guide> = {
   "removed.array_key_exists_object": {
     steps: {
       tr: [
-        "`ArrayObject` ya da `ArrayIterator`'da (ve onlardan türeyen sınıflarda) `$obj->offsetExists($key)` yazın; değeri null olan anahtarlar dahil eski sonucu verir.",
-        "Diğer nesnelerde `property_exists($obj, $key)` yazın. Tek fark: private ve protected özellikler için `property_exists()` true döndürür, eski çağrı sınıfın dışından false veriyordu.",
+        "İkinci argümanı `(array)` ile diziye çevirin: `array_key_exists($key, (array) $obj)`. Eski çağrının baktığı özellikleri verir; `ArrayObject`'te içindeki dizi dahil, sonuç PHP 5.6–7.4 ile aynı. `property_exists()` aynı şey değil, private ve protected özelliklerde de true döndürür.",
+        "Anahtar sayı olabiliyorsa (`'0'`, `12` ya da sayı tutabilen bir değişken) sonucu kontrol edin: eski PHP nesnede sayısal anahtarı hiç bulmuyordu, `(array)` ile bulunur.",
       ],
       en: [
-        "On `ArrayObject` or `ArrayIterator` (and classes extending them), write `$obj->offsetExists($key)`; it gives the old result, keys with a null value included.",
-        "On other objects, write `property_exists($obj, $key)`. The one difference: `property_exists()` returns true for private and protected properties, where the old call gave false from outside the class.",
+        "Turn the second argument into an array with `(array)`: `array_key_exists($key, (array) $obj)`. It holds the properties the old call searched, an `ArrayObject`'s storage included, so the result matches PHP 5.6–7.4. `property_exists()` is not the same: it also returns true for private and protected properties.",
+        "If the key can be a number (`'0'`, `12` or a variable that may hold one), check the result: old PHP never found a numeric key in an object, and with `(array)` it is found.",
       ],
     },
     before: "return array_key_exists($index, $this);",
-    after: "return $this->offsetExists($index);",
+    after: "return array_key_exists($index, (array) $this);",
   },
   "removed.builtin_constant": {
     steps: {

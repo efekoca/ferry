@@ -117,7 +117,7 @@ Findings Ferry can't fix on its own get step-by-step help in their detail, with 
 
 On the three demo projects scanned for PHP 8.5, Ferry's own fixes brought the findings left to you from 171 of 246 down to 57. 125 are now automatic and 64 marked for review, up from 52 and 23, and all 57 come with a guide, a package or options to choose from.
 
-On the 13 old releases `scripts/fetch-corpus.sh` downloads, framework core included, Ferry reports 15,354 findings for PHP 8.5: 11,740 automatic, 892 for review and 2,722 manual, every one of which comes with a guide, a package or options. Of the 5,716 files the preview changes, all but two pass `php -l` on PHP 8.5, and each of those two still holds a finding Ferry leaves manual.
+On the 13 old releases `scripts/fetch-corpus.sh` downloads, framework core included, Ferry reports 15,323 findings for PHP 8.5: 11,912 automatic, 902 for review and 2,509 manual, every one of which comes with a guide, a package or options. Of the 5,729 files the preview changes, all but two pass `php -l` on PHP 8.5, and each of those two still holds a finding Ferry leaves manual.
 
 ### Dependencies that block the upgrade
 

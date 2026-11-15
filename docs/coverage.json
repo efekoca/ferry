@@ -1213,7 +1213,7 @@
   "status": "covered",
   "rules": [
    "removed.ini_setting",
-   "deprecated.ini_setting",
+   "removed.builtin_ini",
    "removed.magic_variable"
   ],
   "note": "track_errors in php.ini and ini_set(), and $php_errormsg, are reported."
@@ -1325,9 +1325,9 @@
   "change": "The mbstring.func_overload ini directive has been deprecated.",
   "status": "covered",
   "rules": [
-   "deprecated.ini_setting"
+   "removed.builtin_ini"
   ],
-  "note": "mbstring.func_overload in php.ini is reported."
+  "note": "mbstring.func_overload in ini_set() and php.ini is reported."
  },
  {
   "version": "7.2",
@@ -2405,7 +2405,7 @@
   "rules": [
    "removed.magic_variable",
    "removed.ini_setting",
-   "deprecated.ini_setting"
+   "removed.builtin_ini"
   ],
   "note": "$php_errormsg, ini_set('track_errors') and track_errors in php.ini/.htaccess are reported."
  },
@@ -3089,7 +3089,7 @@
   "status": "covered",
   "rules": [
    "removed.mb_overload",
-   "deprecated.ini_setting"
+   "removed.builtin_ini"
   ],
   "note": "MB_OVERLOAD_* constants, ini_set and php.ini/.htaccess mbstring.func_overload are reported; mb_get_info('func_overload') is not."
  },
