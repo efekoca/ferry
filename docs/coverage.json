@@ -475,9 +475,9 @@
   "ext": "Standard library changes",
   "change": "setcookie() with an empty cookie name now issues a WARNING and doesn't send an empty set-cookie header line anymore.",
   "status": "covered",
-  "note": "setcookie('', 'v') is reported.",
+  "note": "setcookie('', 'v') is reported, as the ValueError PHP 8.0 throws for it.",
   "rules": [
-   "behavior.setcookie_empty_name"
+   "removed.literal_value_error"
   ]
  },
  {
