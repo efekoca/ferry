@@ -5053,7 +5053,6 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
     fn literal_arguments() {
         let cases: &[(&str, &str, usize)] = &[
             ("<?php curl_setopt($c, CURLOPT_SAFE_UPLOAD, false); curl_setopt($c, CURLOPT_SAFE_UPLOAD, true);", "removed.curl_safe_upload_off", 1),
-            ("<?php setcookie('', 'v'); setcookie('a', '');", "behavior.setcookie_empty_name", 1),
             ("<?php gmp_setbit($g, -1); gmp_setbit($g, 1);", "removed.gmp_setbit_negative", 1),
             ("<?php setlocale('LC_ALL', 'C'); setlocale(LC_ALL, 'C');", "removed.setlocale_string_category", 1),
             ("<?php setlocale(LC_ALL, 'tr_TR.UTF-8'); setlocale(LC_ALL, $l); setlocale(LC_ALL, 'C'); setlocale(LC_ALL, 0); setlocale(LC_MONETARY, 'tr_TR');", "behavior.locale_conversions", 2),
@@ -5061,7 +5060,7 @@ class Handler implements SessionHandlerInterface { function read($id) {} }";
             ("<?php setlocale(LC_CTYPE, 'tr_TR'); setlocale(LC_CTYPE, 'C');", "behavior.locale_case", 1),
             ("<?php htmlspecialchars($a); htmlentities($b); htmlspecialchars($c, ENT_QUOTES);", "behavior.html_default_flags", 1),
             ("<?php htmlspecialchars($c, ENT_QUOTES); html_entity_decode($d, ENT_COMPAT, 'UTF-8');", "behavior.html_default_flags", 0),
-            ("<?php explode('', $s); explode(',', $s); str_repeat($s, -1); str_repeat($s, 2); array_fill(0, -1, 'x'); array_fill(0, 1, 'x'); array_chunk($a, 0); array_chunk($a, 1); str_split($s, 0); str_split($s); str_pad($s, 5, ''); str_pad($s, 5, ' '); mb_substr_count($s, ''); mb_substr_count($s, 'a'); array_rand([], 1); array_rand(array(), 1); array_rand([1], 1); array_rand($a);", "removed.literal_value_error", 9),
+            ("<?php explode('', $s); explode(',', $s); str_repeat($s, -1); str_repeat($s, 2); array_fill(0, -1, 'x'); array_fill(0, 1, 'x'); array_chunk($a, 0); array_chunk($a, 1); str_split($s, 0); str_split($s); str_pad($s, 5, ''); str_pad($s, 5, ' '); mb_substr_count($s, ''); mb_substr_count($s, 'a'); array_rand([], 1); array_rand(array(), 1); array_rand([1], 1); array_rand($a); setcookie('', 'v'); setcookie('a', '');", "removed.literal_value_error", 10),
             ("<?php vsprintf('%s', 'x'); vsprintf('%s', ['x']); vprintf('%s', 'x'); vsprintf('%s', $a);", "removed.vsprintf_string", 2),
             ("<?php new FilesystemIterator($p, FilesystemIterator::KEY_AS_PATHNAME); new FilesystemIterator($p, FilesystemIterator::KEY_AS_PATHNAME | FilesystemIterator::SKIP_DOTS); new FilesystemIterator($p); new FilesystemIterator($p, $flags);", "behavior.filesystem_iterator_dots", 1),
             ("<?php $r = new ReflectionProperty('A', 'b'); $r->setValue(1); $r->setValue($o, 1);", "deprecated.reflection_set_value_single", 1),

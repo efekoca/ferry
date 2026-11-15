@@ -371,6 +371,7 @@ pub const ARGUMENTS: &[ArgRule] = &[
     arg(&["str_repeat"], &[NumBelow(1, 0.0)], value_error("str_repeat() negatif sayıyla", "str_repeat() with a negative count", "sayıyı 0'dan küçük olmayacak şekilde sınırlayın", "keep the count at 0 or above")),
     arg(&["array_fill"], &[NumBelow(1, 0.0)], value_error("array_fill() negatif sayıyla", "array_fill() with a negative count", "sayıyı 0'dan küçük olmayacak şekilde sınırlayın", "keep the count at 0 or above")),
     arg(&["array_chunk", "str_split"], &[NumBelow(1, 1.0)], value_error("Sıfır ya da negatif parça boyu", "Zero or negative chunk length", "boyu en az 1 yapın", "use a length of at least 1")),
+    arg(&["setcookie", "setrawcookie"], &[StrIs(0, &[""])], value_error("setcookie() boş adla", "setcookie() with an empty name", "çereze bir ad verin", "give the cookie a name")),
     arg(&["str_pad"], &[StrIs(2, &[""])], value_error("str_pad() boş dolgu metniyle", "str_pad() with an empty padding", "boş olmayan bir metin verin", "pass a non-empty string")),
     arg(&["mb_substr_count"], &[StrIs(1, &[""])], value_error("mb_substr_count() boş metinle", "mb_substr_count() with an empty needle", "boş olmayan bir metin verin", "pass a non-empty string")),
     arg(&["array_rand"], &[ArrayLitEmpty(0)], value_error("array_rand() boş diziyle", "array_rand() with an empty array", "önce dizinin boş olmadığını denetleyin", "check that the array isn't empty first")),
@@ -411,15 +412,6 @@ pub const ARGUMENTS: &[ArgRule] = &[
         Text::new(
             "CURLOPT_SAFE_UPLOAD PHP 7.0'da kapatılamaz oldu; \"@dosya\" ile yükleme artık çalışmıyor.",
             "CURLOPT_SAFE_UPLOAD can't be turned off since PHP 7.0, so \"@file\" uploads no longer work.",
-        ),
-    )),
-    arg(&["setcookie", "setrawcookie"], &[StrIs(0, &[""])], rule(
-        "behavior.setcookie_empty_name",
-        Text::new("Boş adlı çerez", "Cookie with an empty name"),
-        B, (7, 0), tx("çereze bir ad verin", "give the cookie a name"),
-        Text::new(
-            "PHP 7.0'dan beri boş adlı bir çerez gönderilmez; çağrı uyarı verip false döner.",
-            "Since PHP 7.0 a cookie with an empty name isn't sent; the call warns and returns false.",
         ),
     )),
     arg(&["gmp_setbit"], &[NumBelow(1, 0.0)], rule(

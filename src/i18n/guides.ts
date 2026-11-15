@@ -1903,4 +1903,2670 @@ export const GUIDES: Record<string, Guide> = {
       ],
     },
   },
+  "behavior.bind_column_lob": {
+    steps: {
+      tr: [
+        "PHP 8.1'den beri `PDO::PARAM_LOB` ile bağlanan sütun her zaman bir akıştır (stream). Değeri doğrudan metin gibi kullanan kod (`strlen()`, `echo`, karşılaştırma) artık akış tutamacıyla çalışır.",
+        "Değeri metin olarak okuyun: `$data = is_resource($lob) ? stream_get_contents($lob) : $lob;`. Bu satır iki davranışta da aynı metni verir.",
+        "Değer küçükse ve akışa ihtiyaç yoksa sütunu `PDO::PARAM_STR` ile bağlamak da olur.",
+      ],
+      en: [
+        "Since PHP 8.1 a column bound with `PDO::PARAM_LOB` is always a stream. Code that uses the value as a string directly (`strlen()`, `echo`, comparisons) now works on the stream handle.",
+        "Read the value as a string: `$data = is_resource($lob) ? stream_get_contents($lob) : $lob;`. This line gives the same string under both behaviours.",
+        "If the value is small and no stream is needed, binding the column with `PDO::PARAM_STR` works too.",
+      ],
+    },
+    before: "$stmt->bindColumn(1, $lob, PDO::PARAM_LOB);\n$stmt->fetch(PDO::FETCH_BOUND);\necho strlen($lob);",
+    after: "$stmt->bindColumn(1, $lob, PDO::PARAM_LOB);\n$stmt->fetch(PDO::FETCH_BOUND);\n$data = is_resource($lob) ? stream_get_contents($lob) : $lob;\necho strlen($data);",
+  },
+  "behavior.concat_precedence": {
+    steps: {
+      tr: [
+        "PHP 8.0'dan beri `+`, `-`, `<<` ve `>>`, `.`'dan önce hesaplanır. PHP 7'de `\"Toplam: \" . $a + $b` önce birleştirip sonra topluyordu; PHP 8'de önce toplar.",
+        "Ne kastedildiğini parantezle yazın. Ferry eski sonucu veren parantezleri kendisi ekler; kalan durumlarda (aynı ifadede `&` ya da `|` varsa gibi) parantezi elle koyun.",
+        "Eski sonuç çoğu zaman bir hataydı (metnin sayıya çevrilmesi). Kastedilen toplama işlemiyse `\"Toplam: \" . ($a + $b)` yazın.",
+      ],
+      en: [
+        "Since PHP 8.0, `+`, `-`, `<<` and `>>` are evaluated before `.`. On PHP 7, `\"Total: \" . $a + $b` concatenated first and then added; PHP 8 adds first.",
+        "Write what you mean with parentheses. Ferry adds the ones that keep the old result itself; in the remaining cases (when the same expression has `&` or `|`, say) add them by hand.",
+        "The old result was usually a bug (the text turned into a number). If the sum was meant, write `\"Total: \" . ($a + $b)`.",
+      ],
+    },
+    before: "echo \"Total: \" . $a + $b;",
+    after: "echo \"Total: \" . ($a + $b);",
+  },
+  "behavior.curl_certinfo_format": {
+    steps: {
+      tr: [
+        "PHP 7.0'dan beri `curl_getinfo($ch, CURLINFO_CERTINFO)` sonucundaki `Subject` ve `Issuer` alanları dizi değil, `C = US, O = Örnek, CN = example.com` gibi metindir.",
+        "Bu alanlardan bir değer okuyan kod (`$cert['Subject']['CN']` gibi) metni ayrıştırmalı ya da sertifikayı `openssl_x509_parse()` ile okumalıdır; o fonksiyon alanları dizi olarak verir.",
+      ],
+      en: [
+        "Since PHP 7.0, the `Subject` and `Issuer` fields in the `curl_getinfo($ch, CURLINFO_CERTINFO)` result are strings such as `C = US, O = Example, CN = example.com`, not arrays.",
+        "Code that reads a value from them (such as `$cert['Subject']['CN']`) has to parse the string, or read the certificate with `openssl_x509_parse()`, which returns the fields as arrays.",
+      ],
+    },
+    before: "$cn = $info[0]['Subject']['CN'];",
+    after: "$cn = openssl_x509_parse($info[0]['Cert'])['subject']['CN'];",
+  },
+  "behavior.filesystem_iterator_dots": {
+    steps: {
+      tr: [
+        "PHP 8.2'den beri `FilesystemIterator`'a bayrak verildiğinde `SKIP_DOTS` kendiliğinden eklenmez; döngü `.` ve `..` girdilerini de görür. PHP 8.1'de aynı çağrı onları atlıyordu.",
+        "Eski davranış için bayraklara `FilesystemIterator::SKIP_DOTS` ekleyin: `FilesystemIterator::KEY_AS_PATHNAME | FilesystemIterator::SKIP_DOTS`.",
+      ],
+      en: [
+        "Since PHP 8.2, `SKIP_DOTS` is no longer added when flags are passed to `FilesystemIterator`, so the loop sees `.` and `..` too. On PHP 8.1 the same call skipped them.",
+        "For the old behaviour, add `FilesystemIterator::SKIP_DOTS` to the flags: `FilesystemIterator::KEY_AS_PATHNAME | FilesystemIterator::SKIP_DOTS`.",
+      ],
+    },
+    before: "new FilesystemIterator($dir, FilesystemIterator::KEY_AS_PATHNAME);",
+    after: "new FilesystemIterator($dir, FilesystemIterator::KEY_AS_PATHNAME | FilesystemIterator::SKIP_DOTS);",
+  },
+  "behavior.gettype_closed_resource": {
+    steps: {
+      tr: [
+        "PHP 7.2'den beri `gettype()` kapatılmış bir kaynak için `'unknown type'` yerine `'resource (closed)'` döndürür.",
+        "Karşılaştırmadaki metni `'resource (closed)'` yapın. Kod iki sürümde de çalışacaksa iki değeri birden kontrol edin.",
+      ],
+      en: [
+        "Since PHP 7.2, `gettype()` returns `'resource (closed)'` instead of `'unknown type'` for a closed resource.",
+        "Change the string in the comparison to `'resource (closed)'`. If the code has to run on both versions, check for both values.",
+      ],
+    },
+    before: "if (gettype($fp) === 'unknown type') {",
+    after: "if (gettype($fp) === 'resource (closed)') {",
+  },
+  "behavior.hex_numeric_string": {
+    steps: {
+      tr: [
+        "PHP 7.0'dan beri `'0x1A'` gibi metinler sayısal değildir: `is_numeric('0x1A')` false döner, `'0x1A' == 26` de false'tur. PHP 5.6'da ikisi de true'ydu.",
+        "Onaltılık metni sayıya çevirmek için `hexdec()` kullanın; `0x` önekini kabul eder (`hexdec('0x1A')` 26 verir). Karşılaştırmadan önce iki tarafı da sayıya çevirin.",
+      ],
+      en: [
+        "Since PHP 7.0, strings like `'0x1A'` aren't numeric: `is_numeric('0x1A')` returns false and `'0x1A' == 26` is false too. On PHP 5.6 both were true.",
+        "Use `hexdec()` to turn the hex string into a number; it accepts the `0x` prefix (`hexdec('0x1A')` gives 26). Convert both sides before comparing.",
+      ],
+    },
+    before: "if ($value == 26) {",
+    after: "if (hexdec($value) == 26) {",
+  },
+  "behavior.int_as_char_code": {
+    steps: {
+      tr: [
+        "PHP 7'de `strpos()` gibi fonksiyonlar tamsayı aranan değeri karakter kodu sayıyordu (65 = `A`). PHP 8.0'dan beri rakamları metin olarak arar; sonuç sessizce değişir.",
+        "Karakter kodu kastediliyorsa `chr()` ile sarın; Ferry bunu sabit sayılar için kendisi yapar. Negatif sayılarda ve değişkenlerde değerin ne olduğuna bakıp `chr()` ya da `(string)` yazın.",
+      ],
+      en: [
+        "On PHP 7, functions such as `strpos()` read an integer needle as a character code (65 = `A`). Since PHP 8.0 they search for the digits as a string, so the result changes silently.",
+        "If a character code was meant, wrap it in `chr()`; Ferry does this itself for literal numbers. For negative numbers and variables, check what the value is and write `chr()` or `(string)`.",
+      ],
+    },
+    before: "$end = strpos($data, 0);",
+    after: "$end = strpos($data, chr(0));",
+  },
+  "behavior.json_decode_null_assoc": {
+    steps: {
+      tr: [
+        "PHP 7.2'den beri `json_decode()`'a `assoc` olarak null verildiğinde `JSON_OBJECT_AS_ARRAY` bayrağı dikkate alınır ve nesneler yerine diziler döner. PHP 7.1'de null, false gibi davranıyordu.",
+        "Nesne isteniyorsa `assoc`'u false yapın; dizi isteniyorsa true yazıp bayrağı kaldırın. İkisi de bütün sürümlerde aynı sonucu verir.",
+      ],
+      en: [
+        "Since PHP 7.2, when `json_decode()` gets null as `assoc`, the `JSON_OBJECT_AS_ARRAY` flag is honoured and arrays come back instead of objects. On PHP 7.1, null acted like false.",
+        "If objects are wanted, make `assoc` false; if arrays are wanted, write true and drop the flag. Both give the same result on every version.",
+      ],
+    },
+    before: "json_decode($json, null, 512, JSON_OBJECT_AS_ARRAY);",
+    after: "json_decode($json, false, 512, JSON_OBJECT_AS_ARRAY);",
+  },
+  "behavior.list_assignment_order": {
+    steps: {
+      tr: [
+        "PHP 7.0'dan beri `list()` soldan sağa atar. `list($a[], $a[]) = [1, 2]` PHP 5.6'da `$a`'yı `[2, 1]`, PHP 7'de `[1, 2]` yapar.",
+        "Sıra önemliyse elemanları açıkça yazın ya da anahtarlı `list()` kullanın: `list(1 => $a[], 0 => $a[]) = [1, 2]` PHP 7.1'den beri `[2, 1]` verir.",
+      ],
+      en: [
+        "Since PHP 7.0, `list()` assigns left to right. `list($a[], $a[]) = [1, 2]` makes `$a` `[2, 1]` on PHP 5.6 and `[1, 2]` on PHP 7.",
+        "If the order matters, write the elements out or use a keyed `list()`: `list(1 => $a[], 0 => $a[]) = [1, 2]` gives `[2, 1]` since PHP 7.1.",
+      ],
+    },
+    before: "list($stack[], $stack[]) = $pair;",
+    after: "$stack[] = $pair[1];\n$stack[] = $pair[0];",
+  },
+  "behavior.mb_ereg_named_capture": {
+    steps: {
+      tr: [
+        "PHP 7.3'ten beri `mb_ereg*()` fonksiyonları adlandırılmış grupları (`(?<ad>...)`) destekler: adlar eşleşme dizisine eklenir, `mb_ereg_replace()` da değiştirme metninde `\\k<ad>` gibi yeni sözdizimini yorumlar.",
+        "Eşleşme dizisini sırayla dolaşan ya da eleman sayısına bakan kodu kontrol edin; adlı anahtarlar artık dizide. Değiştirme metninde `\\k` geçiyorsa ve düz metin olarak kastediliyorsa ters bölüyü kaçırın.",
+      ],
+      en: [
+        "Since PHP 7.3, the `mb_ereg*()` functions support named groups (`(?<name>...)`): the names are added to the match array, and `mb_ereg_replace()` reads new syntax such as `\\k<name>` in the replacement.",
+        "Check code that walks the match array in order or counts its elements; the named keys are in it now. If the replacement contains `\\k` meant as plain text, escape the backslash.",
+      ],
+    },
+  },
+  "behavior.mysqli_connect_result": {
+    steps: {
+      tr: [
+        "PHP 8.1'den beri `mysqli::connect()` başarılı olunca null yerine true döndürür. `=== null` ile başarıyı kontrol eden kod artık her bağlantıyı başarısız sayar.",
+        "Sonucu true ile karşılaştırın ya da hatayı `$mysqli->connect_errno` ile kontrol edin; ikincisi bütün sürümlerde aynı çalışır.",
+      ],
+      en: [
+        "Since PHP 8.1, `mysqli::connect()` returns true instead of null on success. Code that checks for success with `=== null` now treats every connection as failed.",
+        "Compare the result with true, or check for an error with `$mysqli->connect_errno`; the second works the same on every version.",
+      ],
+    },
+    before: "if ($db->connect($host, $user, $pass) === null) {",
+    after: "$db->connect($host, $user, $pass);\nif (!$db->connect_errno) {",
+  },
+  "behavior.mysqli_max_length": {
+    steps: {
+      tr: [
+        "PHP 8.1'den beri mysqli alan bilgisindeki `max_length` her zaman 0'dır. Eskiden sonuçtaki en uzun değerin uzunluğunu veriyordu.",
+        "Değer gerekiyorsa sonucu dolaşıp hesaplayın: `max(array_map('strlen', array_column($rows, $name)))`.",
+      ],
+      en: [
+        "Since PHP 8.1, `max_length` in mysqli field metadata is always 0. It used to give the length of the longest value in the result.",
+        "If you need it, compute it from the rows: `max(array_map('strlen', array_column($rows, $name)))`.",
+      ],
+    },
+    before: "$width = mysqli_fetch_field_direct($result, 0)->max_length;",
+    after: "$rows = mysqli_fetch_all($result, MYSQLI_ASSOC);\n$width = max(array_map('strlen', array_column($rows, 'name')));",
+  },
+  "behavior.negative_array_key": {
+    steps: {
+      tr: [
+        "PHP 8.0'dan beri negatif bir anahtardan sonraki otomatik anahtar 0 değil, bir fazlasıdır: `[-5 => 'a', 'b']` PHP 7.4'te `[-5, 0]`, PHP 8'de `[-5, -4]` anahtarlarını verir.",
+        "Sonraki elemanın anahtarı önemliyse açıkça yazın: `[-5 => 'a', 0 => 'b']`.",
+      ],
+      en: [
+        "Since PHP 8.0, the automatic key after a negative key is that key plus one, not 0: `[-5 => 'a', 'b']` gives the keys `[-5, 0]` on PHP 7.4 and `[-5, -4]` on PHP 8.",
+        "If the next element's key matters, write it out: `[-5 => 'a', 0 => 'b']`.",
+      ],
+    },
+    before: "$levels = [-1 => 'debug', 'info', 'warning'];",
+    after: "$levels = [-1 => 'debug', 0 => 'info', 1 => 'warning'];",
+  },
+  "behavior.negative_index_assignment": {
+    steps: {
+      tr: [
+        "PHP 8.3'ten beri boş bir diziye negatif anahtar atandıktan sonraki `[]` ataması 0 değil, bir fazlasını alır: `$a = []; $a[-5] = 'x'; $a[] = 'y';` PHP 8.2'de `y`'yi 0'a, PHP 8.3'te -4'e koyar.",
+        "Anahtar önemliyse `$a[] = ...` yerine anahtarı açıkça yazın.",
+      ],
+      en: [
+        "Since PHP 8.3, an `[]` assignment after a negative key on an empty array takes that key plus one, not 0: `$a = []; $a[-5] = 'x'; $a[] = 'y';` puts `y` at 0 on PHP 8.2 and at -4 on PHP 8.3.",
+        "If the key matters, write it out instead of `$a[] = ...`.",
+      ],
+    },
+    before: "$a = [];\n$a[-5] = 'x';\n$a[] = 'y';",
+    after: "$a = [];\n$a[-5] = 'x';\n$a[0] = 'y';",
+  },
+  "behavior.parenthesized_reference": {
+    steps: {
+      tr: [
+        "PHP 7.0'dan beri fazladan parantez bir şey değiştirmez: `array_pop((g()))` gibi bir çağrı, referans bekleyen parametreye fonksiyon sonucu verdiği için uyarı verir. PHP 5'te parantez bu uyarıyı gizliyordu.",
+        "Sonucu önce bir değişkene atayıp değişkeni verin.",
+      ],
+      en: [
+        "Since PHP 7.0, extra parentheses change nothing: a call like `array_pop((g()))` warns because it passes a function result to a by-reference parameter. On PHP 5 the parentheses hid that notice.",
+        "Assign the result to a variable first and pass the variable.",
+      ],
+    },
+    before: "$last = array_pop((explode('/', $path)));",
+    after: "$parts = explode('/', $path);\n$last = array_pop($parts);",
+  },
+  "behavior.password_algo_integer": {
+    steps: {
+      tr: [
+        "PHP 7.4'ten beri `PASSWORD_*` sabitleri tamsayı değil metindir: `PASSWORD_BCRYPT` 7.0'da `1`, 7.4'ten beri `'2y'`'dir. Bir sayıyla karşılaştırma artık eşleşmez.",
+        "Sayı yerine sabitin kendisiyle karşılaştırın. `password_get_info()` ya da `password_needs_rehash()` çıktısıyla çalışan kod da sabitleri kullanmalı.",
+      ],
+      en: [
+        "Since PHP 7.4, the `PASSWORD_*` constants are strings instead of integers: `PASSWORD_BCRYPT` was `1` on 7.0 and is `'2y'` since 7.4. Comparing with a number no longer matches.",
+        "Compare with the constant itself instead of the number. Code that works with the output of `password_get_info()` or `password_needs_rehash()` should use the constants too.",
+      ],
+    },
+    before: "if (password_get_info($hash)['algo'] === 1) {",
+    after: "if (password_get_info($hash)['algo'] === PASSWORD_BCRYPT) {",
+  },
+  "behavior.password_hash_salt": {
+    steps: {
+      tr: [
+        "`password_hash()`'in `salt` seçeneği PHP 8.0'da kaldırıldı; verilirse uyarıyla yok sayılır ve rastgele bir tuz kullanılır.",
+        "Seçeneği silin. Aynı parolanın her seferinde aynı özeti vermesine dayanan kod (özetleri karşılaştırmak gibi) `password_verify()` kullanmalıdır.",
+      ],
+      en: [
+        "The `salt` option of `password_hash()` was removed in PHP 8.0; when given, it's ignored with a warning and a random salt is used.",
+        "Remove the option. Code that relies on the same password always giving the same hash (comparing hashes, say) should use `password_verify()`.",
+      ],
+    },
+    before: "password_hash($password, PASSWORD_DEFAULT, ['salt' => $salt, 'cost' => 10]);",
+    after: "password_hash($password, PASSWORD_DEFAULT, ['cost' => 10]);",
+  },
+  "behavior.pcntl_failure_value": {
+    steps: {
+      tr: [
+        "PHP 8.4'ten beri `pcntl_sigwaitinfo()` ve `pcntl_sigtimedwait()` başarısız olunca -1 yerine false döndürür; `=== -1` kontrolü artık hiç doğru olmaz.",
+        "Sonucu `=== false` ile karşılaştırın. Kod eski sürümlerde de çalışacaksa iki değeri birden kontrol edin.",
+      ],
+      en: [
+        "Since PHP 8.4, `pcntl_sigwaitinfo()` and `pcntl_sigtimedwait()` return false instead of -1 on failure, so an `=== -1` check is never true anymore.",
+        "Compare the result with `=== false`. If the code also runs on older versions, check for both values.",
+      ],
+    },
+    before: "if (pcntl_sigtimedwait([SIGTERM], $info, 5) === -1) {",
+    after: "if (pcntl_sigtimedwait([SIGTERM], $info, 5) === false) {",
+  },
+  "behavior.printf_bare_precision": {
+    steps: {
+      tr: [
+        "PHP 8.5'ten beri `%.f`, `%.E` ya da `%.g` gibi rakamsız bir hassasiyet 0 demektir; önceden varsayılan hassasiyete (6) dönülüyordu. Metin belirteçleri (`%.s`) değişmedi.",
+        "Eski sonuç için hassasiyeti açıkça yazın: `%.6f`. Ferry sabit biçim metinlerinde bunu kendisi yapar; biçim bir değişkenden geliyorsa o değeri düzeltin.",
+      ],
+      en: [
+        "Since PHP 8.5, a precision without digits such as `%.f`, `%.E` or `%.g` means 0; it used to fall back to the default precision (6). String conversions (`%.s`) didn't change.",
+        "For the old result, write the precision out: `%.6f`. Ferry does this itself in literal formats; when the format comes from a variable, fix that value.",
+      ],
+    },
+    before: "printf('%.f', $ratio);",
+    after: "printf('%.6f', $ratio);",
+  },
+  "behavior.reference_callback": {
+    steps: {
+      tr: [
+        "Bu fonksiyon geri çağırmasına referans vermez. PHP 8.0'dan beri referans bekleyen bir geri çağırma her çağrıda uyarı verir; değişiklik zaten hiçbir zaman diziye yansımıyordu.",
+        "Parametredeki `&`'yi silin. Diziyi yerinde değiştirmek istiyorsanız `array_walk()` (referans verir) ya da sonucu atayan `array_map()` kullanın.",
+      ],
+      en: [
+        "This function doesn't pass references to its callback. Since PHP 8.0, a callback that expects a reference warns on every call; the change never reached the array anyway.",
+        "Remove the `&` from the parameter. To change the array in place, use `array_walk()` (which passes references) or `array_map()` and assign its result.",
+      ],
+    },
+    before: "array_map(function (&$v) { $v = trim($v); }, $items);",
+    after: "$items = array_map(function ($v) { return trim($v); }, $items);",
+  },
+  "behavior.regex_empty_min_quantifier": {
+    steps: {
+      tr: [
+        "PHP 8.4'teki PCRE2 10.44 ve sonrasında `{,3}` \"en fazla 3\" anlamına gelen bir niceleyicidir. Önceden düz metindi: PHP 8.3'te `/a{,3}/` `a{,3}` metnini buluyordu, PHP 8.5'te `aa`'yı buluyor.",
+        "Niceleyici kastediliyorsa `{0,3}` yazın; bütün sürümlerde aynı çalışır. Düz metin kastediliyorsa süslü parantezi kaçırın: `\\{,3}`.",
+      ],
+      en: [
+        "With PCRE2 10.44 and later in PHP 8.4, `{,3}` is a quantifier meaning \"up to 3\". It used to be literal text: on PHP 8.3 `/a{,3}/` found the text `a{,3}`, on PHP 8.5 it finds `aa`.",
+        "If a quantifier was meant, write `{0,3}`, which works the same everywhere. If the text was meant, escape the brace: `\\{,3}`.",
+      ],
+    },
+    before: "preg_match('/^\\d{,3}$/', $value);",
+    after: "preg_match('/^\\d{0,3}$/', $value);",
+  },
+  "behavior.session_key_pipe": {
+    steps: {
+      tr: [
+        "Varsayılan oturum biçimi (`session.serialize_handler = php`) anahtarları `|` ile ayırır. İçinde `|` olan bir anahtar oturumun sessizce kaydedilmemesine yol açıyordu; PHP 8.5'ten beri uyarı verir.",
+        "Anahtardan `|`'yi çıkarın ya da değerleri tek bir dizi anahtarının altında tutun. `session.serialize_handler`'ı `php_serialize` yapmak da sorunu kaldırır, ama mevcut oturumları okunmaz hâle getirir.",
+      ],
+      en: [
+        "The default session format (`session.serialize_handler = php`) separates keys with `|`. A key containing `|` made the session silently fail to save; since PHP 8.5 it warns.",
+        "Take the `|` out of the key, or keep the values under one array key. Switching `session.serialize_handler` to `php_serialize` also removes the problem, but makes existing sessions unreadable.",
+      ],
+    },
+    before: "$_SESSION[$module . '|' . $id] = $state;",
+    after: "$_SESSION[$module][$id] = $state;",
+  },
+  "behavior.sleep_non_array": {
+    steps: {
+      tr: [
+        "`__sleep()` özellik adlarından oluşan bir dizi döndürmelidir. Başka bir şey döndürünce `serialize()` uyarı verip `N;` yazar, yani nesne null olarak saklanır; PHP 8.0'da bu uyarı notice'ten warning'e çıktı.",
+        "Saklanacak özelliklerin adlarını dizi olarak döndürün. Hiçbir özellik saklanmayacaksa `return [];` yazın; o zaman nesne sınıfıyla birlikte, özelliksiz olarak saklanır.",
+      ],
+      en: [
+        "`__sleep()` must return an array of property names. When it returns anything else, `serialize()` warns and writes `N;`, so the object is stored as null; PHP 8.0 raised that notice to a warning.",
+        "Return the names of the properties to keep as an array. If none should be kept, write `return [];`; the object is then stored with its class and no properties.",
+      ],
+    },
+    before: "public function __sleep() {\n    return null;\n}",
+    after: "public function __sleep() {\n    return ['id', 'name'];\n}",
+  },
+  "behavior.spl_autoload_register_throw": {
+    steps: {
+      tr: [
+        "PHP 8.0'dan beri `spl_autoload_register()` hata durumunda her zaman istisna fırlatır; ikinci argüman olarak verilen false yok sayılır ve uyarı verir.",
+        "İkinci argümanı silin. Kayıt hatasını yakalamak istiyorsanız çağrıyı `try { ... } catch (TypeError $e) { ... }` içine alın.",
+      ],
+      en: [
+        "Since PHP 8.0, `spl_autoload_register()` always throws on failure; false as the second argument is ignored and warns.",
+        "Remove the second argument. To catch a registration failure, wrap the call in `try { ... } catch (TypeError $e) { ... }`.",
+      ],
+    },
+    before: "spl_autoload_register('my_loader', false);",
+    after: "spl_autoload_register('my_loader');",
+  },
+  "behavior.substr_false": {
+    steps: {
+      tr: [
+        "PHP 7.0'dan beri `substr()` kesim metnin sonuna denk gelince false yerine boş metin döndürür; PHP 8.0'dan beri hiç false döndürmez.",
+        "Karşılaştırmayı `=== ''` ile yapın. Proje bugün PHP 5'te çalışıyorsa Ferry bunu kendisi yazar; diğer projelerde kodun boş metin ve false için aynı şeyi yapmasını bekleyip beklemediğine bakın.",
+      ],
+      en: [
+        "Since PHP 7.0, `substr()` returns an empty string instead of false when the cut falls at the end of the string, and since PHP 8.0 it never returns false.",
+        "Compare with `=== ''`. When the project runs PHP 5 today, Ferry writes this itself; elsewhere, check whether the code expected the same thing for an empty string and false.",
+      ],
+    },
+    before: "if (substr($path, $len) === false) {",
+    after: "if (substr($path, $len) === '') {",
+  },
+  "behavior.trailing_open_tag": {
+    steps: {
+      tr: [
+        "PHP 7.4'ten beri dosyanın en sonundaki, ardından satır sonu gelmeyen bir `<?php` açılış etiketidir; önceden metin olarak çıktıya yazılıyordu.",
+        "Etiket çıktıya gitmek için yazılmadıysa onu silin. Çıktıya gitmesi gerekiyorsa `echo '<?php';` ile yazın.",
+      ],
+      en: [
+        "Since PHP 7.4, a `<?php` at the very end of a file with no newline after it is an opening tag; it used to be printed as text.",
+        "If the tag wasn't meant as output, remove it. If it was, print it with `echo '<?php';`.",
+      ],
+    },
+  },
+  "behavior.unserialize_allowed_classes_type": {
+    steps: {
+      tr: [
+        "`unserialize()`'ın `allowed_classes` seçeneği PHP 7.1'den beri yalnızca dizi ya da bool kabul eder. Metin verilince false döner; PHP 8.4'ten beri ValueError fırlatır.",
+        "Sınıf adını bir diziye koyun: `['allowed_classes' => ['Foo']]`. Hiçbir sınıfa izin verilmeyecekse false yazın.",
+      ],
+      en: [
+        "`unserialize()`'s `allowed_classes` option only accepts an array or a bool since PHP 7.1. A string makes it return false, and since PHP 8.4 it throws a ValueError.",
+        "Put the class name in an array: `['allowed_classes' => ['Foo']]`. To allow no classes, write false.",
+      ],
+    },
+    before: "unserialize($data, ['allowed_classes' => 'Foo']);",
+    after: "unserialize($data, ['allowed_classes' => ['Foo']]);",
+  },
+  "behavior.wide_shift": {
+    steps: {
+      tr: [
+        "PHP 7.0'dan beri tamsayı genişliği (64 bit) ya da daha fazlası kadar kaydırmak her zaman 0 verir, negatif sayıyı sağa kaydırmak -1 verir. PHP 5.6'da sonuç işlemciye bağlıydı: `1 << 64` 1 veriyordu.",
+        "Kaydırma miktarını sınırlayın ya da büyük sayılar için `gmp_mul()` ve `gmp_pow()` kullanın.",
+      ],
+      en: [
+        "Since PHP 7.0, shifting by the integer width (64 bits) or more always gives 0, and shifting a negative number right gives -1. On PHP 5.6 the result depended on the CPU: `1 << 64` gave 1.",
+        "Limit the shift amount, or use `gmp_mul()` and `gmp_pow()` for large numbers.",
+      ],
+    },
+    before: "$mask = 1 << $bits;",
+    after: "$mask = $bits >= 64 ? 0 : 1 << $bits;",
+  },
+  "deprecated.array_object_object": {
+    steps: {
+      tr: [
+        "PHP 8.5'te `ArrayObject` ya da `ArrayIterator`'a nesne vermek kullanımdan kalktı; nesnenin özellikleri bir dizi gibi kullanılıyordu.",
+        "Bir dizi verin: genel özellikler için `get_object_vars($object)`. Sayılar ve değerler aynı kalır; nesnenin kendisi artık değişmez, değişiklikler dizide kalır.",
+      ],
+      en: [
+        "PHP 8.5 deprecated passing an object to `ArrayObject` or `ArrayIterator`; the object's properties were used as an array.",
+        "Pass an array: `get_object_vars($object)` for the public properties. Counts and values stay the same; the object itself no longer changes, the changes stay in the array.",
+      ],
+    },
+    before: "$view = new ArrayObject($settings);",
+    after: "$view = new ArrayObject(get_object_vars($settings));",
+  },
+  "deprecated.array_pointer_on_object": {
+    steps: {
+      tr: [
+        "PHP 8.1'den beri `key()`, `current()`, `next()`, `prev()`, `reset()` ve `end()`'i bir nesne üzerinde çağırmak kullanımdan kalktı.",
+        "Önce nesneyi diziye çevirin: `$props = get_mangled_object_vars($object);` ve işaretçi fonksiyonlarını o dizide kullanın. Yalnızca genel özellikler gerekiyorsa `get_object_vars()` yeterlidir.",
+      ],
+      en: [
+        "Since PHP 8.1, calling `key()`, `current()`, `next()`, `prev()`, `reset()` and `end()` on an object is deprecated.",
+        "Turn the object into an array first: `$props = get_mangled_object_vars($object);`, and use the pointer functions on that array. `get_object_vars()` is enough when only public properties are needed.",
+      ],
+    },
+    before: "$first = reset($this);",
+    after: "$props = get_object_vars($this);\n$first = reset($props);",
+  },
+  "deprecated.assert_options": {
+    steps: {
+      tr: [
+        "PHP 8.3'te `assert_options()`, `ASSERT_*` sabitleri ve `assert.active` gibi `assert.*` ini ayarları kullanımdan kalktı. Ferry varsayılanı yazan ve hiçbir şey değiştirmeyen çağrıları kendisi siler.",
+        "Doğrulamaları açıp kapatmak için `zend.assertions` ayarını kullanın: geliştirmede 1, üretimde -1. Çalışırken yalnızca 0 ile 1 arasında değiştirilebilir; -1 için `php.ini` gerekir.",
+        "PHP 8.0'dan beri başarısız `assert()` varsayılan olarak `AssertionError` fırlatır; uyarı ya da geri çağırma isteyen kod bunu bir `try`/`catch` ile karşılamalıdır.",
+      ],
+      en: [
+        "PHP 8.3 deprecated `assert_options()`, the `ASSERT_*` constants and `assert.*` ini settings such as `assert.active`. Ferry removes calls that write the default and change nothing itself.",
+        "To turn assertions on or off, use the `zend.assertions` setting: 1 in development, -1 in production. At runtime it can only switch between 0 and 1; -1 needs `php.ini`.",
+        "Since PHP 8.0 a failed `assert()` throws `AssertionError` by default; code that wanted a warning or a callback should handle it with a `try`/`catch`.",
+      ],
+    },
+    before: "assert_options(ASSERT_ACTIVE, 0);",
+    after: "; php.ini\nzend.assertions = -1",
+  },
+  "deprecated.bool_sort_comparator": {
+    steps: {
+      tr: [
+        "Karşılaştırma fonksiyonundan true ya da false döndürmek PHP 8.0'da kullanımdan kalktı; sıfırdan küçük, sıfıra eşit ya da büyük bir tamsayı döndürülmeli.",
+        "`$a > $b` yerine `$a <=> $b` yazın. Ferry basit karşılaştırmalarda bunu kendisi yapar; `==` ya da birden çok koşul içeren fonksiyonları elle çevirin.",
+        "PHP 8.0'dan beri sıralama kararlıdır: eşit sayılan elemanlar ilk sıralarını korur. Eski sıralamaya güvenen testler farklı çıkabilir.",
+      ],
+      en: [
+        "Returning true or false from a comparison function was deprecated in PHP 8.0; return an integer below, equal to or above zero.",
+        "Write `$a <=> $b` instead of `$a > $b`. Ferry does this itself for simple comparisons; convert functions with `==` or several conditions by hand.",
+        "Since PHP 8.0 sorting is stable: elements that compare equal keep their original order. Tests that relied on the old order can differ.",
+      ],
+    },
+    before: "usort($rows, fn($a, $b) => $a['n'] > $b['n']);",
+    after: "usort($rows, fn($a, $b) => $a['n'] <=> $b['n']);",
+  },
+  "deprecated.closure_bind": {
+    steps: {
+      tr: [
+        "Statik bir kapanışa nesne bağlamak ya da `$this` kullanan bir kapanıştan `$this`'i ayırmak her zaman uyarı verip null döndürüyordu; PHP 8.5'te kullanımdan kalktı, PHP 9'da hata olacak.",
+        "Nesne bağlanacaksa kapanıştan `static` sözcüğünü kaldırın. Kapanış `$this` kullanıyorsa ona null bağlamak yerine nesneyi bağlayın ya da kapanışı nesnesiz yazın.",
+        "Kod bu çağrının sonucunu (null) kullanmıyorsa çağrı zaten hiçbir şey yapmıyordu; silebilirsiniz.",
+      ],
+      en: [
+        "Binding an object to a static closure, or unbinding `$this` from a closure that uses it, always warned and returned null; PHP 8.5 deprecated it and PHP 9 will make it an error.",
+        "If an object should be bound, remove `static` from the closure. If the closure uses `$this`, bind an object instead of null, or write the closure without it.",
+        "If the code doesn't use this call's result (null), the call never did anything; you can delete it.",
+      ],
+    },
+    before: "$f = static function () { return $this->id; };\n$g = $f->bindTo($user);",
+    after: "$f = function () { return $this->id; };\n$g = $f->bindTo($user);",
+  },
+  "deprecated.com_typelib_case_insensitive": {
+    steps: {
+      tr: [
+        "Bir tür kitaplığını büyük-küçük harfe duyarsız kaydetmek PHP 7.4'te kullanımdan kalktı ve PHP 8.0'da kaldırıldı.",
+        "`com_load_typelib()`'in ikinci argümanını silin ve sabitleri tür kitaplığındaki yazımıyla kullanın.",
+      ],
+      en: [
+        "Registering a type library case-insensitively was deprecated in PHP 7.4 and removed in PHP 8.0.",
+        "Remove `com_load_typelib()`'s second argument and use the constants as the type library spells them.",
+      ],
+    },
+    before: "com_load_typelib('Word.Application', false);",
+    after: "com_load_typelib('Word.Application');",
+  },
+  "deprecated.ctype_non_string": {
+    steps: {
+      tr: [
+        "PHP 8.1'den beri `ctype_*()` fonksiyonlarına tamsayı vermek kullanımdan kalktı. -128 ile 255 arasındaki tamsayılar karakter kodu sayılıyordu: `ctype_digit(53)` `'5'` karakterine bakıp true, `ctype_digit(5)` false veriyordu; daha büyükler metin gibi okunuyordu.",
+        "Sayının rakamları kastediliyorsa `(string)` ile metne çevirin; karakter kodu kastediliyorsa `chr()` kullanın.",
+      ],
+      en: [
+        "Since PHP 8.1, passing an integer to the `ctype_*()` functions is deprecated. Integers from -128 to 255 were taken as character codes: `ctype_digit(53)` looked at the character `'5'` and gave true, `ctype_digit(5)` gave false; larger ones were read as strings.",
+        "If the number's digits were meant, convert it with `(string)`; if a character code was meant, use `chr()`.",
+      ],
+    },
+    before: "if (ctype_digit($id)) {",
+    after: "if (ctype_digit((string) $id)) {",
+  },
+  "deprecated.curlopt_binarytransfer": {
+    steps: {
+      tr: [
+        "`CURLOPT_BINARYTRANSFER` PHP 5.1.3'ten beri hiçbir şey yapmıyor ve PHP 8.4'te kullanımdan kalktı.",
+        "Seçeneği silin. Ferry bunu `curl_setopt()` çağrılarında ve curl seçenek dizilerinde kendisi yapar; sonucu kullanılan bir `curl_setopt()` çağrısında yerine true yazabilirsiniz, çünkü çağrı her zaman başarılıydı.",
+      ],
+      en: [
+        "`CURLOPT_BINARYTRANSFER` has done nothing since PHP 5.1.3 and was deprecated in PHP 8.4.",
+        "Remove the option. Ferry does this itself in `curl_setopt()` calls and curl option arrays; where a `curl_setopt()` call's result is used, you can write true instead, since the call always succeeded.",
+      ],
+    },
+    before: "$ok = curl_setopt($ch, CURLOPT_BINARYTRANSFER, true);",
+    after: "$ok = true;",
+  },
+  "deprecated.curlpipe_http1": {
+    steps: {
+      tr: [
+        "`CURLPIPE_HTTP1` curl 7.62'den beri hiçbir şey yapmıyor ve PHP 7.4'ten beri kullanımdan kalktı.",
+        "Bugünkü davranış için `CURLPIPE_NOTHING`, HTTP/2 çoğullama için `CURLPIPE_MULTIPLEX` yazın. Ferry maskelerden ve tek başına kullanılan yerlerden bunu kendisi yapar; bir değeri onunla karşılaştıran kodu elle değiştirin.",
+      ],
+      en: [
+        "`CURLPIPE_HTTP1` has done nothing since curl 7.62 and has been deprecated since PHP 7.4.",
+        "Write `CURLPIPE_NOTHING` for today's behaviour or `CURLPIPE_MULTIPLEX` for HTTP/2 multiplexing. Ferry does this itself in masks and where it stands alone; change code that compares a value with it by hand.",
+      ],
+    },
+    before: "curl_multi_setopt($mh, CURLMOPT_PIPELINING, CURLPIPE_HTTP1);",
+    after: "curl_multi_setopt($mh, CURLMOPT_PIPELINING, CURLPIPE_NOTHING);",
+  },
+  "deprecated.date_period_iso_string": {
+    steps: {
+      tr: [
+        "PHP 8.4'ten beri `new DatePeriod()`'u ISO 8601 metniyle çağırmak kullanımdan kalktı.",
+        "PHP 8.3'te gelen `DatePeriod::createFromISO8601String()`'i kullanın; aynı metni ve seçenekleri alır.",
+      ],
+      en: [
+        "Since PHP 8.4, calling `new DatePeriod()` with an ISO 8601 string is deprecated.",
+        "Use `DatePeriod::createFromISO8601String()`, added in PHP 8.3; it takes the same string and options.",
+      ],
+    },
+    before: "$period = new DatePeriod('R4/2012-07-01T00:00:00Z/P7D');",
+    after: "$period = DatePeriod::createFromISO8601String('R4/2012-07-01T00:00:00Z/P7D');",
+  },
+  "deprecated.date_wakeup": {
+    steps: {
+      tr: [
+        "Tarih sınıflarının `__wakeup()` metodu PHP 8.5'te kullanımdan kalktı. Bir `DateTime`, `DateTimeImmutable`, `DateTimeZone` ya da `DatePeriod` nesnesinde doğrudan çağrılınca her zaman Error fırlatıyordu, `DateInterval`'da hiçbir şey yapmıyordu.",
+        "Çağrıyı silin; Ferry canlı bir tarih nesnesindeki tek başına duran çağrıları kendisi siler. Alt sınıfta `__wakeup()` tanımlıysa o mantığı `__unserialize()`'a taşıyın.",
+      ],
+      en: [
+        "The date classes' `__wakeup()` method was deprecated in PHP 8.5. Called directly on a `DateTime`, `DateTimeImmutable`, `DateTimeZone` or `DatePeriod` object it always threw Error; on `DateInterval` it did nothing.",
+        "Delete the call; Ferry deletes standalone calls on a live date object itself. If a subclass defines `__wakeup()`, move that logic to `__unserialize()`.",
+      ],
+    },
+    before: "public function __wakeup()\n{\n    $this->zone = new DateTimeZone($this->name);\n}",
+    after: "public function __unserialize(array $data): void\n{\n    $this->name = $data['name'];\n    $this->zone = new DateTimeZone($this->name);\n}",
+  },
+  "deprecated.dba_fetch_order": {
+    steps: {
+      tr: [
+        "PHP 8.3'ten beri `dba_fetch()`'e tutamacı üçüncü argüman olarak vermek kullanımdan kalktı.",
+        "Argümanların sırasını değiştirin: `dba_fetch($key, $dba, $skip)`.",
+      ],
+      en: [
+        "Since PHP 8.3, passing the handle as the third argument of `dba_fetch()` is deprecated.",
+        "Swap the arguments: `dba_fetch($key, $dba, $skip)`.",
+      ],
+    },
+    before: "dba_fetch($key, 0, $dba);",
+    after: "dba_fetch($key, $dba, 0);",
+  },
+  "deprecated.dba_key_split_null": {
+    steps: {
+      tr: [
+        "PHP 8.4'ten beri `dba_key_split()`'e null ya da false vermek kullanımdan kalktı; bu değerler için hep false dönüyordu.",
+        "Çağrıdan önce değeri kontrol edin ve null ya da false için doğrudan false kullanın.",
+      ],
+      en: [
+        "Since PHP 8.4, passing null or false to `dba_key_split()` is deprecated; it always returned false for them.",
+        "Check the value before the call and use false directly for null or false.",
+      ],
+    },
+    before: "$parts = dba_key_split($key);",
+    after: "$parts = $key === null || $key === false ? false : dba_key_split($key);",
+  },
+  "deprecated.debug_info_null": {
+    steps: {
+      tr: [
+        "PHP 8.5'te `__debugInfo()`'dan null döndürmek kullanımdan kalktı.",
+        "Boş bir dizi döndürün; `var_dump()` çıktısı aynı kalır (PHP 7.4'ten 8.5'e kadar her ikisi de özelliksiz bir nesne gösterdi).",
+      ],
+      en: [
+        "PHP 8.5 deprecated returning null from `__debugInfo()`.",
+        "Return an empty array; the `var_dump()` output stays the same (on PHP 7.4 through 8.5 both showed an object with no properties).",
+      ],
+    },
+    before: "public function __debugInfo() {\n    return null;\n}",
+    after: "public function __debugInfo() {\n    return [];\n}",
+  },
+  "deprecated.e_strict": {
+    steps: {
+      tr: [
+        "`E_STRICT` PHP 8.4'te kullanımdan kalktı; bu hata seviyesi PHP 8'den beri hiç üretilmiyor.",
+        "Maskelerden çıkarın: `E_ALL | E_STRICT` yerine `E_ALL`. Ferry maskelerden kendisi çıkarır; tek başına geçtiği ya da bir değerle karşılaştırıldığı yerlerde değerini (2048) yazabilir ya da kontrolü silebilirsiniz.",
+      ],
+      en: [
+        "`E_STRICT` was deprecated in PHP 8.4; this error level hasn't been raised since PHP 8.",
+        "Take it out of masks: `E_ALL` instead of `E_ALL | E_STRICT`. Ferry removes it from masks itself; where it stands alone or is compared with a value, write its value (2048) or remove the check.",
+      ],
+    },
+    before: "error_reporting(E_ALL | E_STRICT);",
+    after: "error_reporting(E_ALL);",
+  },
+  "deprecated.ffi_static_call": {
+    steps: {
+      tr: [
+        "PHP 8.3'ten beri `FFI::cast()`, `FFI::new()` ve `FFI::type()`'ı statik çağırmak kullanımdan kalktı.",
+        "Bir FFI nesnesi oluşturup metotları onun üzerinden çağırın: `$ffi = FFI::cdef(); $ffi->new('int');`.",
+      ],
+      en: [
+        "Since PHP 8.3, calling `FFI::cast()`, `FFI::new()` and `FFI::type()` statically is deprecated.",
+        "Create an FFI object and call the methods on it: `$ffi = FFI::cdef(); $ffi->new('int');`.",
+      ],
+    },
+    before: "$n = FFI::new('int');",
+    after: "$ffi = FFI::cdef();\n$n = $ffi->new('int');",
+  },
+  "deprecated.finfo_buffer_context": {
+    steps: {
+      tr: [
+        "`finfo_buffer()`'ın yok sayılan `$context` argümanı PHP 8.5'te kullanımdan kalktı.",
+        "Argümanı silin; sonuç değişmez.",
+      ],
+      en: [
+        "PHP 8.5 deprecated `finfo_buffer()`'s ignored `$context` argument.",
+        "Remove the argument; the result doesn't change.",
+      ],
+    },
+    before: "finfo_buffer($finfo, $data, FILEINFO_MIME_TYPE, $context);",
+    after: "finfo_buffer($finfo, $data, FILEINFO_MIME_TYPE);",
+  },
+  "deprecated.get_defined_functions_arg": {
+    steps: {
+      tr: [
+        "Devre dışı fonksiyonları da almak için false vermek PHP 8.0'da, argümanın kendisi PHP 8.5'te kullanımdan kalktı. PHP 8.0'dan beri devre dışı fonksiyonlar listede zaten yok.",
+        "Argümanı silin.",
+      ],
+      en: [
+        "Passing false to include disabled functions was deprecated in PHP 8.0, and the argument itself in PHP 8.5. Since PHP 8.0 disabled functions aren't in the list anyway.",
+        "Remove the argument.",
+      ],
+    },
+    before: "$functions = get_defined_functions(true);",
+    after: "$functions = get_defined_functions();",
+  },
+  "deprecated.hash_option_type": {
+    steps: {
+      tr: [
+        "PHP 8.4'ten beri hash fonksiyonlarının seçeneklerine yanlış türde değer vermek kullanımdan kalktı; örneğin murmur ve xxh algoritmalarının `seed`'i tamsayı olmalı.",
+        "Değeri doğru türe çevirin: `['seed' => (int) $seed]`.",
+      ],
+      en: [
+        "Since PHP 8.4, passing values of the wrong type to hash function options is deprecated; the `seed` of the murmur and xxh algorithms, for example, must be an integer.",
+        "Convert the value to the right type: `['seed' => (int) $seed]`.",
+      ],
+    },
+    before: "hash('murmur3a', $data, false, ['seed' => '42']);",
+    after: "hash('murmur3a', $data, false, ['seed' => 42]);",
+  },
+  "deprecated.implicit_float_to_int": {
+    steps: {
+      tr: [
+        "PHP 8.1'den beri ondalıklı bir sayının dizi anahtarı ya da `%` işleneni olarak sessizce tamsayıya çevrilmesi kullanımdan kalktı. Sonuç aynı: `$a[1.5]` 1 anahtarını, `7.5 % 2` 1'i kullanıyor.",
+        "Çeviriyi açıkça yazın: `$a[(int) $x]`, `(int) $x % 2`. Kesir kısmı önemliyse `intdiv()`, `fmod()` ya da `round()` kullanın.",
+      ],
+      en: [
+        "Since PHP 8.1, a fractional number silently turning into an integer as an array key or a `%` operand is deprecated. The result is the same: `$a[1.5]` uses the key 1 and `7.5 % 2` gives 1.",
+        "Write the conversion out: `$a[(int) $x]`, `(int) $x % 2`. If the fraction matters, use `intdiv()`, `fmod()` or `round()`.",
+      ],
+    },
+    before: "$buckets[$value / 10][] = $value;",
+    after: "$buckets[(int) ($value / 10)][] = $value;",
+  },
+  "deprecated.intlcal_roll_bool": {
+    steps: {
+      tr: [
+        "PHP 8.1'den beri `IntlCalendar::roll()`'a bool vermek kullanımdan kalktı; true bir birim ileri, false bir birim geri demekti.",
+        "true yerine 1, false yerine -1 yazın.",
+      ],
+      en: [
+        "Since PHP 8.1, passing a bool to `IntlCalendar::roll()` is deprecated; true meant one unit up and false one unit down.",
+        "Write 1 instead of true and -1 instead of false.",
+      ],
+    },
+    before: "$cal->roll(IntlCalendar::FIELD_MONTH, true);",
+    after: "$cal->roll(IntlCalendar::FIELD_MONTH, 1);",
+  },
+  "deprecated.intlcal_set": {
+    steps: {
+      tr: [
+        "PHP 8.4'ten beri `IntlCalendar::set()`'i ve `intlcal_set()`'i tarih parçalarıyla çağırmak kullanımdan kalktı.",
+        "Tarih için `setDate($year, $month, $day)`, tarih ve saat için `setDateTime($year, $month, $day, $hour, $minute, $second)` kullanın; ikisi de PHP 8.3'te geldi. Ferry `intlcal_set()` fonksiyon biçimini sonucu kullanılmadığında kendisi çevirir; sonuç kullanılıyorsa yeni metotların değer döndürmediğini hesaba katın.",
+      ],
+      en: [
+        "Since PHP 8.4, calling `IntlCalendar::set()` and `intlcal_set()` with date parts is deprecated.",
+        "Use `setDate($year, $month, $day)` for a date and `setDateTime($year, $month, $day, $hour, $minute, $second)` for date and time; both came in PHP 8.3. Ferry converts the `intlcal_set()` function form itself when its result isn't used; where it is, keep in mind the new methods return nothing.",
+      ],
+    },
+    before: "$cal->set(2024, 0, 31);",
+    after: "$cal->setDate(2024, 0, 31);",
+  },
+  "deprecated.intlgregcal_create_instance": {
+    steps: {
+      tr: [
+        "PHP 8.4'ten beri `new IntlGregorianCalendar()`'ı ve `intlgregcal_create_instance()`'ı tarih parçalarıyla çağırmak kullanımdan kalktı.",
+        "PHP 8.3'te gelen `IntlGregorianCalendar::createFromDate()` ya da `createFromDateTime()`'ı kullanın. Ferry fonksiyon biçimini kendisi çevirir.",
+      ],
+      en: [
+        "Since PHP 8.4, calling `new IntlGregorianCalendar()` and `intlgregcal_create_instance()` with date parts is deprecated.",
+        "Use `IntlGregorianCalendar::createFromDate()` or `createFromDateTime()`, added in PHP 8.3. Ferry converts the function form itself.",
+      ],
+    },
+    before: "$cal = new IntlGregorianCalendar(2024, 0, 31);",
+    after: "$cal = IntlGregorianCalendar::createFromDate(2024, 0, 31);",
+  },
+  "deprecated.invalid_digits": {
+    steps: {
+      tr: [
+        "PHP 7.4'ten beri `base_convert()`, `bindec()`, `octdec()` ve `hexdec()`'e tabanda olmayan rakamlar vermek kullanımdan kalktı; o rakamlar yok sayılır ve sonuç onlarsız hesaplanır.",
+        "Girdiyi çağrıdan önce doğrulayın ya da temizleyin. Baştaki `0x`, `0b`, `0o` önekleri ve boşluklar hâlâ kabul edilir.",
+      ],
+      en: [
+        "Since PHP 7.4, passing digits that aren't in the base to `base_convert()`, `bindec()`, `octdec()` and `hexdec()` is deprecated; those digits are ignored and the result is computed without them.",
+        "Validate or clean the input before the call. Leading `0x`, `0b` and `0o` prefixes and whitespace are still accepted.",
+      ],
+    },
+    before: "$n = base_convert($input, 16, 10);",
+    after: "if (!ctype_xdigit($input)) {\n    throw new InvalidArgumentException('Not hex');\n}\n$n = base_convert($input, 16, 10);",
+  },
+  "deprecated.ldap_exop_response": {
+    steps: {
+      tr: [
+        "PHP 8.4'ten beri `ldap_exop()`'un yanıt argümanları (`$response_data`, `$response_oid`) kullanımdan kalktı.",
+        "Yanıtı almak için PHP 8.3'te gelen `ldap_exop_sync()`'i kullanın; aynı argümanları alır ve true ya da false döndürür.",
+      ],
+      en: [
+        "Since PHP 8.4, `ldap_exop()`'s response arguments (`$response_data`, `$response_oid`) are deprecated.",
+        "Use `ldap_exop_sync()`, added in PHP 8.3, to get the response; it takes the same arguments and returns true or false.",
+      ],
+    },
+    before: "ldap_exop($link, LDAP_EXOP_WHO_AM_I, null, null, $data, $oid);",
+    after: "ldap_exop_sync($link, LDAP_EXOP_WHO_AM_I, null, null, $data, $oid);",
+  },
+  "deprecated.ldap_rebind_empty": {
+    steps: {
+      tr: [
+        "PHP 8.0'dan beri geri çağırmayı kaldırmak için boş metin vermek kullanımdan kalktı.",
+        "Boş metin yerine null verin.",
+      ],
+      en: [
+        "Since PHP 8.0, passing an empty string to remove the callback is deprecated.",
+        "Pass null instead of the empty string.",
+      ],
+    },
+    before: "ldap_set_rebind_proc($link, '');",
+    after: "ldap_set_rebind_proc($link, null);",
+  },
+  "deprecated.mb_strimwidth_negative": {
+    steps: {
+      tr: [
+        "PHP 8.3'ten beri `mb_strimwidth()`'e negatif genişlik vermek kullanımdan kalktı; negatif genişlik metnin sonundan sayılıyordu.",
+        "Genişliği önceden hesaplayın: `mb_strwidth($s) + $width` (negatif `$width` için) ve sonucu pozitif olarak verin.",
+      ],
+      en: [
+        "Since PHP 8.3, passing a negative width to `mb_strimwidth()` is deprecated; a negative width counted from the end of the string.",
+        "Compute the width first: `mb_strwidth($s) + $width` (for a negative `$width`), and pass the result as a positive number.",
+      ],
+    },
+    before: "mb_strimwidth($title, 0, -5, '…');",
+    after: "mb_strimwidth($title, 0, max(0, mb_strwidth($title) - 5), '…');",
+  },
+  "deprecated.mysqli_driver_version": {
+    steps: {
+      tr: [
+        "`mysqli_driver::$driver_version` PHP 8.1'de kullanımdan kalktı; yıllardır güncellenmiyordu.",
+        "İstemci kitaplığının sürümü için `mysqli_get_client_version()` ya da `mysqli_get_client_info()` kullanın. Sürüm yalnızca gösteriliyorsa satırı silebilirsiniz.",
+      ],
+      en: [
+        "`mysqli_driver::$driver_version` was deprecated in PHP 8.1; it hadn't been updated in years.",
+        "Use `mysqli_get_client_version()` or `mysqli_get_client_info()` for the client library's version. If the value is only displayed, you can remove the line.",
+      ],
+    },
+    before: "echo (new mysqli_driver())->driver_version;",
+    after: "echo mysqli_get_client_version();",
+  },
+  "deprecated.mysqli_get_client_info_arg": {
+    steps: {
+      tr: [
+        "PHP 8.1'den beri `mysqli_get_client_info()`'ya bağlantı vermek kullanımdan kalktı; sonuç zaten bağlantıya bağlı değildi.",
+        "Argümanı silin.",
+      ],
+      en: [
+        "Since PHP 8.1, passing a connection to `mysqli_get_client_info()` is deprecated; the result never depended on it.",
+        "Remove the argument.",
+      ],
+    },
+    before: "$info = mysqli_get_client_info($link);",
+    after: "$info = mysqli_get_client_info();",
+  },
+  "deprecated.mysqli_refresh": {
+    steps: {
+      tr: [
+        "`mysqli_refresh()`, `mysqli::refresh()` ve `MYSQLI_REFRESH_*` sabitleri PHP 8.4'te kullanımdan kalktı.",
+        "Aynı işi `FLUSH` sorgularıyla yapın: `MYSQLI_REFRESH_TABLES` için `FLUSH TABLES`, `MYSQLI_REFRESH_LOG` için `FLUSH LOGS`, `MYSQLI_REFRESH_GRANT` için `FLUSH PRIVILEGES`. Ferry bilinen bayraklar için bunu kendisi yazar.",
+        "`MYSQLI_REFRESH_SLAVE`, `REPLICA` ve `MASTER` gibi bayrakların karşılığı sunucu sürümüne göre değişir (`RESET REPLICA`, `RESET MASTER` gibi); sunucunun belgesine bakın.",
+      ],
+      en: [
+        "PHP 8.4 deprecated `mysqli_refresh()`, `mysqli::refresh()` and the `MYSQLI_REFRESH_*` constants.",
+        "Do the same with `FLUSH` queries: `FLUSH TABLES` for `MYSQLI_REFRESH_TABLES`, `FLUSH LOGS` for `MYSQLI_REFRESH_LOG`, `FLUSH PRIVILEGES` for `MYSQLI_REFRESH_GRANT`. Ferry writes this itself for the flags it knows.",
+        "Flags such as `MYSQLI_REFRESH_SLAVE`, `REPLICA` and `MASTER` map to statements that depend on the server version (`RESET REPLICA`, `RESET MASTER` and so on); check the server's documentation.",
+      ],
+    },
+    before: "$db->refresh(MYSQLI_REFRESH_TABLES);",
+    after: "$db->query('FLUSH TABLES');",
+  },
+  "deprecated.null_to_internal": {
+    steps: {
+      tr: [
+        "PHP 8.1'den beri yerleşik fonksiyonların null kabul etmeyen parametrelerine null vermek kullanımdan kalktı; PHP 9'da TypeError olacak.",
+        "Eski sonucu korumak için null yerine türün boş değerini yazın: metin için `''`, sayı için `0`, bool için false. Ferry düz `null` argümanlarını kendisi çevirir; `strict_types` açık dosyalarda bunu yapmaz, çünkü orada null zaten TypeError'dı.",
+        "Değer bir değişkenden geliyorsa `$value ?? ''` ya da `(string) $value` yazın.",
+      ],
+      en: [
+        "Since PHP 8.1, passing null to non-nullable parameters of built-in functions is deprecated; PHP 9 will make it a TypeError.",
+        "To keep the old result, write the type's empty value instead of null: `''` for strings, `0` for numbers, false for bools. Ferry converts plain `null` arguments itself; it doesn't in files with `strict_types`, where null was already a TypeError.",
+        "When the value comes from a variable, write `$value ?? ''` or `(string) $value`.",
+      ],
+    },
+    before: "$len = strlen($name);",
+    after: "$len = strlen($name ?? '');",
+  },
+  "deprecated.openssl_pkey_derive_length": {
+    steps: {
+      tr: [
+        "`openssl_pkey_derive()`'ın `$key_length` argümanı PHP 8.5'te kullanımdan kalktı.",
+        "Argümanı silin ve gerekiyorsa sonucu kısaltın: EC anahtarlarıyla `openssl_pkey_derive($pub, $priv, 16)`, `substr(openssl_pkey_derive($pub, $priv), 0, 16)` ile aynı baytları verdi.",
+      ],
+      en: [
+        "PHP 8.5 deprecated `openssl_pkey_derive()`'s `$key_length` argument.",
+        "Remove the argument and cut the result if needed: with EC keys, `openssl_pkey_derive($pub, $priv, 16)` gave the same bytes as `substr(openssl_pkey_derive($pub, $priv), 0, 16)`.",
+      ],
+    },
+    before: "$secret = openssl_pkey_derive($peer, $key, 16);",
+    after: "$secret = substr(openssl_pkey_derive($peer, $key), 0, 16);",
+  },
+  "deprecated.openssl_pkey_free": {
+    steps: {
+      tr: [
+        "`openssl_pkey_free()` ve `openssl_x509_free()` PHP 8.0'dan beri hiçbir şey yapmıyor ve kullanımdan kalktı; anahtar nesnesi son referansı gidince kendiliğinden serbest kalır.",
+        "Çağrıyı silin; Ferry tek başına duran çağrıları kendisi siler. Sonucu kullanılıyorsa yerine `true` yazın, ya da anahtarı hemen bırakmak için değişkene null atayın.",
+      ],
+      en: [
+        "`openssl_pkey_free()` and `openssl_x509_free()` have done nothing since PHP 8.0, which deprecated them; the key object frees itself when the last reference goes.",
+        "Delete the call; Ferry deletes standalone calls itself. Where its result is used, write `true`, or set the variable to null to let go of the key right away.",
+      ],
+    },
+    before: "$freed = openssl_pkey_free($key);",
+    after: "$key = null;\n$freed = true;",
+  },
+  "deprecated.output_in_ob_handler": {
+    steps: {
+      tr: [
+        "PHP 8.5'ten beri bir çıktı işleyicisinin içinde `echo` ya da `print` ile çıktı üretmek kullanımdan kalktı.",
+        "Yazılacak metni işleyicinin döndürdüğü değere ekleyin: `return $buffer . $extra;`.",
+      ],
+      en: [
+        "Since PHP 8.5, producing output with `echo` or `print` inside an output handler is deprecated.",
+        "Add the text to the value the handler returns: `return $buffer . $extra;`.",
+      ],
+    },
+    before: "ob_start(function ($buffer) {\n    echo '<!-- cached -->';\n    return $buffer;\n});",
+    after: "ob_start(function ($buffer) {\n    return '<!-- cached -->' . $buffer;\n});",
+  },
+  "deprecated.pdo_fetch_serialize": {
+    steps: {
+      tr: [
+        "`PDO::FETCH_SERIALIZE` `Serializable` arayüzüne dayanıyor ve PHP 8.1'de kullanımdan kalktı. Tek başına hiçbir etkisi yoktu: PDO varsayılan modu kullanıyordu, bu yüzden `PDO::FETCH_DEFAULT` sonucu korur. Ferry bunu kendisi yazar.",
+        "`FETCH_CLASS` ile birlikte kullanılıyorsa sütunu okuyup kendiniz `unserialize()` edin.",
+      ],
+      en: [
+        "`PDO::FETCH_SERIALIZE` relies on the `Serializable` interface and was deprecated in PHP 8.1. On its own it had no effect: PDO used the default mode, so `PDO::FETCH_DEFAULT` keeps the result. Ferry writes this itself.",
+        "Combined with `FETCH_CLASS`, fetch the column and `unserialize()` it yourself.",
+      ],
+    },
+    before: "$objects = $stmt->fetchAll(PDO::FETCH_CLASS | PDO::FETCH_SERIALIZE, 'Item');",
+    after: "$objects = array_map('unserialize', $stmt->fetchAll(PDO::FETCH_COLUMN));",
+  },
+  "deprecated.pgsql_escaped_question": {
+    steps: {
+      tr: [
+        "PDO_PGSQL artık `$$` ile tırnaklanmış metinleri tanır; bu yüzden onların içindeki soru işaretini `??` ile kaçırmak PHP 8.4'ten beri kullanımdan kalktı.",
+        "`$$...$$` içindeki `??`'yi tek `?` yapın. Tırnak dışındaki `??` (yer tutucu kaçışı) olduğu gibi kalır.",
+      ],
+      en: [
+        "PDO_PGSQL now understands `$$`-quoted strings, so escaping question marks inside them as `??` has been deprecated since PHP 8.4.",
+        "Change `??` inside `$$...$$` to a single `?`. A `??` outside the quotes (escaping a placeholder) stays as it is.",
+      ],
+    },
+    before: "$pdo->prepare('SELECT $$a ?? b$$, ?');",
+    after: "$pdo->prepare('SELECT $$a ? b$$, ?');",
+  },
+  "deprecated.phar_setstub_length": {
+    steps: {
+      tr: [
+        "PHP 8.3'ten beri `Phar::setStub()`'a bir kaynak ve uzunluk vermek kullanımdan kalktı.",
+        "Stub'ı metin olarak okuyup verin: `$phar->setStub(stream_get_contents($fp, $length));`.",
+      ],
+      en: [
+        "Since PHP 8.3, passing a resource and a length to `Phar::setStub()` is deprecated.",
+        "Read the stub as a string and pass that: `$phar->setStub(stream_get_contents($fp, $length));`.",
+      ],
+    },
+    before: "$phar->setStub($fp, 100);",
+    after: "$phar->setStub(stream_get_contents($fp, 100));",
+  },
+  "deprecated.pow_zero_negative": {
+    steps: {
+      tr: [
+        "PHP 8.4'ten beri sıfırın negatif bir kuvvetini almak kullanımdan kalktı; sonuç `INF`'ti ve PHP 9'da DivisionByZeroError olacak.",
+        "`INF` gerçekten isteniyorsa PHP 8.4'te gelen `fpow()`'u kullanın: `fpow(0, -1)` `INF` verir. Değilse taban sıfırken ne olması gerektiğini ayrıca ele alın.",
+      ],
+      en: [
+        "Since PHP 8.4, raising zero to a negative power is deprecated; the result was `INF`, and PHP 9 will throw DivisionByZeroError.",
+        "If `INF` is really wanted, use `fpow()`, added in PHP 8.4: `fpow(0, -1)` gives `INF`. Otherwise handle a zero base separately.",
+      ],
+    },
+    before: "$scale = $base ** -$exp;",
+    after: "$scale = $base == 0 ? INF : $base ** -$exp;",
+  },
+  "deprecated.reflection_method_string": {
+    steps: {
+      tr: [
+        "PHP 8.4'ten beri `new ReflectionMethod('Sinif::metot')` kullanımdan kalktı.",
+        "PHP 8.3'te gelen `ReflectionMethod::createFromMethodName('Sinif::metot')`'u ya da iki argümanlı `new ReflectionMethod('Sinif', 'metot')`'u kullanın.",
+      ],
+      en: [
+        "Since PHP 8.4, `new ReflectionMethod('Class::method')` is deprecated.",
+        "Use `ReflectionMethod::createFromMethodName('Class::method')`, added in PHP 8.3, or the two-argument `new ReflectionMethod('Class', 'method')`.",
+      ],
+    },
+    before: "$m = new ReflectionMethod($callable);",
+    after: "$m = ReflectionMethod::createFromMethodName($callable);",
+  },
+  "deprecated.sid_constant": {
+    steps: {
+      tr: [
+        "`SID` sabiti, oturum kimliğini URL'de ya da formda taşıyan oturumlarla birlikte PHP 8.4'te kullanımdan kalktı.",
+        "Oturum kimliğini çerezde tutun (`session.use_only_cookies = 1`, varsayılan) ve bağlantılara `SID` eklemeyi bırakın. Çerez kullanılırken `SID` zaten boş metindi.",
+      ],
+      en: [
+        "PHP 8.4 deprecated the `SID` constant, along with sessions that carry the session ID in the URL or a form.",
+        "Keep the session ID in a cookie (`session.use_only_cookies = 1`, the default) and stop adding `SID` to links. While cookies are used, `SID` was an empty string anyway.",
+      ],
+    },
+    before: "echo '<a href=\"next.php?' . SID . '\">Next</a>';",
+    after: "echo '<a href=\"next.php\">Next</a>';",
+  },
+  "deprecated.soap_ssl_method": {
+    steps: {
+      tr: [
+        "`SoapClient`'ın `ssl_method` seçeneği PHP 8.1'de kullanımdan kalktı.",
+        "TLS sürümünü bir akış bağlamıyla verin: `'stream_context' => stream_context_create(['ssl' => ['crypto_method' => STREAM_CRYPTO_METHOD_TLSv1_2_CLIENT]])`.",
+      ],
+      en: [
+        "PHP 8.1 deprecated `SoapClient`'s `ssl_method` option.",
+        "Set the TLS version through a stream context: `'stream_context' => stream_context_create(['ssl' => ['crypto_method' => STREAM_CRYPTO_METHOD_TLSv1_2_CLIENT]])`.",
+      ],
+    },
+    before: "new SoapClient($wsdl, ['ssl_method' => SOAP_SSL_METHOD_TLS]);",
+    after: "new SoapClient($wsdl, ['stream_context' => stream_context_create(['ssl' => ['crypto_method' => STREAM_CRYPTO_METHOD_TLSv1_2_CLIENT]])]);",
+  },
+  "deprecated.splfixedarray_wakeup": {
+    steps: {
+      tr: [
+        "`SplFixedArray::__wakeup()` PHP 8.4'te kullanımdan kalktı; serileştirmeden geri açma artık `__unserialize()` ile yapılıyor ve çağrı nesnede hiçbir şeyi değiştirmiyor.",
+        "Çağrıyı silin; Ferry bunu kendisi yapar. Alt sınıfta `__wakeup()` tanımlıysa o mantığı `__unserialize()`'a taşıyın.",
+      ],
+      en: [
+        "PHP 8.4 deprecated `SplFixedArray::__wakeup()`; unserialization now goes through `__unserialize()`, and the call changes nothing on the object.",
+        "Delete the call; Ferry does this itself. If a subclass defines `__wakeup()`, move that logic to `__unserialize()`.",
+      ],
+    },
+    before: "$items = unserialize($data);\n$items->__wakeup();",
+    after: "$items = unserialize($data);",
+  },
+  "deprecated.sqlite3_exceptions_off": {
+    steps: {
+      tr: [
+        "`SQLite3::enableExceptions(false)` PHP 8.3'te kullanımdan kalktı; istisnalar ileride her zaman açık olacak.",
+        "Çağrıyı silin ve false dönüşünü kontrol eden kodu `try { ... } catch (Exception $e) { ... }` ile değiştirin; SQLite3 hata durumunda `Exception` fırlatır.",
+      ],
+      en: [
+        "PHP 8.3 deprecated `SQLite3::enableExceptions(false)`; exceptions will always be on.",
+        "Remove the call and replace code that checks for a false result with `try { ... } catch (Exception $e) { ... }`; SQLite3 throws `Exception` on errors.",
+      ],
+    },
+    before: "$db->enableExceptions(false);\nif ($db->exec($sql) === false) {\n    log_error($db->lastErrorMsg());\n}",
+    after: "try {\n    $db->exec($sql);\n} catch (Exception $e) {\n    log_error($e->getMessage());\n}",
+  },
+  "deprecated.ssl_capture_session_meta": {
+    steps: {
+      tr: [
+        "`capture_session_meta` SSL bağlam seçeneği PHP 7.0'da kullanımdan kalktı.",
+        "Seçeneği silin ve bağlantının şifreleme bilgisini `stream_get_meta_data($stream)['crypto']`'dan okuyun.",
+      ],
+      en: [
+        "PHP 7.0 deprecated the `capture_session_meta` SSL context option.",
+        "Remove the option and read the connection's crypto details from `stream_get_meta_data($stream)['crypto']`.",
+      ],
+    },
+    before: "$ctx = stream_context_create(['ssl' => ['capture_session_meta' => true]]);",
+    after: "$ctx = stream_context_create(['ssl' => []]);\n$crypto = stream_get_meta_data($stream)['crypto'];",
+  },
+  "deprecated.string_decrement": {
+    steps: {
+      tr: [
+        "Sayısal olmayan bir metni `--` ile azaltmak hiçbir şey yapmıyordu ve PHP 8.3'te kullanımdan kalktı: `$s = 'abc'; $s--;` sonrasında `$s` yine `'abc'`'dir.",
+        "Eski davranışı korumak için `--`'yi silin. Azaltma gerçekten isteniyorsa PHP 8.3'te gelen `str_decrement()`'i kullanın; ama `str_decrement('abc')` `'abb'` verir, yani sonuç değişir.",
+      ],
+      en: [
+        "Decrementing a non-numeric string with `--` did nothing and was deprecated in PHP 8.3: after `$s = 'abc'; $s--;`, `$s` is still `'abc'`.",
+        "To keep the old behaviour, remove the `--`. If decrementing was really meant, use `str_decrement()`, added in PHP 8.3; but `str_decrement('abc')` gives `'abb'`, so the result changes.",
+      ],
+    },
+    before: "$code = $row['code'];\n$code--;\nreturn $code;",
+    after: "$code = $row['code'];\nreturn $code;",
+  },
+  "deprecated.string_increment": {
+    steps: {
+      tr: [
+        "PHP 8.5'ten beri sayısal olmayan bir metni `++` ile artırmak kullanımdan kalktı.",
+        "PHP 8.3'te gelen `str_increment()`'i kullanın; harf ve rakamlardan oluşan metinlerde aynı sonucu verir (`'Az'` → `'Ba'`). Ferry bilinen metinlerde bunu kendisi yapar.",
+        "`str_increment()` boş metinde ve harf ya da rakam olmayan karakter içeren metinlerde ValueError fırlatır; `++` ise `''`'yi `'1'` yapıyordu. Değerin ne olabileceğine bakın.",
+      ],
+      en: [
+        "Since PHP 8.5, incrementing a non-numeric string with `++` is deprecated.",
+        "Use `str_increment()`, added in PHP 8.3; it gives the same result for strings of letters and digits (`'Az'` → `'Ba'`). Ferry does this itself for strings it knows.",
+        "`str_increment()` throws a ValueError for an empty string and for strings with characters other than letters and digits, while `++` turned `''` into `'1'`. Check what the value can be.",
+      ],
+    },
+    before: "$next = $id;\n$next++;",
+    after: "$next = str_increment($id);",
+  },
+  "deprecated.underscore_class_name": {
+    steps: {
+      tr: [
+        "PHP 8.4'ten beri `_` sınıf adı olarak kullanımdan kalktı.",
+        "Sınıfı ve onu kullanan her yeri yeniden adlandırın; Rector'un `RenameClassRector` kuralı hepsini birlikte değiştirebilir.",
+      ],
+      en: [
+        "Since PHP 8.4, `_` as a class name is deprecated.",
+        "Rename the class and every place that uses it; Rector's `RenameClassRector` can change them all at once.",
+      ],
+    },
+    before: "class _ {",
+    after: "class Translator {",
+  },
+  "deprecated.unregister_autoload_call": {
+    steps: {
+      tr: [
+        "Bütün yükleyicileri kaldırmak için `spl_autoload_call`'u kaydından çıkarmak PHP 8.5'te kullanımdan kalktı.",
+        "Kayıtlı yükleyicileri tek tek kaldırın: `foreach (spl_autoload_functions() as $loader) { spl_autoload_unregister($loader); }`.",
+      ],
+      en: [
+        "PHP 8.5 deprecated unregistering `spl_autoload_call` to remove every autoloader.",
+        "Remove the registered autoloaders one by one: `foreach (spl_autoload_functions() as $loader) { spl_autoload_unregister($loader); }`.",
+      ],
+    },
+    before: "spl_autoload_unregister('spl_autoload_call');",
+    after: "foreach (spl_autoload_functions() as $loader) {\n    spl_autoload_unregister($loader);\n}",
+  },
+  "deprecated.unserialize_upper_s": {
+    steps: {
+      tr: [
+        "PHP 8.4'ten beri büyük `S:` etiketli metinleri geri açmak kullanımdan kalktı. Bu etiketi eski PHP sürümleri ve bazı kitaplıklar yazıyordu; içindeki baytlar `\\xx` kaçışlarıyla yazılır.",
+        "Saklanan veriyi bir kez okuyup yeniden serileştirin: hedef sürümde `serialize(unserialize($data))` küçük `s:` ile yazar. Bu dönüşümü veriyi yazan yerde de yapın ki yeni kayıtlar eski biçimde oluşmasın.",
+      ],
+      en: [
+        "Since PHP 8.4, unserializing strings with the uppercase `S:` tag is deprecated. Old PHP versions and some libraries wrote this tag; the bytes inside are written as `\\xx` escapes.",
+        "Read the stored data once and serialize it again: on the target version `serialize(unserialize($data))` writes the lowercase `s:`. Do this where the data is written too, so new records aren't created in the old form.",
+      ],
+    },
+  },
+  "deprecated.void_by_reference": {
+    steps: {
+      tr: [
+        "PHP 8.1'den beri `void` dönüşlü bir fonksiyonu referansla döndüren (`function &f(): void`) olarak tanımlamak kullanımdan kalktı; döndürülecek bir değer yok.",
+        "`&`'yi silin.",
+      ],
+      en: [
+        "Since PHP 8.1, declaring a `void` function as returning by reference (`function &f(): void`) is deprecated; there is nothing to return.",
+        "Remove the `&`.",
+      ],
+    },
+    before: "function &reset(): void {",
+    after: "function reset(): void {",
+  },
+  "deprecated.zip_fl_recompress": {
+    steps: {
+      tr: [
+        "`ZipArchive::FL_RECOMPRESS` PHP 8.3'te kullanımdan kalktı ve libzip'in sonraki sürümlerinde kaldırılacak.",
+        "Kullanıldığı yeri kaldırın; `|` ile birleştirildiği yerlerde yalnızca bu sabiti çıkarın. Ferry `setCompressionName()` ve `setCompressionIndex()` çağrılarında bunu kendisi yapar.",
+      ],
+      en: [
+        "PHP 8.3 deprecated `ZipArchive::FL_RECOMPRESS`, and later libzip versions will remove it.",
+        "Remove its use; in a `|` combination, take out only this constant. Ferry does this itself in `setCompressionName()` and `setCompressionIndex()` calls.",
+      ],
+    },
+    before: "$zip->setCompressionName('a.txt', ZipArchive::CM_DEFLATE, ZipArchive::FL_RECOMPRESS);",
+    after: "$zip->setCompressionName('a.txt', ZipArchive::CM_DEFLATE);",
+  },
+  "removed.ai_idn_constant": {
+    steps: {
+      tr: [
+        "`AI_IDN_ALLOW_UNASSIGNED` ve `AI_IDN_USE_STD3_ASCII_RULES` glibc 2.28'den beri hiçbir şey yapmıyor; PHP 7.4'te kullanımdan kalktı, 8.0'da kaldırıldı.",
+        "`|` maskelerinden çıkarın; tek başına kullanıldığı yerde 0 yazın. glibc 2.28 ve sonrasında arama aynı kalır. Ferry bunu kendisi yapar; bir değeri onunla karşılaştıran ya da `&` ile sınayan kodu elle değiştirin (sonuç her zaman 0'dı).",
+      ],
+      en: [
+        "`AI_IDN_ALLOW_UNASSIGNED` and `AI_IDN_USE_STD3_ASCII_RULES` have done nothing since glibc 2.28; PHP 7.4 deprecated them and 8.0 removed them.",
+        "Drop them from `|` masks; where one stands alone, write 0. The lookup stays the same on glibc 2.28 and later. Ferry does this itself; change code that compares a value with them or tests them with `&` by hand (the result was always 0).",
+      ],
+    },
+    before: "if ($flags & AI_IDN_ALLOW_UNASSIGNED) {",
+    after: "if (false) {",
+  },
+  "removed.ambiguous_trait_alias": {
+    steps: {
+      tr: [
+        "Bu metot kullanılan trait'lerin birden fazlasında var. PHP 8.0'dan beri takma ad hangisini kastettiğini `Trait::metot` ile söylemeli; yoksa sınıf derlenmez.",
+        "Takma adı trait adıyla yazın: `T1::f as g;`. Hangi trait'in metodu kullanılıyorsa (`insteadof` ile seçileni) onun adını verin.",
+      ],
+      en: [
+        "This method exists in more than one of the traits used. Since PHP 8.0 the alias has to say which one with `Trait::method`, or the class doesn't compile.",
+        "Write the alias with the trait's name: `T1::f as g;`. Name the trait whose method is used (the one chosen with `insteadof`).",
+      ],
+    },
+    before: "use T1, T2 { T1::f insteadof T2; f as g; }",
+    after: "use T1, T2 { T1::f insteadof T2; T1::f as g; }",
+  },
+  "removed.array_object_enum": {
+    steps: {
+      tr: [
+        "PHP 8.5'ten beri `ArrayObject` enum kabul etmez ve `InvalidArgumentException` fırlatır.",
+        "Enum'un kendisi yerine gereken değerleri bir diziye koyup verin, örneğin `['case' => $enum->name, 'value' => $enum->value]`.",
+      ],
+      en: [
+        "Since PHP 8.5, `ArrayObject` doesn't accept enums and throws `InvalidArgumentException`.",
+        "Put the values you need into an array and pass that instead of the enum itself, such as `['case' => $enum->name, 'value' => $enum->value]`.",
+      ],
+    },
+    before: "$view = new ArrayObject(Status::Active);",
+    after: "$view = new ArrayObject(['name' => Status::Active->name, 'value' => Status::Active->value]);",
+  },
+  "removed.attribute_on_non_class": {
+    steps: {
+      tr: [
+        "PHP 8.5'ten beri `#[Attribute]` soyut sınıflara, arayüzlere, trait'lere ve enum'lara uygulanamaz; dosya derlenmez.",
+        "`#[Attribute]`'u silin. Bu tür bir öznitelik zaten hiçbir zaman örneklenemiyordu; öznitelik olarak kullanılacaksa onu somut bir sınıf yapın.",
+      ],
+      en: [
+        "Since PHP 8.5, `#[Attribute]` can't be applied to abstract classes, interfaces, traits or enums; the file doesn't compile.",
+        "Remove `#[Attribute]`. Such an attribute could never be instantiated anyway; if it's meant to be used as an attribute, make it a concrete class.",
+      ],
+    },
+    before: "#[Attribute]\nabstract class Route {}",
+    after: "abstract class Route {}",
+  },
+  "removed.break_outside_loop": {
+    steps: {
+      tr: [
+        "Döngü ya da `switch` dışındaki `break` ve `continue` PHP 7.0'dan beri ölümcül hatadır; dosya derlenmez. PHP 5'te fonksiyonun içindeki bir `break`, include edilen dosyayı ya da fonksiyonu bitirmek için kullanılıyordu.",
+        "Fonksiyondan çıkmak için `return`, include edilen dosyayı bitirmek için dosyanın en üst düzeyinde `return` yazın. Ferry dönüş tipi `void` olan ya da olmayan fonksiyonlarda düz `break;`'i kendisi `return;` yapar.",
+        "Kalan kodun çalışmaması isteniyorsa onu bir koşulun içine alın.",
+      ],
+      en: [
+        "`break` and `continue` outside a loop or `switch` have been a fatal error since PHP 7.0; the file doesn't compile. On PHP 5 a `break` inside a function was used to end it or the included file.",
+        "Write `return` to leave a function, and `return` at the top level of an included file to end it. Ferry turns a plain `break;` into `return;` itself in functions without a non-void return type.",
+        "If the rest of the code shouldn't run, put it inside a condition.",
+      ],
+    },
+    before: "if (!$ready) {\n    break;\n}",
+    after: "if (!$ready) {\n    return;\n}",
+  },
+  "removed.builtin_method": {
+    steps: {
+      tr: [
+        "Bu yerleşik metot PHP'den kaldırıldı; çağrılması ölümcül hatadır. Bulgunun başlığı metodu, önerilen satır varsa yerine geçeni gösterir.",
+        "PHP 4 tarzı kurucu çağrıları (`parent::SoapClient(...)` gibi) `parent::__construct(...)` olmalıdır. Diğer metotlar için PHP kılavuzunda sınıfın sayfasına bakın.",
+      ],
+      en: [
+        "This built-in method was removed from PHP; calling it is a fatal error. The finding's title names the method, and the suggested line shows the replacement when there is one.",
+        "PHP 4 style constructor calls (such as `parent::SoapClient(...)`) should be `parent::__construct(...)`. For other methods, look at the class's page in the PHP manual.",
+      ],
+    },
+    before: "parent::SoapClient($wsdl, $options);",
+    after: "parent::__construct($wsdl, $options);",
+  },
+  "removed.bzcompress_range": {
+    steps: {
+      tr: [
+        "PHP 8.5'ten beri `bzcompress()` aralık dışındaki blok boyutu ve iş faktöründe ValueError fırlatır.",
+        "Blok boyutunu 1 ile 9, iş faktörünü 0 ile 250 arasında verin; 9 ve 0 en yaygın seçimlerdir.",
+      ],
+      en: [
+        "Since PHP 8.5, `bzcompress()` throws a ValueError for an out-of-range block size or work factor.",
+        "Pass a block size from 1 to 9 and a work factor from 0 to 250; 9 and 0 are the usual choices.",
+      ],
+    },
+    before: "bzcompress($data, 10);",
+    after: "bzcompress($data, 9);",
+  },
+  "removed.closure_use_variable": {
+    steps: {
+      tr: [
+        "PHP 7.1'den beri `$this`, süper global değişkenler ve bir parametreyle aynı adlı değişkenler `use()` ile bağlanamaz; dosya derlenmez.",
+        "Değişkeni `use()`'dan silin. `$this` kapanışta zaten kullanılabilir; süper global değişkenlere her yerden erişilir; parametreyle çakışan değişkeni başka bir adla bağlayın.",
+      ],
+      en: [
+        "Since PHP 7.1, `$this`, superglobals and variables named like a parameter can't be bound with `use()`; the file doesn't compile.",
+        "Remove the variable from `use()`. `$this` is available in the closure anyway, superglobals are reachable everywhere, and a variable that clashes with a parameter should be bound under another name.",
+      ],
+    },
+    before: "$f = function () use ($this) { return $this->id; };",
+    after: "$f = function () { return $this->id; };",
+  },
+  "removed.create_function": {
+    steps: {
+      tr: [
+        "`create_function()` PHP 8.0'da kaldırıldı. Rector sabit kod metinlerini kapanışa çevirir.",
+        "Kod metni çalışırken oluşturuluyorsa ya da fonksiyon adı bir metin olarak veriliyorsa (`'create_function'`) mantığı elle bir kapanışa yazın. Metindeki değişkenleri kapanışa parametre ya da `use()` ile verin.",
+      ],
+      en: [
+        "`create_function()` was removed in PHP 8.0. Rector turns literal code strings into closures.",
+        "When the code string is built at runtime, or the function name is passed as a string (`'create_function'`), write the logic as a closure by hand. Pass the variables the string used as parameters or with `use()`.",
+      ],
+    },
+    before: "$cmp = create_function('$a, $b', 'return $a[\"' . $key . '\"] <=> $b[\"' . $key . '\"];');",
+    after: "$cmp = function ($a, $b) use ($key) {\n    return $a[$key] <=> $b[$key];\n};",
+  },
+  "removed.csv_separator_length": {
+    steps: {
+      tr: [
+        "PHP 8.4'ten beri CSV fonksiyonları boş ya da birden uzun ayraçta ValueError fırlatır.",
+        "Tek karakterlik bir ayraç verin. Birden çok karakterli bir ayraç gerekiyorsa satırı `explode()` ile bölün.",
+      ],
+      en: [
+        "Since PHP 8.4, the CSV functions throw a ValueError for an empty separator or one longer than a character.",
+        "Pass a one-character separator. If a multi-character separator is needed, split the line with `explode()`.",
+      ],
+    },
+    before: "$fields = str_getcsv($line, '||');",
+    after: "$fields = explode('||', $line);",
+  },
+  "removed.curl_multi_select_negative": {
+    steps: {
+      tr: [
+        "PHP 8.4'ten beri `curl_multi_select()` negatif zaman aşımında ValueError fırlatır.",
+        "0 ya da pozitif bir zaman aşımı verin; varsayılan 1 saniyedir.",
+      ],
+      en: [
+        "Since PHP 8.4, `curl_multi_select()` throws a ValueError for a negative timeout.",
+        "Pass 0 or a positive timeout; the default is 1 second.",
+      ],
+    },
+    before: "curl_multi_select($mh, -1);",
+    after: "curl_multi_select($mh, 1.0);",
+  },
+  "removed.curl_safe_upload_off": {
+    steps: {
+      tr: [
+        "PHP 7.0'dan beri `CURLOPT_SAFE_UPLOAD` kapatılamaz; `'@/yol/dosya'` biçimindeki yüklemeler artık çalışmaz.",
+        "Dosyayı bir `CURLFile` nesnesiyle verin ve `CURLOPT_SAFE_UPLOAD` satırını silin.",
+      ],
+      en: [
+        "Since PHP 7.0, `CURLOPT_SAFE_UPLOAD` can't be turned off, so `'@/path/file'` uploads no longer work.",
+        "Pass the file as a `CURLFile` object and remove the `CURLOPT_SAFE_UPLOAD` line.",
+      ],
+    },
+    before: "curl_setopt($ch, CURLOPT_SAFE_UPLOAD, false);\ncurl_setopt($ch, CURLOPT_POSTFIELDS, ['file' => '@' . $path]);",
+    after: "curl_setopt($ch, CURLOPT_POSTFIELDS, ['file' => new CURLFile($path)]);",
+  },
+  "removed.custom_assert": {
+    steps: {
+      tr: [
+        "`assert()` adında bir fonksiyon tanımlamak PHP 7.3'te kullanımdan kalktı, PHP 8.0'dan beri derleme hatasıdır; `assert` derleyicinin özel ele aldığı bir addır.",
+        "Fonksiyonu yeniden adlandırın ve çağrıldığı yerleri değiştirin. Sınıf metotları bundan etkilenmez.",
+      ],
+      en: [
+        "Declaring a function named `assert()` was deprecated in PHP 7.3 and is a compile error since PHP 8.0; `assert` is a name the compiler handles specially.",
+        "Rename the function and change the places that call it. Class methods aren't affected.",
+      ],
+    },
+    before: "namespace App;\nfunction assert($cond) {",
+    after: "namespace App;\nfunction ensure($cond) {",
+  },
+  "removed.data_stream_write": {
+    steps: {
+      tr: [
+        "PHP 8.0'dan beri `data:` akışlarına yazılamaz; yazma false döndürür. PHP 7.4'te `file_put_contents('data://text/plain,foo', 'x')` 1 döndürüyordu ama yazılan hiçbir yere gitmiyordu.",
+        "Geçici bellek için `php://memory` ya da `php://temp` kullanın. Yalnızca okumak için açılan `data:` akışları çalışmaya devam eder.",
+      ],
+      en: [
+        "Since PHP 8.0, `data:` streams can't be written to; writing returns false. On PHP 7.4, `file_put_contents('data://text/plain,foo', 'x')` returned 1, but what was written went nowhere.",
+        "Use `php://memory` or `php://temp` for in-memory data. `data:` streams opened only for reading keep working.",
+      ],
+    },
+    before: "$fp = fopen('data:text/plain,', 'w');",
+    after: "$fp = fopen('php://memory', 'w+');",
+  },
+  "removed.delete_in_identifier": {
+    steps: {
+      tr: [
+        "PHP 7.1'den beri ASCII 0x7F (Delete) karakteri tırnaksız adlarda kullanılamaz; dosya derlenmez.",
+        "Karakteri silin. Çoğu düzenleyici bu karakteri göstermez; dosyayı onaltılık görünümde açarak ya da `sed -i 's/\\x7f//g' dosya.php` ile temizleyebilirsiniz.",
+      ],
+      en: [
+        "Since PHP 7.1, the ASCII 0x7F (Delete) character isn't allowed in unquoted names; the file doesn't compile.",
+        "Remove the character. Most editors don't show it; you can clean it in a hex view or with `sed -i 's/\\x7f//g' file.php`.",
+      ],
+    },
+  },
+  "removed.duplicate_parameter": {
+    steps: {
+      tr: [
+        "PHP 7.0'dan beri iki parametre aynı adı taşıyamaz; dosya derlenmez. PHP 5'te son parametre geçerli oluyordu.",
+        "Parametrelerden birini yeniden adlandırın. PHP 5'teki davranışı korumak için gövde aynı adı kullanmaya devam ederse sonraki parametrenin değerini almalıdır; öncekini kullanılmayan bir adla değiştirin.",
+      ],
+      en: [
+        "Since PHP 7.0, two parameters can't share a name; the file doesn't compile. On PHP 5 the last one won.",
+        "Rename one of them. To keep the PHP 5 behaviour, the body should keep reading the later parameter under the shared name; give the earlier one an unused name.",
+      ],
+    },
+    before: "function handle($a, $b, $a) {",
+    after: "function handle($unused, $b, $a) {",
+  },
+  "removed.dynamic_scope_call": {
+    steps: {
+      tr: [
+        "`extract()`, `compact()`, `func_get_args()` ve benzerleri PHP 7.1'den beri dinamik olarak (`$f()` ya da `call_user_func()` ile) çağrılamaz. 7.1'de uyarı verir, PHP 8.0'dan beri Error fırlatır.",
+        "Fonksiyonu doğrudan çağırın. Çağrılacak fonksiyon bir değişkenden geliyorsa bu fonksiyonlar için ayrı bir dal yazın.",
+      ],
+      en: [
+        "`extract()`, `compact()`, `func_get_args()` and similar functions can't be called dynamically (through `$f()` or `call_user_func()`) since PHP 7.1. It warns on 7.1 and throws an Error since PHP 8.0.",
+        "Call the function directly. If the function to call comes from a variable, write a separate branch for these.",
+      ],
+    },
+    before: "$vars = call_user_func('compact', 'id', 'name');",
+    after: "$vars = compact('id', 'name');",
+  },
+  "removed.empty_list": {
+    steps: {
+      tr: [
+        "PHP 7.0'dan beri boş bir `list()` ataması (`list() = $a;` ya da `list(,,) = $a;`) derleme hatasıdır.",
+        "Atamayı silin; hiçbir değişkene değer vermiyordu. Sağ taraf bir fonksiyon çağrısıysa ve çalışması gerekiyorsa yalnızca çağrıyı bırakın.",
+      ],
+      en: [
+        "Since PHP 7.0, an empty `list()` assignment (`list() = $a;` or `list(,,) = $a;`) is a compile error.",
+        "Remove the assignment; it assigned nothing. If the right side is a function call that has to run, keep only the call.",
+      ],
+    },
+    before: "list(,,) = next_row($result);",
+    after: "next_row($result);",
+  },
+  "removed.extends_final_class": {
+    steps: {
+      tr: [
+        "Bu yerleşik sınıf artık `final`; onu genişleten bir sınıf derlenmez.",
+        "Sınıfı genişletmek yerine sarın: nesneyi bir özellikte tutun ve gereken metotları ona yönlendirin.",
+      ],
+      en: [
+        "This built-in class is `final` now, so a class that extends it doesn't compile.",
+        "Wrap the class instead of extending it: keep an instance in a property and forward the methods you need to it.",
+      ],
+    },
+    before: "class Money extends GMP {\n}",
+    after: "class Money {\n    public function __construct(private GMP $value) {}\n}",
+  },
+  "removed.extract_flags_zero": {
+    steps: {
+      tr: [
+        "PHP 7.4'ten beri `SplPriorityQueue::setExtractFlags(0)` RuntimeException fırlatır; PHP 5.6'da hata vermiyordu.",
+        "Ne çıkarılacağını söyleyin: veri için `SplPriorityQueue::EXTR_DATA` (varsayılan), öncelik için `EXTR_PRIORITY`, ikisi için `EXTR_BOTH`.",
+      ],
+      en: [
+        "Since PHP 7.4, `SplPriorityQueue::setExtractFlags(0)` throws a RuntimeException; on PHP 5.6 it didn't.",
+        "Say what to extract: `SplPriorityQueue::EXTR_DATA` for the data (the default), `EXTR_PRIORITY` for the priority, `EXTR_BOTH` for both.",
+      ],
+    },
+    before: "$queue->setExtractFlags(0);",
+    after: "$queue->setExtractFlags(SplPriorityQueue::EXTR_DATA);",
+  },
+  "removed.fetch_all_into": {
+    steps: {
+      tr: [
+        "PHP 8.5'ten beri `fetchAll()` `PDO::FETCH_INTO` modunu kabul etmez; tek bir nesneyi doldurmak zaten satır satır yapılan bir iştir.",
+        "Modu `setFetchMode(PDO::FETCH_INTO, $object)` ile ayarlayıp `fetch()`'i bir döngüde çağırın.",
+      ],
+      en: [
+        "Since PHP 8.5, `fetchAll()` doesn't accept the `PDO::FETCH_INTO` mode; filling a single object is a row-by-row job anyway.",
+        "Set the mode with `setFetchMode(PDO::FETCH_INTO, $object)` and call `fetch()` in a loop.",
+      ],
+    },
+    before: "$rows = $stmt->fetchAll(PDO::FETCH_INTO);",
+    after: "$stmt->setFetchMode(PDO::FETCH_INTO, $row);\nwhile ($stmt->fetch()) {\n    $rows[] = clone $row;\n}",
+  },
+  "removed.fetch_class_named_args": {
+    steps: {
+      tr: [
+        "PHP 8.5'ten beri `FETCH_CLASS`'ın kurucu argümanları metin anahtarlı olamaz.",
+        "Anahtarları kaldırıp argümanları kurucudaki sırayla verin: `array_values($args)`.",
+      ],
+      en: [
+        "Since PHP 8.5, the constructor arguments of `FETCH_CLASS` can't have string keys.",
+        "Drop the keys and pass the arguments in the constructor's order: `array_values($args)`.",
+      ],
+    },
+    before: "$stmt->setFetchMode(PDO::FETCH_CLASS, User::class, ['role' => 'admin']);",
+    after: "$stmt->setFetchMode(PDO::FETCH_CLASS, User::class, ['admin']);",
+  },
+  "removed.fetch_props_late_mode": {
+    steps: {
+      tr: [
+        "PHP 8.5'ten beri `PDO::FETCH_PROPS_LATE` yalnızca `PDO::FETCH_CLASS` ile kullanılabilir; başka modlarda zaten etkisi yoktu.",
+        "Başka bir modla birlikteyse `FETCH_PROPS_LATE`'i çıkarın; kurucunun özelliklerden önce çalışması isteniyorsa `FETCH_CLASS` ile kullanın.",
+      ],
+      en: [
+        "Since PHP 8.5, `PDO::FETCH_PROPS_LATE` can only be used with `PDO::FETCH_CLASS`; with other modes it had no effect anyway.",
+        "With another mode, take `FETCH_PROPS_LATE` out; if the constructor should run before the properties are set, use it with `FETCH_CLASS`.",
+      ],
+    },
+    before: "$rows = $stmt->fetchAll(PDO::FETCH_ASSOC | PDO::FETCH_PROPS_LATE);",
+    after: "$rows = $stmt->fetchAll(PDO::FETCH_ASSOC);",
+  },
+  "removed.fgetss": {
+    steps: {
+      tr: [
+        "`fgetss()` ve `gzgetss()` PHP 8.0'da kaldırıldı. Ferry okumayı `fgets()` ile yapıp `strip_tags()` uygulayan ve dosya sonunda false'u koruyan bir ifadeye çevirir.",
+        "Okumayı yalnızca `strip_tags()` ile sarmayın: dosya sonundaki false `''` olur ve `while (... !== false)` döngüsü bitmez. Bir etiket iki satıra bölünmüşse ikinci yarısı artık sonraki satırda kalır; gerekirse dosyanın tamamını okuyup `strip_tags()` uygulayın.",
+      ],
+      en: [
+        "`fgetss()` and `gzgetss()` were removed in PHP 8.0. Ferry turns the read into an expression that reads with `fgets()`, applies `strip_tags()` and keeps the false at end of file.",
+        "Don't just wrap the read in `strip_tags()`: the false at end of file becomes `''` and a `while (... !== false)` loop never ends. When a tag is split across lines, its second half now stays in the next line; if that matters, read the whole file and apply `strip_tags()` once.",
+      ],
+    },
+    before: "while (($line = fgetss($fp, 4096, $allowed)) !== false) {",
+    after: "while (($line = fgets($fp, 4096)) !== false) {\n    $line = strip_tags($line, $allowed);",
+  },
+  "removed.file_append_flag": {
+    steps: {
+      tr: [
+        "PHP 8.3'ten beri `file()` geçersiz bayraklarda ValueError fırlatır ve `FILE_APPEND` bunlardan biridir; `file()` için hiçbir zaman bir anlamı yoktu.",
+        "Bayrağı çıkarın. Dosyaya eklemek isteniyorsa `file_put_contents($path, $data, FILE_APPEND)` kullanın.",
+      ],
+      en: [
+        "Since PHP 8.3, `file()` throws a ValueError for invalid flags, and `FILE_APPEND` is one of them; it never meant anything for `file()`.",
+        "Take the flag out. To append to a file, use `file_put_contents($path, $data, FILE_APPEND)`.",
+      ],
+    },
+    before: "$lines = file($path, FILE_APPEND | FILE_IGNORE_NEW_LINES);",
+    after: "$lines = file($path, FILE_IGNORE_NEW_LINES);",
+  },
+  "removed.filter_flag_host_required": {
+    steps: {
+      tr: [
+        "`FILTER_FLAG_HOST_REQUIRED` ve `FILTER_FLAG_SCHEME_REQUIRED` PHP 8.0'da kaldırıldı; `FILTER_VALIDATE_URL` zaten şema ve host ister.",
+        "Bayrağı çıkarın; tek başına kullanıldığı yerde 0 yazın. Ferry bunu kendisi yapar; bir değeri onunla karşılaştıran ya da `&` ile sınayan kodu elle değiştirin.",
+      ],
+      en: [
+        "`FILTER_FLAG_HOST_REQUIRED` and `FILTER_FLAG_SCHEME_REQUIRED` were removed in PHP 8.0; `FILTER_VALIDATE_URL` already requires a scheme and a host.",
+        "Take the flag out; where it stands alone, write 0. Ferry does this itself; change code that compares a value with it or tests it with `&` by hand.",
+      ],
+    },
+    before: "filter_var($url, FILTER_VALIDATE_URL, FILTER_FLAG_HOST_REQUIRED);",
+    after: "filter_var($url, FILTER_VALIDATE_URL);",
+  },
+  "removed.gettext_empty_domain": {
+    steps: {
+      tr: [
+        "PHP 8.4'ten beri gettext fonksiyonları boş domain'de ValueError fırlatır.",
+        "Domain'in adını verin. Geçerli domain'i okumak için `textdomain(null)` kullanın.",
+      ],
+      en: [
+        "Since PHP 8.4, the gettext functions throw a ValueError for an empty domain.",
+        "Pass the domain's name. To read the current domain, use `textdomain(null)`.",
+      ],
+    },
+    before: "$current = textdomain('');",
+    after: "$current = textdomain(null);",
+  },
+  "removed.gmp_setbit_negative": {
+    steps: {
+      tr: [
+        "PHP 7.0'dan beri `gmp_setbit()` negatif bit indisi kabul etmez.",
+        "İndisi 0 ya da pozitif verin; bit 0 en düşük bittir.",
+      ],
+      en: [
+        "Since PHP 7.0, `gmp_setbit()` doesn't accept a negative bit index.",
+        "Pass an index of 0 or more; bit 0 is the lowest bit.",
+      ],
+    },
+  },
+  "removed.hash_hmac_non_crypto": {
+    steps: {
+      tr: [
+        "PHP 7.2'den beri `crc32`, `adler32` ya da `fnv` gibi kriptografik olmayan algoritmalar HMAC için kullanılamaz.",
+        "`sha256` gibi kriptografik bir algoritma kullanın. Sonuç farklı olacağı için kaydedilmiş HMAC değerleri yeniden üretilmelidir. Yalnızca bir sağlama toplamı gerekiyorsa anahtarsız `hash('crc32b', $data)` kullanın.",
+      ],
+      en: [
+        "Since PHP 7.2, non-cryptographic algorithms such as `crc32`, `adler32` or `fnv` can't be used for HMAC.",
+        "Use a cryptographic algorithm such as `sha256`. The result differs, so stored HMAC values have to be produced again. If only a checksum is needed, use `hash('crc32b', $data)` without a key.",
+      ],
+    },
+    before: "$mac = hash_hmac('crc32', $data, $key);",
+    after: "$mac = hash_hmac('sha256', $data, $key);",
+  },
+  "removed.heredoc_label_in_body": {
+    steps: {
+      tr: [
+        "PHP 7.3'ten beri heredoc ve nowdoc kapanış etiketi girintili olabilir; bu yüzden metnin içinde satır başında (boşluklardan sonra) duran etiket sözcüğü heredoc'u bitirir ve dosya derlenmez.",
+        "Metinde geçmeyen bir etiket seçin: `<<<EOT` yerine `<<<SQL_END` gibi.",
+      ],
+      en: [
+        "Since PHP 7.3, the closing label of a heredoc or nowdoc can be indented, so the label word at the start of a line inside the text (after spaces) ends the heredoc and the file doesn't compile.",
+        "Choose a label that doesn't appear in the text, such as `<<<SQL_END` instead of `<<<EOT`.",
+      ],
+    },
+    before: "$help = <<<END\n  Press Enter to continue,\n  END to stop.\nEND;",
+    after: "$help = <<<HELP_TEXT\n  Press Enter to continue,\n  END to stop.\nHELP_TEXT;",
+  },
+  "removed.image_quality_range": {
+    steps: {
+      tr: [
+        "PHP 8.4'ten beri GD aralık dışındaki kalite değerlerinde ValueError fırlatır.",
+        "`imagejpeg()`, `imagewebp()` ve `imageavif()` için 0 ile 100, `imagepng()` için 0 ile 9 arasında bir değer verin; varsayılan için -1 yazın.",
+      ],
+      en: [
+        "Since PHP 8.4, GD throws a ValueError for quality values out of range.",
+        "Pass 0 to 100 for `imagejpeg()`, `imagewebp()` and `imageavif()`, and 0 to 9 for `imagepng()`; write -1 for the default.",
+      ],
+    },
+    before: "imagepng($image, $path, 15);",
+    after: "imagepng($image, $path, 9);",
+  },
+  "removed.imagecropauto_default": {
+    steps: {
+      tr: [
+        "PHP 8.0'dan beri `imagecropauto()` -1 modunu kabul etmez.",
+        "-1 yerine `IMG_CROP_DEFAULT` yazın.",
+      ],
+      en: [
+        "Since PHP 8.0, `imagecropauto()` no longer accepts the mode -1.",
+        "Write `IMG_CROP_DEFAULT` instead of -1.",
+      ],
+    },
+    before: "imagecropauto($image, -1);",
+    after: "imagecropauto($image, IMG_CROP_DEFAULT);",
+  },
+  "removed.incompatible_override": {
+    steps: {
+      tr: [
+        "Bu metot yerleşik bir sınıfın ya da arayüzün metodunu eziyor ama imzası PHP 8'deki imzaya uymuyor; sınıf yüklenirken ölümcül hata verir. Önerilen satır hedef imzayı gösterir.",
+        "Ferry parametre tiplerini genişletebiliyor, eksik varsayılanları ve parametreleri ekleyebiliyorsa bunu kendisi yapar. `static` farkı, referans farkı ya da uymayan bir dönüş tipi varsa imzayı önerilen satıra göre elle düzeltin.",
+        "Dönüş tipi yalnızca \"geçici\" (tentative) olarak uyuşmuyorsa metoda `#[\\ReturnTypeWillChange]` eklemek yeterlidir.",
+      ],
+      en: [
+        "This method overrides a built-in class or interface method, but its signature doesn't match PHP 8's; loading the class is a fatal error. The suggested line shows the target signature.",
+        "Ferry does this itself when it can widen the parameter types and add missing defaults and parameters. With a `static` difference, a by-reference difference or a return type that doesn't fit, fix the signature by hand from the suggested line.",
+        "If only a tentative return type differs, adding `#[\\ReturnTypeWillChange]` to the method is enough.",
+      ],
+    },
+    before: "class Log extends SplFileObject {\n    public function fwrite($data, $length) {",
+    after: "class Log extends SplFileObject {\n    public function fwrite($data, $length = 0) {",
+  },
+  "removed.interface_constant_visibility": {
+    steps: {
+      tr: [
+        "PHP 8.3'ten beri bir arayüz sabitini private ya da protected olarak yeniden tanımlamak derleme hatasıdır.",
+        "Sabiti public yapın ya da sınıftaki tanımı silip arayüzünkini kullanın.",
+      ],
+      en: [
+        "Since PHP 8.3, redeclaring an interface constant as private or protected is a compile error.",
+        "Make the constant public, or remove the class's declaration and use the interface's.",
+      ],
+    },
+    before: "class Cache implements Store {\n    protected const TTL = 60;\n}",
+    after: "class Cache implements Store {\n    public const TTL = 60;\n}",
+  },
+  "removed.invalid_octal": {
+    steps: {
+      tr: [
+        "0 ile başlayan sayılar sekizliktir. PHP 7.0'dan beri 8 ya da 9 içeren bir sekizlik sayı derleme hatasıdır; PHP 5.6'da sessizce kesiliyordu (`0781` 7 oluyordu).",
+        "Onluk sayı kastediliyorsa baştaki 0'ı silin. PHP 5'teki değeri korumak için kesilen hâlini yazın (`07`).",
+      ],
+      en: [
+        "Numbers starting with 0 are octal. Since PHP 7.0, an octal literal with an 8 or a 9 is a compile error; on PHP 5.6 it was silently cut (`0781` became 7).",
+        "If a decimal number was meant, remove the leading 0. To keep the PHP 5 value, write the cut form (`07`).",
+      ],
+    },
+    before: "$code = 0781;",
+    after: "$code = 781;",
+  },
+  "removed.invalid_unicode_escape": {
+    steps: {
+      tr: [
+        "PHP 7.0'dan beri çift tırnaklı metinlerde `\\u{` bir Unicode kaçışı başlatır; ardından geçerli bir onaltılık kod noktası gelmezse dosya derlenmez.",
+        "Ters bölüyü kaçırın (`\\\\u{`) ya da metni tek tırnağa alın.",
+      ],
+      en: [
+        "Since PHP 7.0, `\\u{` starts a Unicode escape in double-quoted strings, and the file doesn't compile unless a valid hex code point follows.",
+        "Escape the backslash (`\\\\u{`) or put the string in single quotes.",
+      ],
+    },
+    before: "$tpl = \"\\u{name}\";",
+    after: "$tpl = '\\u{name}';",
+  },
+  "removed.is_real": {
+    steps: {
+      tr: [
+        "`is_real()` takma adı PHP 8.0'da kaldırıldı; aynı fonksiyon `is_float()` adıyla duruyor. Rector doğrudan çağrıları değiştirir.",
+        "Geri çağırma olarak verilen `'is_real'` metnini `'is_float'` yapın.",
+      ],
+      en: [
+        "The `is_real()` alias was removed in PHP 8.0; the same function remains as `is_float()`. Rector changes direct calls.",
+        "Change the `'is_real'` string passed as a callback to `'is_float'`.",
+      ],
+    },
+    before: "$floats = array_filter($values, 'is_real');",
+    after: "$floats = array_filter($values, 'is_float');",
+  },
+  "removed.list_result_by_reference": {
+    steps: {
+      tr: [
+        "PHP 7.4'ten beri referanslı olmayan bir `list()` atamasının sonucunu referans bekleyen bir parametreye vermek hatadır.",
+        "Atamayı çağrıdan önce yapın ve çağrıya değişkeni verin.",
+      ],
+      en: [
+        "Since PHP 7.4, passing the result of a non-reference `list()` assignment to a by-reference parameter is an error.",
+        "Do the assignment before the call and pass the variable.",
+      ],
+    },
+    before: "$last = array_pop(list($a, $b) = $pair);",
+    after: "list($a, $b) = $pair;\n$copy = $pair;\n$last = array_pop($copy);",
+  },
+  "removed.literal_value_error": {
+    steps: {
+      tr: [
+        "Bu değer PHP 7'de uyarı verip false ya da null döndürüyordu; PHP 8.0'dan beri ValueError fırlatır. Bulgunun başlığı hangi çağrı olduğunu, önerilen satır yerine ne yazılacağını gösterir.",
+        "Sık durumlar: `explode('', $s)` yerine `str_split($s)`, negatif sayılı `str_repeat()` ve `array_fill()` için sayıyı 0'da sınırlayın, `array_chunk()` ve `str_split()` için en az 1 verin, boş diziyle `array_rand()`'dan önce diziyi kontrol edin, `setcookie()`'ye bir ad verin.",
+        "Değer bir değişkenden geliyorsa çağrıdan önce kontrol edin; eski false sonucuna güvenen kod artık ValueError'u yakalamalı.",
+      ],
+      en: [
+        "This value made PHP 7 warn and return false or null; since PHP 8.0 it throws a ValueError. The finding's title names the call, and the suggested line shows what to write instead.",
+        "Common cases: `str_split($s)` instead of `explode('', $s)`, keep the count of `str_repeat()` and `array_fill()` at 0 or above, give `array_chunk()` and `str_split()` at least 1, check the array before `array_rand()` on an empty one, give `setcookie()` a name.",
+        "When the value comes from a variable, check it before the call; code that relied on the old false result now has to catch the ValueError.",
+      ],
+    },
+    before: "$chars = explode('', $word);",
+    after: "$chars = str_split($word);",
+  },
+  "removed.mb_ereg_e_option": {
+    steps: {
+      tr: [
+        "Değiştirmeyi kod olarak çalıştıran `e` seçeneği PHP 8.0'da kaldırıldı.",
+        "`mb_ereg_replace_callback()` kullanın; değiştirme metnindeki kodu, eşleşmeleri dizi olarak alan bir kapanışa yazın.",
+      ],
+      en: [
+        "The `e` option, which ran the replacement as code, was removed in PHP 8.0.",
+        "Use `mb_ereg_replace_callback()`; write the code from the replacement as a closure that gets the matches as an array.",
+      ],
+    },
+    before: "mb_ereg_replace('(\\d+)', 'strval(\\\\1 * 2)', $s, 'e');",
+    after: "mb_ereg_replace_callback('(\\d+)', fn($m) => strval($m[1] * 2), $s);",
+  },
+  "removed.mbstring_iso_alias": {
+    steps: {
+      tr: [
+        "mbstring'in `ISO_8859-*` ve `ISO8859_*` takma adları PHP 8.0'da kaldırıldı.",
+        "`ISO-8859-*` yazın, örneğin `'ISO-8859-1'`. Aynı adı `iconv()` de kabul eder.",
+      ],
+      en: [
+        "mbstring's `ISO_8859-*` and `ISO8859_*` aliases were removed in PHP 8.0.",
+        "Write `ISO-8859-*`, such as `'ISO-8859-1'`. `iconv()` accepts the same name.",
+      ],
+    },
+    before: "mb_convert_encoding($s, 'UTF-8', 'ISO_8859-9');",
+    after: "mb_convert_encoding($s, 'UTF-8', 'ISO-8859-9');",
+  },
+  "removed.mysqli_embedded_server": {
+    steps: {
+      tr: [
+        "Gömülü MySQL sunucusu fonksiyonları PHP 7.4'te kaldırıldı. Varsayılan mysqlnd sürücüsüyle derlenen PHP'de hiç yoklardı; çağrı betiği zaten orada durduruyordu.",
+        "Çağrıyı silin; Ferry sonucu kullanılmayan çağrıları kendisi siler. Sonucu bir koşulda kullanılıyorsa koşulu da kaldırın, çünkü fonksiyon yokken o kod hiç çalışmıyordu.",
+      ],
+      en: [
+        "The embedded MySQL server functions were removed in PHP 7.4. PHP built with the default mysqlnd driver never had them, so the call already stopped the script there.",
+        "Delete the call; Ferry deletes calls whose result isn't used itself. If the result is used in a condition, remove the condition too, since that code never ran without the function.",
+      ],
+    },
+    before: "if (!mysqli_embedded_server_start(true, [], [])) {\n    die('no server');\n}\n$db = new mysqli($host);",
+    after: "$db = new mysqli($host);",
+  },
+  "removed.mysqli_stat_property": {
+    steps: {
+      tr: [
+        "Belgelenmemiş `mysqli::$stat` özelliği PHP 7.4'te kaldırıldı.",
+        "`stat()` metodunu çağırın; aynı sunucu durum metnini döndürür.",
+      ],
+      en: [
+        "PHP 7.4 removed the undocumented `mysqli::$stat` property.",
+        "Call the `stat()` method; it returns the same server status string.",
+      ],
+    },
+    before: "echo $db->stat;",
+    after: "echo $db->stat();",
+  },
+  "removed.negative_shift": {
+    steps: {
+      tr: [
+        "PHP 7.0'dan beri negatif bir sayı kadar kaydırmak ArithmeticError fırlatır; PHP 5.6'da sonuç işlemciye bağlıydı.",
+        "Kaydırma miktarını pozitif tutun; ters yönde kaydırmak isteniyorsa diğer operatörü kullanın (`$x << -2` yerine `$x >> 2`).",
+      ],
+      en: [
+        "Since PHP 7.0, shifting by a negative number throws an ArithmeticError; on PHP 5.6 the result depended on the CPU.",
+        "Keep the shift amount positive; to shift the other way, use the other operator (`$x >> 2` instead of `$x << -2`).",
+      ],
+    },
+    before: "$v = $x << -2;",
+    after: "$v = $x >> 2;",
+  },
+  "removed.nul_byte_in_source": {
+    steps: {
+      tr: [
+        "PHP 8.0'dan beri metinlerin dışındaki bir NUL baytı uyarı değil ParseError'dur.",
+        "Baytı silin; çoğu düzenleyici göstermez. Onaltılık görünümde ya da `tr -d '\\000' < eski.php > yeni.php` ile temizleyebilirsiniz.",
+      ],
+      en: [
+        "Since PHP 8.0, a NUL byte outside strings is a ParseError instead of a warning.",
+        "Remove the byte; most editors don't show it. You can clean it in a hex view or with `tr -d '\\000' < old.php > new.php`.",
+      ],
+    },
+  },
+  "removed.null_constant_default": {
+    steps: {
+      tr: [
+        "Bu sabit null. PHP 8.0'dan önce böyle bir varsayılan değer parametre tipini null kabul eder hâle getiriyordu; artık getirmez ve argüman verilmeyen çağrı TypeError fırlatır.",
+        "Tipin önüne `?` ekleyin: `?int $a = N`. Varsayılanı doğrudan `null` yazmak da olur.",
+      ],
+      en: [
+        "This constant is null. Before PHP 8.0 such a default made the parameter type nullable; now it doesn't, and a call that omits the argument throws a TypeError.",
+        "Add `?` before the type: `?int $a = N`. Writing the default as plain `null` works too.",
+      ],
+    },
+    before: "function page(int $size = DEFAULT_SIZE) {",
+    after: "function page(?int $size = DEFAULT_SIZE) {",
+  },
+  "removed.odbc_row_zero": {
+    steps: {
+      tr: [
+        "PHP 8.4'ten beri `odbc_fetch_row()` 1'den küçük satır numarasında ValueError fırlatır.",
+        "Satır numaraları 1'den başlar; ilk satır için 1 verin ya da sıradaki satır için argümanı hiç vermeyin.",
+      ],
+      en: [
+        "Since PHP 8.4, `odbc_fetch_row()` throws a ValueError for a row number below 1.",
+        "Row numbers start at 1; pass 1 for the first row, or leave the argument out for the next row.",
+      ],
+    },
+    before: "odbc_fetch_row($result, 0);",
+    after: "odbc_fetch_row($result, 1);",
+  },
+  "removed.php_uname_mode": {
+    steps: {
+      tr: [
+        "PHP 8.4'ten beri `php_uname()` geçersiz modda ValueError fırlatır; önceden `'a'` gibi davranıyordu.",
+        "Geçerli bir mod verin: `'a'`, `'s'`, `'n'`, `'r'`, `'v'` ya da `'m'`.",
+      ],
+      en: [
+        "Since PHP 8.4, `php_uname()` throws a ValueError for an invalid mode; it used to act like `'a'`.",
+        "Pass a valid mode: `'a'`, `'s'`, `'n'`, `'r'`, `'v'` or `'m'`.",
+      ],
+    },
+    before: "php_uname('x');",
+    after: "php_uname('a');",
+  },
+  "removed.png2wbmp": {
+    steps: {
+      tr: [
+        "`png2wbmp()` ve `jpeg2wbmp()` PHP 8.0'da kaldırıldı. Ferry çağrıyı aynı dönüşümü PHP ile yapan bir kapanışa çevirir; argümanlar `...` ile açılıyorsa dokunmaz.",
+        "Elle yazarken görüntüyü `imagecreatefrompng()` ya da `imagecreatefromjpeg()` ile açın, `imagescale()` ile boyutlandırın ve `imagewbmp()` ile kaydedin. Bu yol yaklaşık bir sonuç verir, çünkü eski fonksiyonlar eşik değeriyle siyah-beyaza çeviriyordu; Ferry'nin yazdığı kapanış PHP 5.6 ile bayt bayt aynı çıktıyı verir.",
+      ],
+      en: [
+        "`png2wbmp()` and `jpeg2wbmp()` were removed in PHP 8.0. Ferry turns the call into a closure that does the same conversion in PHP; it leaves calls whose arguments are unpacked with `...`.",
+        "By hand, open the image with `imagecreatefrompng()` or `imagecreatefromjpeg()`, resize it with `imagescale()` and save it with `imagewbmp()`. That gives an approximate result, since the old functions turned the image black and white with the threshold; the closure Ferry writes gives byte-for-byte the same output as PHP 5.6.",
+      ],
+    },
+    before: "png2wbmp($src, $dest, $h, $w, 7);",
+    after: "$im = imagecreatefrompng($src);\nimagewbmp(imagescale($im, $w, $h), $dest);",
+  },
+  "removed.range_invalid": {
+    steps: {
+      tr: [
+        "PHP 8.3'ten beri `range()` 0 adımda, boş metin sınırda ve dizi sınırda hata fırlatır.",
+        "Adımı en az 1 yapın, sınırları sayı ya da tek harf olarak verin. Sınır bir değişkenden geliyorsa çağrıdan önce kontrol edin.",
+      ],
+      en: [
+        "Since PHP 8.3, `range()` throws for a step of 0, an empty string boundary or an array boundary.",
+        "Make the step at least 1, and pass the boundaries as numbers or single letters. When a boundary comes from a variable, check it before the call.",
+      ],
+    },
+    before: "range(1, 10, 0);",
+    after: "range(1, 10, 1);",
+  },
+  "removed.readonly_clone_reference": {
+    steps: {
+      tr: [
+        "PHP 8.4'ten beri `__clone()` içinde readonly bir özelliğe referans almak dolaylı değişiklik sayılır ve Error fırlatır.",
+        "Özelliğe doğrudan atayın: `$this->items = clone $this->items;`. Referansla çalışan bir yardımcı fonksiyon kullanılıyorsa önce değeri bir değişkene alın, değiştirip özelliğe atayın.",
+      ],
+      en: [
+        "Since PHP 8.4, taking a reference to a readonly property inside `__clone()` counts as indirect modification and throws an Error.",
+        "Assign the property directly: `$this->items = clone $this->items;`. If a helper that works by reference is used, copy the value into a variable first, change it and assign it back.",
+      ],
+    },
+    before: "public function __clone() {\n    $ref = &$this->items;\n    $ref = clone $ref;\n}",
+    after: "public function __clone() {\n    $this->items = clone $this->items;\n}",
+  },
+  "removed.reflection_export": {
+    steps: {
+      tr: [
+        "`Reflection*::export()` PHP 8.0'da kaldırıldı. Nesnenin metnini satır sonuyla yazıp null döndürüyordu; son argüman true ise metni döndürüyordu, bunu `(string) new ReflectionX(...)` yapar. Ferry bilinen biçimleri kendisi çevirir.",
+        "Kalan çağrılarda (dönüş değeri hem yazılıp hem kullanılıyorsa gibi) aynı kalıbı elle yazın: yazdırmak için `echo new ReflectionClass($c), \"\\n\";`, metin için `(string) new ReflectionClass($c)`.",
+      ],
+      en: [
+        "`Reflection*::export()` was removed in PHP 8.0. It printed the object's text with a newline and returned null; with true as the last argument it returned the text, which `(string) new ReflectionX(...)` does. Ferry converts the forms it knows itself.",
+        "For the rest (when the result is both printed and used, say), write the same pattern by hand: `echo new ReflectionClass($c), \"\\n\";` to print, `(string) new ReflectionClass($c)` for the text.",
+      ],
+    },
+    before: "$text = ReflectionClass::export($class, true);",
+    after: "$text = (string) new ReflectionClass($class);",
+  },
+  "removed.regex_invalid_escape": {
+    steps: {
+      tr: [
+        "PHP 8.0'dan beri `\\i` gibi bilinmeyen kaçışlar düz karakter değil derleme hatasıdır (PHP 7.4'te `/\\i/` hâlâ `i`'yi buluyordu); `X` belirteci de yok sayılır, bu yüzden desen hiç eşleşmez.",
+        "Karakteri ters bölüsüz yazın (`\\i` yerine `i`). Ters bölünün kendisi kastediliyorsa `\\\\\\\\` yazın. `X` belirtecini silin.",
+      ],
+      en: [
+        "Since PHP 8.0, unknown escapes such as `\\i` are a compile error instead of literal characters (on PHP 7.4 `/\\i/` still found `i`), and the `X` modifier is ignored, so the pattern never matches.",
+        "Write the character without the backslash (`i` instead of `\\i`). If a literal backslash was meant, write `\\\\\\\\`. Remove the `X` modifier.",
+      ],
+    },
+    before: "preg_match('/^\\i\\d+$/', $s);",
+    after: "preg_match('/^i\\d+$/', $s);",
+  },
+  "removed.regex_keep_in_lookaround": {
+    steps: {
+      tr: [
+        "PHP 8.5'ten beri bir lookaround içinde `\\K` kullanmak derleme hatasıdır.",
+        "`\\K`'yi lookaround'un dışına taşıyın ya da eşleşmenin istenen kısmını bir grupla yakalayıp onu kullanın.",
+      ],
+      en: [
+        "Since PHP 8.5, `\\K` inside a lookaround is a compile error.",
+        "Move `\\K` outside the lookaround, or capture the part of the match you want in a group and use that.",
+      ],
+    },
+  },
+  "removed.repeated_static": {
+    steps: {
+      tr: [
+        "PHP 8.3'ten beri bir fonksiyonda aynı static değişkeni iki kez tanımlamak derleme hatasıdır.",
+        "İkinci tanımı silin. PHP 8.2'ye kadar son başlatıcı geçerliydi; Ferry tanımı o değerle bir kez yazar. Başlatıcılardan biri sabit değilse tanımları elle birleştirin.",
+      ],
+      en: [
+        "Since PHP 8.3, declaring the same static variable twice in a function is a compile error.",
+        "Remove the second declaration. Up to PHP 8.2 the last initializer won; Ferry writes the declaration once with that value. If one of the initializers isn't constant, merge them by hand.",
+      ],
+    },
+    before: "static $cache;\nstatic $hits = 0, $cache = [];",
+    after: "static $hits = 0, $cache = [];",
+  },
+  "removed.round_invalid_mode": {
+    steps: {
+      tr: [
+        "PHP 8.4'ten beri `round()` geçersiz modda ValueError fırlatır; önceden yarıyı yukarı yuvarlıyordu.",
+        "`PHP_ROUND_HALF_UP`, `PHP_ROUND_HALF_DOWN`, `PHP_ROUND_HALF_EVEN` ya da `PHP_ROUND_HALF_ODD` verin; eski sonuç için `PHP_ROUND_HALF_UP`.",
+      ],
+      en: [
+        "Since PHP 8.4, `round()` throws a ValueError for an invalid mode; it used to round half up.",
+        "Pass `PHP_ROUND_HALF_UP`, `PHP_ROUND_HALF_DOWN`, `PHP_ROUND_HALF_EVEN` or `PHP_ROUND_HALF_ODD`; `PHP_ROUND_HALF_UP` for the old result.",
+      ],
+    },
+    before: "round($value, 2, 99);",
+    after: "round($value, 2, PHP_ROUND_HALF_UP);",
+  },
+  "removed.setlocale_string_category": {
+    steps: {
+      tr: [
+        "PHP 7.0'dan beri `setlocale()` kategoriyi yalnızca bir `LC_*` sabiti olarak kabul eder; metin vermek çalışmaz.",
+        "Tırnakları kaldırıp sabiti yazın: `setlocale(LC_ALL, 'C')`.",
+      ],
+      en: [
+        "Since PHP 7.0, `setlocale()` only accepts the category as an `LC_*` constant; a string doesn't work.",
+        "Drop the quotes and write the constant: `setlocale(LC_ALL, 'C')`.",
+      ],
+    },
+    before: "setlocale('LC_ALL', 'tr_TR.UTF-8');",
+    after: "setlocale(LC_ALL, 'tr_TR.UTF-8');",
+  },
+  "removed.sql_regcase": {
+    steps: {
+      tr: [
+        "`sql_regcase()` PHP 7.0'da kaldırıldı ve doğrudan bir karşılığı yok. Ferry çağrıyı aynı çıktıyı veren bir geri çağırmaya çevirir.",
+        "Desen büyük-küçük harfe duyarsız aramak için kuruluyorsa `preg_match()`'e `i` belirteciyle düz deseni vermek daha basittir.",
+      ],
+      en: [
+        "`sql_regcase()` was removed in PHP 7.0 and has no direct replacement. Ferry turns the call into a callback that gives the same output.",
+        "If the pattern is built for a case-insensitive search, passing the plain pattern to `preg_match()` with the `i` modifier is simpler.",
+      ],
+    },
+    before: "if (eregi(sql_regcase($word), $text)) {",
+    after: "if (preg_match('/' . preg_quote($word, '/') . '/i', $text)) {",
+  },
+  "removed.ssl_context_option": {
+    steps: {
+      tr: [
+        "`rsa_key_size`, `CN_match` ve `SNI_server_name` SSL bağlam seçenekleri PHP 7.0'da kaldırıldı ve sessizce yok sayılıyor.",
+        "Sertifika adı için `peer_name` kullanın; SNI de bu adla gönderilir. `rsa_key_size`'ı silin.",
+      ],
+      en: [
+        "The `rsa_key_size`, `CN_match` and `SNI_server_name` SSL context options were removed in PHP 7.0 and are silently ignored.",
+        "Use `peer_name` for the certificate name; SNI is sent with it too. Remove `rsa_key_size`.",
+      ],
+    },
+    before: "stream_context_create(['ssl' => ['CN_match' => 'api.example.com']]);",
+    after: "stream_context_create(['ssl' => ['peer_name' => 'api.example.com']]);",
+  },
+  "removed.strip_tags_filter": {
+    steps: {
+      tr: [
+        "`string.strip_tags` akış süzgeci PHP 7.3'te kullanımdan kalktı, PHP 8.0'da kaldırıldı.",
+        "Okuduğunuz metne `strip_tags()` uygulayın. Etiketler okuma parçalarına bölünebileceği için mümkünse metnin tamamını okuyup bir kez uygulayın.",
+      ],
+      en: [
+        "The `string.strip_tags` stream filter was deprecated in PHP 7.3 and removed in PHP 8.0.",
+        "Apply `strip_tags()` to the text you read. Tags can be split across reads, so read the whole text and apply it once where you can.",
+      ],
+    },
+    before: "stream_filter_append($fp, 'string.strip_tags');\n$text = stream_get_contents($fp);",
+    after: "$text = strip_tags(stream_get_contents($fp));",
+  },
+  "removed.trait_property_default": {
+    steps: {
+      tr: [
+        "Sınıf, kullandığı trait'in bir özelliğini farklı bir varsayılanla yeniden tanımlıyor. PHP 7.2'den beri varsayılanlar tür çevirmeden karşılaştırılır; `1` ile `'1'` bile uyumsuzdur ve sınıf derlenmez.",
+        "Sınıftaki tanıma trait'teki varsayılanın aynısını verin, ya da sınıftaki tanımı silip değeri kurucuda atayın.",
+      ],
+      en: [
+        "The class redeclares a property of a trait it uses with a different default. Since PHP 7.2 the defaults are compared without type juggling, so even `1` and `'1'` don't match and the class doesn't compile.",
+        "Give the class's declaration the same default as the trait's, or remove the class's declaration and assign the value in the constructor.",
+      ],
+    },
+    before: "trait Paging { public $size = 20; }\nclass Report { use Paging; public $size = '20'; }",
+    after: "trait Paging { public $size = 20; }\nclass Report { use Paging; public $size = 20; }",
+  },
+  "removed.typed_constant_override": {
+    steps: {
+      tr: [
+        "Bu yerleşik sınıfın sabitleri artık tipli. Alt sınıfta birini aynı tip olmadan yeniden tanımlamak derleme hatasıdır.",
+        "Sabite yerleşik tipi verin (`const string ATOM = ...`). Sabit yalnızca bir değeri tutmak için yeniden tanımlandıysa başka bir adla tanımlamak daha güvenlidir.",
+      ],
+      en: [
+        "This built-in class's constants are typed now. Redeclaring one in a subclass without the same type is a compile error.",
+        "Give the constant the built-in type (`const string ATOM = ...`). If it was redeclared just to hold a value, declaring it under another name is safer.",
+      ],
+    },
+    before: "class Stamp extends DateTime {\n    const ATOM = 'Y-m-d';\n}",
+    after: "class Stamp extends DateTime {\n    const string ATOM = 'Y-m-d';\n}",
+  },
+  "removed.uncloneable_object": {
+    steps: {
+      tr: [
+        "PHP 8.4'ten beri bu nesne kopyalanamaz; `clone` Error fırlatır. Bulgunun başlığı hangi sınıf olduğunu gösterir.",
+        "Kopyalamak yerine yenisini oluşturun: `DOMXPath` için `new DOMXPath($doc)`. Düğüm listeleri için listeyi yeniden sorgulayın ya da `iterator_to_array()` ile bir diziye çevirin.",
+      ],
+      en: [
+        "Since PHP 8.4 this object can't be cloned; `clone` throws an Error. The finding's title names the class.",
+        "Create a new one instead of cloning: `new DOMXPath($doc)` for `DOMXPath`. For node lists, query again or turn the list into an array with `iterator_to_array()`.",
+      ],
+    },
+    before: "$copy = clone $xpath;",
+    after: "$copy = new DOMXPath($xpath->document);",
+  },
+  "removed.unset_this": {
+    steps: {
+      tr: [
+        "`unset($this)` PHP 7.1'den beri ölümcül hatadır; dosya derlenmez. PHP 5'te yalnızca yerel değişkeni siliyor, nesneye dokunmuyordu.",
+        "Çağrıyı silin; metot sonrasında `$this`'i okumuyorsa davranış aynı kalır ve Ferry bunu kendisi yapar. Okuyorsa o satırlar PHP 5'te tanımsız bir değişkene bakıyordu; onları da gözden geçirin.",
+      ],
+      en: [
+        "`unset($this)` has been a fatal error since PHP 7.1; the file doesn't compile. On PHP 5 it only removed the local variable and left the object alone.",
+        "Delete the call; when the method doesn't read `$this` afterwards the behaviour stays the same, and Ferry does this itself. If it does, those lines looked at an undefined variable on PHP 5; review them too.",
+      ],
+    },
+    before: "unset($this);\nreturn $result;",
+    after: "return $result;",
+  },
+  "removed.vsprintf_string": {
+    steps: {
+      tr: [
+        "PHP 8.0'dan beri `vsprintf()` ve `vprintf()` dizi dışında bir şey verilince TypeError fırlatır; PHP 7.4'te false döndürüyorlardı.",
+        "Değeri bir diziye koyun: `vsprintf('%s', [$value])`. Zaten tek değer varsa `sprintf()` kullanın.",
+      ],
+      en: [
+        "Since PHP 8.0, `vsprintf()` and `vprintf()` throw a TypeError when given anything but an array; on PHP 7.4 they returned false.",
+        "Put the value in an array: `vsprintf('%s', [$value])`. With a single value, use `sprintf()`.",
+      ],
+    },
+    before: "$line = vsprintf('%s', $name);",
+    after: "$line = vsprintf('%s', [$name]);",
+  },
+  "removed.xpath_non_node_set": {
+    steps: {
+      tr: [
+        "PHP 8.5'ten beri `SimpleXMLElement::xpath()`, düğüm kümesi döndürmeyen ifadelerde (`count(//a)` gibi) hata fırlatır.",
+        "Bu ifadeleri `DOMXPath::evaluate()` ile çalıştırın: `(new DOMXPath(dom_import_simplexml($xml)->ownerDocument))->evaluate('count(//a)')`.",
+      ],
+      en: [
+        "Since PHP 8.5, `SimpleXMLElement::xpath()` throws for expressions that don't return a node set (such as `count(//a)`).",
+        "Run such expressions with `DOMXPath::evaluate()`: `(new DOMXPath(dom_import_simplexml($xml)->ownerDocument))->evaluate('count(//a)')`.",
+      ],
+    },
+    before: "$n = (int) $xml->xpath('count(//item)');",
+    after: "$n = (int) (new DOMXPath(dom_import_simplexml($xml)->ownerDocument))->evaluate('count(//item)');",
+  },
+  "removed.ereg": {
+    steps: {
+      tr: [
+        "POSIX regex fonksiyonları (`ereg()`, `eregi()`, `ereg_replace()`, `eregi_replace()`, `split()`, `spliti()`) PHP 7.0'da kaldırıldı. Rector doğrudan çağrıları sabit desenlerle `preg_*` karşılıklarına çevirir.",
+        "Elle çevirirken deseni sınırlayıcıyla yazın (`'/.../'`), desendeki sınırlayıcıyı kaçırın; `eregi*` ve `spliti()` için `i` belirtecini ekleyin. `[[:alpha:]]` gibi POSIX sınıfları PCRE'de de çalışır.",
+        "Desen bir değişkenden geliyorsa `'/' . str_replace('/', '\\/', $pattern) . '/'` ile sarın. Ad geri çağırma metni olarak verilmişse (`array_filter($a, 'ereg')` gibi) bir kapanış yazın.",
+      ],
+      en: [
+        "The POSIX regex functions (`ereg()`, `eregi()`, `ereg_replace()`, `eregi_replace()`, `split()`, `spliti()`) were removed in PHP 7.0. Rector turns direct calls with literal patterns into their `preg_*` counterparts.",
+        "By hand, write the pattern with delimiters (`'/.../'`) and escape the delimiter inside it; add the `i` modifier for `eregi*` and `spliti()`. POSIX classes such as `[[:alpha:]]` work in PCRE too.",
+        "When the pattern comes from a variable, wrap it with `'/' . str_replace('/', '\\/', $pattern) . '/'`. When the name is passed as a callback string (such as `array_filter($a, 'ereg')`), write a closure.",
+      ],
+    },
+    before: "if (eregi('^[a-z]+$', $name)) {",
+    after: "if (preg_match('/^[a-z]+$/i', $name)) {",
+  },
+  "removed.call_user_method": {
+    steps: {
+      tr: [
+        "Bu fonksiyon kaldırıldı ya da kullanımdan kalktı; önerilen satır yerine geçeni gösterir. Rector doğrudan çağrıları kendisi değiştirir.",
+        "Ad geri çağırma metni olarak verildiyse (`array_map('eski_ad', $x)` gibi) ya da çağrı `eval()` içindeyse yerine geçeni elle yazın: argümanlar aynıysa yeni fonksiyonun adını, değişiyorsa bir kapanış.",
+      ],
+      en: [
+        "This function was removed or deprecated; the suggested line shows what replaces it. Rector changes direct calls itself.",
+        "When the name is passed as a callback string (such as `array_map('old_name', $x)`) or the call is inside `eval()`, write the replacement by hand: the new function's name when the arguments are the same, a closure when they change.",
+      ],
+    },
+    before: "$data = array_map('read_exif_data', $files);",
+    after: "$data = array_map('exif_read_data', $files);",
+  },
+  "deprecated.curl_close": {
+    steps: {
+      tr: [
+        "Bu kapatma fonksiyonu PHP 8.0'dan beri hiçbir şey yapmıyor; kaynak artık bir nesne ve son referansı gidince kendiliğinden kapanıyor. Yeni sürümlerde kullanımdan kalktı.",
+        "Çağrıyı silin; Rector ve Ferry tek başına duran çağrıları kendileri siler. Nesneyi hemen bırakmak istiyorsanız değişkene null atayın ya da `unset()` kullanın.",
+      ],
+      en: [
+        "This close function has done nothing since PHP 8.0; the resource is an object now and closes on its own when the last reference goes. Newer versions deprecated it.",
+        "Delete the call; Rector and Ferry delete standalone calls themselves. To let go of the object right away, set the variable to null or `unset()` it.",
+      ],
+    },
+    before: "curl_close($ch);\nreturn $body;",
+    after: "return $body;",
+  },
+  "deprecated.mysqli_no_data": {
+    steps: {
+      tr: [
+        "Bu sabit PHP'nin hiç kullanmadığı bir değeri tutuyordu ve kullanımdan kalktı; önerilen satır değerini gösterir.",
+        "Sabitin yerine değerini yazın; sonuç aynıdır. Ferry bunu kendisi yapar. Bayrak bir `|` maskesindeyse ve hiçbir şey yapmıyorsa maskeden çıkarın.",
+      ],
+      en: [
+        "This constant held a value PHP never used and was deprecated; the suggested line shows the value.",
+        "Write the value instead of the constant; the result is the same. Ferry does this itself. If the flag is in a `|` mask and does nothing, take it out of the mask.",
+      ],
+    },
+    before: "if ($status === MYSQLI_NO_DATA) {",
+    after: "if ($status === 100) {",
+  },
+  "deprecated.pdo_driver_constant": {
+    steps: {
+      tr: [
+        "PHP 8.4 sürücüye özel PDO sabitlerini sürücü sınıflarına taşıdı ve `PDO::MYSQL_ATTR_*` gibi eski adları PHP 8.5'te kullanımdan kaldırdı.",
+        "Önerilen satırdaki yeni adı yazın: `PDO::MYSQL_ATTR_SSL_CA` yerine `Pdo\\Mysql::ATTR_SSL_CA`. Değer aynıdır; Rector ve Ferry bilinen sabitleri kendileri değiştirir.",
+      ],
+      en: [
+        "PHP 8.4 moved the driver-specific PDO constants to the driver classes, and PHP 8.5 deprecated old names such as `PDO::MYSQL_ATTR_*`.",
+        "Write the new name from the suggested line: `Pdo\\Mysql::ATTR_SSL_CA` instead of `PDO::MYSQL_ATTR_SSL_CA`. The value is the same; Rector and Ferry change the constants they know themselves.",
+      ],
+    },
+    before: "$options = [PDO::MYSQL_ATTR_SSL_CA => $ca];",
+    after: "$options = [Pdo\\Mysql::ATTR_SSL_CA => $ca];",
+  },
+  "removed.get_magic_quotes_gpc": {
+    steps: {
+      tr: [
+        "`get_magic_quotes_gpc()` ve `get_magic_quotes_runtime()` PHP 8.0'da kaldırıldı. PHP 5.4'ten beri her zaman false döndürüyorlardı.",
+        "Çağrının yerine false yazın; `if (get_magic_quotes_gpc()) { ... }` gibi bir bloğu tümüyle silin, çünkü hiç çalışmıyordu. Ferry ikisini de kendisi yapar.",
+      ],
+      en: [
+        "`get_magic_quotes_gpc()` and `get_magic_quotes_runtime()` were removed in PHP 8.0. They had always returned false since PHP 5.4.",
+        "Write false instead of the call, and remove a block like `if (get_magic_quotes_gpc()) { ... }` altogether, since it never ran. Ferry does both itself.",
+      ],
+    },
+    before: "if (get_magic_quotes_gpc()) {\n    $name = stripslashes($name);\n}\nsave($name);",
+    after: "save($name);",
+  },
+  "removed.each": {
+    steps: {
+      tr: [
+        "`each()` PHP 8.0'da kaldırıldı. Rector `while (list($k, $v) = each($a))` gibi yaygın döngüleri `foreach`'e çevirir.",
+        "Kalan kullanımlarda dizinin iç işaretçisini `key()`, `current()` ve `next()` ile ilerletin: `$k = key($a); $v = current($a); next($a);`. Dizinin sonunda `key()` null döner; `each()` false döndürüyordu.",
+      ],
+      en: [
+        "`each()` was removed in PHP 8.0. Rector turns common loops such as `while (list($k, $v) = each($a))` into `foreach`.",
+        "For the rest, move the array's internal pointer with `key()`, `current()` and `next()`: `$k = key($a); $v = current($a); next($a);`. At the end of the array `key()` returns null, where `each()` returned false.",
+      ],
+    },
+    before: "while (list($key, $value) = each($items)) {",
+    after: "foreach ($items as $key => $value) {",
+  },
+  "removed.ezmlm_hash": {
+    steps: {
+      tr: [
+        "`ezmlm_hash()` PHP 8.0'da kaldırıldı. Ferry çağrıyı aynı sonucu veren bir kapanışla değiştirir.",
+        "Ad geri çağırma metni olarak verildiyse aynı kapanışı elle yazın: adresin her karakteri için `$h = (($h + ($h << 5)) ^ ord(strtolower($c))) & 0xFFFFFFFF;`, 5381'den başlayarak; sonuç `$h % 53`.",
+      ],
+      en: [
+        "`ezmlm_hash()` was removed in PHP 8.0. Ferry replaces the call with a closure that gives the same result.",
+        "When the name is passed as a callback string, write the same closure by hand: for each character of the address, `$h = (($h + ($h << 5)) ^ ord(strtolower($c))) & 0xFFFFFFFF;`, starting from 5381; the result is `$h % 53`.",
+      ],
+    },
+  },
+  "deprecated.mysqli_kill": {
+    steps: {
+      tr: [
+        "`mysqli_kill()` ve `mysqli::kill()` PHP 8.4'te kullanımdan kalktı.",
+        "Aynı işi bir sorguyla yapın: `mysqli_query($link, 'KILL CONNECTION ' . (int) $id)`. Ferry bunu kendisi yazar.",
+      ],
+      en: [
+        "PHP 8.4 deprecated `mysqli_kill()` and `mysqli::kill()`.",
+        "Do the same with a query: `mysqli_query($link, 'KILL CONNECTION ' . (int) $id)`. Ferry writes this itself.",
+      ],
+    },
+    before: "mysqli_kill($link, $id);",
+    after: "mysqli_query($link, 'KILL CONNECTION ' . (int) $id);",
+  },
+  "deprecated.mysqli_ping": {
+    steps: {
+      tr: [
+        "`mysqli_ping()` ve `mysqli::ping()` PHP 8.4'te kullanımdan kalktı. PHP 8.2'den beri kopan bağlantıyı yeniden kurmuyorlardı.",
+        "Ferry iki seçenek sunar: aynı gidiş-dönüşü `DO 1` sorgusuyla yapmak ya da kontrolü kaldırmak. Bağlantının kopabildiği uzun süreli işlerde sorgu hatasını yakalayıp bağlantıyı yeniden kurun.",
+      ],
+      en: [
+        "PHP 8.4 deprecated `mysqli_ping()` and `mysqli::ping()`. Since PHP 8.2 they no longer reconnected a dropped connection.",
+        "Ferry offers two options: make the same round trip with a `DO 1` query, or drop the check. In long-running jobs where the connection can drop, catch the query error and reconnect.",
+      ],
+    },
+    before: "if (!$db->ping()) {\n    $db = connect();\n}",
+    after: "try {\n    $db->query('DO 1');\n} catch (mysqli_sql_exception $e) {\n    $db = connect();\n}",
+  },
+  "removed.convert_cyr_string": {
+    steps: {
+      tr: [
+        "`convert_cyr_string()` PHP 8.0'da kaldırıldı. Ferry iki seçenek sunar: `mb_convert_encoding()` ya da PHP 5.6'nın dönüşüm tablosuyla aynı sonucu veren `strtr()`.",
+        "Tek harflik kodlar şunlara karşılık gelir: `k` KOI8-R, `w` Windows-1251, `i` ISO-8859-5, `a` ve `d` CP866, `m` x-mac-cyrillic. `mb_convert_encoding()` eşlenemeyen karakterlerde `?` yazar.",
+      ],
+      en: [
+        "`convert_cyr_string()` was removed in PHP 8.0. Ferry offers two options: `mb_convert_encoding()`, or `strtr()` with PHP 5.6's conversion table, which gives the same result.",
+        "The one-letter codes map to: `k` KOI8-R, `w` Windows-1251, `i` ISO-8859-5, `a` and `d` CP866, `m` x-mac-cyrillic. `mb_convert_encoding()` writes `?` for characters it can't map.",
+      ],
+    },
+    before: "$text = convert_cyr_string($text, 'k', 'w');",
+    after: "$text = mb_convert_encoding($text, 'Windows-1251', 'KOI8-R');",
+  },
+  "behavior.mysqli_default_exceptions": {
+    steps: {
+      tr: [
+        "PHP 8.1'den beri mysqli'nin varsayılan hata modu `MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT`'tir: başarısız sorgu false döndürmek yerine `mysqli_sql_exception` fırlatır, bu kontrol hiç çalışmaz.",
+        "Ferry iki seçenek sunar: çağrıdan önce `mysqli_report(MYSQLI_REPORT_OFF)` ile eski davranışa dönmek ya da çağrıyı `try`/`catch` içine almak. İlki istek boyunca bütün mysqli çağrılarını etkiler.",
+      ],
+      en: [
+        "Since PHP 8.1, mysqli's default error mode is `MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT`: a failed query throws `mysqli_sql_exception` instead of returning false, so this check never runs.",
+        "Ferry offers two options: go back to the old behaviour with `mysqli_report(MYSQLI_REPORT_OFF)` before the call, or wrap the call in `try`/`catch`. The first affects every mysqli call in the request.",
+      ],
+    },
+    before: "if (!mysqli_query($db, $sql)) {\n    log_error(mysqli_error($db));\n}",
+    after: "try {\n    mysqli_query($db, $sql);\n} catch (mysqli_sql_exception $e) {\n    log_error($e->getMessage());\n}",
+  },
+  "removed.builtin_function": {
+    steps: {
+      tr: [
+        "Bu fonksiyon hedef sürümde yok; çağrılması `Call to undefined function` Error'u verir. Bulgunun başlığı fonksiyonu, önerilen satır varsa yerine geçeni gösterir.",
+        "Fonksiyon kaldırılan bir eklentiye aitse (mcrypt, imap, xmlrpc gibi) o eklentinin rehberine ya da önerilen pakete bakın. Kendi başına kaldırılmışsa PHP kılavuzundaki fonksiyon sayfası yerine geçeni söyler.",
+        "Kod fonksiyonu yalnızca varsa kullanıyorsa (`if (function_exists('ad'))`) o dal hedef sürümde zaten çalışmaz; dalı silmek de olur.",
+      ],
+      en: [
+        "This function doesn't exist on the target version; calling it is a `Call to undefined function` Error. The finding's title names the function, and the suggested line shows the replacement when there is one.",
+        "If the function belongs to a removed extension (such as mcrypt, imap or xmlrpc), see that extension's guide or the suggested package. If it was removed on its own, its page in the PHP manual names the replacement.",
+        "If the code only uses the function when it exists (`if (function_exists('name'))`), that branch never runs on the target version anyway; removing it is fine too.",
+      ],
+    },
+  },
+  "removed.builtin_class": {
+    steps: {
+      tr: [
+        "Bu sınıf hedef sürümde yok; kullanılması `Class not found` Error'u verir. Bulgunun başlığı sınıfı, önerilen satır varsa yerine geçeni gösterir.",
+        "Sınıf kaldırılan bir eklentiye aitse o eklentinin rehberine ya da önerilen pakete bakın; diğer durumlarda PHP kılavuzundaki sınıf sayfası yerine geçeni söyler.",
+      ],
+      en: [
+        "This class doesn't exist on the target version; using it is a `Class not found` Error. The finding's title names the class, and the suggested line shows the replacement when there is one.",
+        "If the class belongs to a removed extension, see that extension's guide or the suggested package; otherwise its page in the PHP manual names the replacement.",
+      ],
+    },
+  },
+  "removed.builtin_class_constant": {
+    steps: {
+      tr: [
+        "Bu sınıf sabiti hedef sürümde yok; kullanılması Error verir. Bulgunun başlığı sabiti, önerilen satır varsa yerine geçeni gösterir.",
+        "Sabitin yerine geçen bir sabit varsa onu yazın; yoksa sabite bağlı kodu kaldırın ya da sabitin eski değerini açıkça yazın.",
+      ],
+      en: [
+        "This class constant doesn't exist on the target version; using it is an Error. The finding's title names the constant, and the suggested line shows the replacement when there is one.",
+        "Write the constant that replaces it if there is one; otherwise remove the code that depends on it, or write its old value out.",
+      ],
+    },
+  },
+  "deprecated.builtin_constant": {
+    steps: {
+      tr: [
+        "Bu sabit hedef sürümde kullanımdan kalktı: hâlâ çalışır ama uyarı verir ve sonraki bir sürümde kaldırılabilir. Bulgunun önerilen satırı varsa yerine geçeni gösterir.",
+        "Yerine geçen sabiti ya da sabitin değerini yazın. Sabit bir `|` maskesindeyse ve artık hiçbir şey yapmıyorsa maskeden çıkarın.",
+      ],
+      en: [
+        "This constant is deprecated on the target version: it still works but warns, and a later version may remove it. The finding's suggested line shows the replacement when there is one.",
+        "Write the replacing constant or the constant's value. If it's in a `|` mask and no longer does anything, take it out of the mask.",
+      ],
+    },
+  },
+  "behavior.inherited_static_reference": {
+    steps: {
+      tr: [
+        "Bu statik özellik üst sınıftan geliyor. PHP 7.3'ten beri ona referans atamak özelliği alt sınıf için ayırmaz; üst sınıfın değeri de değişir. PHP 7.2'de yalnızca alt sınıfınki değişiyordu.",
+        "Alt sınıfın kendi değeri olmalıysa özelliği alt sınıfta yeniden tanımlayın: `public static $x;`. Ortak değer zaten istenen buysa değişiklik gerekmez.",
+      ],
+      en: [
+        "This static property comes from the parent class. Since PHP 7.3, assigning a reference to it doesn't separate it for the subclass, so the parent's value changes too. On PHP 7.2 only the subclass's changed.",
+        "If the subclass should have its own value, redeclare the property in the subclass: `public static $x;`. If a shared value is what's wanted, nothing needs to change.",
+      ],
+    },
+    before: "class Child extends Base {}\nChild::$config = &$local;",
+    after: "class Child extends Base {\n    public static $config;\n}\nChild::$config = &$local;",
+  },
+  "behavior.trait_static_property": {
+    steps: {
+      tr: [
+        "Bu trait üst sınıfta da tanımlı bir statik özellik içeriyor. PHP 8.3'ten beri trait'i kullanan sınıf özelliği kendisi için yeniden tanımlar ve üst sınıfla aynı değeri paylaşmaz.",
+        "Değer ortak kalmalıysa özelliği trait'ten çıkarın ve üst sınıfınkini kullanın. Her sınıfın kendi değeri isteniyorsa değişiklik gerekmez.",
+      ],
+      en: [
+        "This trait contains a static property that's also declared in the parent class. Since PHP 8.3 a class using the trait redeclares the property for itself and no longer shares the parent's value.",
+        "If the value should stay shared, remove the property from the trait and use the parent's. If each class should have its own value, nothing needs to change.",
+      ],
+    },
+  },
+  "deprecated.chr_out_of_range": {
+    steps: {
+      tr: [
+        "PHP 8.5'te `chr()`'a 0–255 dışında bir sayı vermek kullanımdan kalktı. Önceden sayının son baytı kullanılıyordu: `chr(256)` `\"\\0\"`, `chr(-1)` `\"\\xFF\"`, `chr(321)` `'A'` veriyordu.",
+        "Eski sonuç için sayıyı 255 ile maskeleyin: `chr($n & 255)`. Bu bütün sürümlerde aynı baytı verir.",
+      ],
+      en: [
+        "PHP 8.5 deprecated passing a number outside 0–255 to `chr()`. It used to take the number's last byte: `chr(256)` gave `\"\\0\"`, `chr(-1)` gave `\"\\xFF\"` and `chr(321)` gave `'A'`.",
+        "For the old result, mask the number with 255: `chr($n & 255)`. That gives the same byte on every version.",
+      ],
+    },
+    before: "$byte = chr($code);",
+    after: "$byte = chr($code & 255);",
+  },
+  "deprecated.imap_nil_constant": {
+    steps: {
+      tr: [
+        "imap eklentisinin `NIL` sabiti PHP 8.1'de kullanımdan kalktı; hiçbir fonksiyon onu beklemiyordu.",
+        "Sabiti kullanan yeri kaldırın. imap eklentisinin kendisi PHP 8.4'te çekirdekten çıkarıldı; o kodu taşırken imap rehberine bakın.",
+      ],
+      en: [
+        "PHP 8.1 deprecated the imap extension's `NIL` constant; no function expected it.",
+        "Remove the code that uses it. The imap extension itself left the core in PHP 8.4; see the imap guide when you move that code.",
+      ],
+    },
+  },
+  "deprecated.pdo_driver_method": {
+    steps: {
+      tr: [
+        "`PDO::sqlite*` ve `PDO::pgsql*` metotları PHP 8.5'te kullanımdan kalktı; PHP 8.4'te gelen `Pdo\\Sqlite` ve `Pdo\\Pgsql` sınıflarında aynı adlı metotlar var (`sqliteCreateFunction()` → `createFunction()`).",
+        "Bağlantıyı sürücü sınıfıyla açın: `PDO::connect($dsn)` doğru alt sınıfı döndürür, ya da `new Pdo\\Sqlite($dsn)`. Sonra metodu yeni adıyla çağırın.",
+      ],
+      en: [
+        "PHP 8.5 deprecated the `PDO::sqlite*` and `PDO::pgsql*` methods; the `Pdo\\Sqlite` and `Pdo\\Pgsql` classes added in PHP 8.4 have the same methods (`sqliteCreateFunction()` → `createFunction()`).",
+        "Open the connection through the driver class: `PDO::connect($dsn)` returns the right subclass, or use `new Pdo\\Sqlite($dsn)`. Then call the method by its new name.",
+      ],
+    },
+    before: "$pdo = new PDO('sqlite::memory:');\n$pdo->sqliteCreateFunction('md5', 'md5');",
+    after: "$pdo = PDO::connect('sqlite::memory:');\n$pdo->createFunction('md5', 'md5');",
+  },
+  "deprecated.pdo_uri_dsn": {
+    steps: {
+      tr: [
+        "PHP 8.5'te DSN'i bir dosyadan `uri:` ile okumak kullanımdan kalktı.",
+        "Dosyayı kendiniz okuyup DSN'i verin: `new PDO(trim(file_get_contents($path)), $user, $pass)`.",
+      ],
+      en: [
+        "PHP 8.5 deprecated reading the DSN from a file with `uri:`.",
+        "Read the file yourself and pass the DSN: `new PDO(trim(file_get_contents($path)), $user, $pass)`.",
+      ],
+    },
+    before: "$pdo = new PDO('uri:file:///etc/app/dsn');",
+    after: "$pdo = new PDO(trim(file_get_contents('/etc/app/dsn')));",
+  },
+  "removed.pdo_oci": {
+    steps: {
+      tr: [
+        "PDO_OCI sürücüsü PHP 8.4'te çekirdekten çıkarıldı; yalnızca PECL'den kurulursa çalışır.",
+        "Sürücüyü sunucuya `pecl install pdo_oci` ile kurun (Oracle Instant Client gerekir) ve `extension=pdo_oci` satırını ekleyin. Kod değişmez.",
+      ],
+      en: [
+        "PHP 8.4 unbundled the PDO_OCI driver; it only works when installed from PECL.",
+        "Install it on the server with `pecl install pdo_oci` (Oracle Instant Client is needed) and add the `extension=pdo_oci` line. The code doesn't change.",
+      ],
+    },
+  },
+  "removed.script_tag": {
+    steps: {
+      tr: [
+        "`<script language=\"php\">` ve ASP tarzı `<% %>` etiketleri PHP 7.0'da kaldırıldı; içindeki kod artık çalışmaz, metin olarak çıktıya gider.",
+        "Etiketleri `<?php` ve `?>` ile değiştirin.",
+      ],
+      en: [
+        "The `<script language=\"php\">` and ASP-style `<% %>` tags were removed in PHP 7.0; the code inside no longer runs and is printed as text.",
+        "Replace the tags with `<?php` and `?>`.",
+      ],
+    },
+    before: "<script language=\"php\">echo $title;</script>",
+    after: "<?php echo $title; ?>",
+  },
+  "removed.splfileobject_extra_argument": {
+    steps: {
+      tr: [
+        "PHP 8.2'den beri bu `SplFileObject` metotları argüman verildiğinde ArgumentCountError fırlatır; argümanlar zaten yok sayılıyordu.",
+        "Argümanları silin.",
+      ],
+      en: [
+        "Since PHP 8.2, these `SplFileObject` methods throw ArgumentCountError when given arguments; the arguments were ignored anyway.",
+        "Remove the arguments.",
+      ],
+    },
+    before: "if ($file->hasChildren(true)) {",
+    after: "if ($file->hasChildren()) {",
+  },
+  "framework.laravel_helper": {
+    steps: {
+      tr: [
+        "Laravel 6 `str_` ve `array_` yardımcılarını kaldırdı. PHP 8 en az Laravel 6.20 istediği için bu çağrı çalışmaz.",
+        "`Illuminate\\Support\\Str` ve `Arr` sınıflarını kullanın (`str_slug($s)` → `Str::slug($s)`, `array_get($a, 'k')` → `Arr::get($a, 'k')`), ya da eski yardımcıları `composer require laravel/helpers` ile geri ekleyin.",
+      ],
+      en: [
+        "Laravel 6 removed the `str_` and `array_` helpers. PHP 8 needs at least Laravel 6.20, so this call breaks.",
+        "Use the `Illuminate\\Support\\Str` and `Arr` classes (`str_slug($s)` → `Str::slug($s)`, `array_get($a, 'k')` → `Arr::get($a, 'k')`), or bring the old helpers back with `composer require laravel/helpers`.",
+      ],
+    },
+    before: "$slug = str_slug($title);",
+    after: "$slug = \\Illuminate\\Support\\Str::slug($title);",
+  },
+  "framework.laravel_input": {
+    steps: {
+      tr: [
+        "`Input` facade'ı Laravel 6'da kaldırıldı. PHP 8 en az Laravel 6.20 istediği için bu çağrı çalışmaz.",
+        "`Request` facade'ını ya da `request()` yardımcısını kullanın: `Input::get('q')` → `Request::input('q')`.",
+      ],
+      en: [
+        "Laravel 6 removed the `Input` facade. PHP 8 needs at least Laravel 6.20, so this call breaks.",
+        "Use the `Request` facade or the `request()` helper: `Input::get('q')` → `Request::input('q')`.",
+      ],
+    },
+    before: "$q = Input::get('q');",
+    after: "$q = Request::input('q');",
+  },
+  "removed.ini_hash_comment": {
+    steps: {
+      tr: [
+        "PHP 7.0'dan beri ini dosyalarında `#` yorum başlatmaz; satır ayar olarak okunur ve dosya hata verebilir.",
+        "Satırın başındaki `#`'yi `;` yapın.",
+      ],
+      en: [
+        "Since PHP 7.0, `#` doesn't start a comment in ini files; the line is read as a setting and the file can fail to parse.",
+        "Change the `#` at the start of the line to `;`.",
+      ],
+    },
+    before: "# memory_limit = 256M",
+    after: "; memory_limit = 256M",
+  },
+  "removed.ini_setting": {
+    steps: {
+      tr: [
+        "Bu ayar PHP'den kaldırıldı. Açık bırakıldığında PHP `Directive is no longer available` hatasıyla başlamaz; site hiç açılmaz.",
+        "Satırı ini dosyasından ya da `.htaccess`'ten silin. Ayarın sağladığı şey (magic quotes, register_globals gibi) hâlâ gerekiyorsa onu kodda yapın.",
+      ],
+      en: [
+        "PHP removed this setting. Left on, PHP refuses to start with `Directive is no longer available`, so the site doesn't load at all.",
+        "Delete the line from the ini file or `.htaccess`. If what the setting did (magic quotes, register_globals and so on) is still needed, do it in code.",
+      ],
+    },
+    before: "magic_quotes_gpc = On\nmemory_limit = 256M",
+    after: "memory_limit = 256M",
+  },
+  "behavior.opcache_jit_default": {
+    steps: {
+      tr: [
+        "PHP 8.4'te `opcache.jit`'in varsayılanı `disable` oldu. `opcache.jit` ayarlanmadan yalnızca `opcache.jit_buffer_size` verilirse JIT artık sessizce kapalı kalır.",
+        "JIT açık kalsın isteniyorsa `opcache.jit = tracing` satırını ekleyin.",
+      ],
+      en: [
+        "In PHP 8.4, `opcache.jit` defaults to `disable`. Setting only `opcache.jit_buffer_size`, without `opcache.jit`, now silently leaves the JIT off.",
+        "If the JIT should stay on, add the line `opcache.jit = tracing`.",
+      ],
+    },
+    before: "opcache.jit_buffer_size = 64M",
+    after: "opcache.jit_buffer_size = 64M\nopcache.jit = tracing",
+  },
+  "behavior.opcache_zend_extension": {
+    steps: {
+      tr: [
+        "PHP 8.5'te OPcache her zaman PHP'nin içinde gelir; onu `zend_extension` ile yüklemek başlangıçta uyarı verir.",
+        "`zend_extension=opcache` satırını silin; `opcache.*` ayarları olduğu gibi kalabilir.",
+      ],
+      en: [
+        "In PHP 8.5, OPcache is always built in, and loading it with `zend_extension` raises a warning at startup.",
+        "Delete the `zend_extension=opcache` line; the `opcache.*` settings can stay as they are.",
+      ],
+    },
+    before: "zend_extension=opcache\nopcache.enable=1",
+    after: "opcache.enable=1",
+  },
+  "server.composer_platform": {
+    steps: {
+      tr: [
+        "`composer.json`'daki `config.platform.php` Composer'a projenin hangi PHP'de çalışacağını söyler; eski sürümde kalırsa paketler hedef sürümü desteklemeyen sürümlerde kilitli kalır.",
+        "Değeri hedef sürüm yapın ve `composer update` çalıştırın. Ferry değeri yazabilir; güncellemeyi siz çalıştırın.",
+      ],
+      en: [
+        "`config.platform.php` in `composer.json` tells Composer which PHP the project runs on; left at the old version, packages stay locked at releases that don't support the target.",
+        "Set it to the target version and run `composer update`. Ferry can write the value; run the update yourself.",
+      ],
+    },
+    before: "\"config\": { \"platform\": { \"php\": \"7.4\" } }",
+    after: "\"config\": { \"platform\": { \"php\": \"8.5\" } }",
+  },
+  "server.php_version_exact": {
+    steps: {
+      tr: [
+        "Bu dosya PHP sürümünü yama sürümüyle birlikte sabitliyor (`8.1.27` gibi). Ferry hedefi `8.5.0` olarak yazar.",
+        "`8.5.0`'ı sunucuda ya da imajda gerçekten kullandığınız yama sürümüyle değiştirin; güvenlik düzeltmeleri yama sürümlerinde gelir.",
+      ],
+      en: [
+        "This file pins the PHP version down to the patch release (such as `8.1.27`). Ferry writes the target as `8.5.0`.",
+        "Change `8.5.0` to the patch release you actually use on the server or in the image; security fixes come in patch releases.",
+      ],
+    },
+  },
+  "server.composer_platform_check": {
+    steps: {
+      tr: [
+        "`config.platform-check: false` Composer'ın çalışırken PHP sürümünü ve eklentileri denetlemesini kapatır; proje yanlış sürümde açılırsa hata yerine garip davranışlar görürsünüz.",
+        "Denetimi açın (`\"platform-check\": true` ya da satırı silin) ve `composer dump-autoload` çalıştırın.",
+      ],
+      en: [
+        "`config.platform-check: false` stops Composer from checking the PHP version and extensions at runtime; if the project starts on the wrong version, you get odd behaviour instead of an error.",
+        "Turn the check back on (`\"platform-check\": true`, or delete the line) and run `composer dump-autoload`.",
+      ],
+    },
+  },
+  "server.composer_platform_ext": {
+    steps: {
+      tr: [
+        "`config.platform` PHP'yle birlikte gelen bir eklentiyi belirli bir sürüme sabitliyor; Composer bu sürümü gerçek eklentinin yerine kullanır ve hedef sürümde yanlış paketler seçilebilir.",
+        "Satırı silin ve `composer update` çalıştırın; PHP'yle gelen eklentilerin sürümü PHP'ninkiyle aynıdır.",
+      ],
+      en: [
+        "`config.platform` pins an extension that ships with PHP to a specific version; Composer uses that version instead of the real extension, so the wrong packages can be picked on the target.",
+        "Delete the line and run `composer update`; extensions that ship with PHP have PHP's version.",
+      ],
+    },
+  },
+  "behavior.html_default_flags": {
+    steps: {
+      tr: [
+        "PHP 8.1'den beri `htmlspecialchars()`, `htmlentities()` ve kod çözen karşılıklarının varsayılan bayrakları `ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML401`'dir: tek tırnak da kodlanır, geçersiz UTF-8 boş sonuç yerine `�` olur.",
+        "Ferry iki seçenek sunar: eski çıktıyı korumak için bu dosyadaki bayraksız çağrılara `ENT_COMPAT | ENT_HTML401` eklemek, ya da yeni bayrakları açıkça yazmak. Tek tırnaklı HTML özniteliklerinde eski bayraklar XSS açığı bırakır; mümkünse yenileri seçin.",
+      ],
+      en: [
+        "Since PHP 8.1, the default flags of `htmlspecialchars()`, `htmlentities()` and their decoding counterparts are `ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML401`: single quotes are encoded too, and invalid UTF-8 becomes `�` instead of an empty result.",
+        "Ferry offers two options: add `ENT_COMPAT | ENT_HTML401` to the calls without flags in this file to keep the old output, or write the new flags out. The old flags leave an XSS gap in single-quoted HTML attributes; pick the new ones where you can.",
+      ],
+    },
+    before: "echo htmlspecialchars($name);",
+    after: "echo htmlspecialchars($name, ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML401);",
+  },
+  "deprecated.date_rfc7231": {
+    steps: {
+      tr: [
+        "`DATE_RFC7231` ve `DateTimeInterface::RFC7231` biçimi saat dilimini yok sayıp her zaman `GMT` yazar; PHP 8.5'te kullanımdan kalktı.",
+        "Ferry iki seçenek sunar: aynı çıktıyı veren `'D, d M Y H:i:s \\G\\M\\T'` biçimini yazmak, ya da tarihi UTC'ye çevirip bu biçimle yazmak. HTTP başlıkları gibi gerçekten GMT bekleyen yerlerde ikincisi doğrudur.",
+      ],
+      en: [
+        "The `DATE_RFC7231` and `DateTimeInterface::RFC7231` format ignores the time zone and always writes `GMT`; PHP 8.5 deprecated it.",
+        "Ferry offers two options: write the `'D, d M Y H:i:s \\G\\M\\T'` format, which gives the same output, or convert the date to UTC and format it that way. Where GMT is really expected, such as HTTP headers, the second is right.",
+      ],
+    },
+    before: "header('Expires: ' . date(DATE_RFC7231, $time));",
+    after: "header('Expires: ' . gmdate('D, d M Y H:i:s \G\M\T', $time));",
+  },
+  "deprecated.dynamic_property": {
+    steps: {
+      tr: [
+        "PHP 8.2'den beri sınıfta tanımlı olmayan bir özelliğe atama yapmak kullanımdan kalktı; PHP 9'da hata olacak.",
+        "Ferry iki seçenek sunar: sınıfa `#[\\AllowDynamicProperties]` eklemek (davranış aynı kalır) ya da kullanılan özellikleri sınıfta tanımlamak. Bir sınıfın bütün özellikleri aynı seçimi izler.",
+        "Özellik adları çalışırken oluşuyorsa (`$this->$name = ...`) `#[\\AllowDynamicProperties]` ya da bir dizi özelliği (`$this->data[$name]`) kullanın.",
+      ],
+      en: [
+        "Since PHP 8.2, assigning to a property that isn't declared on the class is deprecated; PHP 9 will make it an error.",
+        "Ferry offers two options: add `#[\\AllowDynamicProperties]` to the class (the behaviour stays the same), or declare the properties used. All properties of a class follow the same choice.",
+        "When property names are made at runtime (`$this->$name = ...`), use `#[\\AllowDynamicProperties]` or an array property (`$this->data[$name]`).",
+      ],
+    },
+    before: "class Item {\n    public function __construct() {\n        $this->label = '';\n    }\n}",
+    after: "class Item {\n    public $label;\n\n    public function __construct() {\n        $this->label = '';\n    }\n}",
+  },
+  "deprecated.serializable": {
+    steps: {
+      tr: [
+        "PHP 8.1'den beri `Serializable` arayüzünü `__serialize()` ve `__unserialize()` olmadan uygulamak kullanımdan kalktı.",
+        "İki metodu ekleyin. Ferry eski `serialize()` ve `unserialize()` metotlarını çağıran bir çift önerir; böylece mevcut veriyle aynı sonuç çıkar. PHP 7.4 ve sonrasında yeni metotlar önceliklidir.",
+        "PHP 7.3 ve öncesini desteklemeniz gerekmiyorsa `Serializable`'ı ve eski metotları tümüyle kaldırabilirsiniz; ama eski biçimde saklanmış veri yine eski metotlarla okunur.",
+      ],
+      en: [
+        "Since PHP 8.1, implementing `Serializable` without `__serialize()` and `__unserialize()` is deprecated.",
+        "Add the two methods. Ferry proposes a pair that calls the old `serialize()` and `unserialize()` methods, so the result matches existing data. On PHP 7.4 and later the new methods take precedence.",
+        "If you don't need PHP 7.3 and earlier, you can drop `Serializable` and the old methods; but data stored in the old format is still read through the old methods.",
+      ],
+    },
+    before: "class Token implements Serializable {\n    public function serialize() { return $this->value; }\n    public function unserialize($data) { $this->value = $data; }\n}",
+    after: "class Token implements Serializable {\n    public function serialize() { return $this->value; }\n    public function unserialize($data) { $this->value = $data; }\n    public function __serialize(): array { return ['value' => $this->value]; }\n    public function __unserialize(array $data): void { $this->value = $data['value']; }\n}",
+  },
+  "deprecated.soap_functions_all": {
+    steps: {
+      tr: [
+        "PHP 8.4'ten beri `SoapServer::addFunction()`'a tamsayı (`SOAP_FUNCTIONS_ALL`) vermek kullanımdan kalktı.",
+        "Sunulacak fonksiyonların adlarını bir dizi olarak verin. Ferry iki seçenek sunar: PHP'nin önerdiği gibi o an tanımlı bütün fonksiyonlar (sonradan tanımlananlar çağrılamaz), ya da yalnızca projenin fonksiyonları; ikincisi PHP'nin kendi fonksiyonlarını dışarı açmaz. Yalnızca gerçekten sunulacakları yazmak en güvenlisidir.",
+      ],
+      en: [
+        "Since PHP 8.4, passing an integer (`SOAP_FUNCTIONS_ALL`) to `SoapServer::addFunction()` is deprecated.",
+        "Pass the names of the functions to expose as an array. Ferry offers two options: every function defined at that point, as PHP suggests (ones defined later can't be called), or only the project's functions, which doesn't expose PHP's own. Listing only the ones you really expose is the safest.",
+      ],
+    },
+    before: "$server->addFunction(SOAP_FUNCTIONS_ALL);",
+    after: "$server->addFunction(['getOrder', 'listOrders']);",
+  },
+  "removed.input_request": {
+    steps: {
+      tr: [
+        "`INPUT_REQUEST` ve `INPUT_SESSION` hiç uygulanmamıştı: `filter_input()` bunlarla her zaman null döndürüp uyarı veriyordu, `filter_has_var()` false döndürüyordu. PHP 8.0'da kaldırıldılar.",
+        "Ferry iki seçenek sunar: çağrının eski sonucunu yazmak, ya da `$_REQUEST` veya `$_SESSION`'ı okumak. İkincisi kodun hiç görmediği gerçek veriyi getirir; o veriyle ne olacağını kontrol edin.",
+      ],
+      en: [
+        "`INPUT_REQUEST` and `INPUT_SESSION` were never implemented: `filter_input()` always returned null with them and warned, and `filter_has_var()` returned false. PHP 8.0 removed them.",
+        "Ferry offers two options: write the call's old result, or read `$_REQUEST` or `$_SESSION`. The second brings in real data the code has never seen; check what happens with it.",
+      ],
+    },
+    before: "$id = filter_input(INPUT_REQUEST, 'id', FILTER_VALIDATE_INT);",
+    after: "$id = filter_var($_REQUEST['id'] ?? null, FILTER_VALIDATE_INT);",
+  },
+  "removed.version_compare_operator": {
+    steps: {
+      tr: [
+        "PHP 8.1'den beri `version_compare()` belgelenmemiş operatör kısaltmalarında (`'gte'` gibi) ValueError fırlatır; önceden karşılaştırmadan null döndürüyordu.",
+        "Ferry iki seçenek sunar: kastedilen operatörü (`'>='`, `'<='`, `'=='`, `'!='`) yazmak ya da eski sonucu, yani null'ı yazmak. Geçerli operatörler `<`, `lt`, `<=`, `le`, `>`, `gt`, `>=`, `ge`, `==`, `eq`, `!=`, `<>` ve `ne`'dir.",
+      ],
+      en: [
+        "Since PHP 8.1, `version_compare()` throws a ValueError for undocumented operator abbreviations (such as `'gte'`); it used to return null without comparing.",
+        "Ferry offers two options: write the operator meant (`'>='`, `'<='`, `'=='`, `'!='`), or write the old result, null. The valid operators are `<`, `lt`, `<=`, `le`, `>`, `gt`, `>=`, `ge`, `==`, `eq`, `!=`, `<>` and `ne`.",
+      ],
+    },
+    before: "if (version_compare(PHP_VERSION, '7.0', 'gte')) {",
+    after: "if (version_compare(PHP_VERSION, '7.0', '>=')) {",
+  },
 };
+
+/** Rules that share another rule's guide. */
+const SHARED_GUIDES: [string, string][] = [
+  ["deprecated.assert_constants", "deprecated.assert_options"],
+  ["deprecated.mhash_constant", "deprecated.mhash"],
+  ["deprecated.mysqli_refresh_constant", "deprecated.mysqli_refresh"],
+  ["deprecated.openssl_x509_free", "deprecated.openssl_pkey_free"],
+  ["removed.filter_flag_scheme_required", "removed.filter_flag_host_required"],
+  ["removed.gzgetss", "removed.fgetss"],
+  ["removed.jpeg2wbmp", "removed.png2wbmp"],
+  ["removed.ldap_control_paged_result", "removed.ldap_control_paged_result_response"],
+  ["removed.eregi", "removed.ereg"],
+  ["removed.ereg_replace", "removed.ereg"],
+  ["removed.eregi_replace", "removed.ereg"],
+  ["removed.split", "removed.ereg"],
+  ["removed.spliti", "removed.ereg"],
+  ["removed.call_user_method_array", "removed.call_user_method"],
+  ["removed.read_exif_data", "removed.call_user_method"],
+  ["removed.gmp_random", "removed.call_user_method"],
+  ["removed.image2wbmp", "removed.call_user_method"],
+  ["removed.restore_include_path", "removed.call_user_method"],
+  ["removed.hebrevc", "removed.call_user_method"],
+  ["removed.mbereg", "removed.call_user_method"],
+  ["removed.mbsplit", "removed.call_user_method"],
+  ["removed.mbregex_encoding", "removed.call_user_method"],
+  ["removed.set_socket_blocking", "removed.call_user_method"],
+  ["removed.datefmt_set_timezone_id", "removed.call_user_method"],
+  ["deprecated.socket_set_timeout", "removed.call_user_method"],
+  ["deprecated.mysqli_execute", "removed.call_user_method"],
+  ["deprecated.pg_alias", "removed.call_user_method"],
+  ["deprecated.utf8_encode", "removed.call_user_method"],
+  ["deprecated.utf8_decode", "removed.call_user_method"],
+  ["deprecated.lcg_value", "removed.call_user_method"],
+  ["deprecated.spl_object_storage", "removed.call_user_method"],
+  ["deprecated.curl_share_close", "deprecated.curl_close"],
+  ["deprecated.finfo_close", "deprecated.curl_close"],
+  ["deprecated.imagedestroy", "deprecated.curl_close"],
+  ["deprecated.xml_parser_free", "deprecated.curl_close"],
+  ["deprecated.shmop_close", "deprecated.curl_close"],
+  ["removed.oci_internal_debug", "deprecated.curl_close"],
+  ["deprecated.mysqli_data_truncated", "deprecated.mysqli_no_data"],
+  ["deprecated.mysqli_server_ps_out_params", "deprecated.mysqli_no_data"],
+  ["deprecated.dom_php_err", "deprecated.mysqli_no_data"],
+  ["deprecated.mysqli_update_max_length", "deprecated.mysqli_no_data"],
+  ["deprecated.file_binary", "deprecated.mysqli_no_data"],
+  ["deprecated.file_text", "deprecated.mysqli_no_data"],
+  ["deprecated.pgsql_transaction_constant", "deprecated.mysqli_no_data"],
+  ["removed.get_magic_quotes_runtime", "removed.get_magic_quotes_gpc"],
+  ["deprecated.builtin_class_constant", "deprecated.builtin_constant"],
+  ["deprecated.filter_sanitize_stripped", "deprecated.filter_sanitize_string"],
+  ["removed.input_session", "removed.input_request"],
+  ["removed.numberformatter_type_currency", "deprecated.numberformatter_type_currency"],
+];
+for (const [rule, same] of SHARED_GUIDES) GUIDES[rule] = GUIDES[same];
