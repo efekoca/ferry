@@ -1,5 +1,6 @@
 pub mod analyzer;
 pub mod arguments;
+mod arrays;
 mod calls;
 mod flow;
 #[rustfmt::skip]

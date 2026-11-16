@@ -118,7 +118,7 @@ pub(crate) fn compact_unknown(tokens: &[Token], f: &crate::declarations::Functio
     (call + 2..end).filter(|&a| string_value(&tokens[a]).is_some_and(|s| s != "this" && !known.contains(s))).collect()
 }
 
-fn opener_of(tokens: &[Token], close: usize) -> Option<usize> {
+pub(crate) fn opener_of(tokens: &[Token], close: usize) -> Option<usize> {
     let mut depth = 0usize;
     for k in (0..=close).rev() {
         if tokens[k].is_punct(")") || tokens[k].is_punct("}") || tokens[k].is_punct("]") {

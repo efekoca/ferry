@@ -192,6 +192,16 @@ fn unchecked_pdo(tokens: &[Token]) -> Vec<usize> {
         .collect()
 }
 
+/// The `static $x` statements of the method body `open..close`. A closure, or a method of an
+/// anonymous class, inside it keeps its own static variables, which inheritance never copied.
+pub(crate) fn method_statics(tokens: &[Token], open: usize, close: usize) -> Vec<usize> {
+    let nested = crate::arrays::nested_functions(tokens, open, close);
+    (open..close)
+        .filter(|&i| tokens[i].is_ident_ci("static") && tokens[i + 1].kind == TokenKind::Variable)
+        .filter(|&i| !nested.iter().any(|&(a, b)| a < i && i < b))
+        .collect()
+}
+
 fn inherited_statics(tokens: &[Token], index: &ProjectIndex) -> Vec<usize> {
     let mut out = Vec::new();
     for (class, open, close) in crate::analyzer::class_bodies(tokens) {
@@ -214,7 +224,7 @@ fn inherited_statics(tokens: &[Token], index: &ProjectIndex) -> Vec<usize> {
                 .take_while(|t| !t.is_punct(";") && !t.is_punct("{") && !t.is_punct("}"))
                 .any(|t| t.is_ident_ci("private"));
             if !private && tokens.get(k + 1).is_some_and(|m| m.kind == TokenKind::Ident && index.inherits_unchanged(&name.text, &m.text)) {
-                out.extend((start..end).filter(|&i| tokens[i].is_ident_ci("static") && tokens[i + 1].kind == TokenKind::Variable));
+                out.extend(method_statics(tokens, start, end));
             }
             k = end + 1;
         }

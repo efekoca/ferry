@@ -1283,7 +1283,12 @@ impl<'a> Ctx<'a> {
                     }
                     return;
                 }
-                "extract" => return self.pattern(&patterns::EXTRACT, tok, None),
+                "extract" => {
+                    if !crate::arrays::extracts_array(tokens, i, self.index) {
+                        self.pattern(&patterns::EXTRACT, tok, None);
+                    }
+                    return;
+                }
                 "get_class" | "get_parent_class" => {
                     if tokens.get(i + 2).is_some_and(|t| t.is_punct(")")) {
                         self.pattern(&patterns::GET_CLASS_NO_ARGS, tok, None);
@@ -6202,6 +6207,10 @@ $x = 'self::create';";
         let src = "<?php eval($code); $$name['k'] = 1; extract($_POST);";
         assert_eq!(rules(src, "8.1"), vec!["review.eval", "review.variable_variable", "review.extract"]);
         assert!(rules("<?php $$name = 1; echo ${$name}['k'], $$obj->p; global $$g;", "8.1").is_empty());
+        let arrays = "<?php\nclass D {\n    function trigger_event($n, $data = array()) {\n        $e = new E($data);\n        return $e->filtered(array_keys($data));\n    }\n}\nclass E {\n    function filtered($keys) { return array_intersect_key($this->data, array_flip($keys)); }\n}\nextract(compact('a'));\nextract($dispatcher->trigger_event('x', compact($vars)));\nextract($full + array('escape' => false), EXTR_SKIP);\nextract((array) $row);\n";
+        assert!(rules(arrays, "8.1").is_empty(), "{:?}", rules(arrays, "8.1"));
+        let unknown = "<?php\nclass D { function maybe($a) { if ($a) { return []; } } }\nextract(unpack('N', $s));\nextract($this->settings);\nextract($stmt->fetch());\nextract($d->maybe(1));\n";
+        assert_eq!(rules(unknown, "8.1"), vec!["review.extract"; 4]);
     }
 
     #[test]
