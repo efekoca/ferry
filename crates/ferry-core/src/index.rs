@@ -111,7 +111,16 @@ pub struct ProjectIndex {
     redefines_checks: std::sync::OnceLock<bool>,
     vendor_types: HashMap<String, TypeInfo>,
     vendor_interfaces: HashMap<String, InterfaceInfo>,
+    scoped_calls: HashMap<String, u8>,
+    array_returns: HashMap<String, Option<Vec<String>>>,
+    array_returners: std::sync::OnceLock<HashSet<String>>,
 }
+
+/// `self::m()`, `parent::m()` and callables naming `'self'` or `'parent'`: the method of the class
+/// the code is written in, whatever class the call was made on.
+pub(crate) const FORWARDED_CALL: u8 = 1;
+/// `Name::m()`, `$class::m()` and callables naming a class.
+pub(crate) const NAMED_CALL: u8 = 2;
 
 #[derive(Debug, Clone)]
 struct InterfaceInfo {
@@ -338,6 +347,33 @@ impl ProjectIndex {
         self.enums.contains(fqn)
     }
 
+    /// How the project reaches a method of this name with `::`, other than through `static::`:
+    /// [`FORWARDED_CALL`] and [`NAMED_CALL`] bits.
+    pub(crate) fn scoped_calls(&self, method: &str) -> u8 {
+        self.scoped_calls.get(&method.to_ascii_lowercase()).copied().unwrap_or(0)
+    }
+
+    /// Whether every function (`f:name`) or every method (`m:name`) of the project by that name returns
+    /// an array, as far as their `return` statements show.
+    pub(crate) fn returns_array(&self, key: &str) -> bool {
+        self.array_returners
+            .get_or_init(|| {
+                let mut known = HashSet::new();
+                loop {
+                    let before = known.len();
+                    for (key, deps) in &self.array_returns {
+                        if deps.as_ref().is_some_and(|d| d.iter().all(|d| known.contains(d))) && !known.contains(key) {
+                            known.insert(key.clone());
+                        }
+                    }
+                    if known.len() == before {
+                        break known;
+                    }
+                }
+            })
+            .contains(key)
+    }
+
     /// Whether a known subclass inherits this method instead of overriding it.
     pub(crate) fn inherits_unchanged(&self, class: &str, method: &str) -> bool {
         let by_all = self.overridden_by_all.get_or_init(|| {
@@ -396,6 +432,37 @@ impl ProjectIndex {
         crate::analyzer::constant_visible(&self.constants, space, name)
     }
 
+    fn add_scoped_calls(&mut self, tokens: &[Token]) {
+        let identifier = |s: &str| {
+            s.chars().next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+                && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        };
+        let forwarding = |q: &str| q.eq_ignore_ascii_case("self") || q.eq_ignore_ascii_case("parent");
+        for (i, t) in tokens.iter().enumerate() {
+            let (method, bit) = if t.is_punct("::") && i > 0 {
+                let Some(m) = tokens.get(i + 1).filter(|m| m.kind == TokenKind::Ident && !m.is_ident_ci("class")) else { continue };
+                if !tokens.get(i + 2).is_some_and(|p| p.is_punct("(")) || tokens[i - 1].is_ident_ci("static") {
+                    continue;
+                }
+                (m.text.as_str(), if forwarding(&tokens[i - 1].text) { FORWARDED_CALL } else { NAMED_CALL })
+            } else if let Some(s) = t.literal() {
+                if let Some((q, m)) = s.rsplit_once("::") {
+                    (m, if forwarding(q.trim_start_matches('\\')) { FORWARDED_CALL } else { NAMED_CALL })
+                } else if i >= 2 && tokens[i - 1].is_punct(",") && tokens[i - 2].kind != TokenKind::Variable {
+                    let q = tokens[i - 2].literal();
+                    (s, if q.is_some_and(forwarding) { FORWARDED_CALL } else { NAMED_CALL })
+                } else {
+                    continue;
+                }
+            } else {
+                continue;
+            };
+            if identifier(method) {
+                *self.scoped_calls.entry(method.to_ascii_lowercase()).or_default() |= bit;
+            }
+        }
+    }
+
     fn add(&mut self, tokens: &[Token]) -> Vec<String> {
         let mut added = Vec::new();
         self.constants.extend(crate::analyzer::declared_constants(tokens));
@@ -438,6 +505,18 @@ impl ProjectIndex {
             || tokens.iter().any(|t| {
                 t.is_ident_ci("spl_autoload_register") || t.literal().is_some_and(|s| s.to_ascii_lowercase().ends_with("autoload.php"))
             });
+        self.add_scoped_calls(tokens);
+        for (key, shape) in crate::arrays::array_returns(tokens) {
+            match self.array_returns.entry(key) {
+                Entry::Vacant(slot) => {
+                    slot.insert(shape);
+                }
+                Entry::Occupied(mut slot) => match (slot.get_mut(), shape) {
+                    (Some(deps), Some(more)) => deps.extend(more),
+                    (all, _) => *all = None,
+                },
+            }
+        }
         let methods = crate::analyzer::method_tokens(tokens);
         let spaces = namespaces(tokens);
         let names = Names::new(tokens);

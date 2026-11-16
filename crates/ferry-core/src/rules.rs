@@ -1597,8 +1597,8 @@ pub mod patterns {
         replacement: None,
         fix: FixKind::Manual,
         note: Text::new(
-            "extract() hangi değişkenleri oluşturduğunu gizler; tip ve null davranışını elle kontrol edin.",
-            "extract() hides which variables it creates; check types and nulls by hand.",
+            "extract() dizi olmayan bir değer alırsa PHP 8.0'dan beri TypeError fırlatır (PHP 7 uyarı verip null döndürüyordu) ve hangi değişkenleri oluşturduğunu gizler; ona ne geldiğini elle kontrol edin.",
+            "Since PHP 8.0 extract() throws TypeError when it gets anything but an array (PHP 7 warned and returned null), and it hides which variables it creates; check by hand what reaches it.",
         ),
     };
     pub const PHP4_CONSTRUCTOR: PatternRule = PatternRule {

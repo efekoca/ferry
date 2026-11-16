@@ -182,6 +182,7 @@ const LIKELY_RULES: &[&str] = &[
     "RemoveMagicQuotesSetter",
     "MagicVariableSource",
     "KeyExistsOnObjectArrayAnyKey",
+    "StaticVariablePerClass",
     "RemoveReplacedAutoload",
     "DefaultErrorContext",
     "ErrorReportingWithoutFatalBits",
@@ -446,6 +447,10 @@ const RULE_TITLES: &[(&str, Text)] = &[
     ("OrdLiteralToValue", Text::same("ord('') → 0")),
     ("KeyExistsOnObjectArray", Text::same("array_key_exists($k, $o) → array_key_exists($k, (array) $o)")),
     ("KeyExistsOnObjectArrayAnyKey", Text::same("array_key_exists($k, $o) → array_key_exists($k, (array) $o)")),
+    (
+        "StaticVariablePerClass",
+        Text::new("static $x → sınıfa göre anahtarlı static dizi", "static $x → a static array keyed by static::class"),
+    ),
     ("MbStrrposOffsetBeforeEncoding", Text::same("mb_strrpos($h, $n, 'UTF-8') → mb_strrpos($h, $n, 0, 'UTF-8')")),
     ("Utf8CallableToClosure", Text::same("'utf8_encode' → static fn ($string) => mb_convert_encoding($string, 'UTF-8', 'ISO-8859-1')")),
     ("DomDocumentProperty", Text::same("$dom->actualEncoding → $dom->encoding, $dom->config → null")),

@@ -134,6 +134,7 @@ pub const BARE_PRECISION: &str = "Ferry\\Php85\\ExplicitDefaultPrecision";
 pub const ORD_VALUE: &str = "Ferry\\Php85\\OrdLiteralToValue";
 pub const KEY_EXISTS_CAST: &str = "Ferry\\Php80\\KeyExistsOnObjectArray";
 pub const KEY_EXISTS_CAST_ANY: &str = "Ferry\\Php80\\KeyExistsOnObjectArrayAnyKey";
+pub const STATIC_PER_CLASS: &str = "Ferry\\Php81\\StaticVariablePerClass";
 pub const OFFSET_BEFORE_ENCODING: &str = "Ferry\\Php80\\MbStrrposOffsetBeforeEncoding";
 pub const UTF8_CALLABLE: &str = "Ferry\\Php82\\Utf8CallableToClosure";
 pub const DOM_PROPERTY: &str = "Ferry\\Php84\\DomDocumentProperty";
@@ -734,7 +735,8 @@ const NO_OP_FLAGS: &[(&str, &str, Alone)] = &[
 
 /// Rules whose fix reads the code around the finding, and for three of them the version the project
 /// runs on today.
-const SITE_RULES: [&str; 85] = [
+const SITE_RULES: [&str; 86] = [
+    "behavior.inherited_static_variable",
     "deprecated.final_private_method",
     "removed.builtin_override_signature",
     "deprecated.ldap_connect_port",
@@ -1522,6 +1524,7 @@ fn site_fix(file: &Source, k: usize, rule: &str) -> Option<Fix> {
         "behavior.printf_bare_precision" => explicit_precision(file, k),
         "deprecated.ord_length" => ord_value(file, k),
         "removed.array_key_exists_object" => key_exists_cast(file, k),
+        "behavior.inherited_static_variable" => static_per_class(file, k),
         "removed.mb_strrpos_encoding" => offset_before_encoding(file, k),
         "deprecated.utf8_encode" | "deprecated.utf8_decode" => utf8_callable(file, k),
         "deprecated.dom_document_property" => dom_property(file, k),
@@ -4723,6 +4726,137 @@ fn ord_value(file: &Source, k: usize) -> Option<Fix> {
     Some(Fix { extra: Vec::new(), class: ORD_VALUE, start: tokens[call].start, end: tokens[close].end, text: byte.to_string() })
 }
 
+/// `static $x = 0;` in a method a subclass inherits → one static array keyed by `static::class`, so
+/// each class keeps its own value as it did before PHP 8.1. Each class had its own copy of the
+/// method then, and the copy that ran was that of the class the call was made on, the class
+/// `static::class` names, except through `self::` and `parent::`, which ran the copy of the class
+/// they're written in. A subclass declared at run time copied its parent's values as they were at
+/// that moment; with this it starts from the initial value.
+fn static_per_class(file: &Source, k: usize) -> Option<Fix> {
+    let tokens = file.tokens;
+    if file.current.is_some_and(|v| v >= PhpVersion::new(8, 1)) {
+        return None;
+    }
+    let f = enclosing_function(tokens, k)?;
+    let (open, close) = f.body?;
+    let method = &tokens[f.name?].text;
+    let statics = crate::calls::method_statics(tokens, open, close);
+    if !statics.contains(&k) || !crate::analyzer::method_tokens(tokens).contains(&f.keyword) {
+        return None;
+    }
+    let modifiers = ["public", "protected", "private", "static", "final", "abstract"];
+    let is_static =
+        tokens[..f.keyword].iter().rev().take_while(|t| modifiers.iter().any(|m| t.is_ident_ci(m))).any(|t| t.is_ident_ci("static"));
+    let calls = file.index.scoped_calls(method);
+    if calls & crate::index::FORWARDED_CALL != 0 || !is_static && calls & crate::index::NAMED_CALL != 0 {
+        return None;
+    }
+    if tokens[open..close].iter().any(|t| t.is_ident_ci("get_defined_vars") || t.text.starts_with("<<<")) {
+        return None;
+    }
+    let (vars, semicolon) = static_declarations(tokens, k)?;
+    let others: Vec<&str> = statics
+        .iter()
+        .filter(|&&s| s != k)
+        .filter_map(|&s| static_declarations(tokens, s))
+        .flat_map(|(v, _)| v.into_iter().map(|(name, _)| tokens[name].text.as_str()))
+        .collect();
+    let names: Vec<&str> = vars.iter().map(|&(name, _)| tokens[name].text.as_str()).collect();
+    if names.iter().enumerate().any(|(i, n)| others.contains(n) || names[..i].contains(n)) {
+        return None;
+    }
+    let used: HashSet<&str> = tokens[f.keyword..close].iter().filter(|t| t.kind == TokenKind::Variable).map(|t| t.text.as_str()).collect();
+    let snake = snake_case(tokens);
+    let mut lines = Vec::new();
+    for (name, init) in vars {
+        let var = &tokens[name].text;
+        let core = var.trim_start_matches('_');
+        let snake = if core.contains('_') {
+            true
+        } else if core.chars().any(|c| c.is_ascii_uppercase()) {
+            false
+        } else {
+            snake
+        };
+        let store = if snake { format!("{var}_by_class") } else { format!("{var}ByClass") };
+        if used.contains(store.as_str()) {
+            return None;
+        }
+        lines.push(format!("static ${store} = [];"));
+        if let Some((a, b)) = init.filter(|&(a, b)| a != b || !tokens[a].is_ident_ci("null")) {
+            lines.push(format!("${store} += [static::class => {}];", file.text(a, b)));
+        }
+        lines.push(format!("${var} = &${store}[static::class];"));
+    }
+    let separator = match indent_before(file.src, tokens[k].start) {
+        Some(indent) => format!("{}{indent}", newline(file.src)),
+        None => " ".to_string(),
+    };
+    Some(Fix {
+        extra: Vec::new(),
+        class: STATIC_PER_CLASS,
+        start: tokens[k].start,
+        end: tokens[semicolon].end,
+        text: lines.join(&separator),
+    })
+}
+
+/// A declared variable and the first and last tokens of its initial value.
+type StaticVar = (usize, Option<(usize, usize)>);
+
+/// The variables of the `static` statement at `k` and the statement's `;`.
+fn static_declarations(tokens: &[Token], k: usize) -> Option<(Vec<StaticVar>, usize)> {
+    let mut vars = Vec::new();
+    let mut j = k + 1;
+    loop {
+        let name = j;
+        if tokens.get(name)?.kind != TokenKind::Variable {
+            return None;
+        }
+        j += 1;
+        let mut init = None;
+        if tokens.get(j)?.is_punct("=") {
+            let first = j + 1;
+            let mut depth = 0usize;
+            j = first;
+            loop {
+                let t = tokens.get(j)?;
+                if depth == 0 && (t.is_punct(",") || t.is_punct(";")) {
+                    break;
+                }
+                if t.is_punct("(") || t.is_punct("[") || t.is_punct("{") {
+                    depth += 1;
+                } else if t.is_punct(")") || t.is_punct("]") || t.is_punct("}") {
+                    depth = depth.checked_sub(1)?;
+                }
+                j += 1;
+            }
+            if j == first {
+                return None;
+            }
+            init = Some((first, j - 1));
+        }
+        vars.push((name, init));
+        if tokens.get(j)?.is_punct(";") {
+            return Some((vars, j));
+        }
+        if !tokens[j].is_punct(",") {
+            return None;
+        }
+        j += 1;
+    }
+}
+
+/// Whether the file names its variables in snake_case rather than camelCase.
+fn snake_case(tokens: &[Token]) -> bool {
+    let (snake, camel) = tokens
+        .iter()
+        .filter(|t| t.kind == TokenKind::Variable && t.text.chars().any(|c| c.is_ascii_lowercase()))
+        .map(|t| t.text.trim_start_matches('_'))
+        .fold((0, 0), |(s, c), n| (s + usize::from(n.contains('_')), c + usize::from(n.chars().any(|ch| ch.is_ascii_uppercase()))));
+    snake > camel
+}
+
 /// `array_key_exists($k, $object)` → the same lookup in `(array) $object`: the properties the old call
 /// searched, an ArrayObject's storage included. Old PHP never found a numeric key in an object, so
 /// only a non-numeric string key is certain.
@@ -6661,6 +6795,46 @@ mod tests {
             [FixKind::Likely, FixKind::Auto, FixKind::Likely, FixKind::Auto],
             "old PHP never found a numeric key in an object"
         );
+    }
+
+    #[test]
+    fn inherited_statics_keep_a_copy_per_class() {
+        let src = "<?php\nclass P {\n    public function count() {\n        static $n = 0, $seenAt;\n        return ++$n;\n    }\n    public static function instance() {\n        static $instance = null;\n        return $instance ?: $instance = new static();\n    }\n    protected function cached() { static $cacheMap = array('a' => 1); return $cacheMap; }\n    public function counter() {\n        $f = function () { static $calls = 0; return ++$calls; };\n        return $f();\n    }\n}\nclass C extends P {}\n$a = C::instance();\n";
+        let (out, classes) = fixed(src).unwrap();
+        assert_eq!(
+            out,
+            "<?php\nclass P {\n    public function count() {\n        static $nByClass = [];\n        $nByClass += [static::class => 0];\n        $n = &$nByClass[static::class];\n        static $seenAtByClass = [];\n        $seenAt = &$seenAtByClass[static::class];\n        return ++$n;\n    }\n    public static function instance() {\n        static $instanceByClass = [];\n        $instance = &$instanceByClass[static::class];\n        return $instance ?: $instance = new static();\n    }\n    protected function cached() { static $cacheMapByClass = []; $cacheMapByClass += [static::class => array('a' => 1)]; $cacheMap = &$cacheMapByClass[static::class]; return $cacheMap; }\n    public function counter() {\n        $f = function () { static $calls = 0; return ++$calls; };\n        return $f();\n    }\n}\nclass C extends P {}\n$a = C::instance();\n"
+        );
+        assert_eq!(classes, [STATIC_PER_CLASS]);
+        assert_eq!(kinds_of(&fixes(src), "behavior.inherited_static_variable"), [FixKind::Likely; 3], "a closure keeps its own statics");
+        let snake = "<?php\nclass P {\n    function escape($str) {\n        static $preg_ec = array();\n        static $map;\n        return $preg_ec;\n    }\n}\nclass C extends P {}\n";
+        let out = fixed(snake).unwrap().0;
+        assert!(out.contains("static $preg_ec_by_class = [];\n        $preg_ec_by_class += [static::class => array()];\n        $preg_ec = &$preg_ec_by_class[static::class];\n        static $map_by_class = [];\n        $map = &$map_by_class[static::class];\n"), "{out}");
+        assert_eq!(
+            kinds_of(&fixes_from(src, PhpVersion::new(8, 1)), "behavior.inherited_static_variable"),
+            [FixKind::Manual; 3],
+            "8.1 already shares them"
+        );
+    }
+
+    #[test]
+    fn inherited_statics_stay_manual_when_another_copy_would_run() {
+        let cases = [
+            ("self", "<?php\nclass P {\n    static function one() { static $o; return $o; }\n    function two() { return self::one(); }\n}\nclass C extends P {}\n"),
+            ("parent", "<?php\nclass P {\n    function one() { static $o; return $o; }\n}\nclass C extends P {}\nclass D extends C { function one() { return parent::one(); } }\n"),
+            ("named", "<?php\nclass P {\n    function one() { static $o; return $o; }\n}\nclass C extends P { function two() { return P::one(); } }\n"),
+            ("callable", "<?php\nclass P {\n    static function one() { static $o; return $o; }\n}\nclass C extends P {}\ncall_user_func(array('parent', 'one'));\n"),
+            ("string", "<?php\nclass P {\n    static function one() { static $o; return $o; }\n}\nclass C extends P {}\ncall_user_func('self::one');\n"),
+            ("defined", "<?php\nclass P {\n    function one() { static $o; return get_defined_vars(); }\n}\nclass C extends P {}\n"),
+            ("twice", "<?php\nclass P {\n    function one($a) { if ($a) { static $o = 1; } else { static $o = 2; } return $o; }\n}\nclass C extends P {}\n"),
+            ("taken", "<?php\nclass P {\n    function one() { static $o; $oByClass = 1; return $o; }\n}\nclass C extends P {}\n"),
+        ];
+        for (why, src) in cases {
+            assert!(kinds_of(&fixes(src), "behavior.inherited_static_variable").iter().all(|k| *k == FixKind::Manual), "{why}");
+            assert!(!kinds_of(&fixes(src), "behavior.inherited_static_variable").is_empty(), "{why}");
+        }
+        let named_static = "<?php\nclass P {\n    static function one() { static $o; return $o; }\n}\nclass C extends P {}\nC::one();\n";
+        assert_eq!(kinds_of(&fixes(named_static), "behavior.inherited_static_variable"), [FixKind::Likely], "C::one() runs C's copy");
     }
 
     #[test]

@@ -1016,18 +1016,20 @@ export const GUIDES: Record<string, Guide> = {
   "behavior.inherited_static_variable": {
     steps: {
       tr: [
-        "Alt sınıfta ezilmeyen bir metottaki `static $x`, PHP 8.1'den beri bütün sınıflar için tek kopyadır. PHP 8.0 ve öncesinde her alt sınıfın kendi kopyası vardı; örneğin `B::instance()` artık `A`'nın nesnesini döndürür.",
-        "Değer her sınıf için ayrı kalmalıysa sınıf adını anahtar yapın: `static $instances = []; return $instances[static::class] ??= new static();`.",
+        "Alt sınıfta ezilmeyen bir metottaki `static $x`, PHP 8.1'den beri bütün sınıflar için tek kopyadır. PHP 8.0 ve öncesinde her alt sınıfın kendi kopyası vardı; örneğin `B::instance()` artık `A`'nın nesnesini döndürebilir.",
+        "Ferry bunu değeri `static::class` anahtarlı bir static diziye taşıyarak kendisi düzeltir. Metoda `self::` ya da `parent::` ile ulaşılıyorsa, static olmayan metot `Sınıf::metot()` biçiminde çağrılıyorsa, metot `get_defined_vars()` kullanıyorsa ya da aynı değişken iki kez tanımlıysa düzeltmeyi size bırakır: bu çağrılar eskiden yazıldıkları sınıfın kopyasını çalıştırıyordu ve `static::class` o sınıfı her zaman göstermez.",
+        "Elle düzeltirken her sınıfın değerini ayrı tutun: `static $instances = []; $instance = &$instances[static::class];`. `self::` ile yapılan çağrıları `static::` yapın ya da hangi sınıfın kopyasını kullanmaları gerektiğine karar verin.",
         "Ortak tek bir değer zaten istenen buysa (sınıftan bağımsız bir önbellek gibi) değişiklik gerekmez.",
       ],
       en: [
-        "A `static $x` in a method the subclass doesn't override is a single copy for every class since PHP 8.1. On PHP 8.0 and before, each subclass had its own copy; `B::instance()`, for example, now returns `A`'s object.",
-        "If the value has to stay separate per class, key it by class name: `static $instances = []; return $instances[static::class] ??= new static();`.",
+        "A `static $x` in a method the subclass doesn't override is a single copy for every class since PHP 8.1. On PHP 8.0 and before, each subclass had its own copy; `B::instance()`, for example, can now return `A`'s object.",
+        "Ferry fixes this itself by moving the value into a static array keyed by `static::class`. It leaves the fix to you when the method is reached through `self::` or `parent::`, when a non-static method is called as `Class::method()`, when the method uses `get_defined_vars()`, or when the same variable is declared twice: those calls used to run the copy of the class they're written in, which `static::class` doesn't always name.",
+        "To fix it by hand, keep each class's value apart: `static $instances = []; $instance = &$instances[static::class];`. Make calls through `self::` use `static::`, or decide which class's copy they should use.",
         "If one shared value is what was meant (a cache that doesn't depend on the class, say), nothing needs to change.",
       ],
     },
-    before: "public static function instance()\n{\n    static $instance = null;\n    return $instance ??= new static();\n}",
-    after: "public static function instance()\n{\n    static $instances = [];\n    return $instances[static::class] ??= new static();\n}",
+    before: "public static function instance()\n{\n    static $instance = null;\n    return $instance ?: $instance = new static();\n}",
+    after: "public static function instance()\n{\n    static $instances = [];\n    $instance = &$instances[static::class];\n    return $instance ?: $instance = new static();\n}",
   },
   "behavior.func_get_args_current_value": {
     steps: {

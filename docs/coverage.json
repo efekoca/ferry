@@ -4223,7 +4223,7 @@
   "ext": "Core",
   "change": "When a method using static variables is inherited (but not overridden), the inherited method will now share static variables with the parent method.",
   "status": "covered",
-  "note": "A static variable in a non-private method that a project class inherits without overriding is reported.",
+  "note": "A static variable in a non-private method that a project class inherits without overriding is reported, and moved into a static array keyed by static::class unless the method is reached through self:: or parent::.",
   "rules": [
    "behavior.inherited_static_variable"
   ]
